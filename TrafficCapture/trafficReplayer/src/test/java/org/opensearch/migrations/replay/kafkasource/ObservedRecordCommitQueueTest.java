@@ -83,6 +83,33 @@ class ObservedRecordCommitQueueTest {
         );
     }
 
+    @Test
+    void commitIneligibleHeadBlocksLaterCompletionAndCannotComplete() {
+        var queue = new ObservedRecordCommitQueue(GENERATION);
+        var head = record(10);
+        var later = record(12);
+        queue.register(head);
+        queue.register(later);
+
+        queue.markCommitIneligible(head);
+        var blocked = queue.recordProcessingFinished(later);
+
+        Assertions.assertEquals(List.of(), blocked.newlyContiguousRecords());
+        Assertions.assertEquals(OptionalLong.empty(), blocked.nextCommitOffset());
+        Assertions.assertEquals(OptionalLong.of(10), queue.headOffset());
+        Assertions.assertEquals(1, queue.commitIneligibleCount());
+        Assertions.assertEquals(0, queue.unfinishedCount());
+        Assertions.assertEquals(1, queue.completedBehindHeadCount());
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> queue.recordProcessingFinished(head)
+        );
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> queue.markCommitIneligible(head)
+        );
+    }
+
     private static KafkaRecordId record(long offset) {
         return new KafkaRecordId(GENERATION, offset);
     }

@@ -1,136 +1,120 @@
 package org.opensearch.migrations.replay.tracing;
 
-// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: TrackingKafkaConsumer . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
+import java.util.Locale;
 
-// REBUILD-LIMBO-START(G2)
-/*
-
-import java.time.Duration;
-
-import org.opensearch.migrations.replay.kafka.TrackingKafkaConsumer;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
-import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
-public final class KafkaCommitStateMetrics implements TrackingKafkaConsumer.Metrics {
-    public static final AttributeKey<Long> PARTITION_ATTRIBUTE = AttributeKey.longKey("partition");
-    public static final AttributeKey<Long> GENERATION_ATTRIBUTE = AttributeKey.longKey("generation");
+/** Fixed-cardinality conservation and commit-resolution instruments owned by G4. */
+public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
+    public static final AttributeKey<String> CAUSE_ATTRIBUTE = AttributeKey.stringKey("cause");
+    public static final AttributeKey<String> OUTCOME_ATTRIBUTE = AttributeKey.stringKey("outcome");
     private static final String RECORDS_UNIT = "records";
 
     public static final class MetricNames {
         private MetricNames() {}
 
-        public static final String UNRESOLVED_OBLIGATIONS = "kafkaUnresolvedObligations";
-        public static final String STAGED_COMMIT_PARTITIONS = "kafkaStagedCommitPartitions";
-        public static final String PENDING_COMMIT_ACKNOWLEDGEMENTS = "kafkaPendingCommitAcknowledgements";
-        public static final String COMMIT_LATENCY = "kafkaCommitLatency";
-        public static final String COMMIT_HEAD_AGE = "kafkaCommitHeadAge";
-        public static final String OWNED_RECORDS = "kafkaOwnedRecords";
-        public static final String OWNED_RECORD_BYTES = "kafkaOwnedRecordBytes";
-        public static final String OWNERSHIP_BUDGET_SATURATION = "kafkaOwnershipBudgetSaturation";
+        public static final String RECORDS_READ = "records_read";
+        public static final String RECORDS_COMMITTED = "records_committed";
+        public static final String RECORDS_CANCELLED = "records_cancelled";
+        public static final String RECORDS_ABANDONED_AT_REVOCATION =
+            "records_abandoned_at_revocation";
+        public static final String RECORDS_COMMIT_INELIGIBLE = "records_commit_ineligible";
+        public static final String RECORDS_OUTSTANDING = "records_outstanding";
+        public static final String COMMIT_ATTEMPTS_REJECTED = "commit_attempts_rejected";
+        public static final String COMMIT_RESOLUTIONS = "commit_resolutions";
     }
 
-    private final LongUpDownCounter unresolvedObligations;
-    private final LongUpDownCounter stagedCommitPartitions;
-    private final LongUpDownCounter pendingCommitAcknowledgements;
-    private final DoubleHistogram commitLatency;
-    private final DoubleHistogram commitHeadAge;
-    private final LongUpDownCounter ownedRecords;
-    private final LongUpDownCounter ownedRecordBytes;
-    private final LongCounter ownershipBudgetSaturation;
+    private final LongCounter recordsRead;
+    private final LongCounter recordsCommitted;
+    private final LongCounter recordsCancelled;
+    private final LongCounter recordsAbandonedAtRevocation;
+    private final LongCounter recordsCommitIneligible;
+    private final LongUpDownCounter recordsOutstanding;
+    private final LongCounter commitAttemptsRejected;
+    private final LongCounter commitResolutions;
 
     public KafkaCommitStateMetrics(@NonNull Meter meter) {
-        unresolvedObligations = meter.upDownCounterBuilder(MetricNames.UNRESOLVED_OBLIGATIONS)
+        recordsRead = meter.counterBuilder(MetricNames.RECORDS_READ)
             .setUnit(RECORDS_UNIT)
             .build();
-        stagedCommitPartitions = meter.upDownCounterBuilder(MetricNames.STAGED_COMMIT_PARTITIONS)
-            .setUnit("partitions")
-            .build();
-        pendingCommitAcknowledgements = meter.upDownCounterBuilder(MetricNames.PENDING_COMMIT_ACKNOWLEDGEMENTS)
+        recordsCommitted = meter.counterBuilder(MetricNames.RECORDS_COMMITTED)
             .setUnit(RECORDS_UNIT)
             .build();
-        commitLatency = meter.histogramBuilder(MetricNames.COMMIT_LATENCY)
-            .setUnit("ms")
-            .build();
-        commitHeadAge = meter.histogramBuilder(MetricNames.COMMIT_HEAD_AGE)
-            .setUnit("ms")
-            .build();
-        ownedRecords = meter.upDownCounterBuilder(MetricNames.OWNED_RECORDS)
+        recordsCancelled = meter.counterBuilder(MetricNames.RECORDS_CANCELLED)
             .setUnit(RECORDS_UNIT)
             .build();
-        ownedRecordBytes = meter.upDownCounterBuilder(MetricNames.OWNED_RECORD_BYTES)
-            .setUnit("By")
+        recordsAbandonedAtRevocation =
+            meter.counterBuilder(MetricNames.RECORDS_ABANDONED_AT_REVOCATION)
+                .setUnit(RECORDS_UNIT)
+                .build();
+        recordsCommitIneligible = meter.counterBuilder(MetricNames.RECORDS_COMMIT_INELIGIBLE)
+            .setUnit(RECORDS_UNIT)
             .build();
-        ownershipBudgetSaturation = meter.counterBuilder(MetricNames.OWNERSHIP_BUDGET_SATURATION)
+        recordsOutstanding = meter.upDownCounterBuilder(MetricNames.RECORDS_OUTSTANDING)
+            .setUnit(RECORDS_UNIT)
+            .build();
+        commitAttemptsRejected = meter.counterBuilder(MetricNames.COMMIT_ATTEMPTS_REJECTED)
+            .setUnit("attempts")
+            .build();
+        commitResolutions = meter.counterBuilder(MetricNames.COMMIT_RESOLUTIONS)
             .setUnit("events")
             .build();
     }
 
     @Override
-    public void unresolvedObligationsChanged(int delta) {
-        unresolvedObligations.add(delta);
+    public void recordsRead(long count) {
+        recordsRead.add(count);
     }
 
     @Override
-    public void stagedCommitPartitionsChanged(int delta) {
-        stagedCommitPartitions.add(delta);
+    public void recordsCommitted(long count) {
+        recordsCommitted.add(count);
     }
 
     @Override
-    public void pendingAcknowledgementsChanged(int generation, int delta) {
-        pendingCommitAcknowledgements.add(
-            delta,
-            Attributes.of(GENERATION_ATTRIBUTE, (long) generation)
+    public void recordsCancelled(long count) {
+        recordsCancelled.add(count);
+    }
+
+    @Override
+    public void recordsAbandonedAtRevocation(
+        @NonNull KafkaSourceOwner.AbandonmentCause cause,
+        long count
+    ) {
+        recordsAbandonedAtRevocation.add(
+            count,
+            Attributes.of(CAUSE_ATTRIBUTE, label(cause))
         );
     }
 
     @Override
-    public void commitAcknowledged(int generation, @NonNull Duration latency) {
-        commitLatency.record(
-            nonNegativeMilliseconds(latency),
-            Attributes.of(GENERATION_ATTRIBUTE, (long) generation)
-        );
+    public void recordsCommitIneligible(long count) {
+        recordsCommitIneligible.add(count);
     }
 
     @Override
-    public void commitHeadObserved(int partition, int generation, @NonNull Duration age) {
-        commitHeadAge.record(
-            nonNegativeMilliseconds(age),
-            Attributes.of(
-                PARTITION_ATTRIBUTE,
-                (long) partition,
-                GENERATION_ATTRIBUTE,
-                (long) generation
-            )
-        );
+    public void recordsOutstandingChanged(long delta) {
+        recordsOutstanding.add(delta);
     }
 
     @Override
-    public void ownedRecordCapacityChanged(int recordDelta, long byteDelta) {
-        ownedRecords.add(recordDelta);
-        ownedRecordBytes.add(byteDelta);
+    public void commitAttemptRejected() {
+        commitAttemptsRejected.add(1);
     }
 
     @Override
-    public void ownedRecordBudgetSaturated() {
-        ownershipBudgetSaturation.add(1);
+    public void commitResolved(@NonNull KafkaSourceOwner.CommitResolution resolution) {
+        commitResolutions.add(1, Attributes.of(OUTCOME_ATTRIBUTE, label(resolution)));
     }
 
-    private static double nonNegativeMilliseconds(Duration duration) {
-        return Math.max(0, duration.toNanos() / 1_000_000.0);
+    private static String label(Enum<?> value) {
+        return value.name().toLowerCase(Locale.ROOT);
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G2)

@@ -373,6 +373,10 @@ The owner-authorized assignment-bootstrap amendment arrived after G2 closed. Its
 are owned by G7, where source bootstrap and intake demand are implemented together; case 28's
 cleanup-gated release is owned by G8. G2's Exit therefore does not claim those post-close cases.
 
+The rejected-versus-unknown commit-outcome distinction was not proved before G2 closed and is not
+part of G2's scope or Exit. G4 owns the issuance, outcome classification, conservation disposition,
+and deterministic evidence as one commit-authority chain.
+
 `KafkaSourceOwner`, `KafkaSourceInputQueue`, `PartitionSourceState`, `WakeupController`,
 `ObservedRecordCommitQueue` registration. Deferred, coalesced `wakeup()`, suppressed during rebalance
 callbacks, commit, pause, resume, and control draining. `onPartitionsAssigned` pauses the complete
@@ -523,12 +527,20 @@ retention, and fixed-cardinality outcome observability as one owner-confined cha
 resolves exactly once. A callback that races a wakeup or retirement cannot credit, clear, or restage the same
 operation twice; uncertainty retains a monotonic position for a later commit and never backpedals.
 
+**Inherited from G2 closure — rejected versus unknown outcomes.** G4 owns the complete correction:
+commit issuance must distinguish a rejected operation, which proves the submitted offsets did not move, from
+an unknown operation, which may already have reached the broker. Carry that distinction through owner
+resolution, revocation abandonment, conservation instrumentation, and deterministic evidence; do not infer a
+per-partition result from a batched operation.
+
 **Exit:** no request, accumulator, target result, or policy can commit or retain a record; out-of-order
 completion, head gap, contiguous advancement, duplicate registration, duplicate completion, and
 completion of an unregistered record all have deterministic tests. The ordinary asynchronous submission and
 callback chain proves each accepted operation resolves once under callback/wakeup races, and an uncertain
 outcome can only preserve or advance the staged position while that generation remains owned; revocation
-discards the old generation's staged state. Covers `D3`; contributes `R11`.
+discards the old generation's staged state. Rejected and unknown commit operations remain distinct through
+submission, resolution, revocation abandonment, fixed-cardinality observability, and conservation evidence.
+Covers `D3`; contributes `R11`.
 
 ### G5 — Connection and request owners
 

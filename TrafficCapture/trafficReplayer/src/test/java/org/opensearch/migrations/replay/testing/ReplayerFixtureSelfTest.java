@@ -332,7 +332,8 @@ class ReplayerFixtureSelfTest {
                 () -> 0L,
                 // Non-blocking: this self-test never revokes, and a real wait against a frozen clock would
                 // be the two-clock problem kafkaLLD 15.1 forbids.
-                deadline -> !sourceInputs.isEmpty()
+                deadline -> !sourceInputs.isEmpty(),
+                rootContext.kafkaCommitStateMetrics
             );
 
             // Assignment arrives from inside a poll, which is where Kafka delivers rebalance callbacks.

@@ -9,6 +9,7 @@
 package org.opensearch.migrations.replay.kafkasource;
 
 import java.time.Duration;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -67,6 +68,7 @@ class KafkaSourceOwnerTest {
      */
     private boolean nextWaitConsumesTheWholeInterval;
     private final KafkaSourceInputQueue sourceInputs = new KafkaSourceInputQueue(wakeupController);
+    private final RecordingMetrics commitMetrics = new RecordingMetrics();
 
     @AfterEach
     void closeTelemetry() {
@@ -102,8 +104,85 @@ class KafkaSourceOwnerTest {
                 }
                 clockNanos.updateAndGet(now -> Math.max(now, deadline.monotonicDeadlineNanos()));
                 return false;
-            }
+            },
+            commitMetrics
         );
+    }
+
+    private static final class RecordingMetrics implements KafkaSourceOwner.Metrics {
+        private long recordsRead;
+        private long recordsCommitted;
+        private long recordsCancelled;
+        private long recordsCommitIneligible;
+        private long recordsOutstanding;
+        private long commitAttemptsRejected;
+        private final EnumMap<KafkaSourceOwner.AbandonmentCause, Long> abandoned =
+            new EnumMap<>(KafkaSourceOwner.AbandonmentCause.class);
+        private final EnumMap<KafkaSourceOwner.CommitResolution, Long> resolutions =
+            new EnumMap<>(KafkaSourceOwner.CommitResolution.class);
+
+        @Override
+        public void recordsRead(long count) {
+            recordsRead += count;
+        }
+
+        @Override
+        public void recordsCommitted(long count) {
+            recordsCommitted += count;
+        }
+
+        @Override
+        public void recordsCancelled(long count) {
+            recordsCancelled += count;
+        }
+
+        @Override
+        public void recordsAbandonedAtRevocation(
+            KafkaSourceOwner.AbandonmentCause cause,
+            long count
+        ) {
+            abandoned.merge(cause, count, Long::sum);
+        }
+
+        @Override
+        public void recordsCommitIneligible(long count) {
+            recordsCommitIneligible += count;
+        }
+
+        @Override
+        public void recordsOutstandingChanged(long delta) {
+            recordsOutstanding += delta;
+        }
+
+        @Override
+        public void commitAttemptRejected() {
+            commitAttemptsRejected++;
+        }
+
+        @Override
+        public void commitResolved(KafkaSourceOwner.CommitResolution resolution) {
+            resolutions.merge(resolution, 1L, Long::sum);
+        }
+
+        private long abandoned(KafkaSourceOwner.AbandonmentCause cause) {
+            return abandoned.getOrDefault(cause, 0L);
+        }
+
+        private long resolutions(KafkaSourceOwner.CommitResolution resolution) {
+            return resolutions.getOrDefault(resolution, 0L);
+        }
+
+        private long accountedRecords() {
+            return recordsCommitted
+                + recordsCancelled
+                + recordsCommitIneligible
+                + recordsOutstanding
+                + abandoned.values().stream().mapToLong(Long::longValue).sum();
+        }
+
+        private void assertConservation() {
+            Assertions.assertEquals(recordsRead, accountedRecords());
+        }
     }
 
     /**
@@ -1447,6 +1526,209 @@ class KafkaSourceOwnerTest {
             owner.stagedCommitPosition(PARTITION_1).isEmpty()
                 && owner.stagedCommitPosition(partition2).isEmpty(),
             "an acknowledged commit clears what it committed"
+        );
+    }
+
+    @Test
+    void callbackAfterWakeupCannotResolveOneOperationTwiceOrReleaseItsSuccessor() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptCommitAsyncWakeupAfterRegistration();
+        port.clearHistory();
+
+        owner.runOnce();
+        owner.runOnce();
+
+        Assertions.assertEquals(
+            List.of("commitAsync{traffic-0=11}", "commitAsync{traffic-0=11}"),
+            port.history().stream().filter(call -> call.startsWith("commitAsync")).toList(),
+            "the wakeup resolves the first operation as unknown and its monotonic retry is the only successor"
+        );
+        Assertions.assertEquals(1, commitMetrics.recordsCommitted);
+        Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
+        Assertions.assertEquals(
+            1,
+            commitMetrics.resolutions(KafkaSourceOwner.CommitResolution.DUPLICATE_IGNORED),
+            "the callback registered before the wakeup must hit the first operation's closed latch"
+        );
+        Assertions.assertEquals(
+            1,
+            commitMetrics.resolutions(KafkaSourceOwner.CommitResolution.ACKNOWLEDGED),
+            "only the retry may receive commit credit"
+        );
+    }
+
+    @Test
+    void uncertainRetryNeverBackpedalsBehindAnewerContiguousPrefix() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10), record(12))));
+        owner.runOnce();
+        drainIntake();
+        port.clearHistory();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptNeverResolveAsyncCommits();
+        owner.runOnce();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 12)));
+        owner.runOnce();
+
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
+        port.scriptResolveAsyncCommits();
+        owner.runOnce();
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+        owner.runOnce();
+
+        Assertions.assertEquals(
+            List.of("commitAsync{traffic-0=11}", "commitAsync{traffic-0=13}"),
+            port.history().stream().filter(call -> call.startsWith("commitAsync")).toList(),
+            "restaging the uncertain older position must preserve the newer prefix already staged"
+        );
+        Assertions.assertEquals(2, commitMetrics.recordsCommitted);
+        Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
+        commitMetrics.assertConservation();
+    }
+
+    @Test
+    void rejectedAndUnknownOperationsHaveDistinctRetirementAccounting() throws Exception {
+        var rejectedPort = pumpedSource(List.of(PARTITION_0));
+        var rejectedOwner = ownerFor(rejectedPort);
+        var rejectedGeneration = assignAndGetGeneration(rejectedOwner, rejectedPort, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(rejectedGeneration, 1)));
+        rejectedPort.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        rejectedOwner.runOnce();
+        drainIntake();
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(rejectedGeneration, 10)));
+        rejectedPort.scriptCommitAsyncRejection(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        rejectedOwner.runOnce();
+
+        rejectedPort.scriptCommitAsyncRejection(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        rejectedPort.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        rejectedPort.scriptRebalanceDuringNextPoll(() ->
+            rejectedOwner.onPartitionsRevoked(List.of(PARTITION_0)));
+        rejectedOwner.runOnce();
+
+        Assertions.assertEquals(
+            1,
+            commitMetrics.abandoned(KafkaSourceOwner.AbandonmentCause.REJECTED)
+        );
+        Assertions.assertEquals(
+            0,
+            commitMetrics.abandoned(KafkaSourceOwner.AbandonmentCause.UNKNOWN)
+        );
+        Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
+        commitMetrics.assertConservation();
+
+        var unknownMetrics = new RecordingMetrics();
+        var unknownWakeups = new WakeupController(() -> {}, rootContext);
+        var unknownSourceInputs = new KafkaSourceInputQueue(unknownWakeups);
+        var unknownIntakeInputs = new ReplayIntakeInputQueue();
+        var unknownPort = pumpedSource(List.of(PARTITION_1));
+        var unknownOwner = new KafkaSourceOwner(
+            unknownPort,
+            unknownSourceInputs,
+            unknownIntakeInputs,
+            unknownWakeups,
+            GRACE,
+            clockNanos::get,
+            deadline -> {
+                clockNanos.updateAndGet(now -> Math.max(now, deadline.monotonicDeadlineNanos()));
+                return false;
+            },
+            unknownMetrics
+        );
+        var unknownGeneration = assignAndGetGeneration(unknownOwner, unknownPort, PARTITION_1);
+        unknownSourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(unknownGeneration, 1)));
+        unknownPort.scriptPoll(Map.of(PARTITION_1, List.of(record(20))));
+        unknownOwner.runOnce();
+        while (unknownIntakeInputs.size() > 0) {
+            unknownIntakeInputs.take();
+        }
+        unknownSourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(unknownGeneration, 20)));
+        unknownPort.scriptNeverResolveAsyncCommits();
+        unknownOwner.runOnce();
+        unknownPort.scriptRebalanceDuringNextPoll(() ->
+            unknownOwner.onPartitionsRevoked(List.of(PARTITION_1)));
+        unknownOwner.runOnce();
+
+        Assertions.assertEquals(
+            0,
+            unknownMetrics.abandoned(KafkaSourceOwner.AbandonmentCause.REJECTED)
+        );
+        Assertions.assertEquals(
+            1,
+            unknownMetrics.abandoned(KafkaSourceOwner.AbandonmentCause.UNKNOWN)
+        );
+        Assertions.assertEquals(0, unknownMetrics.recordsOutstanding);
+        unknownMetrics.assertConservation();
+    }
+
+    @Test
+    void retirementConservationCountsUnfinishedRecordsAsCancelled() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsRevoked(List.of(PARTITION_0)));
+
+        owner.runOnce();
+
+        Assertions.assertEquals(1, commitMetrics.recordsRead);
+        Assertions.assertEquals(1, commitMetrics.recordsCancelled);
+        Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
+        commitMetrics.assertConservation();
+    }
+
+    @Test
+    void protocolViolationIsCommitIneligibleAndPreservesEarlierStagedProgress() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10), record(12))));
+        owner.runOnce();
+        drainIntake();
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        sourceInputs.submit(new KafkaSourceInput.CaptureProtocolViolationDetected(
+            new KafkaRecordId(generation, 12),
+            "poison"
+        ));
+
+        Assertions.assertThrows(KafkaSourceOwner.CaptureProtocolViolation.class, owner::runOnce);
+
+        Assertions.assertEquals(2, commitMetrics.recordsRead);
+        Assertions.assertEquals(1, commitMetrics.recordsCommitIneligible);
+        Assertions.assertEquals(1, commitMetrics.recordsOutstanding);
+        commitMetrics.assertConservation();
+        Assertions.assertEquals(
+            java.util.Optional.of(11L),
+            owner.stagedCommitPosition(PARTITION_0),
+            "the poison record blocks itself and later offsets, not a valid earlier prefix"
         );
     }
 

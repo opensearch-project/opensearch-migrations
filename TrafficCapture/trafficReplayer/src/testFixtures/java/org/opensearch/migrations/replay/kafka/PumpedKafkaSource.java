@@ -83,6 +83,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private boolean wakeupNextPollAfterRebalance;
     private boolean wakeupNextCommitSync;
     private boolean wakeupNextCommitAsync;
+    private boolean wakeupNextCommitAsyncAfterRegistration;
+    private CommitOutcome nextRejectedCommitOutcome;
     private boolean neverResolveAsyncCommits;
     private java.util.function.Consumer<String> observationListener = call -> {};
 
@@ -141,6 +143,11 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         neverResolveAsyncCommits = true;
     }
 
+    /** Allows callbacks held by {@link #scriptNeverResolveAsyncCommits()} to run on the next poll. */
+    public void scriptResolveAsyncCommits() {
+        neverResolveAsyncCommits = false;
+    }
+
     /**
      * Interrupts the next poll with {@code WakeupException} after its scripted rebalance callbacks have run.
      *
@@ -177,6 +184,21 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
      */
     public void scriptCommitAsyncWakeup() {
         wakeupNextCommitAsync = true;
+    }
+
+    /**
+     * Registers the next asynchronous callback and then throws {@link WakeupException}.
+     *
+     * <p>This is the operation-level race G4 must survive: the owner resolves the thrown path as unknown, then
+     * a later poll delivers the callback for the same accepted submission. Exactly one may change owner state.
+     */
+    public void scriptCommitAsyncWakeupAfterRegistration() {
+        wakeupNextCommitAsyncAfterRegistration = true;
+    }
+
+    /** Refuses the next asynchronous operation before a callback is registered. */
+    public void scriptCommitAsyncRejection(CommitOutcome outcome) {
+        nextRejectedCommitOutcome = Objects.requireNonNull(outcome);
     }
 
     public void setCommittedPosition(TopicPartition topicPartition, long position) {
@@ -263,12 +285,17 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     @Override
-    public void commitAsync(
+    public AsyncCommitSubmission commitAsync(
         Map<TopicPartition, Long> nextPositions,
         java.util.function.Consumer<CommitOutcome> onResolved
     ) {
         var submitted = Map.copyOf(nextPositions);
         record(new CommitSubmittedAsync(submitted));
+        if (nextRejectedCommitOutcome != null) {
+            var rejected = nextRejectedCommitOutcome;
+            nextRejectedCommitOutcome = null;
+            return AsyncCommitSubmission.rejectedBeforeAcceptance(rejected);
+        }
         if (wakeupNextCommitAsync) {
             wakeupNextCommitAsync = false;
             // Interrupted before a callback is registered, so nothing here will ever resolve this submission.
@@ -277,6 +304,11 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         // Held rather than resolved here, because the real client resolves from inside a later poll(). A test
         // that asserts the loop is not blocked depends on that difference being real in the fixture too.
         pendingAsyncCommits.add(() -> onResolved.accept(nextCommitOutcome));
+        if (wakeupNextCommitAsyncAfterRegistration) {
+            wakeupNextCommitAsyncAfterRegistration = false;
+            throw new WakeupException();
+        }
+        return AsyncCommitSubmission.acceptedByClient();
     }
 
     /**

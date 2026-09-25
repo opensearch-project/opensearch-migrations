@@ -46,6 +46,7 @@ public final class ObservedRecordCommitQueue {
     private static final class Entry {
         private final KafkaRecordId recordId;
         private boolean completed;
+        private boolean commitIneligible;
 
         private Entry(KafkaRecordId recordId) {
             this.recordId = recordId;
@@ -102,6 +103,9 @@ public final class ObservedRecordCommitQueue {
         if (entry.completed) {
             throw new IllegalStateException("Kafka record completion was submitted twice: " + recordId);
         }
+        if (entry.commitIneligible) {
+            throw new IllegalStateException("Kafka record is commit-ineligible: " + recordId);
+        }
         entry.completed = true;
 
         var contiguous = new ArrayList<KafkaRecordId>();
@@ -128,7 +132,43 @@ public final class ObservedRecordCommitQueue {
 
     public int unfinishedCount() {
         ownerThreadGuard.requireOwnerThread();
-        return (int) observedRecords.stream().filter(entry -> !entry.completed).count();
+        return (int) observedRecords.stream()
+            .filter(entry -> !entry.completed && !entry.commitIneligible)
+            .count();
+    }
+
+    public int completedBehindHeadCount() {
+        ownerThreadGuard.requireOwnerThread();
+        return (int) observedRecords.stream().filter(entry -> entry.completed).count();
+    }
+
+    public int commitIneligibleCount() {
+        ownerThreadGuard.requireOwnerThread();
+        return (int) observedRecords.stream().filter(entry -> entry.commitIneligible).count();
+    }
+
+    /**
+     * Marks the poison record terminal without advancing the contiguous prefix.
+     *
+     * <p>The entry remains in the deque as the permanent head barrier: only
+     * {@link #recordProcessingFinished(KafkaRecordId)} removes records, and a protocol violation must stay
+     * uncommitted so restart encounters it again.
+     */
+    public void markCommitIneligible(@NonNull KafkaRecordId recordId) {
+        ownerThreadGuard.requireOwnerThread();
+        requireGeneration(recordId);
+        var entry = recordsById.get(recordId);
+        if (entry == null) {
+            throw new IllegalStateException(
+                "Kafka record was not observed in active generation " + generation + ": " + recordId
+            );
+        }
+        if (entry.completed || entry.commitIneligible) {
+            throw new IllegalStateException(
+                "Kafka record cannot become commit-ineligible from its current state: " + recordId
+            );
+        }
+        entry.commitIneligible = true;
     }
 
     public OptionalLong headOffset() {
@@ -153,7 +193,9 @@ public final class ObservedRecordCommitQueue {
         return new Snapshot(
             generation,
             observedRecords.size(),
-            (int) observedRecords.stream().filter(entry -> !entry.completed).count(),
+            (int) observedRecords.stream()
+                .filter(entry -> !entry.completed && !entry.commitIneligible)
+                .count(),
             head == null ? Optional.empty() : Optional.of(head.recordId),
             greatestObservedOffset
         );

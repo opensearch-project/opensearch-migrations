@@ -67,7 +67,36 @@ public interface KafkaSourcePort {
      *                   which is also why it carries no echo of the positions: the caller already holds them,
      *                   along with the generation each belongs to, which this port has no knowledge of
      */
-    void commitAsync(Map<TopicPartition, Long> nextPositions, Consumer<CommitOutcome> onResolved);
+    AsyncCommitSubmission commitAsync(
+        Map<TopicPartition, Long> nextPositions,
+        Consumer<CommitOutcome> onResolved
+    );
+
+    /**
+     * Whether the client accepted an asynchronous operation before this call returned.
+     *
+     * <p>A rejection is known not to have moved the broker position. An accepted operation resolves only
+     * through its callback, except that an exception after acceptance may force the owner to resolve it as
+     * unknown. Keeping acceptance separate from {@link CommitOutcome} is what prevents a local refusal from
+     * being conflated with an operation that may already have reached the broker.
+     */
+    record AsyncCommitSubmission(boolean accepted, CommitOutcome rejectionOutcome) {
+        public AsyncCommitSubmission {
+            if (accepted == (rejectionOutcome != null)) {
+                throw new IllegalArgumentException(
+                    "accepted submissions have no rejection outcome; rejected submissions require one"
+                );
+            }
+        }
+
+        public static AsyncCommitSubmission acceptedByClient() {
+            return new AsyncCommitSubmission(true, null);
+        }
+
+        public static AsyncCommitSubmission rejectedBeforeAcceptance(CommitOutcome outcome) {
+            return new AsyncCommitSubmission(false, java.util.Objects.requireNonNull(outcome, "outcome"));
+        }
+    }
 
     /**
      * Submits the given next-read positions and waits at most {@code bound} for the result.

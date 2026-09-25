@@ -47,7 +47,11 @@ public class RootReplayerContext extends RootOtelContext {
     public final ConnectionActorMetrics connectionActorMetrics;
     public final TargetExchangeStateMetrics targetExchangeStateMetrics;
     public final ReplayTransactionMetrics replayTransactionMetrics;
+*/
+// REBUILD-LIMBO-END(G5)
     public final KafkaCommitStateMetrics kafkaCommitStateMetrics;
+// REBUILD-LIMBO-START(G5)
+/*
     public final ResourceOwnershipMetrics resourceOwnershipMetrics;
     public final ReplayProcessFatalMetrics replayProcessFatalMetrics;
 
@@ -106,7 +110,11 @@ public class RootReplayerContext extends RootOtelContext {
         connectionActorMetrics = new ConnectionActorMetrics(meter);
         targetExchangeStateMetrics = new TargetExchangeStateMetrics(meter);
         replayTransactionMetrics = new ReplayTransactionMetrics(meter);
+*/
+// REBUILD-LIMBO-END(G5)
         kafkaCommitStateMetrics = new KafkaCommitStateMetrics(meter);
+// REBUILD-LIMBO-START(G5)
+/*
         resourceOwnershipMetrics = new ResourceOwnershipMetrics(meter);
         replayProcessFatalMetrics = new ReplayProcessFatalMetrics(meter);
 

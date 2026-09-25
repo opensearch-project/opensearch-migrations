@@ -41,6 +41,35 @@ import org.apache.kafka.common.errors.WakeupException;
 @Slf4j
 public final class KafkaSourceOwner {
 
+    public enum AbandonmentCause {
+        REJECTED,
+        UNKNOWN,
+        UNSUBMITTED
+    }
+
+    public enum CommitResolution {
+        ACKNOWLEDGED,
+        RETRIABLE,
+        GENERATION_STALE,
+        OUTCOME_UNKNOWN,
+        REJECTED,
+        LATE_CALLBACK,
+        DUPLICATE_IGNORED
+    }
+
+    public interface Metrics {
+        Metrics NOOP = new Metrics() {};
+
+        default void recordsRead(long count) {}
+        default void recordsCommitted(long count) {}
+        default void recordsCancelled(long count) {}
+        default void recordsAbandonedAtRevocation(AbandonmentCause cause, long count) {}
+        default void recordsCommitIneligible(long count) {}
+        default void recordsOutstandingChanged(long delta) {}
+        default void commitAttemptRejected() {}
+        default void commitResolved(CommitResolution resolution) {}
+    }
+
     private final KafkaSourcePort port;
     private final KafkaSourceInputQueue sourceInputs;
     private final ReplayIntakeInputQueue intakeInputs;
@@ -48,25 +77,20 @@ public final class KafkaSourceOwner {
     private final Duration cancellationGrace;
     private final LongSupplier monotonicNanos;
     private final GraceIntervalWait graceWait;
+    private final Metrics metrics;
 
     private final Map<TopicPartition, PartitionSourceState> partitions = new LinkedHashMap<>();
     private final Map<TopicPartition, Long> stagedCommitPositions = new LinkedHashMap<>();
     /**
-     * Positions submitted and not yet resolved. Held apart from staged positions so a partition whose prefix
-     * advances again mid-flight stages the newer position instead of racing a second operation for it, and so
-     * at most one operation is ever outstanding ({@code kafkaLLD §5.7}).
-     */
-    private final Map<TopicPartition, SubmittedPosition> inFlightCommitPositions = new LinkedHashMap<>();
-    /**
-     * Whether a commit operation is outstanding, as distinct from which positions it carried.
+     * The one accepted asynchronous operation that has not resolved.
      *
-     * <p>{@code §5.7} states the invariant about the <em>operation</em> — "at most one commit operation is in
-     * flight at a time" — while {@link #inFlightCommitPositions} is per partition and is emptied when a
-     * partition retires. Deriving the invariant from that map let a revocation that retired every partition in
-     * an outstanding operation empty it while the operation was still unresolved, admitting a second one. Only
-     * {@link #onCommitResolved} clears this.
+     * <p>The identity and its resolution latch travel together. A callback can race a thrown
+     * {@link WakeupException}, and a late callback from that operation can arrive while a newer operation is
+     * active. Only resolving this exact identity may clear the slot; resolving it twice is diagnostic and
+     * changes no state.
      */
-    private boolean commitOperationInFlight;
+    private CommitOperation inFlightCommitOperation;
+    private long nextCommitOperationId;
     /**
      * Generations revoked or lost whose cleanup replay intake has not yet reported.
      *
@@ -88,6 +112,28 @@ public final class KafkaSourceOwner {
         LongSupplier monotonicNanos,
         GraceIntervalWait graceWait
     ) {
+        this(
+            port,
+            sourceInputs,
+            intakeInputs,
+            wakeupController,
+            cancellationGrace,
+            monotonicNanos,
+            graceWait,
+            Metrics.NOOP
+        );
+    }
+
+    public KafkaSourceOwner(
+        KafkaSourcePort port,
+        KafkaSourceInputQueue sourceInputs,
+        ReplayIntakeInputQueue intakeInputs,
+        WakeupController wakeupController,
+        Duration cancellationGrace,
+        LongSupplier monotonicNanos,
+        GraceIntervalWait graceWait,
+        Metrics metrics
+    ) {
         this.port = Objects.requireNonNull(port, "port");
         this.sourceInputs = Objects.requireNonNull(sourceInputs, "sourceInputs");
         this.intakeInputs = Objects.requireNonNull(intakeInputs, "intakeInputs");
@@ -95,6 +141,7 @@ public final class KafkaSourceOwner {
         this.cancellationGrace = Objects.requireNonNull(cancellationGrace, "cancellationGrace");
         this.monotonicNanos = Objects.requireNonNull(monotonicNanos, "monotonicNanos");
         this.graceWait = Objects.requireNonNull(graceWait, "graceWait");
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
         if (cancellationGrace.isNegative()) {
             throw new IllegalArgumentException("cancellationGrace must not be negative");
         }
@@ -174,7 +221,7 @@ public final class KafkaSourceOwner {
         // not block advancement, so offset arithmetic would over-count by every gap.
         state.countRecordsAwaitingCommit(completion.newlyContiguousRecords().size());
         completion.nextCommitOffset().ifPresent(nextOffset ->
-            stagedCommitPositions.put(finished.generation().topicPartition(), nextOffset)
+            stageCommitPosition(finished.generation().topicPartition(), nextOffset)
         );
     }
 
@@ -208,12 +255,21 @@ public final class KafkaSourceOwner {
     private void applyProtocolViolation(KafkaSourceInput.CaptureProtocolViolationDetected violation) {
         // Blocks commits at and past the violating offset so a restart stops at the same record rather than
         // skipping it. Ending intake is what stops later records being admitted.
-        var state = partitions.get(violation.generation().topicPartition());
-        if (state != null) {
-            state.endIntake();
-        }
-        stagedCommitPositions.remove(violation.generation().topicPartition());
+        var state = currentStateFor(violation.generation()).orElseThrow(() ->
+            new IllegalStateException("protocol violation arrived for inactive generation " + violation.generation())
+        );
+        state.endIntake();
+        state.commitQueue().markCommitIneligible(violation.recordId());
+        metrics.recordsCommitIneligible(1);
+        metrics.recordsOutstandingChanged(-1);
+        // A position already staged is necessarily before the violating record, because only
+        // RecordProcessingFinished advances the prefix. Preserve that valid progress; the ineligible entry
+        // remains in the deque and blocks every position at or beyond itself.
         throw new CaptureProtocolViolation(violation);
+    }
+
+    private void stageCommitPosition(TopicPartition topicPartition, long nextPosition) {
+        stagedCommitPositions.merge(topicPartition, nextPosition, Math::max);
     }
 
     // ---------------------------------------------------------------- commit
@@ -231,15 +287,21 @@ public final class KafkaSourceOwner {
      * partition that advances mid-flight stages the newer position rather than racing the old one.
      */
     private void submitLoopCommitIfEligible() {
-        if (stagedCommitPositions.isEmpty() || commitOperationInFlight) {
+        if (stagedCommitPositions.isEmpty() || inFlightCommitOperation != null) {
             return;
         }
         var submitted = detachForSubmission();
-        inFlightCommitPositions.putAll(submitted);
-        commitOperationInFlight = true;
+        var operation = new CommitOperation(nextCommitOperationId++, submitted);
+        inFlightCommitOperation = operation;
         wakeupController.enterProtectedOperation();
         try {
-            port.commitAsync(positionsOf(submitted), outcome -> onCommitResolved(submitted, outcome));
+            var submission = port.commitAsync(
+                positionsOf(submitted),
+                outcome -> resolveCommitOperation(operation, outcome, false)
+            );
+            if (!submission.accepted()) {
+                resolveCommitOperation(operation, submission.rejectionOutcome(), true);
+            }
         } catch (WakeupException absorbedByTheSubmission) {
             // §5.4 leaves this owner as the only interpreter of a wakeup, which is why the adapter propagates it
             // rather than classifying it. Resolving it here is what releases the one-in-flight slot §5.7 permits
@@ -251,7 +313,7 @@ public final class KafkaSourceOwner {
             // asynchronous submission. Unknown is right either way — the operation may already have reached the
             // broker — and it keeps a still-owned partition's position and re-offers it.
             wakeupController.onWakeupAbsorbedByProtectedOperation();
-            onCommitResolved(submitted, KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
+            resolveCommitOperation(operation, KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN, false);
         } finally {
             wakeupController.leaveProtectedOperation();
         }
@@ -294,8 +356,34 @@ public final class KafkaSourceOwner {
     private record SubmittedPosition(
         PartitionGenerationId generation,
         long nextPosition,
-        long recordsCovered
+        PartitionSourceState.CommitCoverage recordsCovered
     ) {}
+
+    /**
+     * One operation-level identity and latch.
+     *
+     * <p>Owner-thread confinement makes an atomic unnecessary. The identity is still essential: a callback for
+     * operation N may arrive after a wakeup resolved N and operation N+1 was submitted. Only N may observe its
+     * latch, and it can never clear N+1's in-flight slot.
+     */
+    private static final class CommitOperation {
+        private final long operationId;
+        private final Map<TopicPartition, SubmittedPosition> submitted;
+        private boolean resolved;
+
+        private CommitOperation(long operationId, Map<TopicPartition, SubmittedPosition> submitted) {
+            this.operationId = operationId;
+            this.submitted = Map.copyOf(submitted);
+        }
+
+        private boolean claimResolution() {
+            if (resolved) {
+                return false;
+            }
+            resolved = true;
+            return true;
+        }
+    }
 
     /**
      * Resolves a submitted commit. Runs on the Kafka thread, delivered from inside a later {@code poll()}.
@@ -306,32 +394,38 @@ public final class KafkaSourceOwner {
      * partial application stays unobservable, whereas abandoning it would hold that partition's progress until
      * its prefix next advances — which work blocked behind an unfinished head can delay without bound.
      */
-    private void onCommitResolved(
-        Map<TopicPartition, SubmittedPosition> submitted,
-        KafkaSourcePort.CommitOutcome outcome
+    private void resolveCommitOperation(
+        CommitOperation operation,
+        KafkaSourcePort.CommitOutcome outcome,
+        boolean rejectedWithoutBrokerMovement
     ) {
-        // Cleared here and only here: the operation is what §5.7 bounds, and it is resolved exactly once
-        // regardless of how many of its partitions still exist locally.
-        commitOperationInFlight = false;
-        submitted.forEach((topicPartition, detail) -> {
+        if (!operation.claimResolution()) {
+            metrics.commitResolved(CommitResolution.DUPLICATE_IGNORED);
+            log.atDebug().setMessage("Ignoring duplicate resolution for commit operation {}: {}")
+                .addArgument(operation.operationId).addArgument(outcome).log();
+            return;
+        }
+        if (inFlightCommitOperation == operation) {
+            inFlightCommitOperation = null;
+        }
+        if (rejectedWithoutBrokerMovement) {
+            metrics.commitAttemptRejected();
+            metrics.commitResolved(CommitResolution.REJECTED);
+        } else {
+            metrics.commitResolved(resolutionOf(outcome));
+        }
+        operation.submitted.forEach((topicPartition, detail) -> {
             var state = partitions.get(topicPartition);
             var currentGeneration = state != null && state.generation().equals(detail.generation());
-
-            // Matched on generation, not on partition. A callback can outlive a revoke-and-reassign, and
-            // clearing the marker by partition alone would release the successor's in-flight slot and let a
-            // second operation race it (kafkaLLD §5.7's one-in-flight rule).
-            var inFlight = inFlightCommitPositions.get(topicPartition);
-            if (inFlight != null && inFlight.generation().equals(detail.generation())) {
-                inFlightCommitPositions.remove(topicPartition);
-            }
 
             if (!currentGeneration) {
                 // kafkaLLD §5.7's LATE_CALLBACK: diagnostic only. It changes no state -- crediting a successor
                 // for an operation the revoked generation submitted would inflate its retirement count, and
                 // re-staging would offer a successor a position it never derived.
                 wakeupController.countLateCommitCallback();
+                metrics.commitResolved(CommitResolution.LATE_CALLBACK);
                 log.atDebug()
-                    .setMessage("Late commit callback for retired generation {} at {}: {}; ignoring")
+                    .setMessage("Late commit resolution for retired generation {} at {}: {}; ignoring")
                     .addArgument(detail::generation).addArgument(detail::nextPosition).addArgument(outcome)
                     .log();
                 return;
@@ -339,6 +433,8 @@ public final class KafkaSourceOwner {
 
             if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
                 state.creditRecordsCommitted(detail.recordsCovered());
+                metrics.recordsCommitted(detail.recordsCovered().total());
+                metrics.recordsOutstandingChanged(-detail.recordsCovered().total());
                 // A still-owned partition restores records after an unknown outcome. An acknowledgement of the
                 // re-offered position covers those restored records, so the earlier uncertainty no longer
                 // explains its retirement count.
@@ -348,14 +444,28 @@ public final class KafkaSourceOwner {
 
             // Nothing is reported to intake, which finished its record-processing decision before sending
             // RecordProcessingFinished (kafkaLLD §5.7).
+            if (rejectedWithoutBrokerMovement) {
+                state.restoreRejectedRecords(detail.recordsCovered());
+            } else {
+                state.restoreUncertainRecords(detail.recordsCovered());
+            }
             if (stillOwnsForCommit(topicPartition)) {
-                stagedCommitPositions.putIfAbsent(topicPartition, detail.nextPosition());
-                state.restoreRecordsAwaitingCommit(detail.recordsCovered());
+                stageCommitPosition(topicPartition, detail.nextPosition());
             } else {
                 log.atInfo().setMessage("Dropping commit position {} for {}: {} and no longer committable")
                     .addArgument(detail::nextPosition).addArgument(topicPartition).addArgument(outcome).log();
             }
         });
+    }
+
+    private static CommitResolution resolutionOf(KafkaSourcePort.CommitOutcome outcome) {
+        return switch (outcome) {
+            case ACKNOWLEDGED -> CommitResolution.ACKNOWLEDGED;
+            case RETRIABLE -> CommitResolution.RETRIABLE;
+            case GENERATION_STALE -> CommitResolution.GENERATION_STALE;
+            case OUTCOME_UNKNOWN -> CommitResolution.OUTCOME_UNKNOWN;
+            case LATE_CALLBACK -> CommitResolution.LATE_CALLBACK;
+        };
     }
 
     /**
@@ -444,6 +554,8 @@ public final class KafkaSourceOwner {
             .toList();
         stamped.forEach(record -> state.commitQueue().register(record.recordId()));
         state.countRecordsRead(stamped.size());
+        metrics.recordsRead(stamped.size());
+        metrics.recordsOutstandingChanged(stamped.size());
         submitRequired(new ReplayIntakeInput.PartitionRecordBatch(requestId, stamped));
     }
 
@@ -566,11 +678,14 @@ public final class KafkaSourceOwner {
         // The old generation must not go on offering a commit: kafkaLLD §5.7 has it neither retrying nor
         // waiting, with the next assigned position deciding redelivery instead.
         stagedCommitPositions.remove(topicPartition);
-        // Captured before the removal, because it is what distinguishes "committed nothing" from "outcome
-        // unknown" in the log below.
-        var unresolvedAtRetirement = inFlightCommitPositions.remove(topicPartition) != null;
         if (state == null) {
             return;
+        }
+        var activeSubmission = inFlightCommitOperation == null
+            ? null
+            : inFlightCommitOperation.submitted.get(topicPartition);
+        if (activeSubmission != null && !activeSubmission.generation().equals(state.generation())) {
+            activeSubmission = null;
         }
         // Not registered here. Registration happens before graceful cancellation is submitted, so that a
         // completion arriving during the grace interval matches an obligation that already exists; re-adding
@@ -578,9 +693,10 @@ public final class KafkaSourceOwner {
         // The diagnostic qualifies the two measurements without interpreting them. NONE_OBSERVED means only
         // that no unresolved or unknown commit outcome is known; kafkaLLD §15.4 leaves conclusions about a zero
         // count to the observer.
-        if (unresolvedAtRetirement) {
+        if (activeSubmission != null) {
             state.markAsyncCommitUnresolved();
         }
+        recordRetirementConservation(state, activeSubmission);
         log.atInfo()
             .setMessage("Retiring generation {}: committed {} of {} records read, commitUncertainty={}")
             .addArgument(state::generation)
@@ -593,6 +709,58 @@ public final class KafkaSourceOwner {
             state.recordsCommitted(),
             state.recordsRead()
         );
+    }
+
+    private void recordRetirementConservation(
+        PartitionSourceState state,
+        SubmittedPosition activeSubmission
+    ) {
+        var staged = state.recordsAwaitingCommit();
+        var completedBehindHead = state.commitQueue().completedBehindHeadCount();
+        var cancelled = state.commitQueue().unfinishedCount();
+        var commitIneligible = state.commitQueue().commitIneligibleCount();
+        var activeUnknown = activeSubmission == null ? 0 : activeSubmission.recordsCovered().total();
+
+        var abandonedRejected = staged.rejected();
+        var abandonedUnknown = Math.addExact(staged.unknown(), activeUnknown);
+        var abandonedUnsubmitted = Math.addExact(staged.unsubmitted(), completedBehindHead);
+        var accounted = Math.addExact(
+            Math.addExact(state.recordsCommitted(), commitIneligible),
+            Math.addExact(
+                Math.addExact(cancelled, abandonedRejected),
+                Math.addExact(abandonedUnknown, abandonedUnsubmitted)
+            )
+        );
+        if (accounted != state.recordsRead()) {
+            throw new IllegalStateException(
+                "record conservation failed while retiring "
+                    + state.generation()
+                    + ": read="
+                    + state.recordsRead()
+                    + ", accounted="
+                    + accounted
+            );
+        }
+
+        recordAbandonment(AbandonmentCause.REJECTED, abandonedRejected);
+        recordAbandonment(AbandonmentCause.UNKNOWN, abandonedUnknown);
+        recordAbandonment(AbandonmentCause.UNSUBMITTED, abandonedUnsubmitted);
+        if (cancelled > 0) {
+            metrics.recordsCancelled(cancelled);
+        }
+        var newlyTerminal = Math.addExact(
+            cancelled,
+            Math.addExact(abandonedRejected, Math.addExact(abandonedUnknown, abandonedUnsubmitted))
+        );
+        if (newlyTerminal > 0) {
+            metrics.recordsOutstandingChanged(-newlyTerminal);
+        }
+    }
+
+    private void recordAbandonment(AbandonmentCause cause, long count) {
+        if (count > 0) {
+            metrics.recordsAbandonedAtRevocation(cause, count);
+        }
     }
 
     /**
@@ -659,7 +827,7 @@ public final class KafkaSourceOwner {
         if (stagedCommitPositions.isEmpty()) {
             return;
         }
-        if (commitOperationInFlight) {
+        if (inFlightCommitOperation != null) {
             // §5.7 allows one commit operation at a time, and an asynchronous one cannot be taken back: Kafka
             // guarantees its callback runs before the next commitSync returns, so it resolves *during* any
             // commit issued here — crediting its own record count, which this one would then credit again.
@@ -668,7 +836,7 @@ public final class KafkaSourceOwner {
             // the operation that decides. Its positions are not re-offered: §5.7 has a revoked generation
             // discard rather than retry, and the next assigned position decides redelivery.
             log.atDebug().setMessage("Not attempting a revocation commit while {} is in flight")
-                .addArgument(inFlightCommitPositions::keySet).log();
+                .addArgument(() -> inFlightCommitOperation.submitted.keySet()).log();
             return;
         }
         // Attempted however little grace is left. The bound is what keeps the call inside the deadline, so a
@@ -684,6 +852,7 @@ public final class KafkaSourceOwner {
             return;
         }
         var submitted = detachForSubmission();
+        var operation = new CommitOperation(nextCommitOperationId++, submitted);
         wakeupController.enterProtectedOperation();
         KafkaSourcePort.CommitOutcome outcome;
         try {
@@ -698,7 +867,7 @@ public final class KafkaSourceOwner {
             wakeupController.leaveProtectedOperation();
         }
         if (outcome == KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN) {
-            // Synchronous submissions never enter inFlightCommitPositions, so the retirement check cannot
+            // Synchronous submissions never enter inFlightCommitOperation, so the retirement check cannot
             // reconstruct this outcome. The operation-level result applies to every submitted partition.
             submitted.keySet().forEach(topicPartition -> {
                 var state = partitions.get(topicPartition);
@@ -707,7 +876,10 @@ public final class KafkaSourceOwner {
                 }
             });
         }
-        onCommitResolved(submitted, outcome);
+        var rejectedWithoutBrokerMovement =
+            outcome == KafkaSourcePort.CommitOutcome.RETRIABLE
+                || outcome == KafkaSourcePort.CommitOutcome.GENERATION_STALE;
+        resolveCommitOperation(operation, outcome, rejectedWithoutBrokerMovement);
     }
 
     /**

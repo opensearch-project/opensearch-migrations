@@ -32,6 +32,51 @@ import org.apache.kafka.common.TopicPartition;
  */
 public final class PartitionSourceState {
 
+    /**
+     * Finished records carried by one staged or submitted commit position.
+     *
+     * <p>The categories are monotonic evidence. A pre-acceptance rejection moves only records never known
+     * uncertain into {@code rejected}; an accepted operation with a non-acknowledged result moves all of its
+     * coverage to {@code unknown}. Later failures cannot make an earlier unknown outcome certain.
+     */
+    public record CommitCoverage(long unsubmitted, long rejected, long unknown) {
+        public static final CommitCoverage EMPTY = new CommitCoverage(0, 0, 0);
+
+        public CommitCoverage {
+            if (unsubmitted < 0 || rejected < 0 || unknown < 0) {
+                throw new IllegalArgumentException("commit coverage counts must not be negative");
+            }
+        }
+
+        public long total() {
+            return unsubmitted + rejected + unknown;
+        }
+
+        public CommitCoverage plusUnsubmitted(long count) {
+            if (count < 0) {
+                throw new IllegalArgumentException("count must not be negative");
+            }
+            return new CommitCoverage(Math.addExact(unsubmitted, count), rejected, unknown);
+        }
+
+        public CommitCoverage plus(CommitCoverage other) {
+            Objects.requireNonNull(other, "other");
+            return new CommitCoverage(
+                Math.addExact(unsubmitted, other.unsubmitted),
+                Math.addExact(rejected, other.rejected),
+                Math.addExact(unknown, other.unknown)
+            );
+        }
+
+        public CommitCoverage afterRejectedBeforeAcceptance() {
+            return new CommitCoverage(0, Math.addExact(unsubmitted, rejected), unknown);
+        }
+
+        public CommitCoverage afterUncertainOutcome() {
+            return new CommitCoverage(0, 0, total());
+        }
+    }
+
     private final PartitionGenerationId generation;
     private final ObservedRecordCommitQueue commitQueue;
     private PartitionBatchRequestId outstandingRequest;
@@ -42,7 +87,7 @@ public final class PartitionSourceState {
     private long recordsRead;
     private long recordsCommitted;
     /** Finished records whose commit has not yet been acknowledged; credited when one is. */
-    private long recordsAwaitingCommit;
+    private CommitCoverage recordsAwaitingCommit = CommitCoverage.EMPTY;
     private CommitUncertainty commitUncertainty = CommitUncertainty.NONE_OBSERVED;
 
     public PartitionSourceState(PartitionGenerationId generation) {
@@ -178,11 +223,16 @@ public final class PartitionSourceState {
         NONE_OBSERVED,
         /** An asynchronous submission was still unresolved at retirement; its callback arrives afterwards. */
         ASYNC_UNRESOLVED_AT_RETIREMENT,
-        /** A synchronous revocation commit returned an unknown outcome; it may have reached the broker. */
+        /** An accepted commit returned an unknown outcome; it may have reached the broker. */
         SYNC_OUTCOME_UNKNOWN
     }
 
-    /** Records that a synchronous revocation commit for this generation returned an unknown outcome. */
+    /**
+     * Records an accepted commit whose broker outcome is unknown.
+     *
+     * <p>The retained method name predates G4's common async/sync accounting; callers must interpret the
+     * state, not the historical method name.
+     */
     public void markSyncCommitOutcomeUnknown() {
         commitUncertainty = CommitUncertainty.SYNC_OUTCOME_UNKNOWN;
     }
@@ -220,7 +270,7 @@ public final class PartitionSourceState {
      * arithmetic would over-count by every gap.
      */
     public void countRecordsAwaitingCommit(long count) {
-        recordsAwaitingCommit += count;
+        recordsAwaitingCommit = recordsAwaitingCommit.plusUnsubmitted(count);
     }
 
     /**
@@ -231,9 +281,9 @@ public final class PartitionSourceState {
      * awaiting at acknowledgement time would report them committed although their position was never
      * acknowledged.
      */
-    public long takeRecordsAwaitingCommit() {
+    public CommitCoverage takeRecordsAwaitingCommit() {
         var taken = recordsAwaitingCommit;
-        recordsAwaitingCommit = 0;
+        recordsAwaitingCommit = CommitCoverage.EMPTY;
         return taken;
     }
 
@@ -248,13 +298,24 @@ public final class PartitionSourceState {
      * measurement exists so that a run of zero-commit retirements is visible, and over-reporting would hide
      * exactly that.
      */
-    public void creditRecordsCommitted(long recordsCovered) {
-        recordsCommitted += recordsCovered;
+    public void creditRecordsCommitted(CommitCoverage recordsCovered) {
+        recordsCommitted += recordsCovered.total();
     }
 
-    /** Returns a failed submission's records to the awaiting pool, so a later commit still credits them. */
-    public void restoreRecordsAwaitingCommit(long recordsCovered) {
-        recordsAwaitingCommit += recordsCovered;
+    /** Returns a pre-acceptance rejection without erasing any earlier uncertainty. */
+    public void restoreRejectedRecords(CommitCoverage recordsCovered) {
+        recordsAwaitingCommit =
+            recordsAwaitingCommit.plus(recordsCovered.afterRejectedBeforeAcceptance());
+    }
+
+    /** Returns an accepted operation whose broker result is uncertain. */
+    public void restoreUncertainRecords(CommitCoverage recordsCovered) {
+        recordsAwaitingCommit = recordsAwaitingCommit.plus(recordsCovered.afterUncertainOutcome());
+        markSyncCommitOutcomeUnknown();
+    }
+
+    public CommitCoverage recordsAwaitingCommit() {
+        return recordsAwaitingCommit;
     }
 
     public long recordsCommitted() {
