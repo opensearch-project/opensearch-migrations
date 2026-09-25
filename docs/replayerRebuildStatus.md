@@ -32,9 +32,10 @@ Plan A and Plan B.
 | G2 | proved | Kafka source owner, wakeup boundary, generation/commit handling, and repeated design-conformance/falsification review; R9 proved |
 | G3 | `blocked(PA2/design)` | Implementation, falsification, and repeated conformance review complete through `3dbec52cf`; the committed focused six-class validation reports 56 passing tests, and the final review found no production-code conformance defect. Closure waits only on PA2 item 5's typed producer/interoperability and the exact authorized design amendment removing ordinary-`Write` fallback semantics |
 | G4 | proved | Commit authority complete through `49dd4cea0`: ordered observed-record head, one operation-level resolution latch, monotonic recommit, rejected/unknown distinction, revocation conservation, fixed-cardinality telemetry, 65-test focused validation, exact-revision falsification, and resumed Claude conformance review |
+| G5 | open | Production implementation is committed through `19c05162d`; the exact-method trace audit is complete in the current checkpoint with 147 balanced mappings across 16 files, unchanged and branch-only claims removed, retained sources preserved for the final sweep, and the pre-carry RequestSender source gap recorded. Milestone evidence and resumed-session production review remain to be closed |
 | Production compile | proved | Last recorded passing with the required Gradle Spotless exclusions |
 | Compiled test set | proved | Last recorded 108 tests, 0 failures; inherited unresolved tests remain marked and owned below |
-| Limbo regions | open | Measured 2026-09-25: 213 files with `REBUILD-LIMBO-START`; historical counts drift and the START grep is authoritative |
+| Limbo regions | open | Measured 2026-09-25: 176 files with `REBUILD-LIMBO-START`; historical counts drift and the START grep is authoritative |
 | Limbo integrity | proved | `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh`; rerun after every marking change |
 | PR strategy | decided | Keep draft PR #3394 and the same branch through the red-CI stretch; repair CI at the swing |
 | DCO debt | `deferred(post-G12)` | Seven inherited PR commits lack sign-off: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`; preserve history during the eventual rewrite |
@@ -201,7 +202,7 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | Permit release can precede asynchronous aborted-channel teardown | G5 | Close D6 residual; no replacement attempt while old bytes remain in flight |
 | Latent marked `ChannelContextManager.RefCountedContext.release` at `:54-58`, reached from `releaseContextFor` at `:88-95`, is non-atomic and assert-dependent at `:56`/`:91` | G5 | Inert by construction today; resolve during rewrite and do not apply an isolated legacy patch |
 | Latent marked `ISourceTrafficChannelKey.getSourceGeneration` at `:23-25` defaults to zero and lets lifetimes collide in legacy keys | G3/G5 | Inert by construction today; final identities must use `ConnectionProcessingId`/real generation and prove no cross-route |
-| Broad G5 `REBUILD-TRACE` prose predates the exact-method convention | G5 | Audit every existing record against mainline baseline `2fe4538a`; retain only exact paired mappings for moved, split, merged, substantially rewritten, or retired behavior. Owner confirmed exact method-level prose colocated with each retained source and target. Keep retained source members in limbo through the final sweep; `RequestSenderOrchestrator.scheduleOnConnectionReplaySession` is a pre-existing gap because it disappeared before Plan A's carry baseline, so its source record points to `2fe4538a` rather than restoring deleted code |
+| Broad G5 `REBUILD-TRACE` prose predates the exact-method convention | G5 | proved — 147 unique exact mappings balance source and target records across 16 files; unchanged and branch-only claims were removed. Retained eligible source members remain in limbo through the final sweep, including the deliberate `TrafficReplayerTopLevel.getCurrentAccumulator -> RETIRED` source. The baseline `RequestSenderOrchestrator` constructors and named scheduling, cancellation, retry, and packet-send methods were already absent before Plan A's carry baseline; their source records are anchored to `2fe4538a` at the surviving replacement seam rather than restoring deleted bodies. In-place `ChannelContextManager`, `ReplayContexts`, and `ParsedHttpMessagesAsDicts` rewrites colocate paired records; the history-preserving `ThreadLocalTupleWriter` → `TupleWriter` rename colocates predecessor and target records |
 | Mainline `SigV4AuthTransformerFactory` is unchanged but not independently promotable | G5 | Keep it in limbo while its real consuming path is unresolved: a clean compile after unmarking found unavailable `IHttpMessage` and AWS-credential types. Add no trace unless its responsibility later moves, splits, merges, substantially rewrites, or retires |
 | `SourceConnectionState.expire()` has no production caller | G6 | Wire broker-time expiration trigger; direct G3 transition test is prerequisite evidence only |
 | Live and marked predecessor files both use the name `ReplayIntakeInput` | G5/G7 owner promotion | Resolve when promoting `RequestLifecycleInput`; do not create an undesigned business-input variant |
@@ -244,8 +245,8 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 
 | Item | Introduced | Removal / repair | State |
 |---|---|---|---|
-| `REBUILD-LIMBO` regions | G0 | each owning milestone; zero at rebuild completion | open — 215 START files; remeasure with the command |
-| `REBUILD-LIMBO-NOTE` stand-ins | varies | named milestone in each note | open — 6 NOTE files |
+| `REBUILD-LIMBO` regions | G0 | each owning milestone; zero at rebuild completion | open — 176 START files measured 2026-09-25; remeasure with the command |
+| `REBUILD-LIMBO-NOTE` stand-ins | varies | named milestone in each note | open — 5 NOTE files measured 2026-09-25 |
 | Module `build.gradle` limbo note | G0 | last limbo region | open |
 | `KafkaSourceRootContext` | G2 | G3 | proved deleted |
 | Proxy Kafka tests missing `LogAppendTime` topic setup | inherited | PA2 item 1 | open; masks PA2 item 2 |

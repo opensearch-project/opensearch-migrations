@@ -157,6 +157,10 @@ public final class OutstandingOperationRegistry {
         this.countHook = countHook;
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.put ->
+    //     OutstandingOperationRegistry.register
+    // REBUILD-TRACE-END(G5,target)
     public Registration register(
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ConnectionProcessingId connectionProcessingId,
@@ -203,6 +207,10 @@ public final class OutstandingOperationRegistry {
         publish(null);
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.remove ->
+    //     OutstandingOperationRegistry.complete
+    // REBUILD-TRACE-END(G5,target)
     public void complete(@NonNull Registration registration) {
         requireOwnerThread();
         var entry = requireEntry(registration, "apply typed completion");
@@ -213,10 +221,20 @@ public final class OutstandingOperationRegistry {
         publish(entry.operationType);
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.getRemainingItems ->
+    //     OutstandingOperationRegistry.snapshots
+    // REBUILD-TRACE-END(G5,target)
     public List<Snapshot> snapshots() {
         return publishedSnapshots;
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.isEmpty ->
+    //     OutstandingOperationRegistry.activeCount
+    // TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.size ->
+    //     OutstandingOperationRegistry.activeCount
+    // REBUILD-TRACE-END(G5,target)
     public int activeCount() {
         return publishedSnapshots.size();
     }

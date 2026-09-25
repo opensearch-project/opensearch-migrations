@@ -15,15 +15,6 @@ import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// accumulator onRequest/onResponse/onClose callbacks -> these typed source-assembly methods
-// context-free onRequestReconstituted -> deterministic fixtures and dump adapters only
-// production onRequestReconstituted -> context overload; request identity, ordinal, and first-byte
-//     source time are opened from IRequestContext instead of passed beside it
-// production sink target -> TrafficReplayerTopLevel.ConnectionAssemblySink ->
-//     TargetConnectionOwner typed inputs
-// REBUILD-TRACE-END(G5,source)
-
 /**
  * Where source assembly's results go.
  *

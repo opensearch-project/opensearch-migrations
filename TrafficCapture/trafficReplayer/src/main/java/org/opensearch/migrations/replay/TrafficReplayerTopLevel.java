@@ -58,23 +58,6 @@ import io.netty.channel.EventLoop;
 import lombok.NonNull;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// old constructors' component assembly -> Configuration + constructor + createConnection
-// old accumulator callback wiring -> ConnectionAssemblySink methods + IntakeLifecycleSink
-// old RequestSenderOrchestrator/ReplayEngine creation -> TargetConnectionOwner +
-//     RequestReplayOwner + TargetChannelPort created by createConnection
-// old ThreadLocalTupleWriter construction -> createConnection +
-//     ManagedTupleTransformerFactory/ManagedPhysicalTupleSinkFactory
-// old tuple-writer close -> releaseConnectionResources/closeManaged
-// old Kafka run setup -> constructor + startIntake + runSourceOnce + rebalanceListener
-// old makeNettyPacketConsumerConnectionPool/loadSslContext -> G9 startup configuration calling
-//     NettyPacketToHttpConsumer.create; the transport implementation is live in G5
-// old setupRunAndWait*/doSetup*/wrapUpWorkAndEmitSummary/waitForRemainingWork/shutdown ->
-//     G9 process supervisor and owner-loop startup/shutdown
-// old shouldRetry -> RequestReplayOwner.RetryPolicy
-// old currentReplayEngine inspection -> typed owner registries/activitySnapshot
-// REBUILD-TRACE-END(G5,target)
-
 /**
  * G5's production composition root. G9 owns starting and supervising its two owner loops.
  *
@@ -166,6 +149,10 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     private final Consumer<Error> fatalHandler;
     private boolean intakeStarted;
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerTopLevel.<init>(7-argument) -> TrafficReplayerTopLevel.<init>(6-argument)
+    // TrafficReplayerTopLevel.<init>(8-argument) -> TrafficReplayerTopLevel.<init>(6-argument)
+    // REBUILD-TRACE-END(G5,target)
     public TrafficReplayerTopLevel(
         @NonNull org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
         @NonNull RootReplayerContext rootContext,
@@ -284,6 +271,10 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         };
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.<init>(IntFunction,Supplier) ->
+    //     TrafficReplayerTopLevel.deployedTupleTransformer
+    // REBUILD-TRACE-END(G5,target)
     public static ManagedTupleTransformer<Map<String, Object>> deployedTupleTransformer(
         @NonNull Supplier<IJsonTransformer> transformerSupplier
     ) {
@@ -439,8 +430,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     }
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // TrafficReplayerCore.packageAndWriteTuple + ParsedHttpMessagesAsDicts construction/toTupleMap ->
-    // deployedTupleFactory + ParsedHttpMessagesAsDicts(RequestResult).
+    // TrafficReplayerCore.TrafficReplayerAccumulationCallbacks.packageAndWriteTuple ->
+    //     TrafficReplayerTopLevel.deployedTupleFactory
     // REBUILD-TRACE-END(G5,target)
     public static RequestReplayOwner.TupleFactory<
         HttpMessageAndTimestamp.Request,
@@ -484,6 +475,16 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.<init>(ClientConnectionPool,BiFunction) ->
+    //     TrafficReplayerTopLevel.createConnection
+    // RequestSenderOrchestrator.<init>(ClientConnectionPool,Duration,Duration,BiFunction) ->
+    //     TrafficReplayerTopLevel.createConnection
+    // ThreadLocalTupleWriter.<init>(IntFunction) -> TrafficReplayerTopLevel.createConnection
+    // ThreadLocalTupleWriter.<init>(IntFunction,Supplier) -> TrafficReplayerTopLevel.createConnection
+    // TrafficReplayerTopLevel.<init>(7-argument) -> TrafficReplayerTopLevel.createConnection
+    // TrafficReplayerTopLevel.<init>(8-argument) -> TrafficReplayerTopLevel.createConnection
+    // REBUILD-TRACE-END(G5,target)
     private ConnectionBinding createConnection(
         ConnectionAssemblySink assemblySink,
         ConnectionProcessingId connectionId
@@ -588,6 +589,12 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         }
     }
 
+    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.releaseConnectionResources
+    // REBUILD-TRACE-END(G5,source)
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.releaseConnectionResources
+    // REBUILD-TRACE-END(G5,target)
     private void releaseConnectionResources(
         ConnectionProcessingId connectionId,
         ConnectionBinding binding
@@ -597,6 +604,12 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         contextManager.releaseContextFor(binding.connectionContext);
     }
 
+    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.closeManaged
+    // REBUILD-TRACE-END(G5,source)
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.closeManaged
+    // REBUILD-TRACE-END(G5,target)
     private void closeManaged(
         AutoCloseable closeable,
         String component,
@@ -866,17 +879,6 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     }
 }
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// The inert predecessor below supplies the source functions named by REBUILD-TRACE(G5,target):
-// getCurrentReplayEngine, every constructor,
-// makeNettyPacketConsumerConnectionPool, loadSslContext, setupRunAndWaitForReplayToFinish,
-// doSetupRunAndWaitForReplayToFinish, wrapUpWorkAndEmitSummary,
-// setupRunAndWaitForReplayWithShutdownChecks, doSetupRunAndWaitForReplayWithShutdownChecks,
-// waitForRemainingWork, handleAlreadySetFinishedSignal, writeStatusLogsForRemainingWork,
-// formatWorkItem, shouldRetry, shutdown, and close. Each maps to the exact owner or G9
-// disposition named above; none remains a second live orchestration path.
-// REBUILD-TRACE-END(G5,source)
-
 // REBUILD-LIMBO(G5) -- the carried predecessor members below remain inert. Javadoc is left outside
 // the marked regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
@@ -1016,26 +1018,66 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     static class ConcurrentHashMapWorkTracker<T> implements IStreamableWorkTracker<T> {
         ConcurrentHashMap<UniqueReplayerRequestKey, TrackedFuture<String, T>> map = new ConcurrentHashMap<>();
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.put ->
+//     OutstandingOperationRegistry.register
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         @Override
         public void put(UniqueReplayerRequestKey uniqueReplayerRequestKey, TrackedFuture<String, T> completableFuture) {
             map.put(uniqueReplayerRequestKey, completableFuture);
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.remove ->
+//     OutstandingOperationRegistry.complete
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         @Override
         public void remove(UniqueReplayerRequestKey uniqueReplayerRequestKey) {
             map.remove(uniqueReplayerRequestKey);
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.isEmpty ->
+//     OutstandingOperationRegistry.activeCount
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         @Override
         public boolean isEmpty() {
             return map.isEmpty();
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.size ->
+//     OutstandingOperationRegistry.activeCount
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         @Override
         public int size() {
             return map.size();
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker.getRemainingItems ->
+//     OutstandingOperationRegistry.snapshots
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         public Stream<Map.Entry<UniqueReplayerRequestKey, TrackedFuture<String, T>>> getRemainingItems() {
             return map.entrySet().stream();
         }
@@ -1048,6 +1090,17 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     private final AtomicBoolean fatalShutdownClaimed;
     private final ReplayProcessFatalHandler.ProcessTerminator fatalProcessTerminator;
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerTopLevel.<init>(7-argument) -> TrafficReplayerTopLevel.<init>(6-argument)
+// TrafficReplayerTopLevel.<init>(8-argument) -> TrafficReplayerTopLevel.<init>(6-argument)
+// TrafficReplayerTopLevel.<init>(7-argument) -> TrafficReplayerTopLevel.createConnection
+// TrafficReplayerTopLevel.<init>(8-argument) -> TrafficReplayerTopLevel.createConnection
+// The two baseline overloads were consolidated into the retained ten-argument predecessor below.
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     public TrafficReplayerTopLevel(
         IRootReplayerContext context,
         URI serverUri,

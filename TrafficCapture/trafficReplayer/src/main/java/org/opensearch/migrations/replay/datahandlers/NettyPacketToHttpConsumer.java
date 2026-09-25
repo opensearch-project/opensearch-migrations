@@ -55,30 +55,6 @@ import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// old constructor -> create + DeployedTargetPacketConsumer constructor
-// activateLiveChannel -> DeployedTargetPacketConsumerFactory.acquireChannel/connect
-// createClientConnectionFactory/createClientConnection/ClientConnectionAttempt ->
-//     create + DeployedTargetPacketConsumerFactory.connect/initializeTls
-// createClientConnection eventLoop.isShuttingDown guard ->
-//     DeployedTargetPacketConsumerFactory.connect's explicit exceptional guard
-// initializeConnectionHandlers -> initializeTls + ConnectionClosedListenerHandler
-// channelIsInUse -> DeployedTargetPacketConsumerFactory.channelIsInUse
-// initializeRequestHandlers -> DeployedTargetPacketConsumer.initializeRequestHandlers
-// consumeBytes -> ActiveAttempt.sendPacket
-// sendPacket/writePacketAndUpdateFuture -> DeployedTargetPacketConsumer.sendPacket
-// classifyPacketTransportFailure -> settleTransportFailure + ActiveAttempt.classify
-// finalizeRequest -> ActiveAttempt.finalizeResponse +
-//     DeployedTargetPacketConsumer.finalizeRequest/finishResponse
-// deactivateChannel -> DeployedTargetPacketConsumer.resetForReuse/finishResponse
-// abort -> ActiveAttempt.abort + DeployedTargetPacketConsumer.abort +
-//     DeployedTargetPacketConsumerFactory.close
-// setCurrentMessageContext/getCurrentRequestSpan/getParentContext/closeSpans ->
-//     transitionTo/closeRequestPhase; request identity comes from AttemptInput.replayContext
-// old connect retry timer -> RequestReplayOwner.scheduleRetry, so no permit spans backoff
-// OutboundRequestMethod/RequestMethodAwareHttpResponseDecoder -> same-named nested types
-// REBUILD-TRACE-END(G5,target)
-
 /**
  * Production Netty implementation of the connection-scoped {@link TargetChannelPort}.
  *
@@ -125,7 +101,10 @@ public final class NettyPacketToHttpConsumer
     /**
      * Builds the production Netty implementation of the G5 target-channel contract.
      */
-    // REBUILD-TRACE(G5,target): old constructor + createClientConnectionFactory.
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // NettyPacketToHttpConsumer.createClientConnectionFactory ->
+    //     NettyPacketToHttpConsumer.create
+    // REBUILD-TRACE-END(G5,target)
     public static NettyPacketToHttpConsumer create(
         @NonNull ConnectionProcessingId connectionProcessingId,
         @NonNull EventLoop eventLoop,
@@ -174,7 +153,6 @@ public final class NettyPacketToHttpConsumer
     }
 
     @Override
-    // REBUILD-TRACE(G5,target): old RequestSenderOrchestrator.sendPackets request boundary.
     public Attempt<AggregatedRawResponse> startAttempt(AttemptInput<PreparedRequest> input) {
         requireOwnerThread();
         if (closed) {
@@ -215,7 +193,6 @@ public final class NettyPacketToHttpConsumer
     }
 
     @Override
-    // REBUILD-TRACE(G5,target): old ConnectionReplaySession/ClientConnectionPool close boundary.
     public CompletionStage<Void> close(ConnectionProcessingId reportedConnectionId) {
         requireOwnerThread();
         if (!connectionProcessingId.equals(reportedConnectionId)) {
@@ -300,7 +277,6 @@ public final class NettyPacketToHttpConsumer
         }
 
         @Override
-        // REBUILD-TRACE(G5,target): old request-scoped constructor.
         public TargetPacketConsumer create(
             TargetChannelPort.AttemptInput<PreparedRequest> input,
             IntConsumer targetWriteAccepted
@@ -321,7 +297,6 @@ public final class NettyPacketToHttpConsumer
         }
 
         @Override
-        // REBUILD-TRACE(G5,target): old abort/deactivate channel close.
         public CompletionStage<Void> close(ConnectionProcessingId reportedConnectionId) {
             requireOwnerThread();
             if (!connectionProcessingId.equals(reportedConnectionId)) {
@@ -334,7 +309,10 @@ public final class NettyPacketToHttpConsumer
             return closeCurrentChannel();
         }
 
-        // REBUILD-TRACE(G5,target): old activateLiveChannel.
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // NettyPacketToHttpConsumer.activateLiveChannel ->
+        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.acquireChannel
+        // REBUILD-TRACE-END(G5,target)
         private CompletableFuture<Channel> acquireChannel(
             DeployedTargetPacketConsumer consumer
         ) {
@@ -359,8 +337,14 @@ public final class NettyPacketToHttpConsumer
         }
 
         // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // old createClientConnection/ClientConnectionAttempt without in-attempt backoff;
-        // RequestReplayOwner.scheduleRetry owns the delay.
+        // NettyPacketToHttpConsumer.activateLiveChannel ->
+        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
+        // NettyPacketToHttpConsumer.createClientConnection(4-argument) ->
+        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
+        // NettyPacketToHttpConsumer.createClientConnection(5-argument) ->
+        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
+        // NettyPacketToHttpConsumer.ClientConnectionAttempt.initializeConnectionHandlers ->
+        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
         // REBUILD-TRACE-END(G5,target)
         private CompletableFuture<Channel> connect(
             DeployedTargetPacketConsumer consumer
@@ -435,7 +419,10 @@ public final class NettyPacketToHttpConsumer
             return result;
         }
 
-        // REBUILD-TRACE(G5,target): old initializeConnectionHandlers TLS branch.
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // NettyPacketToHttpConsumer.ClientConnectionAttempt.initializeConnectionHandlers ->
+        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.initializeTls
+        // REBUILD-TRACE-END(G5,target)
         private void initializeTls(
             Channel connected,
             IReplayContexts.IRequestConnectingContext connectingContext,
@@ -477,7 +464,6 @@ public final class NettyPacketToHttpConsumer
             });
         }
 
-        // REBUILD-TRACE(G5,target): old active-channel publication + initializeRequestHandlers call.
         private void publishConnectedChannel(
             Channel connected,
             DeployedTargetPacketConsumer consumer,
@@ -505,7 +491,6 @@ public final class NettyPacketToHttpConsumer
             }
         }
 
-        // REBUILD-TRACE(G5,target): old failed-channel close before a later retry.
         private CompletionStage<Void> invalidate(Channel failedChannel) {
             requireOwnerThread();
             if (channel == failedChannel) {
@@ -552,6 +537,10 @@ public final class NettyPacketToHttpConsumer
             return result;
         }
 
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // NettyPacketToHttpConsumer.addLoggingHandlerLast ->
+        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.addLoggingHandlerLast
+        // REBUILD-TRACE-END(G5,target)
         private static void addLoggingHandlerLast(
             ChannelPipeline pipeline,
             String name
@@ -569,7 +558,10 @@ public final class NettyPacketToHttpConsumer
             }
         }
 
-        // REBUILD-TRACE(G5,target): old channelIsInUse.
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // NettyPacketToHttpConsumer.channelIsInUse ->
+        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.channelIsInUse
+        // REBUILD-TRACE-END(G5,target)
         private static boolean channelIsInUse(Channel channel) {
             var lastHandler = channel.pipeline().last();
             return !(lastHandler instanceof ConnectionClosedListenerHandler)
@@ -589,12 +581,20 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.ConnectionClosedListenerHandler.channelInactive ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.ConnectionClosedListenerHandler.channelInactive
+            // REBUILD-TRACE-END(G5,target)
             public void channelInactive(ChannelHandlerContext context) throws Exception {
                 socketContext.close();
                 super.channelInactive(context);
             }
 
             @Override
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.ConnectionClosedListenerHandler.exceptionCaught ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.ConnectionClosedListenerHandler.exceptionCaught
+            // REBUILD-TRACE-END(G5,target)
             public void exceptionCaught(
                 ChannelHandlerContext context,
                 Throwable cause
@@ -623,6 +623,10 @@ public final class NettyPacketToHttpConsumer
             private boolean finalizationStarted;
             private boolean cleaned;
 
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.<init> ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.<init>
+            // REBUILD-TRACE-END(G5,target)
             private DeployedTargetPacketConsumer(
                 TargetChannelPort.AttemptInput<PreparedRequest> input,
                 IntConsumer targetWriteAccepted
@@ -633,7 +637,10 @@ public final class NettyPacketToHttpConsumer
                 this.channelReady = acquireChannel(this);
             }
 
-            // REBUILD-TRACE(G5,target): old initializeRequestHandlers.
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.initializeRequestHandlers ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.initializeRequestHandlers
+            // REBUILD-TRACE-END(G5,target)
             private void initializeRequestHandlers(Channel acquiredChannel) {
                 requireOwnerThread();
                 if (channelIsInUse(acquiredChannel)) {
@@ -677,7 +684,10 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
-            // REBUILD-TRACE(G5,target): old consumeBytes compatibility boundary.
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.consumeBytes ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.consumeBytes
+            // REBUILD-TRACE-END(G5,target)
             public TrackedFuture<String, Void> consumeBytes(ByteBuf packet) {
                 return sendPacket(packet).thenApply(
                     ignored -> null,
@@ -686,7 +696,12 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
-            // REBUILD-TRACE(G5,target): old sendPacket/writePacketAndUpdateFuture.
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.consumeBytes ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.sendPacket
+            // NettyPacketToHttpConsumer.writePacketAndUpdateFuture ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.sendPacket
+            // REBUILD-TRACE-END(G5,target)
             public TrackedFuture<String, PacketSendOutcome> sendPacket(ByteBuf packet) {
                 requireOwnerThread();
                 var result = new CompletableFuture<PacketSendOutcome>();
@@ -743,7 +758,6 @@ public final class NettyPacketToHttpConsumer
                 return new TextTrackedFuture<>(result, "write one target packet");
             }
 
-            // REBUILD-TRACE(G5,target): old classifyPacketTransportFailure plus channel teardown.
             private void settleTransportFailure(
                 CompletableFuture<PacketSendOutcome> result,
                 Throwable failure,
@@ -789,7 +803,10 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
-            // REBUILD-TRACE(G5,target): old finalizeRequest response-watcher installation.
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.finalizeRequest ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finalizeRequest
+            // REBUILD-TRACE-END(G5,target)
             public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
                 requireOwnerThread();
                 if (finalizationStarted) {
@@ -849,7 +866,12 @@ public final class NettyPacketToHttpConsumer
                 return new TextTrackedFuture<>(response, "finalize target response");
             }
 
-            // REBUILD-TRACE(G5,target): old finalizeRequest completion + deactivateChannel choice.
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.finalizeRequest ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finishResponse
+            // NettyPacketToHttpConsumer.deactivateChannel ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finishResponse
+            // REBUILD-TRACE-END(G5,target)
             private void finishResponse(
                 AggregatedRawResponse value,
                 boolean reusable
@@ -886,7 +908,10 @@ public final class NettyPacketToHttpConsumer
                 );
             }
 
-            // REBUILD-TRACE(G5,target): old deactivateChannel keep-alive reset.
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.deactivateChannel ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.resetForReuse
+            // REBUILD-TRACE-END(G5,target)
             private CompletionStage<Void> resetForReuse() {
                 requireOwnerThread();
                 if (cleaned) {
@@ -919,7 +944,6 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
-            // REBUILD-TRACE(G5,target): old abort's request-local state closure.
             public void abort(CancellationException cause) {
                 requireOwnerThread();
                 if (packetFailure == null) {
@@ -928,7 +952,10 @@ public final class NettyPacketToHttpConsumer
                 closeRequestPhase();
             }
 
-            // REBUILD-TRACE(G5,target): old setCurrentMessageContext/getCurrentRequestSpan.
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.setCurrentMessageContext ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.transitionTo
+            // REBUILD-TRACE-END(G5,target)
             private void transitionTo(RequestPhase next) {
                 requireOwnerThread();
                 if (requestPhase == next) {
@@ -947,7 +974,12 @@ public final class NettyPacketToHttpConsumer
                 requestPhase = next;
             }
 
-            // REBUILD-TRACE(G5,target): old closeSpans.
+            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+            // NettyPacketToHttpConsumer.deactivateChannel ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.closeRequestPhase
+            // NettyPacketToHttpConsumer.getCurrentRequestSpan ->
+            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.closeRequestPhase
+            // REBUILD-TRACE-END(G5,target)
             private void closeRequestPhase() {
                 if (requestPhaseContext != null) {
                     requestPhaseContext.close();
@@ -1067,6 +1099,9 @@ public final class NettyPacketToHttpConsumer
             this.firstPacketStart = clock.instant();
         }
 
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.start
+        // REBUILD-TRACE-END(G5,target)
         private void start() {
             if (packets.isEmpty()) {
                 throw new IllegalStateException("target attempt has no request packets");
@@ -1085,7 +1120,6 @@ public final class NettyPacketToHttpConsumer
             sendPacket(0);
         }
 
-        // REBUILD-TRACE(G5,target): old firstTargetWriteSubmitted callback, extended to final write.
         private void targetWriteAccepted(int oneBasedPacketOrdinal) {
             requireOwnerThread();
             if (finished) {
@@ -1108,7 +1142,9 @@ public final class NettyPacketToHttpConsumer
             }
         }
 
-        // REBUILD-TRACE(G5,target): old consumeBytes plus captured pacing split.
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.sendPacket
+        // REBUILD-TRACE-END(G5,target)
         private void sendPacket(int index) {
             requireOwnerThread();
             if (finished || aborting) {
@@ -1134,7 +1170,9 @@ public final class NettyPacketToHttpConsumer
             );
         }
 
-        // REBUILD-TRACE(G5,target): old activeChannelFuture packet-result chain.
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.settlePacket
+        // REBUILD-TRACE-END(G5,target)
         private void settlePacket(
             int index,
             TargetPacketConsumer.PacketSendOutcome packetOutcome,
@@ -1179,7 +1217,9 @@ public final class NettyPacketToHttpConsumer
             });
         }
 
-        // REBUILD-TRACE(G5,target): old scheduling moved out of RequestSenderOrchestrator.
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.schedulePacket
+        // REBUILD-TRACE-END(G5,target)
         private void schedulePacket(int index) {
             var targetTime = firstPacketStart.plus(
                 input.preparedRequest().packetInterval().multipliedBy(index)
@@ -1200,7 +1240,11 @@ public final class NettyPacketToHttpConsumer
             }
         }
 
-        // REBUILD-TRACE(G5,target): old finalizeRequest call and typed packet-failure preservation.
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.finalizeResponse
+        // NettyPacketToHttpConsumer.finalizeRequest ->
+        //     NettyPacketToHttpConsumer.ActiveAttempt.finalizeResponse
+        // REBUILD-TRACE-END(G5,target)
         private void finalizeResponse(NoTargetResponseDiagnostic packetFailure) {
             final org.opensearch.migrations.utils.TrackedFuture<String, AggregatedRawResponse>
                 finalized;
@@ -1229,7 +1273,10 @@ public final class NettyPacketToHttpConsumer
             );
         }
 
-        // REBUILD-TRACE(G5,target): old response/error interpretation.
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // RequestTransformerAndSender.getRetryCheckVisitor ->
+        //     NettyPacketToHttpConsumer.ActiveAttempt.classify
+        // REBUILD-TRACE-END(G5,target)
         private TargetAttemptOutcome<AggregatedRawResponse> classify(
             AggregatedRawResponse response
         ) {
@@ -1268,7 +1315,6 @@ public final class NettyPacketToHttpConsumer
             );
         }
 
-        // REBUILD-TRACE(G5,target): old successful request finalization and attempt-payload release.
         private void finish(TargetAttemptOutcome<AggregatedRawResponse> result) {
             if (finished) {
                 return;
@@ -1283,7 +1329,6 @@ public final class NettyPacketToHttpConsumer
             }
         }
 
-        // REBUILD-TRACE(G5,target): old exceptional future completion and payload cleanup.
         private void fail(Throwable failure) {
             if (finished) {
                 return;
@@ -1316,7 +1361,6 @@ public final class NettyPacketToHttpConsumer
         }
 
         @Override
-        // REBUILD-TRACE(G5,target): old abort + channel close, now awaited before permit release.
         public CompletionStage<Void> abort(CancellationException cause) {
             requireOwnerThread();
             if (abortCompletion.isDone()) {
@@ -1395,18 +1439,6 @@ public final class NettyPacketToHttpConsumer
         }
     }
 }
-
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// The inert predecessor below is the source side of the target map above. Its constructor,
-// activateLiveChannel, createClientConnection*, ClientConnectionAttempt,
-// createClientConnection's eventLoop.isShuttingDown guard,
-// initializeConnectionHandlers, channelIsInUse, initializeRequestHandlers, consumeBytes,
-// sendPacket, writePacketAndUpdateFuture, classifyPacketTransportFailure, finalizeRequest,
-// deactivateChannel, abort, setCurrentMessageContext, getCurrentRequestSpan, getParentContext,
-// closeSpans, OutboundRequestMethod, and RequestMethodAwareHttpResponseDecoder are each paired
-// with the exact live target named in REBUILD-TRACE(G5,target). InterimHttpResponseHandler remains
-// intentionally live with its POST1 removal/preservation TODO.
-// REBUILD-TRACE-END(G5,source)
 
 // REBUILD-LIMBO(G5) -- the carried predecessor members below remain inert. Javadoc is left outside
 // the marked regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
@@ -1571,12 +1603,28 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
             socketContext = channelKeyContext.createSocketContext();
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.ConnectionClosedListenerHandler.channelInactive ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.ConnectionClosedListenerHandler.channelInactive
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         @Override
         public void channelInactive(ChannelHandlerContext ctx) throws Exception {
             socketContext.close();
             super.channelInactive(ctx);
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.ConnectionClosedListenerHandler.exceptionCaught ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.ConnectionClosedListenerHandler.exceptionCaught
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
             socketContext.addTraceException(cause, true);
@@ -1589,6 +1637,14 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.<init> ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.<init>
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     public NettyPacketToHttpConsumer(
         ConnectionReplaySession replaySession,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
@@ -1608,6 +1664,16 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.activateLiveChannel ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.acquireChannel
+// NettyPacketToHttpConsumer.activateLiveChannel ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private TrackedFuture<String, Void> activateLiveChannel() {
         if (cancellationCause != null) {
             return TextTrackedFuture.failedFuture(
@@ -1658,11 +1724,27 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
             );
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.setCurrentMessageContext ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.transitionTo
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> & IScopedInstrumentationAttributes>
     void setCurrentMessageContext(T requestSendingContext) {
         currentRequestContextUnion = requestSendingContext;
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.getCurrentRequestSpan ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.closeRequestPhase
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private IScopedInstrumentationAttributes getCurrentRequestSpan() {
         return (IScopedInstrumentationAttributes) currentRequestContextUnion;
     }
@@ -1671,6 +1753,14 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         return currentRequestContextUnion.getLogicalEnclosingScope();
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.createClientConnectionFactory ->
+//     NettyPacketToHttpConsumer.create
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     public static ConnectionReplaySession.ChannelFutureFactory
     createClientConnectionFactory(SslContext sslContext, URI uri) {
         return (eventLoop, ctx, cancellationSignal) ->
@@ -1686,6 +1776,21 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
 
     public static class ChannelNotActiveException extends IOException { }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.createClientConnection(4-argument) ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
+// NettyPacketToHttpConsumer.createClientConnection(4-argument) ->
+//     RequestReplayOwner.scheduleRetry
+// NettyPacketToHttpConsumer.createClientConnection(5-argument) ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
+// NettyPacketToHttpConsumer.createClientConnection(5-argument) ->
+//     RequestReplayOwner.scheduleRetry
+// The two baseline overloads were consolidated into the retained six-argument predecessor.
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     public static TrackedFuture<String, ChannelFuture> createClientConnection(
         EventLoop eventLoop,
         SslContext sslContext,
@@ -1889,6 +1994,16 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
 // REBUILD-LIMBO-ESCAPED-LINE(G5):          */
 // REBUILD-LIMBO-START(G5)
 /*
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.ClientConnectionAttempt.initializeConnectionHandlers ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
+// NettyPacketToHttpConsumer.ClientConnectionAttempt.initializeConnectionHandlers ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.initializeTls
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         private TrackedFuture<String, ChannelFuture> initializeConnectionHandlers(
             ChannelFuture outboundChannelFuture
         ) {
@@ -2007,6 +2122,14 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.channelIsInUse ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.channelIsInUse
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private static boolean channelIsInUse(Channel c) {
         var pipeline = c.pipeline();
         var lastHandler = pipeline.last();
@@ -2019,6 +2142,14 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.initializeRequestHandlers ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.initializeRequestHandlers
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private void initializeRequestHandlers() {
         assert channel.isActive();
         if (channelIsInUse(channel)) {
@@ -2071,10 +2202,30 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         channel.config().setAutoRead(true);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.addLoggingHandlerLast ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.addLoggingHandlerLast
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private static void addLoggingHandlerLast(ChannelPipeline pipeline, String name) {
         PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel -> pipeline.addLast(new LoggingHandler("n" + name, logLevel)));
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.deactivateChannel ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finishResponse
+// NettyPacketToHttpConsumer.deactivateChannel ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.resetForReuse
+// NettyPacketToHttpConsumer.deactivateChannel ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.closeRequestPhase
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private void deactivateChannel() {
         try {
             var pipeline = channel.pipeline();
@@ -2115,6 +2266,16 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.consumeBytes ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.consumeBytes
+// NettyPacketToHttpConsumer.consumeBytes ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.sendPacket
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     @Override
     public TrackedFuture<String, Void> consumeBytes(ByteBuf packetData) {
         return sendPacket(packetData).thenApply(
@@ -2183,6 +2344,14 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.writePacketAndUpdateFuture ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.sendPacket
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private TrackedFuture<String, PacketSendOutcome> writePacketAndUpdateFuture(ByteBuf packetData) {
         final ChannelFuture writeFuture;
         try {
@@ -2235,6 +2404,18 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// NettyPacketToHttpConsumer.finalizeRequest ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finalizeRequest
+// NettyPacketToHttpConsumer.finalizeRequest ->
+//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finishResponse
+// NettyPacketToHttpConsumer.finalizeRequest ->
+//     NettyPacketToHttpConsumer.ActiveAttempt.finalizeResponse
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     @Override
     public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v, t) -> {

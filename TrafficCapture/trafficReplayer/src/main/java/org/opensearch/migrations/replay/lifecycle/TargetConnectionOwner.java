@@ -42,35 +42,6 @@ import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// CapturedTrafficToHttpTransactionAccumulator connection map/rotation ->
-//     ReplayIntakeOwner connection routing + this owner's process-local lifetime
-// RequestSenderOrchestrator.scheduleWork/scheduleRequest/scheduleClose ->
-//     submit/applyRequestAdmission/applyCapturedClose plus admission/execution queues
-// RequestSenderOrchestrator bindNettySchedule* -> scheduleAdmissionHead/scheduleExecutionHead
-// old cached ConnectionReplaySession turn ownership -> activeTurn + requestRegistry
-// old first-write callback -> firstTargetWriteSubmitted; new final boundary ->
-//     finalTargetWriteSubmitted
-// old request callback removal -> connectionTurnFinished/requestProcessingFinished with registry
-// old source response dispatch -> routeRequest + RequestReplayOwner typed source inputs
-// old connection close/expiration/cancellation callbacks ->
-//     closeTargetChannel/expireConnection/gracefulCancel/forceCancel/tryFinishOwner
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// submit/applyRequestAdmission/applyCapturedClose ->
-//     RequestSenderOrchestrator scheduleWork/scheduleRequest/scheduleClose.
-// evaluateExecutionHead/acquirePermit/applyPermitResult ->
-//     scheduleSendRequestOnConnectionReplaySession and cached ConnectionReplaySession turn ownership.
-// firstTargetWriteSubmitted/finalTargetWriteSubmitted ->
-//     predecessor first-write callback and the designed final-write boundary.
-// connectionTurnFinished/requestProcessingFinished/requestCleanupFinished ->
-//     predecessor request callback removal and cleanup, split into typed milestones.
-// routeRequest and typed source-response inputs -> predecessor source-response dispatch.
-// closeTargetChannel/expireConnection/gracefulCancel/forceCancel/tryFinishOwner ->
-//     predecessor connection close, expiration, cancellation, and final removal callbacks.
-// requestRegistry/activeTurn -> predecessor cached ConnectionReplaySession and callback registry.
-// REBUILD-TRACE-END(G5,target)
-
 /**
  * Event-loop-confined owner of one process-local target connection and its request registry.
  */
@@ -447,6 +418,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         );
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleRequest ->
+    //     TargetConnectionOwner.submit(AdmitReconstitutedRequest)
+    // REBUILD-TRACE-END(G5,target)
     public CompletionStage<RequestAdmissionResult> submit(
         @NonNull AdmitReconstitutedRequest<S, F> admission
     ) {
@@ -484,6 +459,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         return completion.minimalCompletionStage();
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleClose ->
+    //     TargetConnectionOwner.submit(AdmitCapturedClose)
+    // REBUILD-TRACE-END(G5,target)
     public CompletionStage<InputApplied> submit(@NonNull AdmitCapturedClose<S, F> input) {
         return submitNonAdmissionInput(input);
     }
@@ -524,6 +503,9 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         return submitInput(input, () -> applyNonAdmissionInput(input));
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.submitUnorderedWorkToEventLoop -> TargetConnectionOwner.submitInput
+    // REBUILD-TRACE-END(G5,target)
     private <V> CompletionStage<V> submitInput(
         ConnectionInput<S, F> input,
         Supplier<V> transition
@@ -623,6 +605,9 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         };
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleRequest -> TargetConnectionOwner.applyRequestAdmission
+    // REBUILD-TRACE-END(G5,target)
     private RequestAdmissionResult applyRequestAdmission(
         AdmitReconstitutedRequest<S, F> admission
     ) {
@@ -691,6 +676,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         return new RequestAdmissionAccepted();
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleClose -> TargetConnectionOwner.applyCapturedClose
+    // RequestSenderOrchestrator.scheduleCloseOnConnectionReplaySession ->
+    //     TargetConnectionOwner.applyCapturedClose
+    // REBUILD-TRACE-END(G5,target)
     private void applyCapturedClose(AdmitCapturedClose<S, F> close) {
         validateIdentity(close);
         if (sourceLifetime != SourceLifetime.OPEN) {
@@ -726,6 +716,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleWork -> TargetConnectionOwner.scheduleAdmissionHead
     // RequestSenderOrchestrator.scheduleOnConnectionReplaySession -> TargetConnectionOwner.scheduleAdmissionHead
     //     [preparation-time scheduling].
     // REBUILD-TRACE-END(G5,target)
@@ -827,6 +818,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleSendRequestOnConnectionReplaySession ->
+    //     TargetConnectionOwner.evaluateExecutionHead
+    // REBUILD-TRACE-END(G5,target)
     private void evaluateExecutionHead() {
         requireOwnerThread();
         executionTimer = null;
@@ -877,6 +872,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             || request.readiness != PreparationReadiness.FILTERED;
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleSendRequestOnConnectionReplaySession ->
+    //     TargetConnectionOwner.acquirePermit
+    // REBUILD-TRACE-END(G5,target)
     private void acquirePermit(
         RequestEntry<S, P, R, F, T> request,
         CompletableFuture<Void> retryDelivery
@@ -936,6 +935,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleSendRequestOnConnectionReplaySession ->
+    //     TargetConnectionOwner.applyPermitResult
+    // REBUILD-TRACE-END(G5,target)
     private void applyPermitResult(
         PendingPermit<S, P, R, F, T> expected,
         TargetAttemptPermitProvider.AcquisitionResult result,
@@ -992,6 +995,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleCloseOnConnectionReplaySession ->
+    //     TargetConnectionOwner.closeTargetChannel
+    // REBUILD-TRACE-END(G5,target)
     private void closeTargetChannel() {
         if (targetChannelClosed || targetChannelClosePending) {
             return;
@@ -1053,6 +1060,9 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         maybeCloseAfterSourceEnd();
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.gracefulCancel
+    // REBUILD-TRACE-END(G5,target)
     private void gracefulCancel(
         CancellationDeadline deadline,
         CancellationException cause
@@ -1074,6 +1084,9 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         maybeCloseAfterSourceEnd();
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.forceCancel
+    // REBUILD-TRACE-END(G5,target)
     private void forceCancel(CancellationException cause) {
         sourceLifetime = SourceLifetime.CANCELLING;
         cancelAdmissionTimer();
@@ -1546,6 +1559,9 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         ));
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.getDelayFromNowMs -> TargetConnectionOwner.nonNegativeDelay
+    // REBUILD-TRACE-END(G5,target)
     private static Duration nonNegativeDelay(Instant now, Instant target) {
         return target.isAfter(now) ? Duration.between(now, target) : Duration.ZERO;
     }

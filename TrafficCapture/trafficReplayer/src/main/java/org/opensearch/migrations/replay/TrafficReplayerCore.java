@@ -818,6 +818,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             shutdown(fatalError);
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
+        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+        // TrafficReplayerCore.TrafficReplayerAccumulationCallbacks.packageAndWriteTuple ->
+        //     TrafficReplayerTopLevel.deployedTupleFactory
+        // REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
         private CompletableFuture<Void> packageAndWriteTuple(
             IReplayContexts.ITupleHandlingContext tupleHandlingContext,
             ThreadLocalTupleWriter tupleWriter,
