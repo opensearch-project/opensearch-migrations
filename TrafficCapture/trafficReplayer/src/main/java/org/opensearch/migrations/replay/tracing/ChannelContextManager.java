@@ -1,15 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
-// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: ITrafficStreamKey . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
 
-// REBUILD-LIMBO-START(G2)
-/*
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -42,15 +33,11 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
             return context;
         }
 
-*/
-// REBUILD-LIMBO-END(G2)
         /**
          * Returns true if this was the final release
          *
          * @return
          */
-// REBUILD-LIMBO-START(G2)
-/*
         boolean release() {
             refCount--;
             assert refCount >= 0;
@@ -98,5 +85,3 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
     }
 }
 
-*/
-// REBUILD-LIMBO-END(G2)
