@@ -1136,7 +1136,7 @@ Kafka assigns partitions to replayer group members. Records themselves are not a
 polls records from its currently assigned partitions.
 
 For one partition, a **partition generation** is one uninterrupted period during which the replayer
-owns that partition. The replayer has one cancellation grace interval, set by a command-line option,
+owns that partition. The replayer has one revocation grace interval, set by a command-line option,
 with a **one-second default**. It may be raised, but must remain safely below the Kafka poll interval:
 that interval is also the rebalance timeout, and exceeding it fences the member, which turns a
 graceful revocation into a lost one and discards all staged progress. The default is the smallest
@@ -1150,7 +1150,9 @@ including one partway through sending, which cannot finish without further targe
 graceful cancellation will not issue. A request whose target path is complete—because its request
 was fully sent or intentionally filtered—and the tuple work needed to finish it get the grace
 interval. Completions during that wait may still commit only when the target path completed and the
-tuple is durable. At the deadline it sends force cancellation, and
+tuple is durable. Tuple output flushes eagerly during grace and each newly eligible contiguous
+commit position is attempted without intentional batching delay. At the deadline it sends force
+cancellation, and
 `onPartitionsRevoked` returns once replay intake accepts that notification, without waiting for
 every forced cleanup to finish. Cancelled work emits no completion or commit request. Its
 uncommitted records remain eligible for delivery to a future partition generation; the current
@@ -1232,11 +1234,19 @@ process kill.
 
 ### 12.2 Normal replayer shutdown
 
-Normal shutdown applies the revocation pattern process-wide: stop accepting new Kafka records,
-run the same graceful-then-forced cancellation with the configured grace interval, complete Kafka
-commits that become valid while partitions are still owned, leave unfinished whole records
-uncommitted for a future owner, and close Kafka, tuple output, transformation resources, and event
-loops after process-local cleanup. Cancellation never causes a Kafka commit.
+Normal shutdown is an unbounded, host-terminated grace state rather than timed revocation
+cancellation. It stops accepting new Kafka records, cancels incomplete source assembly that cannot
+finish without more input, and drains every complete request already admitted, including queued,
+unsent, partly written, retrying, and tuple-writing work. Tuple output flushes eagerly and each newly
+eligible contiguous commit position is attempted without intentional batching delay while Kafka
+ownership remains valid.
+
+The replayer exits after admitted work drains, tuples are durable, eligible commits resolve, and
+process-local cleanup completes. It sends no force cancellation and has no shutdown-grace timer or
+command-line option. If work cannot drain, the process remains in shutdown grace until the host
+environment terminates it; uncommitted records remain eligible for a future owner. Cancellation
+never causes a Kafka commit. Fatal failure and protocol violation keep their independent bounded
+termination behavior.
 [Replayer Processing and Commit Architecture §10.1](replayerProcessingAndCommitArchitecture.md#101-normal-shutdown)
 defines the ordered steps.
 
@@ -1370,7 +1380,9 @@ poison pill.
 ### 14.6 Reassignment cannot commit cancelled work
 
 Partition revocation stops new old-assignment intake before graceful cancellation. Work completed
-during the grace interval may commit; cancelled work does not authorize commit. At the deadline,
+during the grace interval may commit; tuple output flushes eagerly and eligible contiguous commit
+positions are attempted without intentional batching delay. Cancelled work does not authorize
+commit. At the deadline,
 the callback waits only until replay intake accepts force cancellation; cleanup may finish later.
 The replayer removes process-local state only after old operations reach their required final
 states, and any uncommitted records remain available to a later partition assignment.
@@ -1494,9 +1506,12 @@ The full acceptance suite must also prove:
 - a crash after target execution or tuple output but before Kafka commit may produce accepted
   at-least-once duplicates;
 - cancellation never creates a Kafka commit;
-- revocation uses a five-second default graceful interval, sends force cancellation at the
-  deadline, and returns after replay intake accepts that notification rather than after every
-  cleanup finishes;
+- revocation uses a one-second default graceful interval, flushes tuple output eagerly, sends force
+  cancellation at the deadline, and returns after replay intake accepts that notification rather
+  than after every cleanup finishes;
+- orderly shutdown drains already-admitted work without a deadline or force cancellation, flushes
+  tuple output eagerly, commits eligible contiguous prefixes promptly, and otherwise waits for host
+  termination;
 - retained records prevent committing later offsets past them;
 - a semantic violation in a later record does not prevent an earlier complete request from reaching
   the target;

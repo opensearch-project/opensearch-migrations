@@ -207,7 +207,8 @@ hard-coded item count: update the table only after consulting me if the authorit
 ## 7. Configuration
 
 **Add** (none of these exists in the starting tree; grep returns zero hits for each): `E` default
-30s, `S` clock-skew bound, `W` default 5s, `P` default 2, cancellation grace default 5s,
+30s, `S` clock-skew bound, `W` default 5s, `P` default 2, revocation cancellation grace default 1s
+through `--cancellation-grace-ms` / `--cancellationGraceMs` (there is no shutdown-grace option),
 `protocolViolationDrainLimit` fixed 60s, the ten-minute watchdog. Startup must reject `P < 1`, `T_threads < 1`,
 `W <= 0`, `E <= 0`, `S < 0`.
 

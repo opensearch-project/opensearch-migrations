@@ -696,10 +696,12 @@ release a Kafka record. Cancellation completion also contributes to generation c
 
 ### 17.1 Graceful cancellation
 
-The deadline is the process-local monotonic value supplied by the Kafka source owner. Connection
-and request owners compare it only with the same monotonic clock.
+`GracefulConnectionCancellation` carries the same `CancellationGrace` value that replay intake
+received for the partition generation.
 
-On `GracefulConnectionCancellation(deadline)`, the connection owner:
+For `CancellationGrace.Revocation(deadline)`, the deadline is the process-local monotonic value
+supplied by the Kafka source owner. Connection and request owners compare it only with the same
+monotonic clock. The connection owner:
 
 - rejects new admissions;
 - cancels every request whose target path is not complete: one that has neither reached
@@ -731,6 +733,21 @@ An admitted request cancelled before it begins sending returns cancellation clea
 
 A request whose target turn finishes normally or during graceful cancellation emits exactly one
 `ConnectionRequestFinished`.
+
+For `CancellationGrace.Shutdown.INSTANCE`, the connection owner:
+
+- rejects new admissions;
+- continues every already-admitted request, including queued, unsent, preparing, waiting-for-permit,
+  partly written, retrying, and tuple-writing work, through its ordinary terminal outcome;
+- allows the execution queue to begin another already-admitted request;
+- flushes its tuple sink when shutdown grace begins and after every tuple accepted during shutdown
+  grace; and
+- emits the ordinary `ConnectionRequestFinished`, `RequestProcessingFinished`, and
+  `ConnectionOwnerFinished` milestones as work drains.
+
+Shutdown grace creates no deadline timer and never causes `ForceConnectionCancellation`. A request
+that cannot finish remains owned until the host environment terminates the process. Fatal failure
+still bypasses orderly drain.
 
 ### 17.2 Force cancellation
 
@@ -839,8 +856,8 @@ Long-running activity reporting observes these registrations but cannot complete
 
 ### 19.5 Cancellation and resources
 
-- Graceful cancellation immediately cleans every unsent request.
-- Graceful cancellation immediately cleans a request that is **partway through** sending, rather than
+- Revocation grace immediately cleans every unsent request.
+- Revocation grace immediately cleans a request that is **partway through** sending, rather than
   waiting on it, and closes that request's channel rather than reusing it.
 - A request whose final bytes are on the wire may finish target and tuple work before the deadline.
 - A request that reaches the deadline with a response obtained but its tuple not yet durable is
@@ -852,6 +869,11 @@ Long-running activity reporting observes these registrations but cannot complete
 - No permit, timer, target buffer, transformed request, response, tuple, or registry entry leaks.
 - Every per-attempt signed buffer list is released exactly once.
 - Cancellation cleanup never emits Kafka-record completion.
+- Shutdown grace drains every already-admitted request, including queued, unsent, and partly written
+  work, without creating a deadline or force-cancellation result.
+- Tuple output flushes on either grace-mode entry and after every tuple accepted during grace.
+- A drained shutdown emits only ordinary completion milestones; a host-killed shutdown manufactures
+  no completion or cleanup result.
 
 ### 19.6 Failure
 
