@@ -691,11 +691,16 @@ Only `CloseObservation` terminates a captured connection in the capture protocol
 `ConnectionExceptionObservation` is diagnostic and does not reset or terminate source
 reconstruction.
 
-Source writes observed before the request end-of-message marker are treated as an informational
-response such as `100 Continue`. Replay intake ignores that write observation, or the complete
-write-segment sequence through its segment-end marker, and continues assembling the request. It
-does not discard the request, advance its captured request ordinal, create source-response state,
-or leave request assembly.
+`InterimResponseObservation` carries one complete source interim response.
+`InterimResponseSegmentObservation` values followed by `EndOfSegmentsIndication` carry the segmented
+form; the segment end finalizes the active interim response. Replay intake preserves the exact interim
+bytes and record associations in observation order. An interim received while a request is being
+assembled does not discard or complete that request, advance its captured request ordinal, change its
+request bytes, or leave request assembly. An interim received after request end-of-message and before
+the final response remains associated with that request and does not enter the final-response bytes.
+Ordinary `WriteObservation` and `WriteSegmentObservation` values are final-response observations and
+are never accepted as an interim-response compatibility encoding. Captures written before the typed
+protocol change have no interim-response decoder or fallback.
 
 `CaptureCapabilityProbe` is inert. It creates no writer, partition, connection, heartbeat,
 expiration, request, target, tuple, or record-completion state.
