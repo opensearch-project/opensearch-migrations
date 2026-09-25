@@ -9,7 +9,7 @@ workloadsNodePool:
   architectures: ["amd64", "arm64"]
   capacityTypes: ["on-demand"]
   instanceCategories: ["c", "m", "r"]
-  minInstanceGeneration: 4
+  minInstanceGeneration: 5
   instanceSizes: ["medium", "large", "xlarge", "2xlarge", "4xlarge"]
   limits:
     cpu: "64000m"
