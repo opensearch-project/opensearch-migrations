@@ -743,12 +743,13 @@ public class TrafficReplayer {
                 finalBlockingTrafficSource.logHeartbeat();
                 var accum = tr.getCurrentAccumulator();
                 if (accum != null) {
-                    accum.logHeartbeat();
+                    accum.heartbeatAndExpireStaleConnections();
                 }
                 var engine = tr.getCurrentReplayEngine();
                 if (engine != null) {
                     engine.logHeartbeat();
                 }
+                tr.liveTrafficStreamLimiter.logHeartbeat();
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
