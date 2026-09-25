@@ -1610,6 +1610,8 @@ class KafkaSourceOwnerTest {
     @Test
     void rejectedAndUnknownOperationsHaveDistinctRetirementAccounting() throws Exception {
         var rejectedPort = pumpedSource(List.of(PARTITION_0));
+        // Zero grace deliberately prevents a later accepted sync attempt from replacing the evidence supplied
+        // by this pre-acceptance rejection. The other leg below covers that accepted synchronous outcome.
         var rejectedOwner = ownerFor(rejectedPort, Duration.ZERO);
         var rejectedGeneration = assignAndGetGeneration(rejectedOwner, rejectedPort, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
@@ -1651,6 +1653,12 @@ class KafkaSourceOwnerTest {
             GRACE,
             clockNanos::get,
             deadline -> {
+                if (deadline.hasPassed(clockNanos.get())) {
+                    return false;
+                }
+                if (!unknownSourceInputs.isEmpty()) {
+                    return true;
+                }
                 clockNanos.updateAndGet(now -> Math.max(now, deadline.monotonicDeadlineNanos()));
                 return false;
             },
@@ -1664,15 +1672,20 @@ class KafkaSourceOwnerTest {
         while (unknownIntakeInputs.size() > 0) {
             unknownIntakeInputs.take();
         }
-        unknownSourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
-            new KafkaRecordId(unknownGeneration, 20)));
-        unknownPort.scriptCommitAsyncRejection(KafkaSourcePort.CommitOutcome.RETRIABLE);
-        unknownOwner.runOnce();
         unknownPort.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
-        unknownPort.scriptRebalanceDuringNextPoll(() ->
-            unknownOwner.onPartitionsRevoked(List.of(PARTITION_1)));
+        unknownPort.scriptRebalanceDuringNextPoll(() -> {
+            // Arriving after callback entry prevents the ordinary loop from submitting this position
+            // asynchronously first. The grace loop applies it and must issue the bounded synchronous commit.
+            unknownSourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(unknownGeneration, 20)));
+            unknownOwner.onPartitionsRevoked(List.of(PARTITION_1));
+        });
         unknownOwner.runOnce();
 
+        Assertions.assertTrue(
+            unknownPort.history().stream().anyMatch(call -> call.startsWith("commitSync")),
+            "the accepted retriable operation must be the bounded revocation commit"
+        );
         Assertions.assertEquals(
             0,
             unknownMetrics.abandoned(KafkaSourceOwner.AbandonmentCause.REJECTED)

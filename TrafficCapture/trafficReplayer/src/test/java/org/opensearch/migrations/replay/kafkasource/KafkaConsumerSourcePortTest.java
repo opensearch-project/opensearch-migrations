@@ -232,6 +232,23 @@ class KafkaConsumerSourcePortTest {
     }
 
     @Test
+    void aCallbackTimeoutOnAnAsynchronousSubmissionIsUnknownRatherThanFatal() {
+        var port = new KafkaConsumerSourcePort(
+            new ScriptedCommitConsumer(null, null, new TimeoutException("broker answer timed out")),
+            Duration.ofSeconds(1)
+        );
+        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+
+        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+
+        Assertions.assertEquals(
+            List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
+            resolutions
+        );
+        Assertions.assertTrue(submission.accepted());
+    }
+
+    @Test
     void anAcknowledgedCommitCarriesThePositionsItWasGiven() {
         var consumer = new ScriptedCommitConsumer(null, null, null);
         var port = new KafkaConsumerSourcePort(consumer, Duration.ofSeconds(1));
