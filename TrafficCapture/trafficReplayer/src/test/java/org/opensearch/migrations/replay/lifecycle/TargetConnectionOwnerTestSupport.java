@@ -61,6 +61,7 @@ final class TargetConnectionOwnerTestSupport {
         final List<RequestReplayOwner.RequestResult<String, TestPrepared, String, String>>
             tupleInputs = new ArrayList<>();
         final List<String> lifecycleEvents = new ArrayList<>();
+        final List<String> transitionHistory = new ArrayList<>();
         final Map<String, CompletableFuture<Void>> lifecycleAcceptances =
             new LinkedHashMap<>();
         final TargetAttemptPermitProvider permitProvider;
@@ -121,9 +122,14 @@ final class TargetConnectionOwnerTestSupport {
                     public void releaseSourceResponse(String sourceResponse) {}
                 },
                 permitProvider,
-                new RecordingLifecycleSink(lifecycleEvents, lifecycleAcceptances),
+                new RecordingLifecycleSink(
+                    lifecycleEvents,
+                    transitionHistory,
+                    lifecycleAcceptances
+                ),
                 fatalFailures::add,
-                OutstandingOperationRegistry.CountHook.NOOP
+                (type, typeCount, totalCount) ->
+                    transitionHistory.add("operations:" + totalCount)
             );
         }
 
@@ -380,6 +386,7 @@ final class TargetConnectionOwnerTestSupport {
 
     private record RecordingLifecycleSink(
         List<String> events,
+        List<String> transitionHistory,
         Map<String, CompletableFuture<Void>> acceptances
     ) implements TargetConnectionOwner.LifecycleSink {
 
@@ -409,8 +416,17 @@ final class TargetConnectionOwnerTestSupport {
             return record("owner-finished");
         }
 
+        @Override
+        public CompletionStage<Void> connectionCleanupFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId
+        ) {
+            return record("cleanup-finished");
+        }
+
         private CompletionStage<Void> record(String event) {
             events.add(event);
+            transitionHistory.add("lifecycle:" + event);
             return acceptances.computeIfAbsent(
                 event,
                 ignored -> CompletableFuture.completedFuture(null)

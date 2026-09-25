@@ -142,6 +142,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             PartitionGenerationId partitionGenerationId,
             ConnectionProcessingId connectionProcessingId
         );
+
+        CompletionStage<Void> connectionCleanupFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId
+        );
     }
 
     @FunctionalInterface
@@ -676,14 +681,15 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             impossible("permit acquisition submission", failure);
             return;
         }
-        pendingPermit = new PendingPermit<>(
+        var expected = new PendingPermit<>(
             request,
             acquisition,
             registration,
             retryDelivery
         );
+        pendingPermit = expected;
         acquisition.completion().whenComplete((result, failure) ->
-            postPermitResult(pendingPermit, result, unwrap(failure))
+            postPermitResult(expected, result, unwrap(failure))
         );
     }
 
@@ -891,17 +897,25 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             || pendingPermit != null
             || !requestRegistry.isEmpty()
             || admissionTimer != null
-            || executionTimer != null) {
+            || executionTimer != null
+            || operations.activeCount() != 0) {
             return;
         }
         ownerFinishedSubmitted = true;
         requiredLifecycleDelivery(
             null,
-            "connection-owner completion",
-            () -> lifecycleSink.connectionOwnerFinished(
-                partitionGenerationId,
-                connectionProcessingId
-            ),
+            sourceLifetime == SourceLifetime.CANCELLING
+                ? "connection cleanup completion"
+                : "connection-owner completion",
+            () -> sourceLifetime == SourceLifetime.CANCELLING
+                ? lifecycleSink.connectionCleanupFinished(
+                    partitionGenerationId,
+                    connectionProcessingId
+                )
+                : lifecycleSink.connectionOwnerFinished(
+                    partitionGenerationId,
+                    connectionProcessingId
+                ),
             () -> {}
         );
     }
@@ -1211,6 +1225,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                     }
                     afterAcceptance.run();
                     operations.complete(registration);
+                    tryFinishOwner();
                     completion.complete(null);
                 }
             )

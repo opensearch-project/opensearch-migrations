@@ -39,9 +39,10 @@ class TargetConnectionOwnerCancellationTest {
         Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
         Assertions.assertEquals(0, fixture.activePermits.get());
         Assertions.assertEquals(
-            java.util.List.of("owner-finished"),
+            java.util.List.of("cleanup-finished"),
             fixture.lifecycleEvents
         );
+        assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
@@ -84,10 +85,11 @@ class TargetConnectionOwnerCancellationTest {
         acquired.permit().close();
         Assertions.assertEquals(0, fixture.activePermits.get());
         Assertions.assertEquals(
-            java.util.List.of("owner-finished"),
+            java.util.List.of("cleanup-finished"),
             fixture.lifecycleEvents,
             "cancellation emits no normal request milestone"
         );
+        assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
@@ -147,6 +149,20 @@ class TargetConnectionOwnerCancellationTest {
             fixture.fatalFailures.stream().anyMatch(error ->
                 error.getMessage().contains("required event-loop submission")
             )
+        );
+    }
+
+    private static void assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(
+        TargetConnectionOwnerTestSupport.Fixture fixture
+    ) {
+        var cleanupIndex = fixture.transitionHistory.indexOf(
+            "lifecycle:cleanup-finished"
+        );
+        Assertions.assertTrue(cleanupIndex > 0);
+        Assertions.assertEquals(
+            "operations:1",
+            fixture.transitionHistory.get(cleanupIndex - 1),
+            "owner cleanup may be submitted only after every earlier operation registration is released"
         );
     }
 }
