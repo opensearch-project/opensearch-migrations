@@ -184,9 +184,16 @@ class TrafficReplayerTopLevelConstructionTest {
                     1_000,
                     5_000
                 ),
+                2,
+                1,
                 4,
                 1
             );
+            Assertions.assertEquals(
+                TrafficReplayerTopLevel.DEFAULT_RETRY_READY_REQUEST_SUPPLY_PER_TARGET_THREAD,
+                configuration.retryReadyRequestSupplyPerTargetThread()
+            );
+            Assertions.assertEquals(2, configuration.retryReadyRequestSupplyTarget(), "N = P * T_threads");
             var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
             var replayer = new TrafficReplayerTopLevel<>(
                 consumer,
@@ -206,11 +213,15 @@ class TrafficReplayerTopLevelConstructionTest {
                     .orElseThrow()
                     .generation();
                 intakeFence(replayer);
+                replayer.runSourceOnce();
 
-                replayer.sourceInputs().submit(
-                    new KafkaSourceInput.RequestNextPartitionBatch(
-                        new PartitionBatchRequestId(generation, 1)
-                    )
+                Assertions.assertEquals(
+                    new PartitionBatchRequestId(generation, 1),
+                    replayer.sourceOwner().partitionState(TOPIC_PARTITION)
+                        .orElseThrow()
+                        .outstandingRequest()
+                        .orElseThrow(),
+                    "assignment's ordinary demand pass must install one explicit request beside bootstrap"
                 );
                 consumer.schedulePollTask(() -> {
                     var value = requestResponseAndClose().toByteArray();

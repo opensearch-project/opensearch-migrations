@@ -166,7 +166,11 @@ class RecordAssociationAccumulatorTest {
     @Test
     void sourceResponseRecordRemainsAssociatedUntilRequestProcessingFinishes() {
         var first = stream(0, read(1, "GET / HTTP/1.1\r\n\r\n"), endOfMessage(2));
-        var response = stream(1, write(3, "HTTP/1.1 200 OK\r\n\r\n"));
+        var response = stream(
+            1,
+            write(3, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"),
+            close(4)
+        );
         var script = new RecordScript(TOPIC)
             .addTraffic(0, 0, Instant.ofEpochMilli(1_000), WRITER, first)
             .addTraffic(0, 1, Instant.ofEpochMilli(2_000), WRITER, response);
@@ -181,6 +185,21 @@ class RecordAssociationAccumulatorTest {
             ),
             "both request and response records remain owned until processing completion"
         );
+        Assertions.assertEquals(
+            1,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.RETRY_READY_REQUEST_SUPPLY
+            ),
+            "the complete source response makes the unfinished target turn retry-ready supply"
+        );
+        Assertions.assertEquals(
+            1,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.RETRY_READY_SUPPLY_ADDITIONS
+            )
+        );
         finishRequest(script, 0);
 
         Assertions.assertEquals(
@@ -190,6 +209,21 @@ class RecordAssociationAccumulatorTest {
             ),
             sourceCompletions(),
             "both records finish together, and only once the request's processing is complete"
+        );
+        Assertions.assertEquals(
+            0,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.RETRY_READY_REQUEST_SUPPLY
+            ),
+            "the finished target turn leaves supply exactly once"
+        );
+        Assertions.assertEquals(
+            1,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.RETRY_READY_SUPPLY_REMOVALS
+            )
         );
     }
 
@@ -481,9 +515,14 @@ class RecordAssociationAccumulatorTest {
     }
 
     private void finishRequest(RecordScript script, long capturedRequestOrdinal) {
-        owner.applyOnCallingThread(new ReplayIntakeInput.RequestProcessingFinished(
+        var requestId = new ReplayRequestId(lifetimeOf(script), capturedRequestOrdinal);
+        owner.applyOnCallingThread(new RequestLifecycleInput.ConnectionRequestFinished(
             script.generation(0),
-            new ReplayRequestId(lifetimeOf(script), capturedRequestOrdinal)
+            requestId
+        ));
+        owner.applyOnCallingThread(new RequestLifecycleInput.RequestProcessingFinished(
+            script.generation(0),
+            requestId
         ));
     }
 

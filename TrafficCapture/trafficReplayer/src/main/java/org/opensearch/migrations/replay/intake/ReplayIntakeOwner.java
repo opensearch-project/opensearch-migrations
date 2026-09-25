@@ -78,6 +78,10 @@ public final class ReplayIntakeOwner {
         default void sourceConnectionsExpired(int count) {}
         default void targetConnectionExpirationSent() {}
         default void brokerTimeViolation() {}
+        default void batchRequested() {}
+        default void batchApplied(PartitionIntakeState.BatchEntitlement entitlement) {}
+        default void retryReadySupplyChanged(int delta) {}
+        default void demandEvaluated(boolean open) {}
         default void capturedCloseAccepted() {}
         default void captureProtocolViolation() {}
         default void recordBatchRejectedAfterProtocolViolation() {}
@@ -102,6 +106,7 @@ public final class ReplayIntakeOwner {
     private final Metrics metrics;
     private final RecordObserver recordObserver;
     private final PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration;
+    private final int requestSupplyTarget;
     private final Thread ownerThread;
     private final OwnerThreadGuard ownerThreadGuard;
     private final CompletableFuture<Void> termination = new CompletableFuture<>();
@@ -119,6 +124,7 @@ public final class ReplayIntakeOwner {
     ) {
         this(inputQueue, sourceInputs, assemblySink, fatalHandler, Metrics.NOOP, RecordObserver.NOOP,
             new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
+            2,
             runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
@@ -131,6 +137,7 @@ public final class ReplayIntakeOwner {
     ) {
         this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, RecordObserver.NOOP,
             new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
+            2,
             runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
@@ -144,6 +151,7 @@ public final class ReplayIntakeOwner {
     ) {
         this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, recordObserver,
             new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
+            2,
             runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
@@ -157,7 +165,22 @@ public final class ReplayIntakeOwner {
         @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration
     ) {
         this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, recordObserver,
-            brokerTimeConfiguration, runnable -> new Thread(runnable, "replay-intake-owner"));
+            brokerTimeConfiguration, 2, runnable -> new Thread(runnable, "replay-intake-owner"));
+    }
+
+    public ReplayIntakeOwner(
+        @NonNull ReplayIntakeInputQueue inputQueue,
+        @NonNull KafkaSourceInputQueue sourceInputs,
+        @NonNull SourceAssemblySink assemblySink,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull Metrics metrics,
+        @NonNull RecordObserver recordObserver,
+        @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        int requestSupplyTarget
+    ) {
+        this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, recordObserver,
+            brokerTimeConfiguration, requestSupplyTarget,
+            runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
     ReplayIntakeOwner(
@@ -168,13 +191,18 @@ public final class ReplayIntakeOwner {
         @NonNull Metrics metrics,
         @NonNull RecordObserver recordObserver,
         @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        int requestSupplyTarget,
         @NonNull ThreadFactory threadFactory
     ) {
+        if (requestSupplyTarget <= 0) {
+            throw new IllegalArgumentException("requestSupplyTarget must be positive");
+        }
         this.inputQueue = inputQueue;
         this.sourceInputs = sourceInputs;
         this.metrics = metrics;
         this.recordObserver = recordObserver;
         this.brokerTimeConfiguration = brokerTimeConfiguration;
+        this.requestSupplyTarget = requestSupplyTarget;
         this.assemblySink = new ObservedSourceAssemblySink(assemblySink);
         this.fatalHandler = fatalHandler;
         this.ownerThread = Objects.requireNonNull(threadFactory.newThread(this::runLoop));
@@ -277,7 +305,8 @@ public final class ReplayIntakeOwner {
         switch (input) {
             case ReplayIntakeInput.PartitionGenerationAssigned assigned -> applyGenerationAssigned(assigned);
             case ReplayIntakeInput.PartitionRecordBatch batch -> applyRecordBatch(batch);
-            case ReplayIntakeInput.RequestProcessingFinished finished -> applyRequestProcessingFinished(finished);
+            case RequestLifecycleInput.RequestProcessingFinished finished ->
+                applyRequestProcessingFinished(finished);
             // REBUILD-LIMBO-NOTE(G8): §15.1 graceful cancellation, §15.2 force cancellation and §15.3's
             // cleanup tracker, which is what sends GenerationCleanupFinished back to the source.
             case ReplayIntakeInput.GracefulGenerationCancellation ignored -> unimplemented(input, "G8");
@@ -285,12 +314,13 @@ public final class ReplayIntakeOwner {
             case ReplayIntakeInput.ConnectionCleanupFinished ignored -> unimplemented(input, "G8");
             case ReplayIntakeInput.FinalizedArchivePartitionEnd finalized ->
                 applyFinalizedArchivePartitionEnd(finalized);
-            case ReplayIntakeInput.ConnectionRequestFinished finished ->
+            case RequestLifecycleInput.ConnectionRequestFinished finished ->
                 requireGeneration(finished.generation()).connectionRequestFinished(finished.requestId());
             case ReplayIntakeInput.ConnectionOwnerFinished finished ->
                 applyConnectionOwnerFinished(finished);
         }
         metrics.inputApplied(inputKind(input));
+        recomputeDemandAfterInput();
     }
 
     private static InputKind inputKind(ReplayIntakeInput input) {
@@ -304,9 +334,9 @@ public final class ReplayIntakeOwner {
                 InputKind.FORCE_GENERATION_CANCELLATION;
             case ReplayIntakeInput.FinalizedArchivePartitionEnd ignored ->
                 InputKind.FINALIZED_ARCHIVE_PARTITION_END;
-            case ReplayIntakeInput.ConnectionRequestFinished ignored ->
+            case RequestLifecycleInput.ConnectionRequestFinished ignored ->
                 InputKind.CONNECTION_REQUEST_FINISHED;
-            case ReplayIntakeInput.RequestProcessingFinished ignored ->
+            case RequestLifecycleInput.RequestProcessingFinished ignored ->
                 InputKind.REQUEST_PROCESSING_FINISHED;
             case ReplayIntakeInput.ConnectionOwnerFinished ignored ->
                 InputKind.CONNECTION_OWNER_FINISHED;
@@ -326,9 +356,6 @@ public final class ReplayIntakeOwner {
 
     /**
      * Creates the corresponding {@link PartitionIntakeState}.
-     *
-     * <p>REBUILD-LIMBO-NOTE(G7): {@code §4.1}'s ordinary end-of-input demand pass requires the supply count
-     * and explicit batch-request state introduced by G7.
      */
     private void applyGenerationAssigned(ReplayIntakeInput.PartitionGenerationAssigned assigned) {
         var generation = assigned.generation();
@@ -345,7 +372,8 @@ public final class ReplayIntakeOwner {
             this::submitRecordProcessingFinished,
             metrics::activeRecordTrackersChanged,
             metrics::recordTrackerRetired,
-            brokerTimeConfiguration
+            brokerTimeConfiguration,
+            metrics::retryReadySupplyChanged
         );
     }
 
@@ -354,21 +382,26 @@ public final class ReplayIntakeOwner {
      * submit the next request."
      */
     private void applyRecordBatch(ReplayIntakeInput.PartitionRecordBatch batch) {
+        var state = requireGeneration(batch.requestId().generation());
+        var entitlement = state.beginApplyingBatch(batch.requestId());
         // §16: the first capture-protocol violation kills the whole replay. Completion and cleanup inputs may
         // still drain already-admitted work, but no queued batch from any partition may admit another record.
         if (captureProtocolViolationRecord != null) {
             metrics.recordBatchRejectedAfterProtocolViolation();
+            state.finishApplyingBatch(batch.requestId(), entitlement);
+            metrics.batchApplied(entitlement);
             return;
         }
-        var state = requireGeneration(batch.requestId().generation());
-        for (var record : batch.records()) {
-            if (!applyRecord(state, record)) {
-                break;
+        try {
+            for (var record : batch.records()) {
+                if (!applyRecord(state, record)) {
+                    break;
+                }
             }
+        } finally {
+            state.finishApplyingBatch(batch.requestId(), entitlement);
+            metrics.batchApplied(entitlement);
         }
-        // REBUILD-LIMBO-NOTE(G7): closing the batch request, recomputing demand and submitting the next
-        // RequestNextPartitionBatch are §13's, and the partitionBatchState that makes "cannot request the next
-        // batch before applying this one" checkable lives there too.
     }
 
     /**
@@ -377,7 +410,9 @@ public final class ReplayIntakeOwner {
      * <p>{@code §8.3} is what makes that removal narrow — only this request's association leaves each record,
      * so a record shared with another request stays unfinished.
      */
-    private void applyRequestProcessingFinished(ReplayIntakeInput.RequestProcessingFinished finished) {
+    private void applyRequestProcessingFinished(
+        RequestLifecycleInput.RequestProcessingFinished finished
+    ) {
         // REBUILD-LIMBO-NOTE(G8): cancellation can make a late completion stale after generation cleanup.
         // G8 adds the cancellation/cleanup state that decides whether to consume or ignore that late input.
         var state = requireGeneration(finished.generation());
@@ -398,6 +433,23 @@ public final class ReplayIntakeOwner {
         requireGeneration(finished.generation())
             .removeConnectionOwner(finished.connectionProcessingId());
         assemblySink.onConnectionOwnerFinished(finished.connectionProcessingId());
+    }
+
+    /**
+     * The ordinary end-of-input pass from {@code kafkaLLD §13}, over every active generation.
+     */
+    private void recomputeDemandAfterInput() {
+        if (captureProtocolViolationRecord != null) {
+            return;
+        }
+        for (var state : partitions.values()) {
+            var demandOpen = state.demandOpen(requestSupplyTarget);
+            metrics.demandEvaluated(demandOpen);
+            state.requestNextBatchIfNeeded(requestSupplyTarget).ifPresent(requestId -> {
+                submitRequired(new KafkaSourceInput.RequestNextPartitionBatch(requestId));
+                metrics.batchRequested();
+            });
+        }
     }
 
     // ---------------------------------------------------------------- §7, one record
@@ -462,8 +514,8 @@ public final class ReplayIntakeOwner {
         state.closeRecordToNewAssociations(record.recordId());
         metrics.recordApplied();
 
-        // 10. Recompute partition demand.
-        // REBUILD-LIMBO-NOTE(G7): §13's recomputation, which has no count to recompute until that milestone.
+        // 10. The enclosing input runs the demand pass after this complete batch, so a request can never be
+        // issued while the current batch is still being applied.
         return true;
     }
 

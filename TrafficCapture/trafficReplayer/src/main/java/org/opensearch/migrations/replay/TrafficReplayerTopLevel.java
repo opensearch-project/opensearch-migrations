@@ -35,6 +35,7 @@ import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
 import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
+import org.opensearch.migrations.replay.intake.RequestLifecycleInput;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationCancelled;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
@@ -68,6 +69,8 @@ import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
  */
 public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     implements AutoCloseable {
+
+    public static final int DEFAULT_RETRY_READY_REQUEST_SUPPLY_PER_TARGET_THREAD = 2;
 
     @FunctionalInterface
     public interface TargetChannelFactory<P, R> {
@@ -128,6 +131,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull Consumer<T> tupleReleaser,
         @NonNull Duration tupleRetryDelay,
         @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        int retryReadyRequestSupplyPerTargetThread,
+        int targetEventLoopThreadCount,
         int maximumResponseRetries,
         int maximumTargetAttempts
     ) {
@@ -141,6 +146,25 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             if (maximumResponseRetries <= 0) {
                 throw new IllegalArgumentException("maximumResponseRetries must be positive");
             }
+            if (retryReadyRequestSupplyPerTargetThread <= 0) {
+                throw new IllegalArgumentException(
+                    "retryReadyRequestSupplyPerTargetThread must be positive"
+                );
+            }
+            if (targetEventLoopThreadCount <= 0) {
+                throw new IllegalArgumentException("targetEventLoopThreadCount must be positive");
+            }
+            Math.multiplyExact(
+                retryReadyRequestSupplyPerTargetThread,
+                targetEventLoopThreadCount
+            );
+        }
+
+        public int retryReadyRequestSupplyTarget() {
+            return Math.multiplyExact(
+                retryReadyRequestSupplyPerTargetThread,
+                targetEventLoopThreadCount
+            );
         }
     }
 
@@ -190,7 +214,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             fatalHandler::accept,
             rootContext.getReplayIntakeMetrics(),
             ReplayIntakeOwner.RecordObserver.NOOP,
-            configuration.brokerTimeConfiguration()
+            configuration.brokerTimeConfiguration(),
+            configuration.retryReadyRequestSupplyTarget()
         );
         this.sourceOwner = new KafkaSourceOwner(
             new KafkaConsumerSourcePort(consumer, kafkaPollTimeout),
@@ -882,7 +907,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             ) {
                 requireLifecycleIdentity(reportedConnectionId);
                 return intakeInputs.submitAndAwaitHandling(
-                    new ReplayIntakeInput.ConnectionRequestFinished(generation, requestId)
+                    new RequestLifecycleInput.ConnectionRequestFinished(generation, requestId)
                 );
             }
 
@@ -894,7 +919,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             ) {
                 requireLifecycleIdentity(reportedConnectionId);
                 return intakeInputs.submitAndAwaitHandling(
-                    new ReplayIntakeInput.RequestProcessingFinished(generation, requestId)
+                    new RequestLifecycleInput.RequestProcessingFinished(generation, requestId)
                 );
             }
 

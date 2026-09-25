@@ -15,7 +15,6 @@ import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
-import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 
 /**
@@ -41,16 +40,22 @@ import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
  *
  * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 4.1.</p>
  */
-public sealed interface ReplayIntakeInput {
+public sealed interface ReplayIntakeInput permits
+    ReplayIntakeInput.PartitionGenerationAssigned,
+    ReplayIntakeInput.PartitionRecordBatch,
+    ReplayIntakeInput.GracefulGenerationCancellation,
+    ReplayIntakeInput.ForceGenerationCancellation,
+    ReplayIntakeInput.FinalizedArchivePartitionEnd,
+    RequestLifecycleInput,
+    ReplayIntakeInput.ConnectionOwnerFinished,
+    ReplayIntakeInput.ConnectionCleanupFinished {
 
     /**
      * Kafka assigned a partition and the source allocated a new process-local generation.
      *
      * <p>Creates the corresponding partition intake state expecting the source-local bootstrap batch.
-     *
-     * <p>REBUILD-LIMBO-NOTE(G7): once retry-ready supply and explicit batch-request state are present, applying
-     * this input also runs the ordinary demand pass over every assigned generation and may request one
-     * additional batch. Prior-generation cleanup delays source reading without rejecting that request.</p>
+     * Applying this input also runs the ordinary demand pass over every assigned generation and may request
+     * one additional batch. Prior-generation cleanup delays source reading without rejecting that request.</p>
      */
     record PartitionGenerationAssigned(PartitionGenerationId generation) implements ReplayIntakeInput {
         public PartitionGenerationAssigned {
@@ -117,38 +122,6 @@ public sealed interface ReplayIntakeInput {
     record FinalizedArchivePartitionEnd(PartitionGenerationId generation) implements ReplayIntakeInput {
         public FinalizedArchivePartitionEnd {
             Objects.requireNonNull(generation, "generation");
-        }
-    }
-
-    /**
-     * The request finished all target sends and retries, so the next request from the same captured connection
-     * may start. <strong>Tuple work may still be unfinished.</strong>
-     *
-     * <p>Removes the request from retry-ready Kafka demand supply if it was counted, and prevents later
-     * retry-input resolution from adding it back. This is the first of the two request milestones and is not
-     * commit authority.</p>
-     */
-    record ConnectionRequestFinished(PartitionGenerationId generation, ReplayRequestId requestId)
-        implements ReplayIntakeInput {
-        public ConnectionRequestFinished {
-            Objects.requireNonNull(generation, "generation");
-            Objects.requireNonNull(requestId, "requestId");
-        }
-    }
-
-    /**
-     * Target sending and retries are finished, the captured source response is either complete or known to be
-     * incomplete, the tuple is durable, and the request's resources have been released.
-     *
-     * <p>Marks this request's required processing complete for every Kafka record containing its request or
-     * response observations. A record may then finish — but only if no other request and no incomplete source
-     * reconstruction still depends on it.</p>
-     */
-    record RequestProcessingFinished(PartitionGenerationId generation, ReplayRequestId requestId)
-        implements ReplayIntakeInput {
-        public RequestProcessingFinished {
-            Objects.requireNonNull(generation, "generation");
-            Objects.requireNonNull(requestId, "requestId");
         }
     }
 
