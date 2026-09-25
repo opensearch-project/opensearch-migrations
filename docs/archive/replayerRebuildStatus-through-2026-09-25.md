@@ -1,4 +1,4 @@
-# Historical replayer rebuild status through 2026-09-24
+# Historical replayer rebuild status through 2026-09-25
 
 > **NON-AUTHORITATIVE ARCHIVE.** This is the complete pre-slimming status and narrative history.
 > Current state lives only in [`../replayerRebuildStatus.md`](../replayerRebuildStatus.md).
