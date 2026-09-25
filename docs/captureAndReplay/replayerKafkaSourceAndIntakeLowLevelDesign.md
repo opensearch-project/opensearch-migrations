@@ -716,6 +716,12 @@ Ordinary `WriteObservation` and `WriteSegmentObservation` values are final-respo
 are never accepted as an interim-response compatibility encoding. Captures written before the typed
 protocol change have no interim-response decoder or fallback.
 
+Source bytes that never completed an interim response's header are not an interim response. The
+capture emits them as ordinary final-response `WriteObservation` or `WriteSegmentObservation` values,
+ordered before the connection's `ConnectionExceptionObservation` and before its terminal
+`CloseObservation`. Replay intake retains them under the final-response rules for the phase in which
+they arrive and never reclassifies an ordinary write observation as an interim response.
+
 An ordinary final-response observation received while a request is still being assembled is retained
 without completing or discarding the request, advancing its captured request ordinal, changing its
 request bytes, or leaving request assembly. Whole and segmented final-response bytes and their record
