@@ -28,9 +28,35 @@ import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.lifecycle.OwnerThreadGuard;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator constructor/accept ->
+//     newPartitionState/applyRecord/applyPayload/applyTrafficStream
+// accumulator per-connection map/rotation -> PartitionIntakeState + SourceConnectionState
+// accumulator record callback bookkeeping -> PartitionIntakeState associations +
+//     applyRequestProcessingFinished/submitRecordProcessingFinished
+// accumulator connection lifecycle callbacks -> SourceAssemblySink +
+//     applyConnectionOwnerFinished
+// accumulator getStatsString/logHeartbeat/counters -> ReplayIntake Metrics and owner diagnostics
+// accumulator close/fireAccumulationsCallbacksAndClose ->
+//     typed generation cancellation and connection-cleanup inputs owned by G7/G8
+// old caller-thread mutation -> runLoop/apply; applyOnCallingThread is deterministic-test-only
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// constructors/newPartitionState -> accumulator construction/createInitialAccumulation.
+// runLoop/apply/applyRecordBatch -> accumulator accept's caller-thread mutation boundary.
+// applyRecord/applyPayload/applyTrafficStream -> accumulator accept.
+// ObservedSourceAssemblySink.onRequestReconstituted/onSourceResponseComplete/
+//     onSourceResponseIncomplete/onCapturedClose/onConnectionOwnerFinished ->
+//     accumulator SpanWrappingAccumulationCallbacks and terminal callbacks.
+// applyRequestProcessingFinished/submitRecordProcessingFinished ->
+//     accumulator record-work callback bookkeeping.
+// metrics and partitionState diagnostics -> accumulator getStatsString/logHeartbeat/numberOf*.
+// REBUILD-TRACE-END(G5,target)
 
 /**
  * Sole owner of replay-intake state and of applying source records — {@code kafkaLLD §3}, {@code §7}.
@@ -205,7 +231,19 @@ public final class ReplayIntakeOwner {
         try {
             while (true) {
                 switch (inputQueue.takeEntry()) {
-                    case ReplayIntakeInputQueue.SubmittedInput submitted -> apply(submitted.input());
+                    case ReplayIntakeInputQueue.SubmittedInput submitted -> {
+                        try {
+                            apply(submitted.input());
+                            if (submitted.handled() != null) {
+                                submitted.handled().complete(null);
+                            }
+                        } catch (Throwable failure) {
+                            if (submitted.handled() != null) {
+                                submitted.handled().completeExceptionally(failure);
+                            }
+                            throw failure;
+                        }
+                    }
                     case ReplayIntakeInputQueue.StopAfterDraining ignored -> {
                         metrics.ownerStoppedAfterDraining();
                         termination.complete(null);
@@ -244,10 +282,12 @@ public final class ReplayIntakeOwner {
             case ReplayIntakeInput.ConnectionCleanupFinished ignored -> unimplemented(input, "G8");
             // REBUILD-LIMBO-NOTE(G6): §14's finite-input expiration rules, which need §10's writer time state.
             case ReplayIntakeInput.FinalizedArchivePartitionEnd ignored -> unimplemented(input, "G6");
-            // REBUILD-LIMBO-NOTE(G7): §13's supply count is what this input changes.
-            case ReplayIntakeInput.ConnectionRequestFinished ignored -> unimplemented(input, "G7");
-            // REBUILD-LIMBO-NOTE(G5): removes the connection-owner mapping; §4.1 says it finishes no record.
-            case ReplayIntakeInput.ConnectionOwnerFinished ignored -> unimplemented(input, "G5");
+            // G7 adds the supply-count transition. G5 still accepts the typed milestone and validates its
+            // generation so the production completion chain has a real receiver.
+            case ReplayIntakeInput.ConnectionRequestFinished finished ->
+                requireGeneration(finished.generation());
+            case ReplayIntakeInput.ConnectionOwnerFinished finished ->
+                applyConnectionOwnerFinished(finished);
         }
         metrics.inputApplied(inputKind(input));
     }
@@ -342,6 +382,12 @@ public final class ReplayIntakeOwner {
             .associationFinished(new RecordAssociationId.Request(finished.requestId()));
     }
 
+    private void applyConnectionOwnerFinished(ReplayIntakeInput.ConnectionOwnerFinished finished) {
+        requireGeneration(finished.generation())
+            .removeConnectionOwner(finished.connectionProcessingId());
+        assemblySink.onConnectionOwnerFinished(finished.connectionProcessingId());
+    }
+
     // ---------------------------------------------------------------- §7, one record
 
     /**
@@ -432,24 +478,36 @@ public final class ReplayIntakeOwner {
             submitProtocolViolation(record.recordId(), violation.getMessage());
             return false;
         }
-        for (var observation : trafficStream.getSubStreamList()) {
-            SourceConnectionState.ObservationOutcome outcome;
-            try {
-                outcome = connection.apply(observation, record.recordId(), record.logAppendTimeMillis());
-            } catch (SourceConnectionState.CaptureProtocolViolation violation) {
-                // §16: invalid capture input stops admission through the source rather than terminating here.
-                submitProtocolViolation(record.recordId(), violation.getMessage());
-                return false;
-            }
-            // Additions first: §8.2 forbids a transient gap, and one observation can both finish a request's
-            // assembly identity and begin the next request's.
-            outcome.associationsToAdd()
-                .forEach(association -> state.associate(record.recordId(), association));
-            outcome.relabels()
-                .forEach(relabel -> state.relabelAll(relabel.from(), relabel.to()));
-            outcome.associationsFinished().forEach(state::associationFinished);
-            if (outcome.lifetimeEnded()) {
-                state.retireLifetime(connection);
+        var recordContext = record.replayContext();
+        try (var trafficContext = recordContext == null
+            ? null
+            : recordContext.createTrafficStreamContext(
+                TrafficStreamUtils.getTrafficStreamIndex(trafficStream)
+            )) {
+            for (var observation : trafficStream.getSubStreamList()) {
+                SourceConnectionState.ObservationOutcome outcome;
+                try {
+                    outcome = connection.apply(
+                        observation,
+                        record.recordId(),
+                        record.logAppendTimeMillis(),
+                        trafficContext
+                    );
+                } catch (SourceConnectionState.CaptureProtocolViolation violation) {
+                    // §16: invalid capture input stops admission through the source rather than terminating here.
+                    submitProtocolViolation(record.recordId(), violation.getMessage());
+                    return false;
+                }
+                // Additions first: §8.2 forbids a transient gap, and one observation can both finish a request's
+                // assembly identity and begin the next request's.
+                outcome.associationsToAdd()
+                    .forEach(association -> state.associate(record.recordId(), association));
+                outcome.relabels()
+                    .forEach(relabel -> state.relabelAll(relabel.from(), relabel.to()));
+                outcome.associationsFinished().forEach(state::associationFinished);
+                if (outcome.lifetimeEnded()) {
+                    state.retireLifetime(connection);
+                }
             }
         }
         return true;
@@ -487,6 +545,7 @@ public final class ReplayIntakeOwner {
             Instant requestEndOfMessageSourceTime,
             long requestCompletingLogAppendTime
         ) {
+            metrics.requestReconstituted();
             delegate.onRequestReconstituted(
                 replayRequestId,
                 capturedRequestOrdinal,
@@ -495,7 +554,21 @@ public final class ReplayIntakeOwner {
                 requestEndOfMessageSourceTime,
                 requestCompletingLogAppendTime
             );
-            metrics.requestReconstituted();
+        }
+
+        @Override
+        public void onRequestReconstituted(
+            HttpMessageAndTimestamp.Request request,
+            Instant requestEndOfMessageSourceTime,
+            long requestCompletingLogAppendTime,
+            org.opensearch.migrations.replay.tracing.IReplayContexts.IRequestContext replayContext
+        ) {
+            delegate.onRequestReconstituted(
+                request,
+                requestEndOfMessageSourceTime,
+                requestCompletingLogAppendTime,
+                replayContext
+            );
         }
 
         @Override
@@ -518,9 +591,18 @@ public final class ReplayIntakeOwner {
         }
 
         @Override
-        public void onCapturedClose(ConnectionProcessingId connectionProcessingId, Instant closeTime) {
-            delegate.onCapturedClose(connectionProcessingId, closeTime);
+        public void onCapturedClose(
+            ConnectionProcessingId connectionProcessingId,
+            long capturedOrdinal,
+            Instant closeTime
+        ) {
+            delegate.onCapturedClose(connectionProcessingId, capturedOrdinal, closeTime);
             metrics.capturedCloseAccepted();
+        }
+
+        @Override
+        public void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId) {
+            delegate.onConnectionOwnerFinished(connectionProcessingId);
         }
     }
 

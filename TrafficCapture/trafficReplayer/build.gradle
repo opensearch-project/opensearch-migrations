@@ -30,6 +30,7 @@ plugins {
 
 dependencies {
     implementation project(':TrafficCapture:captureProtobufs')
+    implementation project(':TrafficCapture:tupleSink')
     implementation project(':coreUtilities')
     // TransformerParams, for the two transformer-config parameter delegates on the CLI surface.
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')

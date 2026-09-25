@@ -823,9 +823,16 @@ class SourceReconstructionTest {
         }
 
         @Override
-        public void onCapturedClose(ConnectionProcessingId connectionProcessingId, Instant closeTime) {
+        public void onCapturedClose(
+            ConnectionProcessingId connectionProcessingId,
+            long capturedOrdinal,
+            Instant closeTime
+        ) {
             closes.add(connectionProcessingId);
         }
+
+        @Override
+        public void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId) {}
 
         private void assertExactlyOneFinalResponseResultPerRequest() {
             var finalResults = new ArrayList<ReplayRequestId>(

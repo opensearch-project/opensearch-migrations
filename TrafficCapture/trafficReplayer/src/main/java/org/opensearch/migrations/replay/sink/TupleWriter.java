@@ -24,10 +24,37 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.WaitReason;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
+
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// ThreadLocalTupleWriter.threadLocalSink.initialValue -> TrafficReplayerTopLevel.createConnection's
+//     managed transformer/sink construction; G9 replaces temporary per-connection placement with a
+//     bounded writer worker and restores the stable writer index to deployed S3 sink construction.
+// ThreadLocalTupleWriter constructors -> TupleWriter constructors +
+//     TrafficReplayerTopLevel ManagedTupleTransformerFactory/ManagedPhysicalTupleSinkFactory.
+// ThreadLocalTupleWriter.writeTuple tuple-map creation -> RequestReplayOwner.TupleFactory.
+// ThreadLocalTupleWriter.writeTuple transform/type check -> TupleWriter.start +
+//     TrafficReplayerTopLevel.deployedTupleTransformer.
+// ThreadLocalTupleWriter.writeTuple TupleSink.accept/future -> TupleWriter.submitPhysicalWrite/
+//     onPhysicalWriteComplete.
+// ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.releaseConnectionResources/closeManaged.
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// ThreadLocalTupleWriter constructors -> TrafficReplayerTopLevel.createConnection creates one
+//     transformer, sink, and TupleWriter for each connection; G9 replaces that temporary
+//     placement with the recorded bounded writer-worker placement.
+// ThreadLocalTupleWriter.writeTuple tuple-map construction -> RequestReplayOwner.TupleFactory
+// ThreadLocalTupleWriter.writeTuple transformation/type check ->
+//     TupleWriter.start + TrafficReplayerTopLevel.deployedTupleTransformer
+// ThreadLocalTupleWriter.writeTuple sink.accept/future -> TupleWriter.submitPhysicalWrite
+// ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.releaseConnectionResources/closeManaged
+// predecessor sink index -> G9 writer-worker index and deployed S3 sink construction
+// no predecessor retry owner -> submitPhysicalWrite/onPhysicalWriteComplete per connLLD section 12
+// REBUILD-TRACE-END(G5,target)
 
 /**
  * Owns physical retries for one logical {@link WriteTuple} link.
@@ -37,9 +64,13 @@ import lombok.NonNull;
  */
 public final class TupleWriter<T> {
     public record WriteTuple<T>(
-        @NonNull ReplayRequestId requestId,
+        @NonNull IReplayContexts.ITupleHandlingContext replayContext,
         @NonNull T tuple
-    ) {}
+    ) {
+        public ReplayRequestId requestId() {
+            return replayContext.getRequestId();
+        }
+    }
 
     public sealed interface TupleWriteResult
         permits TupleDurable, TupleWriteCancelled {}
@@ -52,7 +83,27 @@ public final class TupleWriter<T> {
 
     @FunctionalInterface
     public interface PhysicalTupleSink<T> {
-        CompletionStage<Void> write(T tuple);
+        CompletionStage<Void> write(
+            IReplayContexts.ITupleHandlingContext replayContext,
+            T tuple
+        );
+    }
+
+    public sealed interface TupleTransformation<T>
+        permits TransformedTuple, TupleDropped {}
+
+    public record TransformedTuple<T>(
+        @NonNull T tuple
+    ) implements TupleTransformation<T> {}
+
+    public record TupleDropped<T>() implements TupleTransformation<T> {}
+
+    @FunctionalInterface
+    public interface TupleTransformer<T> {
+        TupleTransformation<T> transform(
+            IReplayContexts.ITupleHandlingContext replayContext,
+            T tuple
+        );
     }
 
     @FunctionalInterface
@@ -78,16 +129,44 @@ public final class TupleWriter<T> {
     private final EventLoop eventLoop;
     private final Clock clock;
     private final Duration retryDelay;
+    private final TupleTransformer<T> transformer;
     private final PhysicalTupleSink<T> sink;
     private final Consumer<T> tupleReleaser;
     private final FatalHandler fatalHandler;
     private final OutstandingOperationRegistry operations;
     private final Map<ReplayRequestId, WriteOperation> active = new LinkedHashMap<>();
 
+    // REBUILD-TRACE(G5,target): old no-transformer constructor/noop transformer default.
     public TupleWriter(
         @NonNull EventLoop eventLoop,
         @NonNull Clock clock,
         @NonNull Duration retryDelay,
+        @NonNull PhysicalTupleSink<T> sink,
+        @NonNull Consumer<T> tupleReleaser,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull OutstandingOperationRegistry.CountHook countHook
+    ) {
+        this(
+            eventLoop,
+            clock,
+            retryDelay,
+            (replayContext, tuple) -> new TransformedTuple<>(tuple),
+            sink,
+            tupleReleaser,
+            fatalHandler,
+            countHook
+        );
+    }
+
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // old ThreadLocalTupleWriter constructor; factory placement moved to
+    // TrafficReplayerTopLevel.createConnection and later to G9 writer workers.
+    // REBUILD-TRACE-END(G5,target)
+    public TupleWriter(
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull Duration retryDelay,
+        @NonNull TupleTransformer<T> transformer,
         @NonNull PhysicalTupleSink<T> sink,
         @NonNull Consumer<T> tupleReleaser,
         @NonNull FatalHandler fatalHandler,
@@ -99,6 +178,7 @@ public final class TupleWriter<T> {
         this.eventLoop = eventLoop;
         this.clock = clock;
         this.retryDelay = retryDelay;
+        this.transformer = transformer;
         this.sink = sink;
         this.tupleReleaser = tupleReleaser;
         this.fatalHandler = fatalHandler;
@@ -111,6 +191,7 @@ public final class TupleWriter<T> {
         );
     }
 
+    // REBUILD-TRACE(G5,target): old writeTuple public boundary.
     public LogicalWrite write(@NonNull WriteTuple<T> input) {
         var operation = new WriteOperation(input);
         postRequired(
@@ -125,6 +206,7 @@ public final class TupleWriter<T> {
         return operations;
     }
 
+    // REBUILD-TRACE(G5,target): old writeTuple map-transform/type-check portion.
     private void start(WriteOperation operation) {
         requireOwnerThread();
         var requestId = operation.input.requestId();
@@ -145,9 +227,32 @@ public final class TupleWriter<T> {
             null,
             WaitReason.WAITING_FOR_TUPLE_DURABILITY
         );
-        submitPhysicalWrite(operation);
+        final TupleTransformation<T> transformed;
+        try {
+            transformed = Objects.requireNonNull(
+                transformer.transform(
+                    operation.input.replayContext(),
+                    operation.input.tuple()
+                ),
+                "tuple transformer returned no result"
+            );
+        } catch (Throwable failure) {
+            failTransformation(operation, failure);
+            return;
+        }
+        switch (transformed) {
+            case TransformedTuple<T> emitted -> {
+                operation.transformedTuple = emitted.tuple();
+                submitPhysicalWrite(operation);
+            }
+            case TupleDropped<T> ignored -> {
+                operation.state = State.DURABLE;
+                finish(operation, new TupleDurable());
+            }
+        }
     }
 
+    // REBUILD-TRACE(G5,target): old TupleSink.accept/future portion.
     private void submitPhysicalWrite(WriteOperation operation) {
         requireOwnerThread();
         if (operation.state == State.CANCELLED || operation.state == State.FAILED) {
@@ -169,7 +274,10 @@ public final class TupleWriter<T> {
         final CompletionStage<Void> attempt;
         try {
             attempt = Objects.requireNonNull(
-                sink.write(operation.input.tuple()),
+                sink.write(
+                    operation.input.replayContext(),
+                    operation.transformedTuple
+                ),
                 "physical tuple sink returned no completion stage"
             );
         } catch (Throwable failure) {
@@ -185,6 +293,7 @@ public final class TupleWriter<T> {
         );
     }
 
+    // REBUILD-TRACE(G5,target): old returned sink future plus new durable retry ownership.
     private void onPhysicalWriteComplete(
         WriteOperation operation,
         OutstandingOperationRegistry.Registration registration,
@@ -228,6 +337,7 @@ public final class TupleWriter<T> {
         }
     }
 
+    // REBUILD-TRACE(G5,target): old close-time abandonment replaced by typed scoped cancellation.
     private void cancelOnOwner(WriteOperation operation, CancellationException cause) {
         requireOwnerThread();
         if (operation.state == State.DURABLE
@@ -247,22 +357,44 @@ public final class TupleWriter<T> {
         finish(operation, new TupleWriteCancelled(cause));
     }
 
+    private void failTransformation(WriteOperation operation, Throwable failure) {
+        operation.state = State.FAILED;
+        active.remove(operation.input.requestId(), operation);
+        if (operation.logicalRegistration != null) {
+            operations.complete(operation.logicalRegistration);
+            operation.logicalRegistration = null;
+        }
+        releaseCandidate(operation);
+        operation.completion.completeExceptionally(failure);
+        reportFatal("tuple transformation", failure);
+    }
+
+    // REBUILD-TRACE(G5,target): old writeTuple completion plus candidate/transformed release.
     private void finish(WriteOperation operation, TupleWriteResult result) {
         active.remove(operation.input.requestId(), operation);
         if (operation.logicalRegistration != null) {
             operations.complete(operation.logicalRegistration);
             operation.logicalRegistration = null;
         }
+        releaseCandidate(operation);
+        operation.completion.complete(result);
+    }
+
+    private void releaseCandidate(WriteOperation operation) {
         if (operation.released.compareAndSet(false, true)) {
             try {
                 tupleReleaser.accept(operation.input.tuple());
+                if (operation.transformedTuple != null
+                    && operation.transformedTuple != operation.input.tuple()) {
+                    tupleReleaser.accept(operation.transformedTuple);
+                }
             } catch (Throwable failure) {
                 reportFatal("tuple ownership release", failure);
             }
         }
-        operation.completion.complete(result);
     }
 
+    // REBUILD-TRACE(G5,target): old direct Netty-thread assumption made explicit.
     private void postRequired(
         String operation,
         Runnable transition,
@@ -321,17 +453,20 @@ public final class TupleWriter<T> {
         private OutstandingOperationRegistry.Registration logicalRegistration;
         private OutstandingOperationRegistry.Registration physicalRegistration;
         private ScheduledFuture<?> retryTimer;
+        private T transformedTuple;
 
         private WriteOperation(WriteTuple<T> input) {
             this.input = input;
         }
 
         @Override
+        // REBUILD-TRACE(G5,target): old writeTuple returned CompletableFuture.
         public CompletionStage<TupleWriteResult> completion() {
             return completion.minimalCompletionStage();
         }
 
         @Override
+        // REBUILD-TRACE(G5,target): no old per-write cancel method; replaces writer-wide shutdown.
         public void cancel(@NonNull CancellationException cause) {
             postRequired(
                 "logical tuple cancellation " + input.requestId(),

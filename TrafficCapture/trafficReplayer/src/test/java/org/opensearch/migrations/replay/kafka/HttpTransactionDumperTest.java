@@ -57,7 +57,7 @@ class HttpTransactionDumperTest {
             1_000L
         );
         dumper.onSourceResponseComplete(requestId, response, true);
-        dumper.onCapturedClose(CONNECTION, Instant.ofEpochSecond(104));
+        dumper.onCapturedClose(CONNECTION, 1, Instant.ofEpochSecond(104));
 
         var output = baos.toString(StandardCharsets.UTF_8);
         log.info("dump-http output:\n{}", output);

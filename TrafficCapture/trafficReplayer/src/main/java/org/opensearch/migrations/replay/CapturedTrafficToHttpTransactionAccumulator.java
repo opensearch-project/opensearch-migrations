@@ -1,5 +1,34 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator constructors ->
+//     ReplayIntakeOwner constructors/newPartitionState + SourceConnectionState constructor.
+// SpanWrappingAccumulationCallbacks.onRequestReceived/onConnectionClose/onTrafficStreamsExpired/
+//     onTrafficStreamIgnored -> ObservedSourceAssemblySink + PartitionIntakeState association retirement.
+// getStatsString/logHeartbeat and numberOf* accessors ->
+//     ReplayIntakeOwner.Metrics + owner activity/registry diagnostics; no parallel accumulator counters.
+// summarizeTrafficStream -> typed KafkaRecordId/ConnectionProcessingId diagnostics; the TrafficStream
+//     object formatter is not retained because owner state carries the normative identities.
+// accept -> ReplayIntakeOwner.applyRecord/applyPayload/applyTrafficStream.
+// createInitialAccumulation -> ReplayIntakeOwner.newPartitionState +
+//     SourceConnectionState constructor/requestUnderAssembly/responseUnderAssembly.
+// addObservationToAccumulation -> SourceConnectionState.apply.
+// handleObservationForSkipState -> SourceConnectionState.applyWhileDiscardingInheritedTail.
+// getTrafficStreamsHeldByAccum -> PartitionIntakeState's record-association/reverse-association maps.
+// handleCloseObservationThatAffectEveryState -> SourceConnectionState.applyCapturedClose/
+//     applyConnectionException.
+// handleObservationForReadState -> SourceConnectionState.applyBetweenRequests/applyToRequest.
+// handleObservationForWriteState -> SourceConnectionState.applyToResponse.
+// handleDroppedRequestForAccumulation -> SourceConnectionState.applyRequestDropped.
+// rotateAccumulationIfNecessary/rotateAccumulationOnReadIfNecessary ->
+//     ReplayIntakeOwner's ConnectionProcessingId lifetime routing + SourceConnectionState.completeResponse.
+// handleEndOfRequest -> SourceConnectionState.reconstituteRequest.
+// handleEndOfResponse -> SourceConnectionState.completeResponse.
+// close/closeAsTrafficSourceReaderInterruptedAndRemove/fireAccumulationsCallbacksAndClose ->
+//     SourceConnectionState.expire/endAssemblyAtBoundary/stopAssembling plus G7/G8 typed
+//     generation-cancellation and connection-cleanup inputs.
+// REBUILD-TRACE-END(G5,source)
+
 // REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
 // regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its

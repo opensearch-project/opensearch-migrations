@@ -11,9 +11,11 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
 
 import org.junit.jupiter.api.Assertions;
@@ -140,6 +142,77 @@ class TargetConnectionOwnerMilestoneTest {
         Assertions.assertEquals(
             List.of("source-9|second-target|source-response"),
             fixture.tupleSink.writes
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void filteredHeadUsesNoPermitOrExchangeAndStillTransformsItsSkippedTuple() {
+        var transformations = new AtomicInteger();
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture(
+            1,
+            false,
+            (replayContext, tuple) -> {
+                transformations.incrementAndGet();
+                return new org.opensearch.migrations.replay.sink.TupleWriter.TransformedTuple<>(
+                    "transformed:" + tuple
+                );
+            }
+        );
+        fixture.admit(12, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.filtered(12);
+        fixture.completeSource(12, "source-response");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+        Assertions.assertEquals(List.of("turn:12"), fixture.lifecycleEvents);
+        Assertions.assertEquals(1, transformations.get());
+        Assertions.assertEquals(
+            List.of("transformed:source-12|skipped|source-response"),
+            fixture.tupleSink.writes
+        );
+
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(List.of("turn:12", "processing:12"), fixture.lifecycleEvents);
+        Assertions.assertEquals(0, registeredRequests(fixture));
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void gracefulCancellationAllowsFilteredRequestToFinishItsTupleChain() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(13, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.filtered(13);
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.owner.submit(new TargetConnectionOwner.GracefulConnectionCancellation<>(
+            TargetConnectionOwnerTestSupport.CONNECTION,
+            TargetConnectionOwnerTestSupport.GENERATION,
+            new CancellationDeadline(Duration.ofSeconds(10).toNanos()),
+            new CancellationException("partition revoked")
+        ));
+        fixture.completeSource(13, "source-response");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+        Assertions.assertEquals(List.of("turn:13"), fixture.lifecycleEvents);
+        Assertions.assertEquals(
+            List.of("source-13|skipped|source-response"),
+            fixture.tupleSink.writes
+        );
+
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            List.of("turn:13", "processing:13", "cleanup-finished"),
+            fixture.lifecycleEvents
         );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }

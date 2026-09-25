@@ -97,6 +97,44 @@ class TargetConnectionOwnerCancellationTest {
     }
 
     @Test
+    void durableFromASeparatelyOwnedTupleWriterAfterForceEmitsCleanupExactlyOnce() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture(1, true);
+        fixture.admit(12, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(12);
+        fixture.completeSource(12, "source-response");
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target-response");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(java.util.List.of("turn:12"), fixture.lifecycleEvents);
+        fixture.tupleEventLoop.runUntilIdle();
+        Assertions.assertEquals(1, fixture.tupleSink.writes.size());
+
+        fixture.tupleSink.durableNext();
+        Assertions.assertEquals(1, fixture.tupleEventLoop.pendingTasks());
+
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new CancellationException("force before durability is applied")
+        ));
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(java.util.List.of("turn:12"), fixture.lifecycleEvents);
+
+        fixture.tupleEventLoop.runUntilIdle();
+        Assertions.assertEquals(1, fixture.eventLoop.pendingTasks());
+
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            java.util.List.of("turn:12", "cleanup-finished"),
+            fixture.lifecycleEvents
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
     void forceCancellationReleasesFinalSourceWaitBeforeCleanup() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture();
         fixture.admit(6, Instant.EPOCH);

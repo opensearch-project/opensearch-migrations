@@ -13,17 +13,23 @@ import java.time.Instant;
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// accumulator onRequest/onResponse/onClose callbacks -> these typed source-assembly methods
+// context-free onRequestReconstituted -> deterministic fixtures and dump adapters only
+// production onRequestReconstituted -> context overload; request identity, ordinal, and first-byte
+//     source time are opened from IRequestContext instead of passed beside it
+// production sink target -> TrafficReplayerTopLevel.ConnectionAssemblySink ->
+//     TargetConnectionOwner typed inputs
+// REBUILD-TRACE-END(G5,source)
 
 /**
  * Where source assembly's results go.
  *
- * <p>REBUILD-LIMBO-NOTE(G5): this is the seam for {@code connLLD §3}'s {@code ConnectionInput} family.
- * The four methods are named for the four messages replay intake sends — {@code AdmitReconstitutedRequest},
- * {@code SourceResponseComplete}, {@code SourceResponseIncomplete}, {@code AdmitCapturedClose} — and G5
- * replaces this interface with those values routed to a {@code TargetConnectionOwner}. Two fields of
- * {@code AdmitReconstitutedRequest} ({@code §3.1}) are transformation/target metadata and an
- * activity-monitor identity that G5 defines, which is why the value type is not declared yet: it cannot be
- * built without inventing them.
+ * <p>This is the replay-intake side of {@code connLLD §3}'s connection-input link. Production construction
+ * routes each method to the process-local {@code TargetConnectionOwner} selected by the complete
+ * {@code ConnectionProcessingId}.
  *
  * <p>Called only on the replay-intake thread, synchronously from within one record's application, so an
  * implementation must not block.
@@ -46,6 +52,28 @@ public interface SourceAssemblySink {
         Instant requestEndOfMessageSourceTime,
         long requestCompletingLogAppendTime
     );
+
+    /**
+     * The same request delivery with its explicitly propagated replay scope.
+     *
+     * <p>The default keeps context-free deterministic source-assembly fixtures usable. The production sink
+     * overrides this overload and requires the context.</p>
+     */
+    default void onRequestReconstituted(
+        HttpMessageAndTimestamp.Request request,
+        Instant requestEndOfMessageSourceTime,
+        long requestCompletingLogAppendTime,
+        IReplayContexts.IRequestContext replayContext
+    ) {
+        onRequestReconstituted(
+            replayContext.getRequestId(),
+            replayContext.getCapturedRequestOrdinal(),
+            request,
+            replayContext.getTimeOfOriginalRequest(),
+            requestEndOfMessageSourceTime,
+            requestCompletingLogAppendTime
+        );
+    }
 
     /**
      * A source response that reached a terminal boundary ({@code §9.2}).
@@ -84,5 +112,14 @@ public interface SourceAssemblySink {
      * The captured close for a source-connection lifetime that reconstituted at least one request
      * ({@code §9.3} step 3). A request-less lifetime has no connection owner to receive this command.
      */
-    void onCapturedClose(ConnectionProcessingId connectionProcessingId, Instant closeTime);
+    void onCapturedClose(
+        ConnectionProcessingId connectionProcessingId,
+        long capturedOrdinal,
+        Instant closeTime
+    );
+
+    /**
+     * Replay intake handled the matching owner's terminal completion and removed its source-side lifetime.
+     */
+    void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId);
 }

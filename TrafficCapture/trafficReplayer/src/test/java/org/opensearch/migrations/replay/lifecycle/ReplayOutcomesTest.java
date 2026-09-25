@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.lifecycle;
 
 import java.util.concurrent.CancellationException;
 
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +18,12 @@ class ReplayOutcomesTest {
 
         Assertions.assertEquals("ready:prepared", describePreparation(ready));
         Assertions.assertEquals("cancelled:cancelled", describePreparation(cancelled));
+        var filtered = new ReplayOutcomes.RequestPreparationReady<String>(
+            null,
+            HttpRequestTransformationStatus.skipped()
+        );
+        Assertions.assertTrue(filtered.transformationStatus().isSkipped());
+        Assertions.assertNull(filtered.value());
     }
 
     private static String describePreparation(

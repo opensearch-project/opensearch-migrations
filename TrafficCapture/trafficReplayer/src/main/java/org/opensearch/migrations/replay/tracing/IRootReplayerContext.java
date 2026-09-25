@@ -1,36 +1,27 @@
 package org.opensearch.migrations.replay.tracing;
 
-
-
-import org.opensearch.migrations.replay.ReplayProcessFatalHandler;
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.kafka.TrackingKafkaConsumer;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
-import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
-import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
-import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IRootOtelContext;
 
 public interface IRootReplayerContext extends IRootOtelContext, IInstrumentConstructor {
 
-    ITrafficSourceContexts.IReadChunkContext createReadChunkContext();
+    IReplayContexts.IConnectionContext createConnectionContext(
+        ConnectionProcessingId connectionProcessingId
+    );
 
-    IReplayContexts.IChannelKeyContext createChannelContext(ISourceTrafficChannelKey tsk);
+    IReplayContexts.IKafkaRecordContext createKafkaRecordContext(
+        KafkaRecordId recordId,
+        int serializedSizeBytes
+    );
 
-    TargetAttemptPermitProvider.Metrics getPermitPoolMetrics();
+    ReplayIntakeOwner.Metrics getReplayIntakeMetrics();
 
-    TargetConnectionOwner.Metrics getConnectionActorMetrics();
+    KafkaSourceOwner.Metrics getKafkaCommitStateMetrics();
 
-    TargetExchangeState.Metrics getTargetExchangeStateMetrics();
-
-    ReplayTransaction.Metrics getReplayTransactionMetrics();
-
-    TrackingKafkaConsumer.Metrics getKafkaCommitStateMetrics();
-
-    ResourceOwnership.Metrics getResourceOwnershipMetrics();
-
-    ReplayProcessFatalHandler.Metrics getReplayProcessFatalMetrics();
+    TargetAttemptPermitProvider.Metrics getTargetAttemptPermitMetrics();
 }
-

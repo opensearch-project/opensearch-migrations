@@ -17,11 +17,45 @@ import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.createInitialAccumulation ->
+//     SourceConnectionState constructor + requestUnderAssembly/responseUnderAssembly
+// addObservationToAccumulation/handleObservationForSkipState ->
+//     apply/applyWhileDiscardingInheritedTail
+// handleObservationForReadState -> applyBetweenRequests/applyToRequest
+// handleObservationForWriteState -> applyToResponse
+// handleCloseObservationThatAffectEveryState -> applyCapturedClose
+// handleDroppedRequestForAccumulation -> applyRequestDropped
+// rotateAccumulationIfNecessary/rotateAccumulationOnReadIfNecessary ->
+//     ReplayIntakeOwner's ConnectionProcessingId lifetime routing
+// handleEndOfRequest -> reconstituteRequest
+// handleEndOfResponse -> completeResponse
+// close/closeAsTrafficSourceReaderInterruptedAndRemove/fireAccumulationsCallbacksAndClose ->
+//     expire/endAssemblyAtBoundary/stopAssembling
+// sequence and packet append helpers -> requireSequenceContiguous/appendTo/timestampOf
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// constructor/requestUnderAssembly/responseUnderAssembly ->
+//     accumulator createInitialAccumulation and lazy request/response creation.
+// apply overloads -> accumulator accept/addObservationToAccumulation.
+// applyWhileDiscardingInheritedTail -> handleObservationForSkipState.
+// applyBetweenRequests/applyToRequest -> handleObservationForReadState.
+// applyToResponse -> handleObservationForWriteState.
+// reconstituteRequest -> handleEndOfRequest.
+// completeResponse -> handleEndOfResponse plus rotation completion.
+// applyConnectionException/applyCapturedClose -> handleCloseObservationThatAffectEveryState.
+// applyRequestDropped -> handleDroppedRequestForAccumulation.
+// expire/endAssemblyAtBoundary/stopAssembling ->
+//     close/closeAsTrafficSourceReaderInterruptedAndRemove/fireAccumulationsCallbacksAndClose.
+// requireSequenceContiguous/appendTo/timestampOf -> predecessor sequence and packet helpers.
+// REBUILD-TRACE-END(G5,target)
 
 /**
  * Source-side HTTP assembly for one process-local connection lifetime — {@code kafkaLLD §9}.
@@ -113,6 +147,9 @@ public final class SourceConnectionState {
     private boolean requestEverReconstituted;
     private long currentCapturedRequestOrdinal;
     private HttpMessageAndTimestamp.Request incomingRequest;
+    private IReplayContexts.IRequestContext requestContext;
+    private IReplayContexts.IRequestAccumulationContext requestAccumulationContext;
+    private IReplayContexts.IResponseAccumulationContext responseAccumulationContext;
     private ReplayRequestId responseBeingAssembledFor;
     private final Map<ReplayRequestId, HttpMessageAndTimestamp.Response> responseStateByRequest =
         new LinkedHashMap<>();
@@ -170,6 +207,15 @@ public final class SourceConnectionState {
         @NonNull KafkaRecordId containingRecord,
         long logAppendTimeMillis
     ) {
+        return apply(observation, containingRecord, logAppendTimeMillis, null);
+    }
+
+    public ObservationOutcome apply(
+        @NonNull TrafficObservation observation,
+        @NonNull KafkaRecordId containingRecord,
+        long logAppendTimeMillis,
+        IReplayContexts.ITrafficStreamsLifecycleContext trafficContext
+    ) {
         requireSequenceContiguous(observation);
         if (lifetime == Lifetime.EXPLICITLY_CLOSED) {
             throw new CaptureProtocolViolation(
@@ -202,9 +248,12 @@ public final class SourceConnectionState {
 
         return switch (phase) {
             case DISCARDING_INHERITED_TAIL -> applyWhileDiscardingInheritedTail(observation);
-            case BETWEEN_REQUESTS -> applyBetweenRequests(observation, containingRecord, logAppendTimeMillis);
-            case ASSEMBLING_REQUEST -> applyToRequest(observation, containingRecord, logAppendTimeMillis);
-            case ASSEMBLING_RESPONSE -> applyToResponse(observation, containingRecord, logAppendTimeMillis);
+            case BETWEEN_REQUESTS ->
+                applyBetweenRequests(observation, containingRecord, logAppendTimeMillis, trafficContext);
+            case ASSEMBLING_REQUEST ->
+                applyToRequest(observation, containingRecord, logAppendTimeMillis, trafficContext);
+            case ASSEMBLING_RESPONSE ->
+                applyToResponse(observation, containingRecord, logAppendTimeMillis, trafficContext);
         };
     }
 
@@ -245,7 +294,8 @@ public final class SourceConnectionState {
     private ObservationOutcome applyBetweenRequests(
         TrafficObservation observation,
         KafkaRecordId containingRecord,
-        long logAppendTimeMillis
+        long logAppendTimeMillis,
+        IReplayContexts.ITrafficStreamsLifecycleContext trafficContext
     ) {
         if (!(observation.hasRead() || observation.hasReadSegment())) {
             // A write with no request in front of it belongs to the discarded tail or to a request this
@@ -254,22 +304,28 @@ public final class SourceConnectionState {
             return ObservationOutcome.none();
         }
         phase = Phase.ASSEMBLING_REQUEST;
-        return applyToRequest(observation, containingRecord, logAppendTimeMillis);
+        return applyToRequest(observation, containingRecord, logAppendTimeMillis, trafficContext);
     }
 
     private ObservationOutcome applyToRequest(
         TrafficObservation observation,
         KafkaRecordId containingRecord,
-        long logAppendTimeMillis
+        long logAppendTimeMillis,
+        IReplayContexts.ITrafficStreamsLifecycleContext trafficContext
     ) {
         var timestamp = timestampOf(observation);
         var assembly = currentAssemblyId();
         if (observation.hasRead()) {
-            appendTo(requestUnderAssembly(timestamp), observation.getRead().getData().toByteArray(), timestamp);
+            appendTo(
+                requestUnderAssembly(timestamp, trafficContext),
+                observation.getRead().getData().toByteArray(),
+                timestamp
+            );
             return added(assembly);
         }
         if (observation.hasReadSegment()) {
-            requestUnderAssembly(timestamp).addSegment(observation.getReadSegment().getData().toByteArray());
+            requestUnderAssembly(timestamp, trafficContext)
+                .addSegment(observation.getReadSegment().getData().toByteArray());
             return added(assembly);
         }
         if (observation.hasSegmentEnd()) {
@@ -300,7 +356,8 @@ public final class SourceConnectionState {
     private ObservationOutcome applyToResponse(
         TrafficObservation observation,
         KafkaRecordId containingRecord,
-        long logAppendTimeMillis
+        long logAppendTimeMillis,
+        IReplayContexts.ITrafficStreamsLifecycleContext trafficContext
     ) {
         var timestamp = timestampOf(observation);
         var requestId = responseBeingAssembledFor;
@@ -329,7 +386,12 @@ public final class SourceConnectionState {
             // response. It is the only evidence of that available anywhere in the protocol.
             var completed = completeResponse(true);
             phase = Phase.ASSEMBLING_REQUEST;
-            var next = applyToRequest(observation, containingRecord, logAppendTimeMillis);
+            var next = applyToRequest(
+                observation,
+                containingRecord,
+                logAppendTimeMillis,
+                trafficContext
+            );
             return new ObservationOutcome(
                 concat(completed.associationsToAdd(), next.associationsToAdd()),
                 concat(completed.associationsFinished(), next.associationsFinished()),
@@ -355,7 +417,9 @@ public final class SourceConnectionState {
     ) {
         var request = requireRequestUnderAssembly();
         var assembly = currentAssemblyId();
-        var replayRequestId = new ReplayRequestId(connectionProcessingId, currentCapturedRequestOrdinal);
+        var replayRequestId = requestContext == null
+            ? new ReplayRequestId(connectionProcessingId, currentCapturedRequestOrdinal)
+            : requestContext.getRequestId();
         var requestAssociation = new RecordAssociationId.Request(replayRequestId);
 
         incomingRequest = null;
@@ -367,17 +431,32 @@ public final class SourceConnectionState {
         );
         requestEverReconstituted = true;
         phase = Phase.ASSEMBLING_RESPONSE;
+        if (requestContext != null) {
+            requestContext.onRequestReconstituted();
+            requestAccumulationContext.close();
+            requestAccumulationContext = null;
+            responseAccumulationContext = requestContext.createResponseAccumulationContext();
+        }
 
         // REBUILD-LIMBO-NOTE(G7): create §9.1's request-state bookkeeping for retry input, final source
         // response and demand before admitting the request to its connection owner.
-        sink.onRequestReconstituted(
-            replayRequestId,
-            currentCapturedRequestOrdinal,
-            request,
-            request.getFirstPacketTimestamp(),
-            requestEndOfMessageSourceTime,
-            requestCompletingLogAppendTime
-        );
+        if (requestContext == null) {
+            sink.onRequestReconstituted(
+                replayRequestId,
+                currentCapturedRequestOrdinal,
+                request,
+                request.getFirstPacketTimestamp(),
+                requestEndOfMessageSourceTime,
+                requestCompletingLogAppendTime
+            );
+        } else {
+            sink.onRequestReconstituted(
+                request,
+                requestEndOfMessageSourceTime,
+                requestCompletingLogAppendTime,
+                requestContext
+            );
+        }
         // The end-of-message record contributes to the request too, and its association is the request's
         // from the outset rather than an assembly identity that is immediately relabelled.
         return new ObservationOutcome(
@@ -399,6 +478,7 @@ public final class SourceConnectionState {
         var response = responseStateByRequest.remove(requestId);
         responseBeingAssembledFor = null;
         if (response != null) {
+            closeResponseAccumulationContext();
             sink.onSourceResponseComplete(requestId, response, keptAlive);
             currentCapturedRequestOrdinal++;
         }
@@ -425,7 +505,11 @@ public final class SourceConnectionState {
         var abandoned = endAssemblyAtBoundary();
         lifetime = Lifetime.EXPLICITLY_CLOSED;
         if (requestEverReconstituted) {
-            sink.onCapturedClose(connectionProcessingId, latestObservationTime);
+            sink.onCapturedClose(
+                connectionProcessingId,
+                currentCapturedRequestOrdinal,
+                latestObservationTime
+            );
         }
         return new ObservationOutcome(
             concat(abandoned.associationsToAdd(), List.of(terminal)),
@@ -454,6 +538,7 @@ public final class SourceConnectionState {
         // the source's ordinal progression.
         var finished = List.<RecordAssociationId>of(currentAssemblyId());
         incomingRequest = null;
+        closeIncompleteRequestContexts();
         ignoringInformationalWriteSegments = false;
         currentCapturedRequestOrdinal++;
         phase = Phase.BETWEEN_REQUESTS;
@@ -475,6 +560,7 @@ public final class SourceConnectionState {
         if (incomingRequest != null) {
             finished.add(currentAssemblyId());
             incomingRequest = null;
+            closeIncompleteRequestContexts();
         }
         ignoringInformationalWriteSegments = false;
         if (responseBeingAssembledFor != null) {
@@ -496,12 +582,14 @@ public final class SourceConnectionState {
         if (incomingRequest != null) {
             finished.add(currentAssemblyId());
             incomingRequest = null;
+            closeIncompleteRequestContexts();
         }
         ignoringInformationalWriteSegments = false;
         if (responseBeingAssembledFor != null) {
             var requestId = responseBeingAssembledFor;
             responseStateByRequest.remove(requestId);
             responseBeingAssembledFor = null;
+            closeResponseAccumulationContext();
             sink.onSourceResponseIncomplete(requestId, reason);
         }
         phase = Phase.BETWEEN_REQUESTS;
@@ -552,11 +640,43 @@ public final class SourceConnectionState {
         );
     }
 
-    private HttpMessageAndTimestamp.Request requestUnderAssembly(Instant firstPacketTimestamp) {
+    private HttpMessageAndTimestamp.Request requestUnderAssembly(
+        Instant firstPacketTimestamp,
+        IReplayContexts.ITrafficStreamsLifecycleContext trafficContext
+    ) {
         if (incomingRequest == null) {
             incomingRequest = new HttpMessageAndTimestamp.Request(firstPacketTimestamp);
+            if (trafficContext != null) {
+                requestContext = trafficContext.createRequestContext(
+                    new ReplayRequestId(
+                        connectionProcessingId,
+                        currentCapturedRequestOrdinal
+                    ),
+                    firstPacketTimestamp
+                );
+                requestAccumulationContext = requestContext.createRequestAccumulationContext();
+            }
         }
         return incomingRequest;
+    }
+
+    private void closeIncompleteRequestContexts() {
+        if (requestAccumulationContext != null) {
+            requestAccumulationContext.close();
+            requestAccumulationContext = null;
+        }
+        if (requestContext != null) {
+            requestContext.close();
+            requestContext = null;
+        }
+    }
+
+    private void closeResponseAccumulationContext() {
+        if (responseAccumulationContext != null) {
+            responseAccumulationContext.close();
+            responseAccumulationContext = null;
+        }
+        requestContext = null;
     }
 
     private HttpMessageAndTimestamp.Request requireRequestUnderAssembly() {

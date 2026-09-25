@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationCancelled;
@@ -31,9 +32,13 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparat
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.testing.FakeClock;
 import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 
+import io.opentelemetry.api.OpenTelemetry;
 import org.apache.kafka.common.TopicPartition;
 
 final class TargetConnectionOwnerTestSupport {
@@ -54,6 +59,8 @@ final class TargetConnectionOwnerTestSupport {
     static final class Fixture {
         final FakeClock clock = new FakeClock();
         final TestEventLoop eventLoop = new TestEventLoop(clock);
+        final RootReplayerContext replayContexts = new RootReplayerContext(OpenTelemetry.noop());
+        final TestEventLoop tupleEventLoop;
         final List<Error> fatalFailures = new ArrayList<>();
         final AtomicInteger activePermits = new AtomicInteger();
         final FakePreparer preparer = new FakePreparer(clock);
@@ -75,6 +82,23 @@ final class TargetConnectionOwnerTestSupport {
         }
 
         Fixture(int permitCapacity) {
+            this(permitCapacity, false);
+        }
+
+        Fixture(int permitCapacity, boolean separateTupleEventLoop) {
+            this(
+                permitCapacity,
+                separateTupleEventLoop,
+                (replayContext, tuple) -> new TupleWriter.TransformedTuple<>(tuple)
+            );
+        }
+
+        Fixture(
+            int permitCapacity,
+            boolean separateTupleEventLoop,
+            TupleWriter.TupleTransformer<String> tupleTransformer
+        ) {
+            tupleEventLoop = separateTupleEventLoop ? new TestEventLoop(clock) : eventLoop;
             permitProvider = new TargetAttemptPermitProvider(
                 permitCapacity,
                 activePermits,
@@ -82,9 +106,10 @@ final class TargetConnectionOwnerTestSupport {
                 fatalFailures::add
             );
             tupleWriter = new TupleWriter<>(
-                eventLoop,
+                tupleEventLoop,
                 clock,
                 Duration.ofSeconds(1),
+                tupleTransformer,
                 tupleSink,
                 ignored -> {},
                 fatalFailures::add,
@@ -100,11 +125,13 @@ final class TargetConnectionOwnerTestSupport {
                 retryPolicy,
                 targetChannel,
                 tupleWriter,
-                result -> {
+                (replayContext, result) -> {
                     tupleInputs.add(result);
                     return result.sourceRequest()
                         + "|"
-                        + result.terminalTargetResponse().response()
+                        + (result.transformationStatus().isSkipped()
+                            ? "skipped"
+                            : result.terminalTargetResponse().response())
                         + "|"
                         + describeFinal(result.finalSourceResponse());
                 },
@@ -141,15 +168,27 @@ final class TargetConnectionOwnerTestSupport {
         ) {
             return owner.submit(
                 new TargetConnectionOwner.AdmitReconstitutedRequest<>(
-                    CONNECTION,
-                    GENERATION,
-                    request(ordinal),
-                    ordinal,
-                    firstByteTime,
                     "source-" + ordinal,
-                    "activity-" + ordinal
+                    requestContext(ordinal, firstByteTime)
                 )
             );
+        }
+
+        private IReplayContexts.IRequestContext requestContext(
+            long ordinal,
+            Instant firstByteTime
+        ) {
+            var recordContext = replayContexts.createKafkaRecordContext(
+                new KafkaRecordId(GENERATION, ordinal),
+                0
+            );
+            var trafficContext = recordContext.createTrafficStreamContext(ordinal);
+            var requestContext = trafficContext.createRequestContext(
+                request(ordinal),
+                firstByteTime
+            );
+            requestContext.onRequestReconstituted();
+            return requestContext;
         }
 
         void completeSource(long ordinal, String response) {
@@ -157,7 +196,8 @@ final class TargetConnectionOwnerTestSupport {
                 CONNECTION,
                 GENERATION,
                 request(ordinal),
-                response
+                response,
+                true
             ));
         }
 
@@ -220,7 +260,8 @@ final class TargetConnectionOwnerTestSupport {
         @Override
         public RequestReplayOwner.PreparationOperation<TestPrepared> begin(
             ReplayRequestId requestId,
-            String sourceRequest
+            String sourceRequest,
+            IReplayContexts.IRequestTransformationContext replayContext
         ) {
             begun.add(requestId);
             beginTimes.add(clock.instant());
@@ -247,6 +288,16 @@ final class TargetConnectionOwnerTestSupport {
                 ignored -> new CompletableFuture<>()
             ).complete(new RequestPreparationReady<>(
                 new TestPrepared("prepared-" + ordinal)
+            ));
+        }
+
+        void filtered(long ordinal) {
+            completions.computeIfAbsent(
+                request(ordinal),
+                ignored -> new CompletableFuture<>()
+            ).complete(new RequestPreparationReady<>(
+                null,
+                HttpRequestTransformationStatus.skipped()
             ));
         }
     }
@@ -368,7 +419,10 @@ final class TargetConnectionOwnerTestSupport {
         final Queue<CompletableFuture<Void>> completions = new ArrayDeque<>();
 
         @Override
-        public CompletionStage<Void> write(String tuple) {
+        public CompletionStage<Void> write(
+            IReplayContexts.ITupleHandlingContext replayContext,
+            String tuple
+        ) {
             writes.add(tuple);
             var completion = new CompletableFuture<Void>();
             completions.add(completion);
