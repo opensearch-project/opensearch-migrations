@@ -157,22 +157,21 @@ work, not deferred work. Status for each lives in `docs/replayerRebuildStatus.md
    One direct `/private/tmp` Codex worker at `b08be26e7` independently falsified typed classification, request
    continuation, incomplete-response ordering, suppressed-response isolation, and exception-time
    required-capture failure handling; every mutation produced the intended assertion failure and the worker
-   restored the exact clean revision. A second worker falsified telemetry isolation at `f1832b5b0`: removing
-   the best-effort telemetry guard prevented the held write and terminal close from being captured. The
-   final production review returned no design-conformance defects.
+   restored the exact clean revision. A synthetic reviewer-injected telemetry fault at `f1832b5b0` confirmed
+   that the defensive terminal-close path still captures the held write and close when diagnostic reporting
+   fails. This was not an observed production failure and creates no additional PA2 telemetry requirement;
+   the defensive terminal-close behavior remains without expanding telemetry-failure handling. The final
+   production review returned no design-conformance defects.
 
-   Two proxy hardening decisions remain before PA2 itself can close. The response classifier currently has no
-   size bound while a candidate informational header waits for `CRLF CRLF`, and the design does not say what
-   happens at such a bound. Separately, a telemetry exception while ending one response at the next-request
-   boundary currently closes the connection, while the terminal-close path treats the same diagnostic failure
-   as best effort. Both decisions and recommendations are recorded in the status register; neither changes
-   G3's now-proved typed producer/consumer interoperability obligation.
+   No source interim-header size bound is added. The source server is trusted, while the existing client-input
+   bounds already constrain untrusted input. The typed producer/consumer chain and all five PA2 repairs are
+   therefore closed on the recorded evidence.
 
 **PA2 Exit:** all five focused repairs above have direct tests, their temporary replayer-side workarounds are
 deleted, intentional suppression followed by a stream boundary preserves the successor
 `priorRequestsReceived` ordinal, and source interim responses are emitted only as the typed whole or segmented
-observations consumed by G3, with no ordinary-`Write` compatibility path. PA2 closes after the owner selects
-the bounded-classification and next-request telemetry-failure behavior recorded for item 5.
+observations consumed by G3, with no ordinary-`Write` compatibility path. PA2 and G3 are closed with the
+evidence recorded above and in `docs/replayerRebuildStatus.md`.
 
 If one agent owns both proxy and replayer, these are explicit scheduled checkpoints, not fictional
 parallelism. Proxy work may be interleaved with replayer work, but PA3 cannot be deferred into final
