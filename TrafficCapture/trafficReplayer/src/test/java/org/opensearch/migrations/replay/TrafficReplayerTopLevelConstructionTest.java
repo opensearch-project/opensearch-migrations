@@ -184,7 +184,6 @@ class TrafficReplayerTopLevelConstructionTest {
                     1_000,
                     5_000
                 ),
-                2,
                 1,
                 4,
                 1

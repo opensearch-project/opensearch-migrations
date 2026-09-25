@@ -136,6 +136,62 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         int maximumResponseRetries,
         int maximumTargetAttempts
     ) {
+        public Configuration(
+            @NonNull Clock clock,
+            @NonNull LongSupplier nanoTime,
+            @NonNull Function<Instant, Instant> replayTimeMapper,
+            @NonNull Function<ConnectionProcessingId, EventLoop> eventLoopFor,
+            @NonNull BiFunction<
+                ConnectionProcessingId,
+                IReplayContexts.IConnectionContext,
+                RequestReplayOwner.RequestPreparer<HttpMessageAndTimestamp.Request, P>
+            > requestPreparerFactory,
+            @NonNull RequestReplayOwner.RetryPolicy<R, HttpMessageAndTimestamp.Response> retryPolicy,
+            @NonNull TargetChannelFactory<P, R> targetChannelFactory,
+            @NonNull RequestReplayOwner.TupleFactory<
+                HttpMessageAndTimestamp.Request,
+                P,
+                R,
+                HttpMessageAndTimestamp.Response,
+                T
+            > tupleFactory,
+            @NonNull RequestReplayOwner.ResourceReleaser<
+                HttpMessageAndTimestamp.Request,
+                P,
+                R,
+                HttpMessageAndTimestamp.Response
+            > resourceReleaser,
+            @NonNull ManagedTupleTransformerFactory<T> tupleTransformerFactory,
+            @NonNull ManagedPhysicalTupleSinkFactory<T> tupleSinkFactory,
+            @NonNull Consumer<T> tupleReleaser,
+            @NonNull Duration tupleRetryDelay,
+            @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+            int targetEventLoopThreadCount,
+            int maximumResponseRetries,
+            int maximumTargetAttempts
+        ) {
+            this(
+                clock,
+                nanoTime,
+                replayTimeMapper,
+                eventLoopFor,
+                requestPreparerFactory,
+                retryPolicy,
+                targetChannelFactory,
+                tupleFactory,
+                resourceReleaser,
+                tupleTransformerFactory,
+                tupleSinkFactory,
+                tupleReleaser,
+                tupleRetryDelay,
+                brokerTimeConfiguration,
+                DEFAULT_RETRY_READY_REQUEST_SUPPLY_PER_TARGET_THREAD,
+                targetEventLoopThreadCount,
+                maximumResponseRetries,
+                maximumTargetAttempts
+            );
+        }
+
         public Configuration {
             if (tupleRetryDelay.isNegative()) {
                 throw new IllegalArgumentException("tupleRetryDelay must not be negative");

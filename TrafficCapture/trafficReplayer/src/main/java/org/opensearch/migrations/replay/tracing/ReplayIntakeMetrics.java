@@ -60,7 +60,8 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
             "replayIntakeBrokerTimeViolations";
         public static final String BATCH_REQUESTS_SUBMITTED =
             "replayIntakeBatchRequestsSubmitted";
-        public static final String BATCHES_APPLIED = "replayIntakeBatchesApplied";
+        public static final String BATCH_ENTITLEMENTS_RESOLVED =
+            "replayIntakeBatchEntitlementsResolved";
         public static final String RETRY_READY_REQUEST_SUPPLY =
             "replayIntakeRetryReadyRequestSupply";
         public static final String RETRY_READY_SUPPLY_ADDITIONS =
@@ -92,7 +93,7 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private final LongCounter targetConnectionExpirationsSent;
     private final LongCounter brokerTimeViolations;
     private final LongCounter batchRequestsSubmitted;
-    private final LongCounter batchesApplied;
+    private final LongCounter batchEntitlementsResolved;
     private final LongUpDownCounter retryReadyRequestSupply;
     private final LongCounter retryReadySupplyAdditions;
     private final LongCounter retryReadySupplyRemovals;
@@ -125,7 +126,8 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
             counter(meter, MetricNames.TARGET_CONNECTION_EXPIRATIONS_SENT, "commands");
         brokerTimeViolations = counter(meter, MetricNames.BROKER_TIME_VIOLATIONS, "violations");
         batchRequestsSubmitted = counter(meter, MetricNames.BATCH_REQUESTS_SUBMITTED, "requests");
-        batchesApplied = counter(meter, MetricNames.BATCHES_APPLIED, "batches");
+        batchEntitlementsResolved =
+            counter(meter, MetricNames.BATCH_ENTITLEMENTS_RESOLVED, "batches");
         retryReadyRequestSupply = meter.upDownCounterBuilder(MetricNames.RETRY_READY_REQUEST_SUPPLY)
             .setUnit("requests")
             .build();
@@ -233,8 +235,10 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     }
 
     @Override
-    public void batchApplied(@NonNull PartitionIntakeState.BatchEntitlement entitlement) {
-        batchesApplied.add(
+    public void batchEntitlementResolved(
+        @NonNull PartitionIntakeState.BatchEntitlement entitlement
+    ) {
+        batchEntitlementsResolved.add(
             1,
             Attributes.of(BATCH_ENTITLEMENT_ATTRIBUTE, entitlement.name())
         );
