@@ -65,6 +65,10 @@ describe("migration resource log ownership", () => {
 
         expect(countOccurrences(nodePool, RESOURCE_UID_LABEL)).toBe(2);
         expect(nodePool).toContain("inputs.parameters.ownerUid");
+        expect(nodePool).toContain(
+            "name: {{=toJSON(inputs.parameters.clusterName)}}",
+        );
+        expect(nodePool).not.toContain("name: dual-role");
         expect(countOccurrences(kafka, RESOURCE_UID_LABEL)).toBe(2);
         expect(kafka).toContain("inputs.parameters.ownerUid");
     });

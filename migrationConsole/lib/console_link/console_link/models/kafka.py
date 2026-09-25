@@ -503,7 +503,12 @@ class Kafka(ABC):
         pass
 
     @abstractmethod
-    def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
+    def describe_consumer_group(
+        self,
+        group_name='logging-group-default',
+        *,
+        include_time_lag=True,
+    ) -> CommandResult:
         pass
 
     @abstractmethod
@@ -541,12 +546,19 @@ class MSK(Kafka):
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, LIST_TOPICS_OPERATION)
 
-    def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
+    def describe_consumer_group(
+        self,
+        group_name='logging-group-default',
+        *,
+        include_time_lag=True,
+    ) -> CommandResult:
         command = [resolve_kafka_tool(KAFKA_CONSUMER_GROUPS_SCRIPT), '--bootstrap-server', f'{self.brokers}',
                    '--timeout', '100000', '--describe', '--group', f'{group_name}',
                    '--command-config', resolve_msk_auth_config()]
         logger.info(f"Executing command: {command}")
         result = get_result_for_command(command, DESCRIBE_CONSUMER_GROUP_OPERATION)
+        if not include_time_lag:
+            return result
         return _augment_describe_output_with_time_lag(
             result, self.brokers,
             extra_console_consumer_args=['--consumer.config', resolve_msk_auth_config()],
@@ -597,11 +609,18 @@ class StandardKafka(Kafka):
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, LIST_TOPICS_OPERATION)
 
-    def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
+    def describe_consumer_group(
+        self,
+        group_name='logging-group-default',
+        *,
+        include_time_lag=True,
+    ) -> CommandResult:
         command = self._base_command(KAFKA_CONSUMER_GROUPS_SCRIPT) + [
             '--timeout', '100000', '--describe', '--group', group_name]
         logger.info(f"Executing command: {command}")
         result = get_result_for_command(command, DESCRIBE_CONSUMER_GROUP_OPERATION)
+        if not include_time_lag:
+            return result
         return _augment_describe_output_with_time_lag(
             result, self.brokers, extra_console_consumer_args=[],
         )
@@ -687,11 +706,18 @@ class ScramKafka(Kafka):
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "List Topics")
 
-    def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
+    def describe_consumer_group(
+        self,
+        group_name='logging-group-default',
+        *,
+        include_time_lag=True,
+    ) -> CommandResult:
         command = [resolve_kafka_tool(KAFKA_CONSUMER_GROUPS_SCRIPT), '--bootstrap-server', self.brokers,
                    '--timeout', '100000', '--describe', '--group', group_name] + self._cmd_config_args()
         logger.info(f"Executing command: {command}")
         result = get_result_for_command(command, "Describe Consumer Group")
+        if not include_time_lag:
+            return result
         return _augment_describe_output_with_time_lag(
             result, self.brokers,
             extra_console_consumer_args=['--consumer.config', self._props_file],

@@ -125,10 +125,12 @@ ensure_registry_container() {
 #
 # Steps per node:
 #  1. Resolve the host gateway IP from inside the node (default route next-hop).
-#  2. Add an /etc/hosts entry mapping EXTERNAL_REGISTRY_NAME to that IP so
-#     containerd/cri-dockerd can resolve the name without Docker bridge DNS.
-#  3. Write a hosts.toml pointing containerd at http://<name>:EXTERNAL_REGISTRY_PORT
-#     so plain-HTTP pulls are accepted.
+#  2. Write a hosts.toml for the named image registry that points directly at
+#     http://<gateway-ip>:EXTERNAL_REGISTRY_PORT.
+#
+# Using the gateway IP in hosts.toml is deliberate. Entries appended to a
+# container's /etc/hosts are regenerated when Docker restarts, which previously
+# left long-lived kind clusters unable to resolve the local registry.
 #
 # Args: <cluster-docker-network> <node-container-name>...
 connect_cluster_to_registry_network() {
@@ -147,10 +149,9 @@ connect_cluster_to_registry_network() {
   local node host_gw
   for node in "${nodes[@]}"; do
     host_gw="$(docker exec "${node}" sh -c "ip route show default | awk '/default/ {print \$3}'")"
-    docker exec -i "${node}" sh -c "echo '${host_gw} ${EXTERNAL_REGISTRY_NAME}' >> /etc/hosts"
     docker exec "${node}" mkdir -p "${registry_dir}"
     cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${registry_dir}/hosts.toml"
-server = "http://${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}"
+server = "http://${host_gw}:${EXTERNAL_REGISTRY_PORT}"
 EOF
   done
 }

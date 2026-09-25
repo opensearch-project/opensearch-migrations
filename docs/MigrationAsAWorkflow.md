@@ -274,7 +274,8 @@ empty phases intentionally produce no hint.
 | `submit --wait` (submitted, but monitoring failed) | submitted but could not be monitored — check with `workflow manage` / `workflow status` |
 | `submit` (script error) | fix the issue above, then `workflow configure edit` (not emitted for `FileNotFoundError`) |
 | `approve step` | `workflow manage`, or `workflow approve step --list` for more gates |
-| `approve change` / `approve retry` | `workflow manage` to monitor progress |
+| `approve change` | `workflow manage` to monitor progress |
+| impossible-change retry gate | `workflow reset <resource> --resubmit` |
 | `status` / `manage` | phase-aware (running / succeeded / failed); no hint for `--all-workflows` or resource views |
 | `show` (output view) | migration complete — no further action needed (no hint for `--list` / `--history` / `--run` / `--clean`) |
 
@@ -621,7 +622,7 @@ workflow approve step --all                        # approve all waiting step ga
 # Runtime gates (VAP field-change approvals) — see reconfiguringWorkflows.md
 workflow approve change --list
 workflow approve change kafkacluster.my-cluster    # allow a Gated change to proceed
-workflow approve retry  kafkacluster.my-cluster    # after manually resetting an Impossible field
+workflow reset kafkacluster.my-cluster --resubmit # replace after an Impossible field change
 ```
 
 Gate names may be given with or without the `.vapretry` suffix.

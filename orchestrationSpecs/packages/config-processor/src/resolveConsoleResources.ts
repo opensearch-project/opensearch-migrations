@@ -84,14 +84,27 @@ export async function main(args = process.argv.slice(2)) {
         process.exit(4);
     }
 
-    const consoleResources = resolvedConfigFile
-        ? buildConsoleResourcesFromResolvedConfig(await parseInput(resolvedConfigFile) as ResolvedMigrationResources)
-        : buildConsoleResources(
-            userConfigFile
-                ? await new MigrationConfigTransformer().processFromObject(await parseInput(userConfigFile))
-                : ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(await parseInput(workflowConfigFile!)),
+    let consoleResources;
+    if (resolvedConfigFile) {
+        consoleResources = buildConsoleResourcesFromResolvedConfig(
+            await parseInput(resolvedConfigFile) as ResolvedMigrationResources
+        );
+    } else if (userConfigFile) {
+        const resolved = await new MigrationConfigTransformer().resolveForConsoleResources(
+            await parseInput(userConfigFile)
+        );
+        consoleResources = buildConsoleResources(
+            resolved.workflowConfig,
+            workflowName,
+            "config",
+            resolved.userConfig
+        );
+    } else {
+        consoleResources = buildConsoleResources(
+            ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(await parseInput(workflowConfigFile!)),
             workflowName
         );
+    }
     const contents = JSON.stringify(consoleResources, null, 2);
 
     if (outputFile) {

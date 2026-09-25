@@ -599,7 +599,9 @@ class Test0003ApprovalGateIntegration(MATestBase):
         self.index_name = f"test_0003_{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0003_doc"
         self.doc_type = "sample_type"
-        self.snapshot_migration_name = "source1-target1-testsnapshot-migration-0"
+        # The legacy Argo test input is normalized into the canonical first
+        # snapshot-migration slice before resources and approval gates are named.
+        self.snapshot_migration_name = "source1-target1-testsnapshot-slice-0"
         # Unlike every other test, this one runs with skipApprovals=false and means
         # to block at each of these gates until it approves them by hand, so the
         # wait loops must not treat them as a workflow stuck on an approval nobody

@@ -2,10 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
+    "composite": true,
     "paths": {
       "@/*": ["./*"]
     }
   },
-  "include": ["./src/**/*"],
+  "include": ["./src/**/*", "./generated/**/*.json"],
   "exclude": ["./node_modules", "./dist", "./test"]
 }

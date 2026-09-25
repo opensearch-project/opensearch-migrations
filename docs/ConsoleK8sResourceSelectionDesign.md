@@ -11,7 +11,7 @@ mapping rules over the raw user workflow config:
 
 - first source cluster from `sourceClusters`
 - first target cluster from `targetClusters`
-- zero or one Kafka cluster inferred from `kafkaClusterConfiguration` and
+- zero or one Kafka cluster inferred from `traffic.kafkaClusters` and
   `traffic.proxies`
 - a single source proxy inferred from `traffic.proxies`
 
@@ -302,7 +302,7 @@ No Kafka configured:
 
 ```text
 Error: No Kafka cluster is configured for this deployment.
-Configure kafkaClusterConfiguration and traffic.proxies, or deploy a KafkaCluster resource first.
+Configure traffic.kafkaClusters and traffic.proxies, or deploy a KafkaCluster resource first.
 ```
 
 Ambiguous source:

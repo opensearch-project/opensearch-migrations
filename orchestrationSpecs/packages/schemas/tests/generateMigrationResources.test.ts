@@ -93,6 +93,8 @@ describe("generated migration resources", () => {
     test("preserves stricter invariants alongside gated checks", () => {
         expect(vaps).toContain("object.spec.partitions >= oldObject.spec.partitions");
         expect(vaps).toContain("Gated changes detected on CapturedTraffic fields: partitions, replicas, topicConfig");
+        expect(vaps).not.toContain("Impossible: partitions cannot be changed");
+        expect(vaps).not.toContain("Impossible: replicas cannot be changed");
     });
 
     test("generates lifecycle guard policies from resource projections", () => {

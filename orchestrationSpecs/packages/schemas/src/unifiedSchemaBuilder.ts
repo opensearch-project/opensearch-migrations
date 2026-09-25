@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import childProcess from "node:child_process";
-import {OVERALL_MIGRATION_CONFIG} from "./userSchemas";
+import {
+    DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
+    OVERALL_MIGRATION_CONFIG,
+} from "./userSchemas";
 import {zodSchemaToJsonSchema} from "./getSchemaFromZod";
 import {injectKafkaBrokerConfigSchema} from "./kafkaBrokerConfigSchema";
 
@@ -50,12 +53,20 @@ function clone<T>(value: T): T {
 }
 
 function getAutoCreateProperties(schema: any): Record<string, unknown> {
-    const kafkaClusterBranches = schema.properties.kafkaClusterConfiguration.additionalProperties.anyOf;
+    const kafkaClusterBranches = schema.properties.traffic.properties.kafkaClusters.additionalProperties.anyOf;
     const autoCreateBranch = kafkaClusterBranches.find((branch: any) => branch.properties?.autoCreate);
     if (!autoCreateBranch) {
         throw new Error("Kafka cluster configuration schema is missing an autoCreate branch");
     }
     return autoCreateBranch.properties.autoCreate.properties;
+}
+
+function getTopicDefinitionSchemas(schema: any): any[] {
+    const kafkaClusterBranches = schema.properties.traffic.properties.kafkaClusters.additionalProperties.anyOf;
+    return kafkaClusterBranches.flatMap((branch: any) => {
+        const topicDefinition = branch.properties?.topics?.additionalProperties;
+        return topicDefinition ? [topicDefinition] : [];
+    });
 }
 
 function addSchemaMetadata(schema: Record<string, unknown>, mode: UnifiedSchemaMode, detail: string) {
@@ -135,6 +146,82 @@ function makeSchemaPartial(value: unknown): unknown {
     return updated;
 }
 
+function workflowTopicSpecSchema(topicSpec: unknown): unknown {
+    const schema = makeSchemaPartial(rewriteRefs(topicSpec)) as any;
+    if (!schema?.properties || typeof schema.properties !== "object") {
+        return schema;
+    }
+    delete schema.properties.topicName;
+
+    for (const property of Object.values(schema.properties)) {
+        if (property && typeof property === "object") {
+            (property as Record<string, unknown>)["x-expert"] = true;
+        }
+    }
+
+    const ownedCountFields = {
+        partitions: {
+            defaultValue: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.partitions,
+            description: "Number of partitions for the topic. This can be increased after deployment but cannot be decreased.",
+            defaultDescription: "New topics use one partition unless this value is overridden.",
+        },
+        replicas: {
+            defaultValue: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.replicas,
+            description: "Replication factor for the topic. Changes to a deployed topic require approval.",
+            defaultDescription: "New topics use three replicas unless this value is overridden.",
+        },
+    } as const;
+
+    for (const [field, metadata] of Object.entries(ownedCountFields)) {
+        const importedProperty = schema.properties[field];
+        const property = (
+            importedProperty && typeof importedProperty === "object"
+                ? importedProperty
+                : {}
+        ) as Record<string, unknown>;
+        property.type = "integer";
+        property.minimum = Math.max(
+            1,
+            typeof property.minimum === "number" ? property.minimum : 1,
+        );
+        property.default = metadata.defaultValue;
+        property.description = metadata.description;
+        property["x-effective-default"] = {
+            label: String(metadata.defaultValue),
+            value: metadata.defaultValue,
+            description: metadata.defaultDescription,
+        };
+        property["x-essential"] = true;
+        delete property["x-expert"];
+        schema.properties[field] = property;
+    }
+    return schema;
+}
+
+function resolveTopLevelComponentReference(
+    schemaNode: unknown,
+    definitions: Record<string, unknown>,
+): unknown {
+    let current = schemaNode;
+    const visited = new Set<string>();
+    while (
+        current
+        && typeof current === "object"
+        && typeof (current as any).$ref === "string"
+        && (current as any).$ref.startsWith("#/components/schemas/")
+    ) {
+        const definitionName = (current as any).$ref.substring(
+            "#/components/schemas/".length,
+        );
+        if (visited.has(definitionName) || !definitions[definitionName]) {
+            break;
+        }
+        visited.add(definitionName);
+        current = definitions[definitionName];
+    }
+    return current;
+}
+
 function collectReferencedDefinitionNames(value: unknown, target = new Set<string>()) {
     if (Array.isArray(value)) {
         value.forEach(v => collectReferencedDefinitionNames(v, target));
@@ -198,7 +285,9 @@ function extractStrimziDefsFromOpenApi(openApi: any) {
     }
     defs.StrimziKafkaSpec = makeSchemaPartial(rewriteRefs(kafkaSpec));
     defs.StrimziKafkaNodePoolSpec = makeSchemaPartial(rewriteRefs(nodePoolSpec));
-    defs.StrimziKafkaTopicSpec = makeSchemaPartial(rewriteRefs(topicSpec));
+    defs.StrimziKafkaTopicSpec = workflowTopicSpecSchema(
+        resolveTopLevelComponentReference(topicSpec, definitions),
+    );
     return defs;
 }
 
@@ -214,15 +303,19 @@ function injectStrimziRefs(schema: Record<string, unknown>, defs: Record<string,
     autoCreateProps.clusterSpecOverrides = {
         $ref: "#/$defs/StrimziKafkaSpec",
         description: "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource.",
+        "x-expert": true,
     };
     autoCreateProps.nodePoolSpecOverrides = {
         $ref: "#/$defs/StrimziKafkaNodePoolSpec",
         description: "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource.",
+        "x-expert": true,
     };
-    autoCreateProps.topicSpecOverrides = {
-        $ref: "#/$defs/StrimziKafkaTopicSpec",
-        description: "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics.",
-    };
+    for (const topicDefinition of getTopicDefinitionSchemas(enriched)) {
+        topicDefinition.properties.specOverrides = {
+            $ref: "#/$defs/StrimziKafkaTopicSpec",
+            description: "Kafka topic settings merged into the generated Strimzi KafkaTopic.spec. Partition and replica counts are common settings; additional Strimzi fields are available in expert mode.",
+        };
+    }
     return enriched;
 }
 
@@ -264,7 +357,7 @@ function readStrimziOpenApiFromCluster() {
         "get",
         "--raw",
         STRIMZI_OPENAPI_API_PATH,
-    ], {encoding: "utf-8"});
+    ], {encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"]});
     return JSON.parse(output);
 }
 

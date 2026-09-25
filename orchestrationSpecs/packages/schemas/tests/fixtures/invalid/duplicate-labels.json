@@ -7,25 +7,34 @@
         "snapshots": {
           "snap1": {
             "repoName": "",
-            "config": { "externallyManagedSnapshotName": "snap1" }
+            "config": {
+              "externallyManagedSnapshotName": "snap1"
+            }
           }
         }
       }
     }
   },
   "targetClusters": {
-    "target": { "endpoint": "http://target:9200" }
+    "target": {
+      "endpoint": "http://target:9200"
+    }
   },
   "snapshotMigrationConfigs": [
     {
       "fromSource": "source",
       "toTarget": "target",
-      "perSnapshotConfig": {
-        "snap1": [
-          { "label": "dup", "documentBackfillConfig": {} },
-          { "label": "dup", "metadataMigrationConfig": {} }
-        ]
-      }
+      "fromSnapshot": "snap1",
+      "slices": [
+        {
+          "label": "dup",
+          "documentBackfillConfig": {}
+        },
+        {
+          "label": "dup",
+          "metadataMigrationConfig": {}
+        }
+      ]
     }
   ]
 }

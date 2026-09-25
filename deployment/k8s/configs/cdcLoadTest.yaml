@@ -40,14 +40,18 @@ targetClusters:
         secretName: target-creds
     # auth-end
 
-# An auto-created Strimzi cluster. Swap in an `existing:` block to point at a Kafka you already run.
-kafkaClusterConfiguration:
-  default:
-    autoCreate: {}
-
 traffic:
+  # An auto-created Strimzi cluster. Swap in an `existing:` block to point at Kafka you already run.
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture-proxy: {}
+
   proxies:
     capture-proxy:
+      kafka: default
+      kafkaTopic: capture-proxy
       source: source1
       proxyConfig:
         listenPort: 9201

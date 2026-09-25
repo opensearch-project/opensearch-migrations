@@ -58,11 +58,14 @@ allprojects {
 
 def commonExclusions = ['.gradle/**',
                         '**/build/**',
-                        '**/TrafficCapture/SolrTransformations/transforms/dist/**',
+                        '**/.gradle/**',
+                        '**/dist/**',
                         '**/node_modules/**',
                         '**/opensearch-cluster-cdk/**',
                         '**/cdk.out/**',
                         '**/cdk.out-minified/**',
+                        'migrationConsole/web/openapi.json',
+                        'migrationConsole/web/src/api/schema.generated.ts',
                         '**/transformation/standardJavascriptTransforms/node_modules/**']
 spotless {
     format 'misc', {

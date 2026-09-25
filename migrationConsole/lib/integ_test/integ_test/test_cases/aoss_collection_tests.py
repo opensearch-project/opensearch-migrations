@@ -159,17 +159,15 @@ def build_aoss_migration_config(
         for target_name in AOSS_COLLECTIONS
     }
     snapshot_migrations = []
-    for target_name, collection in AOSS_COLLECTIONS.items():
+    for slice_number, (target_name, collection) in enumerate(AOSS_COLLECTIONS.items()):
         indices = collection["expected_indices"]
         snapshot_migrations.append({
             "fromSource": "source",
             "toTarget": target_name,
-            "perSnapshotConfig": {
-                snapshot_name: [{
-                    "metadataMigrationConfig": {"indexAllowlist": indices},
-                    "documentBackfillConfig": {"indexAllowlist": indices},
-                }]
-            },
+            "fromSnapshot": snapshot_name,
+            "slice": f"slice-{slice_number}",
+            "metadataMigrationConfig": {"indexAllowlist": indices},
+            "documentBackfillConfig": {"indexAllowlist": indices},
         })
 
     return {

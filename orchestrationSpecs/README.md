@@ -65,14 +65,14 @@ The migration config is validated against a single unified JSON Schema.  That
 schema starts with the orchestration config shape from
 `packages/schemas/src/userSchemas.ts`, then splices in selected Strimzi schema
 fragments for the Kafka pass-through sections under
-`kafkaClusterConfiguration.<name>.autoCreate`.
+`traffic.kafkaClusters.<name>`.
 
 The merge intentionally pulls in only Strimzi `spec` fragments that users are
 allowed to control:
 
 - `Kafka.spec` via `clusterSpecOverrides`
 - `KafkaNodePool.spec` via `nodePoolSpecOverrides`
-- `KafkaTopic.spec` via `topicSpecOverrides`
+- `KafkaTopic.spec` via `topics.<topic>.specOverrides`
 
 The workflow still owns names, labels, annotations, and connectivity/auth
 requirements that the proxy, replayer, and console components depend on.  The
@@ -95,7 +95,11 @@ At a high level it does the following:
 4. Re-homes those definitions under the unified schema's `$defs`.
 5. Rewrites the orchestration config properties for the Kafka pass-through
    sections so that they reference those Strimzi-derived definitions.
-6. Emits one JSON Schema artifact that tools, editors, agents, and runtime
+6. Overlays workflow-owned metadata for common topic settings: `partitions`
+   and `replicas` remain Strimzi-compatible, but expose positive-integer
+   constraints and the workflow defaults (`1` and `3`) without expert mode.
+   Other `KafkaTopic.spec` fields remain expert settings.
+7. Emits one JSON Schema artifact that tools, editors, agents, and runtime
    validation can all use.
 
 That builder is exposed through:
@@ -229,10 +233,11 @@ targetClusters:
 
 ### Kafka Settings
 
-`kafkaClusterConfiguration.<cluster>.autoCreate` is intended to behave like the
-other compound resource settings in migration config: the workflow provides
-baseline defaults, the user specifies only the Kafka settings they care about,
-and the final Kafka configuration is a deep merge of defaults plus overrides.
+`traffic.kafkaClusters.<cluster>` explicitly declares a Kafka cluster and its
+topics. The `autoCreate` block behaves like the other compound resource
+settings in migration config: the workflow provides baseline defaults, the
+user specifies only the Kafka settings they care about, and the final Kafka
+configuration is a deep merge of defaults plus overrides.
 
 The baseline model is intended to track Strimzi `0.50`.  The primary user
 inputs are:
@@ -240,7 +245,7 @@ inputs are:
 - `auth` for the workflow-owned managed Kafka auth contract
 - `clusterSpecOverrides` for `Kafka.spec`
 - `nodePoolSpecOverrides` for `KafkaNodePool.spec`
-- `topicSpecOverrides` for `KafkaTopic.spec`
+- `topics.<topic>.specOverrides` for each `KafkaTopic.spec`
 
 These sections are validated by the unified JSON Schema after defaults and user
 overrides are merged.  The preferred schema uses Strimzi-derived definitions
@@ -249,7 +254,7 @@ resource names and Kafka access contract.  In particular, workflow-managed
 listeners, auth wiring, and other invariants may be overwritten so that proxy,
 replayer, and console connectivity remains stable.
 
-For `kafkaClusterConfiguration.<cluster>.existing`, the user should provide the
+For `traffic.kafkaClusters.<cluster>.existing`, the user should provide the
 explicit connection and auth material that migration applications must use.  In
 particular, existing Kafka clusters should use an explicit auth block rather
 than relying on the workflow to infer secret names.

@@ -242,37 +242,46 @@ spec:
               | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
             ')
 
-            # Build perSnapshotConfig: snapshot/backup label -> migrations array
-            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '
+            # Bind each migration to its snapshot/backup and assign a stable slice name.
+            SNAPSHOT_MIGRATIONS=$(echo "$SOURCE_CONFIGS" | jq '
               .[0]["snapshot-and-migration-configs"][0] as $smc |
               ($smc.snapshotConfig.snapshotLabel // "testsnapshot") as $snapLabel |
-              if ($smc.snapshotConfig.solrBackupConfig.externalBackupName // null) != null then
-                {($smc.snapshotConfig.solrBackupConfig.externalBackupName): $smc.migrations}
-              elif ($smc.snapshotConfig.solrBackupConfig // null) != null then
-                {($snapLabel): $smc.migrations}
-              elif ($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) != null then
-                {($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName): $smc.migrations}
-              else
-                {($snapLabel): $smc.migrations}
-              end
+              (
+                if ($smc.snapshotConfig.solrBackupConfig.externalBackupName // null) != null then
+                  $smc.snapshotConfig.solrBackupConfig.externalBackupName
+                elif ($smc.snapshotConfig.solrBackupConfig // null) != null then
+                  $snapLabel
+                elif ($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) != null then
+                  $smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName
+                else
+                  $snapLabel
+                end
+              ) as $fromSnapshot |
+              $smc.migrations
+              | to_entries
+              | map(
+                  (.value | del(.label))
+                  + {
+                    "fromSource": "source1",
+                    "toTarget": "target1",
+                    "fromSnapshot": $fromSnapshot,
+                    "slice": ("slice-" + (.key | tostring))
+                  }
+                )
             ')
 
             # Build the complete OVERALL_MIGRATION_CONFIG
             MIGRATION_CONFIG=$(jq -n \
               --argjson sources "$SOURCE_CLUSTERS" \
               --argjson target "$TARGET_TRANSFORMED" \
-              --argjson snapshotConfigs "$SNAPSHOT_CONFIGS" \
+              --argjson snapshotMigrations "$SNAPSHOT_MIGRATIONS" \
               '{
                 "skipApprovals": true,
                 "sourceClusters": $sources,
                 "targetClusters": {
                   "target1": $target
                 },
-                "snapshotMigrationConfigs": [{
-                  "fromSource": "source1",
-                  "toTarget": "target1",
-                  "perSnapshotConfig": $snapshotConfigs
-                }]
+                "snapshotMigrationConfigs": $snapshotMigrations
               }')
 
             MIGRATION_CONFIG_BASE64=$(echo "$MIGRATION_CONFIG" | base64 | tr -d '\n')

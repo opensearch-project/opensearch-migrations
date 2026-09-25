@@ -54,37 +54,21 @@ instructions [here](https://kind.sigs.k8s.io/docs/user/quick-start/).
 kind --version
 ```
 
-## Build the Docker images
+## Build and deploy the local environment
 
 Since we are building from source here, we will need to build the necessary Docker images for the Migration Assistant
-that our K8s containers will utilize. The `kindTesting.sh` script handles kind setup, image builds (via BuildKit),
-and deployment all-in-one:
+that our K8s containers will utilize. From `deployment/k8s`, the `kindTesting.sh` script handles kind setup, image builds
+(via BuildKit), and deployment of both the Migration Assistant (`ma`) and source/target test clusters (`tc`):
 
 ```shell
 ./kindTesting.sh
 ```
 
-## Deploy the Migration Assistant Helm chart
-
-This will deploy our main Migration Assistant Helm chart which will create the needed resources to perform the Migration
-Assistant suite of migration tooling
+Confirm both releases and their pods are ready:
 
 ```shell
-helm install ma -n ma charts/aggregates/migrationAssistantWithArgo \
-  --create-namespace \
-  -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
-```
-
-To see all helm deployments for this namespace
-
-```shell
-helm -n ma list
-```
-
-To view the pods that were created and are initializing
-
-```shell
-kubectl -n ma get pods
+helm --kube-context kind-ma -n ma list
+kubectl --context kind-ma -n ma get pods
 ```
 
 ## Access the Migration Console
@@ -92,7 +76,24 @@ kubectl -n ma get pods
 Open a shell to the Migration Console pod
 
 ```shell
-kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
+kubectl --context kind-ma -n ma exec --stdin --tty migration-console-0 -- /bin/bash
+```
+
+## Access the Workflow Web UI
+
+The migration-console image includes the FastAPI server and compiled frontend. Start
+the server in the pod and keep its port-forward open:
+
+```shell
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh start
+```
+
+Open `http://127.0.0.1:8000`. Only this port is required on the host. To diagnose the
+server from another terminal:
+
+```shell
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh status
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh logs
 ```
 
 ## Cleanup
