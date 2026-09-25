@@ -412,6 +412,11 @@ public final class ReplayIntakeOwner {
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
     // CapturedTrafficToHttpTransactionAccumulator.accept -> ReplayIntakeOwner.applyRecord
     // REBUILD-TRACE-END(G5,target)
+    // REBUILD-TRACE-START(G6,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // CapturedTrafficToHttpTransactionAccumulator.addObservationToAccumulation(
+    //     Accumulation,ITrafficStreamKey,TrafficObservation,KafkaRecordId) ->
+    //     ReplayIntakeOwner.applyRecord
+    // REBUILD-TRACE-END(G6,target)
     private boolean applyRecord(PartitionIntakeState state, ApplicationKafkaRecord record) {
         // 1. Validate that its generation is active for application.
         // REBUILD-LIMBO-NOTE(G8): §15 cancellation state extends this check beyond identity equality: a

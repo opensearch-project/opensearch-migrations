@@ -119,6 +119,13 @@ class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHash
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G6,source): retain through the rebuild; remove in final pre-merge cleanup.
+// ExpiringKeyQueue.expireItemsBefore -> PartitionIntakeState.expireConnectionsForWriter
+// REBUILD-TRACE-END(G6,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private int expireItemsBefore(
         AccumulatorMap connectionAccumulatorMap,
         BehavioralPolicy behavioralPolicy,

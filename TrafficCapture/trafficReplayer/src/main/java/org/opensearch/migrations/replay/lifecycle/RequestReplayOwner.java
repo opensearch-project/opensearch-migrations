@@ -1031,6 +1031,12 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     // RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.applyRetryDecision
     // RequestTransformerAndSender.getRetryCheckVisitor -> RequestReplayOwner.applyRetryDecision
     // REBUILD-TRACE-END(G5,target)
+    // REBUILD-TRACE-START(G6,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // DefaultRetry.shouldRetry(
+    //     ByteBuf,List<AggregatedRawResponse>,AggregatedRawResponse,
+    //     TrackedFuture<String,? extends IRequestResponsePacketPair>) ->
+    //     RequestReplayOwner.applyRetryDecision
+    // REBUILD-TRACE-END(G6,target)
     private void applyRetryDecision(
         TargetAttemptOutcome.TargetResponseObtained<R> response
     ) {
