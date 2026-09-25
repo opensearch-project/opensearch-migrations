@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
@@ -1216,6 +1217,15 @@ class SourceReconstructionTest {
 
         @Override
         public void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId) {}
+
+        @Override
+        public void onGracefulGenerationCancellation(
+            ConnectionProcessingId connectionProcessingId,
+            CancellationGrace grace
+        ) {}
+
+        @Override
+        public void onForceGenerationCancellation(ConnectionProcessingId connectionProcessingId) {}
 
         @Override
         public void onCapturedConnectionExpired(ConnectionProcessingId connectionProcessingId) {

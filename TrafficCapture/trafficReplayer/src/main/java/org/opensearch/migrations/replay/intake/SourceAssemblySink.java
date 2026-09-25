@@ -11,6 +11,7 @@ package org.opensearch.migrations.replay.intake;
 import java.time.Instant;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -138,6 +139,15 @@ public interface SourceAssemblySink {
      * possible fresh reconstruction ({@code §10.3}).
      */
     default void onCapturedConnectionExpired(ConnectionProcessingId connectionProcessingId) {}
+
+    /** Delivers partition-generation grace to one published connection owner. */
+    void onGracefulGenerationCancellation(
+        ConnectionProcessingId connectionProcessingId,
+        CancellationGrace grace
+    );
+
+    /** Delivers forced revocation cleanup to one published connection owner. */
+    void onForceGenerationCancellation(ConnectionProcessingId connectionProcessingId);
 
     /**
      * Replay intake handled the matching owner's terminal completion and removed its source-side lifetime.

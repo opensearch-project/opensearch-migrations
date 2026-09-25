@@ -21,6 +21,7 @@ import java.util.Set;
 import java.util.function.LongSupplier;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
@@ -81,6 +82,11 @@ public final class KafkaSourceOwner {
         );
     }
 
+    @FunctionalInterface
+    public interface ProtocolViolationHandler {
+        void begin(KafkaSourceInput.CaptureProtocolViolationDetected violation);
+    }
+
     private final KafkaSourcePort port;
     private final KafkaSourceInputQueue sourceInputs;
     private final ReplayIntakeInputQueue intakeInputs;
@@ -90,6 +96,7 @@ public final class KafkaSourceOwner {
     private final GraceIntervalWait graceWait;
     private final Metrics metrics;
     private final RecordContextFactory recordContextFactory;
+    private final ProtocolViolationHandler protocolViolationHandler;
 
     private final Map<TopicPartition, PartitionSourceState> partitions = new LinkedHashMap<>();
     private final Map<KafkaRecordId, IReplayContexts.IKafkaRecordContext> recordContexts =
@@ -116,6 +123,9 @@ public final class KafkaSourceOwner {
      */
     private final Map<TopicPartition, Set<PartitionGenerationId>> cleanupOutstanding = new LinkedHashMap<>();
     private long nextGenerationSequence;
+    private boolean orderlyShutdownStarted;
+    private boolean orderlyShutdownClosed;
+    private boolean protocolViolationDetected;
 
     public KafkaSourceOwner(
         KafkaSourcePort port,
@@ -135,7 +145,10 @@ public final class KafkaSourceOwner {
             monotonicNanos,
             graceWait,
             Metrics.NOOP,
-            RecordContextFactory.NONE
+            RecordContextFactory.NONE,
+            violation -> {
+                throw new CaptureProtocolViolation(violation);
+            }
         );
     }
 
@@ -158,7 +171,10 @@ public final class KafkaSourceOwner {
             monotonicNanos,
             graceWait,
             metrics,
-            RecordContextFactory.NONE
+            RecordContextFactory.NONE,
+            violation -> {
+                throw new CaptureProtocolViolation(violation);
+            }
         );
     }
 
@@ -173,6 +189,34 @@ public final class KafkaSourceOwner {
         Metrics metrics,
         RecordContextFactory recordContextFactory
     ) {
+        this(
+            port,
+            sourceInputs,
+            intakeInputs,
+            wakeupController,
+            cancellationGrace,
+            monotonicNanos,
+            graceWait,
+            metrics,
+            recordContextFactory,
+            violation -> {
+                throw new CaptureProtocolViolation(violation);
+            }
+        );
+    }
+
+    public KafkaSourceOwner(
+        KafkaSourcePort port,
+        KafkaSourceInputQueue sourceInputs,
+        ReplayIntakeInputQueue intakeInputs,
+        WakeupController wakeupController,
+        Duration cancellationGrace,
+        LongSupplier monotonicNanos,
+        GraceIntervalWait graceWait,
+        Metrics metrics,
+        RecordContextFactory recordContextFactory,
+        ProtocolViolationHandler protocolViolationHandler
+    ) {
         this.port = Objects.requireNonNull(port, "port");
         this.sourceInputs = Objects.requireNonNull(sourceInputs, "sourceInputs");
         this.intakeInputs = Objects.requireNonNull(intakeInputs, "intakeInputs");
@@ -184,6 +228,10 @@ public final class KafkaSourceOwner {
         this.recordContextFactory = Objects.requireNonNull(
             recordContextFactory,
             "recordContextFactory"
+        );
+        this.protocolViolationHandler = Objects.requireNonNull(
+            protocolViolationHandler,
+            "protocolViolationHandler"
         );
         if (cancellationGrace.isNegative()) {
             throw new IllegalArgumentException("cancellationGrace must not be negative");
@@ -200,6 +248,52 @@ public final class KafkaSourceOwner {
         submitLoopCommitIfEligible();
         applyPauseAndResumeDecisions();
         pollAndDeliver();
+    }
+
+    /**
+     * Begins host-bounded orderly shutdown while retaining Kafka ownership long enough to commit drained work.
+     */
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerTopLevel.shutdown(Error) -> KafkaSourceOwner.beginOrderlyShutdown
+    // REBUILD-TRACE-END(G8,target)
+    public void beginOrderlyShutdown() {
+        if (orderlyShutdownStarted) {
+            return;
+        }
+        orderlyShutdownStarted = true;
+        for (var state : partitions.values()) {
+            state.endIntake();
+            cleanupOutstanding
+                .computeIfAbsent(state.topicPartition(), ignored -> new LinkedHashSet<>())
+                .add(state.generation());
+            submitRequired(new ReplayIntakeInput.GracefulGenerationCancellation(
+                state.generation(),
+                CancellationGrace.Shutdown.INSTANCE
+            ));
+        }
+        applyPauseAndResumeDecisions();
+    }
+
+    public boolean isOrderlyShutdownReadyToClose() {
+        return orderlyShutdownStarted
+            && cleanupOutstanding.isEmpty()
+            && sourceInputs.isEmpty()
+            && stagedCommitPositions.isEmpty()
+            && inFlightCommitOperation == null;
+    }
+
+    public void closeAfterOrderlyShutdown() {
+        if (orderlyShutdownClosed) {
+            return;
+        }
+        if (!isOrderlyShutdownReadyToClose()) {
+            throw new IllegalStateException("orderly shutdown has not drained");
+        }
+        for (var topicPartition : List.copyOf(partitions.keySet())) {
+            retireGeneration(topicPartition, false);
+        }
+        port.close();
+        orderlyShutdownClosed = true;
     }
 
     // ---------------------------------------------------------------- queued source inputs
@@ -296,6 +390,9 @@ public final class KafkaSourceOwner {
     }
 
     private void applyProtocolViolation(KafkaSourceInput.CaptureProtocolViolationDetected violation) {
+        protocolViolationDetected = true;
+        partitions.values().forEach(PartitionSourceState::endIntake);
+        applyPauseAndResumeDecisions();
         // Blocks commits at and past the violating offset so a restart stops at the same record rather than
         // skipping it. Ending intake is what stops later records being admitted.
         currentStateFor(violation.generation()).ifPresent(state -> {
@@ -311,9 +408,9 @@ public final class KafkaSourceOwner {
             // RecordProcessingFinished advances the prefix. Preserve that valid progress; the ineligible entry
             // remains in the deque and blocks every position at or beyond itself.
         });
-        // An already-retired generation has no commit state left to classify. Preserve the same bounded
-        // protocol-fatal path as an active generation without mutating a successor generation's accounting.
-        throw new CaptureProtocolViolation(violation);
+        // An already-retired generation has no commit state left to classify. It still begins the same bounded
+        // protocol-fatal path without mutating a successor generation's accounting.
+        protocolViolationHandler.begin(violation);
     }
 
     private void stageCommitPosition(TopicPartition topicPartition, long nextPosition) {
@@ -527,7 +624,7 @@ public final class KafkaSourceOwner {
      */
     private boolean stillOwnsForCommit(TopicPartition topicPartition) {
         var state = partitions.get(topicPartition);
-        return state != null && state.lifecycleAllowsIntake();
+        return state != null && (state.lifecycleAllowsIntake() || orderlyShutdownStarted);
     }
 
     // ---------------------------------------------------------------- pause and resume
@@ -647,6 +744,9 @@ public final class KafkaSourceOwner {
     private void beginGeneration(TopicPartition topicPartition) {
         var generation = new PartitionGenerationId(topicPartition, nextGenerationSequence++);
         var state = new PartitionSourceState(generation);
+        if (protocolViolationDetected) {
+            state.endIntake();
+        }
         // A newly assigned generation cannot reuse mutable state from the previous one, so both the state and
         // the commit queue are replaced rather than reset (kafkaLLD §5.2).
         partitions.put(topicPartition, state);
@@ -700,7 +800,10 @@ public final class KafkaSourceOwner {
             var deadlineNanos = monotonicNanos.getAsLong() + cancellationGrace.toNanos();
             var deadline = new CancellationDeadline(deadlineNanos);
             generations.forEach(generation -> submitRequired(
-                new ReplayIntakeInput.GracefulGenerationCancellation(generation, deadline)
+                new ReplayIntakeInput.GracefulGenerationCancellation(
+                    generation,
+                    new CancellationGrace.Revocation(deadline)
+                )
             ));
 
             wakeupController.recordGraceWaitEnded(
@@ -730,6 +833,10 @@ public final class KafkaSourceOwner {
      * committed nothing, which is precisely the case it exists to reveal ({@code procCommit §9.5}).
      */
     private void retireGeneration(TopicPartition topicPartition) {
+        retireGeneration(topicPartition, true);
+    }
+
+    private void retireGeneration(TopicPartition topicPartition, boolean recordRebalanceRetirement) {
         var state = partitions.remove(topicPartition);
         // The old generation must not go on offering a commit: kafkaLLD §5.7 has it neither retrying nor
         // waiting, with the next assigned position deciding redelivery instead.
@@ -761,11 +868,13 @@ public final class KafkaSourceOwner {
             .addArgument(state::recordsRead)
             .addArgument(state::commitUncertainty)
             .log();
-        wakeupController.recordGenerationRetired(
-            state.generation().toString(),
-            state.recordsCommitted(),
-            state.recordsRead()
-        );
+        if (recordRebalanceRetirement) {
+            wakeupController.recordGenerationRetired(
+                state.generation().toString(),
+                state.recordsCommitted(),
+                state.recordsRead()
+            );
+        }
     }
 
     private void recordRetirementConservation(
@@ -1019,9 +1128,6 @@ public final class KafkaSourceOwner {
      * licenses {@code onPartitionsRevoked} to return and discard the generation's state — intake would then
      * never learn the generation ended.
      *
-     * <p>Thrown rather than routed to an injected handler, matching {@link CaptureProtocolViolation}: the
-     * supervisor and the fatal ladder are {@code G9}'s, and a second escalation mechanism here would be a
-     * temporary concept in the core model.
      */
     private void submitRequired(ReplayIntakeInput input) {
         if (!intakeInputs.submit(input)) {

@@ -169,10 +169,54 @@ class TupleWriterTest {
         contexts.close();
     }
 
+    @Test
+    void graceFlushesOnEntryAndImmediatelyAfterEachAcceptedTuple() {
+        var contexts = new ContextFixture();
+        var clock = new FakeClock();
+        var eventLoop = new TestEventLoop(clock);
+        var sink = new ScriptedSink();
+        var fatalFailures = new ArrayList<Error>();
+        var writer = new TupleWriter<>(
+            eventLoop,
+            clock,
+            Duration.ZERO,
+            sink,
+            ignored -> {},
+            fatalFailures::add,
+            OutstandingOperationRegistry.CountHook.NOOP
+        );
+
+        writer.enterGrace();
+        eventLoop.runUntilIdle();
+        Assertions.assertEquals(1, sink.flushes.get(), "grace entry must flush buffered tuples");
+        writer.enterGrace();
+        eventLoop.runUntilIdle();
+        Assertions.assertEquals(1, sink.flushes.get(), "duplicate grace entry must not flush again");
+
+        var write = writer.write(new TupleWriter.WriteTuple<>(contexts.tuple, "tuple"));
+        eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(1, sink.writes.get());
+        Assertions.assertEquals(
+            2,
+            sink.flushes.get(),
+            "an accepted tuple must be flushed immediately while grace is active"
+        );
+        sink.durableNext();
+        eventLoop.runUntilIdle();
+        Assertions.assertInstanceOf(
+            TupleWriter.TupleDurable.class,
+            write.completion().toCompletableFuture().join()
+        );
+        Assertions.assertTrue(fatalFailures.isEmpty());
+        contexts.close();
+    }
+
     private static final class ScriptedSink
         implements TupleWriter.PhysicalTupleSink<String> {
 
         private final AtomicInteger writes = new AtomicInteger();
+        private final AtomicInteger flushes = new AtomicInteger();
         private final Queue<CompletableFuture<Void>> completions = new ArrayDeque<>();
 
         @Override
@@ -184,6 +228,11 @@ class TupleWriterTest {
             var completion = new CompletableFuture<Void>();
             completions.add(completion);
             return completion;
+        }
+
+        @Override
+        public void flush() {
+            flushes.incrementAndGet();
         }
 
         void failNext() {

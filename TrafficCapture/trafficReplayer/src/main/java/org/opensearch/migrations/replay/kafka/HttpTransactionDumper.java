@@ -12,6 +12,7 @@ import java.io.PrintStream;
 import java.time.Instant;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.intake.SourceAssemblySink;
@@ -125,6 +126,19 @@ public class HttpTransactionDumper implements SourceAssemblySink {
         out.println(linePrefix
             + buildPrefix(connectionProcessingId, closeTime, closeTime)
             + " CLOSED");
+    }
+
+    @Override
+    public void onGracefulGenerationCancellation(
+        ConnectionProcessingId connectionProcessingId,
+        CancellationGrace grace
+    ) {
+        // Dump modes construct no target-side owner.
+    }
+
+    @Override
+    public void onForceGenerationCancellation(ConnectionProcessingId connectionProcessingId) {
+        // Dump modes construct no target-side owner.
     }
 
     @Override

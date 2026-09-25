@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datahandlers.TransformedPacketReceiver;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.intake.PartitionIntakeState;
@@ -50,6 +51,7 @@ import org.opensearch.migrations.replay.sink.TupleWriter.TupleTransformer;
 import org.opensearch.migrations.replay.sink.TupleSink;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.ProtocolViolationMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -97,6 +99,9 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     }
 
     public interface ManagedPhysicalTupleSink<T> extends PhysicalTupleSink<T>, AutoCloseable {
+        @Override
+        void flush();
+
         @Override
         void close() throws Exception;
     }
@@ -233,6 +238,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     private final ChannelContextManager contextManager;
     private final TargetAttemptPermitProvider permitProvider;
     private final Consumer<Error> fatalHandler;
+    private final ProtocolViolationTerminator protocolViolationTerminator;
     private boolean intakeStarted;
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
@@ -249,6 +255,12 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     ) {
         this.configuration = configuration;
         this.fatalHandler = fatalHandler;
+        this.protocolViolationTerminator = ProtocolViolationTerminator.system(
+            System::exit,
+            new ProtocolViolationMetrics(
+                rootContext.getMeterProvider().get(RootReplayerContext.SCOPE_NAME)
+            )
+        );
         this.contextManager = new ChannelContextManager(rootContext);
         var wakeupController = new WakeupController(consumer::wakeup, rootContext);
         this.sourceInputs = new KafkaSourceInputQueue(wakeupController);
@@ -282,7 +294,11 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             configuration.nanoTime(),
             GraceIntervalWait.blockingOn(sourceInputs, configuration.nanoTime()),
             rootContext.getKafkaCommitStateMetrics(),
-            rootContext::createKafkaRecordContext
+            rootContext::createKafkaRecordContext,
+            violation -> protocolViolationTerminator.begin(
+                violation.recordId(),
+                violation.diagnostic()
+            )
         );
     }
 
@@ -548,19 +564,47 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             }
 
             @Override
+            public void flush() {
+                sink.flush();
+            }
+
+            @Override
             public void close() {
                 sink.close();
             }
         };
     }
 
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerTopLevel.shutdown(Error) -> TrafficReplayerTopLevel.close
+    // REBUILD-TRACE-END(G8,target)
     @Override
     public void close() {
-        sourceInputs.close();
-        if (intakeStarted && intakeInputs.requestStopAfterDraining()) {
-            intakeOwner.termination().toCompletableFuture().join();
-        } else if (!intakeStarted) {
+        if (!intakeStarted) {
+            sourceOwner.beginOrderlyShutdown();
+            sourceOwner.closeAfterOrderlyShutdown();
+            sourceInputs.close();
             intakeInputs.closeNow();
+            closeProtocolViolationTerminator();
+            return;
+        }
+        sourceOwner.beginOrderlyShutdown();
+        while (!sourceOwner.isOrderlyShutdownReadyToClose()) {
+            sourceOwner.runOnce();
+        }
+        if (intakeInputs.requestStopAfterDraining()) {
+            intakeOwner.termination().toCompletableFuture().join();
+        }
+        sourceOwner.closeAfterOrderlyShutdown();
+        sourceInputs.close();
+        closeProtocolViolationTerminator();
+    }
+
+    private void closeProtocolViolationTerminator() {
+        try {
+            protocolViolationTerminator.close();
+        } catch (Exception failure) {
+            fatalHandler.accept(new Error("Failed to close protocol-violation terminator", failure));
         }
     }
 
@@ -894,6 +938,38 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                     HttpMessageAndTimestamp.Request,
                     HttpMessageAndTimestamp.Response
                 >(connectionId, connectionId.generation())
+            );
+        }
+
+        @Override
+        public void onGracefulGenerationCancellation(
+            ConnectionProcessingId connectionId,
+            CancellationGrace grace
+        ) {
+            requireConnection(connectionId).owner.submit(
+                new TargetConnectionOwner.GracefulConnectionCancellation<
+                    HttpMessageAndTimestamp.Request,
+                    HttpMessageAndTimestamp.Response
+                >(
+                    connectionId,
+                    connectionId.generation(),
+                    grace,
+                    new CancellationException("partition generation entered " + grace)
+                )
+            );
+        }
+
+        @Override
+        public void onForceGenerationCancellation(ConnectionProcessingId connectionId) {
+            requireConnection(connectionId).owner.submit(
+                new TargetConnectionOwner.ForceConnectionCancellation<
+                    HttpMessageAndTimestamp.Request,
+                    HttpMessageAndTimestamp.Response
+                >(
+                    connectionId,
+                    connectionId.generation(),
+                    new CancellationException("partition generation force-cancelled")
+                )
             );
         }
 
@@ -1738,6 +1814,15 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerTopLevel.shutdown(Error) -> TrafficReplayerTopLevel.close
+// TrafficReplayerTopLevel.shutdown(Error) -> KafkaSourceOwner.beginOrderlyShutdown
+// Only the inherited orderly-drain slice maps forward; G9 owns fatal supervision and watchdogs.
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G5)
+/*
     @SneakyThrows
     @Override
     public @NonNull CompletableFuture<Void> shutdown(Error error) {

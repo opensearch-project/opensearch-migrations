@@ -47,7 +47,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         PartitionResumed,
         Polled,
         CommitSubmittedAsync,
-        CommitAttempted {}
+        CommitAttempted,
+        SourceClosed {}
 
     public record PartitionPaused(TopicPartition topicPartition) implements Observation {}
 
@@ -68,6 +69,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     public record CommitAttempted(Map<TopicPartition, Long> nextPositions, Duration bound)
         implements Observation {}
 
+    public record SourceClosed() implements Observation {}
+
     private final Set<TopicPartition> assignment = new LinkedHashSet<>();
     private final Set<TopicPartition> paused = new LinkedHashSet<>();
     private final Map<TopicPartition, Long> committedPositions = new LinkedHashMap<>();
@@ -86,6 +89,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private boolean wakeupNextCommitAsyncAfterRegistration;
     private CommitOutcome nextRejectedCommitOutcome;
     private boolean neverResolveAsyncCommits;
+    private boolean closed;
     private java.util.function.Consumer<String> observationListener = call -> {};
 
     /** A rebalance callback can throw, because {@code onPartitionsRevoked} waits and can be interrupted. */
@@ -280,6 +284,12 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     @Override
+    public void close() {
+        closed = true;
+        record(new SourceClosed());
+    }
+
+    @Override
     public Optional<Long> committedPosition(TopicPartition topicPartition) {
         return Optional.ofNullable(committedPositions.get(topicPartition));
     }
@@ -370,6 +380,10 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         return paused.contains(topicPartition);
     }
 
+    public boolean isClosed() {
+        return closed;
+    }
+
     /** One place every call is recorded, so a listener cannot miss one that was added later. */
     private void record(Observation observation) {
         observations.add(observation);
@@ -383,6 +397,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
             case Polled polled -> "poll->" + polled.partitionsReturned();
             case CommitSubmittedAsync commit -> "commitAsync" + commit.nextPositions();
             case CommitAttempted commit -> "commitSync" + commit.nextPositions();
+            case SourceClosed ignored -> "close";
         };
     }
 

@@ -242,7 +242,9 @@ class TargetConnectionOwnerMilestoneTest {
         fixture.owner.submit(new TargetConnectionOwner.GracefulConnectionCancellation<>(
             TargetConnectionOwnerTestSupport.CONNECTION,
             TargetConnectionOwnerTestSupport.GENERATION,
-            new CancellationDeadline(Duration.ofSeconds(10).toNanos()),
+            new org.opensearch.migrations.replay.identity.CancellationGrace.Revocation(
+                new CancellationDeadline(Duration.ofSeconds(10).toNanos())
+            ),
             new CancellationException("partition revoked")
         ));
         fixture.completeSource(13, "source-response");

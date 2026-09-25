@@ -110,6 +110,9 @@ public interface KafkaSourcePort {
      */
     CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound);
 
+    /** Closes the Kafka client after orderly shutdown has drained and resolved its final commits. */
+    void close();
+
     /**
      * The distinctions {@code kafkaLLD §5.7} requires commit handling to keep apart. They describe the
      * <strong>operation</strong>, never individual partitions: the per-partition error codes exist on the wire

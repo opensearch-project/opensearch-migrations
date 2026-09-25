@@ -8,12 +8,15 @@
 
 package org.opensearch.migrations.replay.intake;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
@@ -474,6 +477,213 @@ class RecordAssociationAccumulatorTest {
     }
 
     /**
+     * Refactors the stale-accumulation and interrupted-close regressions onto the typed generation boundary.
+     * Old assembly is removed before a successor can apply the same captured connection identity.
+     */
+    @Test
+    void cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput() {
+        var predecessor = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, read(1, "POST /stale HTTP/1.1\r\nContent-Length: 1\r\n\r\n"))
+        );
+        var predecessorGeneration = predecessor.generation(0);
+        owner.applyOnCallingThread(
+            new ReplayIntakeInput.PartitionGenerationAssigned(predecessorGeneration)
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(predecessorGeneration, 0),
+            predecessor.records()
+        ));
+        Assertions.assertEquals(
+            1,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS
+            )
+        );
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.GracefulGenerationCancellation(
+            predecessorGeneration,
+            new CancellationGrace.Revocation(new CancellationDeadline(Duration.ofSeconds(1).toNanos()))
+        ));
+
+        var afterCleanup = drainSourceInputs();
+        Assertions.assertEquals(
+            1,
+            afterCleanup.stream()
+                .filter(KafkaSourceInput.GenerationCleanupFinished.class::isInstance)
+                .count(),
+            "a generation with no target owner must finish cleanup immediately"
+        );
+        Assertions.assertTrue(
+            afterCleanup.stream().noneMatch(KafkaSourceInput.RecordProcessingFinished.class::isInstance),
+            "discarding cancelled assembly must not manufacture commit authority"
+        );
+        Assertions.assertEquals(
+            0,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS
+            ),
+            "cleanup must return the process-wide tracker gauge to its prior value"
+        );
+
+        var successor = new RecordScript(TOPIC, 1).addTraffic(
+            0,
+            1,
+            Instant.ofEpochMilli(2_000),
+            WRITER,
+            stream(
+                0,
+                read(1, "GET /successor HTTP/1.1\r\n\r\n"),
+                endOfMessage(2)
+            )
+        );
+        owner.applyOnCallingThread(
+            new ReplayIntakeInput.PartitionGenerationAssigned(successor.generation(0))
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(successor.generation(0), 0),
+            successor.records()
+        ));
+
+        Assertions.assertEquals(
+            1,
+            sink.reconstituted.size(),
+            "the successor must reconstruct freshly instead of finding predecessor assembly"
+        );
+        Assertions.assertEquals(
+            successor.generation(0),
+            sink.reconstituted.get(0).connectionProcessingId().generation()
+        );
+    }
+
+    @Test
+    void cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, read(1, "GET / HTTP/1.1\r\n\r\n"), endOfMessage(2))
+        );
+        assignAndApply(script);
+        var generation = script.generation(0);
+        var connection = sink.reconstituted.get(0).connectionProcessingId();
+        Assertions.assertTrue(
+            owner.partitionState(generation).orElseThrow()
+                .lifetimeOf(connection).orElseThrow()
+                .hasConnectionOwner()
+        );
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.GracefulGenerationCancellation(
+            generation,
+            new CancellationGrace.Revocation(new CancellationDeadline(Duration.ofSeconds(1).toNanos()))
+        ));
+        Assertions.assertEquals(List.of(connection), sink.gracefulCancellations);
+        Assertions.assertTrue(
+            drainSourceInputs().stream()
+                .noneMatch(KafkaSourceInput.GenerationCleanupFinished.class::isInstance),
+            "cleanup must wait for the published connection owner"
+        );
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.ForceGenerationCancellation(generation));
+        owner.applyOnCallingThread(new ReplayIntakeInput.ForceGenerationCancellation(generation));
+        Assertions.assertEquals(
+            List.of(connection),
+            sink.forceCancellations,
+            "duplicate force delivery must be inert while owner cleanup is pending"
+        );
+
+        var unrelatedGeneration = new org.opensearch.migrations.replay.identity.PartitionGenerationId(
+            generation.topicPartition(),
+            generation.localSequence() + 1
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.ConnectionCleanupFinished(
+            unrelatedGeneration,
+            connection
+        ));
+        Assertions.assertTrue(
+            drainSourceInputs().stream()
+                .noneMatch(KafkaSourceInput.GenerationCleanupFinished.class::isInstance),
+            "an acknowledgement under another generation cannot settle the predecessor"
+        );
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.ConnectionCleanupFinished(
+            generation,
+            connection
+        ));
+        owner.applyOnCallingThread(new ReplayIntakeInput.ConnectionCleanupFinished(
+            generation,
+            connection
+        ));
+
+        var afterExactAcknowledgement = drainSourceInputs();
+        Assertions.assertEquals(
+            1,
+            afterExactAcknowledgement.stream()
+                .filter(KafkaSourceInput.GenerationCleanupFinished.class::isInstance)
+                .count(),
+            "the exact owner acknowledgement completes its generation once"
+        );
+        Assertions.assertTrue(
+            afterExactAcknowledgement.stream()
+                .noneMatch(KafkaSourceInput.RecordProcessingFinished.class::isInstance),
+            "typed cleanup never authorizes commit"
+        );
+        Assertions.assertEquals(
+            0,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS
+            )
+        );
+    }
+
+    @Test
+    void shutdownGraceUsesOrdinaryConnectionCompletionAndNeverForcesTheGeneration() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, read(1, "GET / HTTP/1.1\r\n\r\n"), endOfMessage(2))
+        );
+        assignAndApply(script);
+        var generation = script.generation(0);
+        var connection = sink.reconstituted.get(0).connectionProcessingId();
+        Assertions.assertTrue(
+            owner.partitionState(generation).orElseThrow()
+                .lifetimeOf(connection).orElseThrow()
+                .hasConnectionOwner()
+        );
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.GracefulGenerationCancellation(
+            generation,
+            CancellationGrace.Shutdown.INSTANCE
+        ));
+        Assertions.assertEquals(List.of(connection), sink.gracefulCancellations);
+        Assertions.assertEquals(List.of(CancellationGrace.Shutdown.INSTANCE), sink.graceModes);
+        Assertions.assertTrue(sink.forceCancellations.isEmpty());
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.ConnectionOwnerFinished(
+            generation,
+            connection
+        ));
+
+        Assertions.assertEquals(
+            1,
+            drainSourceInputs().stream()
+                .filter(KafkaSourceInput.GenerationCleanupFinished.class::isInstance)
+                .count()
+        );
+        Assertions.assertTrue(sink.forceCancellations.isEmpty());
+    }
+
+    /**
      * {@code procCommit §6.1}: a close-only record finishes once source assembly settles it. {@code §9.3}
      * says no connection owner is created merely to process that close when no request was reconstituted.
      */
@@ -562,6 +772,9 @@ class RecordAssociationAccumulatorTest {
         private final List<ReplayRequestId> completeResponses = new ArrayList<>();
         private final List<ReplayRequestId> incompleteResponses = new ArrayList<>();
         private final List<ConnectionProcessingId> closes = new ArrayList<>();
+        private final List<ConnectionProcessingId> gracefulCancellations = new ArrayList<>();
+        private final List<CancellationGrace> graceModes = new ArrayList<>();
+        private final List<ConnectionProcessingId> forceCancellations = new ArrayList<>();
 
         @Override
         public void onRequestReconstituted(
@@ -602,6 +815,20 @@ class RecordAssociationAccumulatorTest {
             Instant closeTime
         ) {
             closes.add(connectionProcessingId);
+        }
+
+        @Override
+        public void onGracefulGenerationCancellation(
+            ConnectionProcessingId connectionProcessingId,
+            CancellationGrace grace
+        ) {
+            gracefulCancellations.add(connectionProcessingId);
+            graceModes.add(grace);
+        }
+
+        @Override
+        public void onForceGenerationCancellation(ConnectionProcessingId connectionProcessingId) {
+            forceCancellations.add(connectionProcessingId);
         }
 
         @Override

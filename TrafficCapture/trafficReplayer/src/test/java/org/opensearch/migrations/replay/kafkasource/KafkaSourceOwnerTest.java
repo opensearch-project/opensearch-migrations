@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
@@ -89,6 +90,22 @@ class KafkaSourceOwnerTest {
         Duration cancellationGrace,
         KafkaSourceOwner.RecordContextFactory recordContextFactory
     ) {
+        return ownerFor(
+            port,
+            cancellationGrace,
+            recordContextFactory,
+            violation -> {
+                throw new KafkaSourceOwner.CaptureProtocolViolation(violation);
+            }
+        );
+    }
+
+    private KafkaSourceOwner ownerFor(
+        PumpedKafkaSource port,
+        Duration cancellationGrace,
+        KafkaSourceOwner.RecordContextFactory recordContextFactory,
+        KafkaSourceOwner.ProtocolViolationHandler protocolViolationHandler
+    ) {
         return new KafkaSourceOwner(
             port,
             sourceInputs,
@@ -119,7 +136,8 @@ class KafkaSourceOwnerTest {
                 return false;
             },
             commitMetrics,
-            recordContextFactory
+            recordContextFactory,
+            protocolViolationHandler
         );
     }
 
@@ -497,6 +515,65 @@ class KafkaSourceOwnerTest {
             drainIntake().stream().filter(ReplayIntakeInput.PartitionRecordBatch.class::isInstance).count(),
             "the previously blocked partition should deliver once cleanup finishes"
         );
+    }
+
+    @Test
+    void orderlyShutdownPausesIntakeCommitsPromptlyAndClosesOnlyAfterCommitResolution() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        drainIntake();
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)
+        ));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+        port.clearHistory();
+
+        owner.beginOrderlyShutdown();
+        owner.beginOrderlyShutdown();
+
+        var shutdownInputs = drainIntake();
+        var graceful = shutdownInputs.stream()
+            .filter(ReplayIntakeInput.GracefulGenerationCancellation.class::isInstance)
+            .map(ReplayIntakeInput.GracefulGenerationCancellation.class::cast)
+            .toList();
+        Assertions.assertEquals(1, graceful.size(), "shutdown grace is submitted once per generation");
+        Assertions.assertSame(CancellationGrace.Shutdown.INSTANCE, graceful.get(0).grace());
+        Assertions.assertTrue(
+            shutdownInputs.stream().noneMatch(ReplayIntakeInput.ForceGenerationCancellation.class::isInstance),
+            "orderly shutdown never sends force cancellation"
+        );
+        Assertions.assertTrue(port.isPaused(PARTITION_0), "shutdown must stop new record intake");
+
+        port.scriptNeverResolveAsyncCommits();
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)
+        ));
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation));
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            port.history().contains("commitAsync{traffic-0=11}"),
+            () -> "the newly eligible prefix must be attempted in the first shutdown iteration: "
+                + port.history()
+        );
+        Assertions.assertFalse(
+            owner.isOrderlyShutdownReadyToClose(),
+            "cleanup alone cannot close Kafka while its final commit is unresolved"
+        );
+        Assertions.assertFalse(port.isClosed());
+
+        port.scriptResolveAsyncCommits();
+        owner.runOnce();
+
+        Assertions.assertTrue(owner.isOrderlyShutdownReadyToClose());
+        owner.closeAfterOrderlyShutdown();
+        Assertions.assertTrue(port.isClosed());
+        Assertions.assertEquals(1, commitMetrics.recordsCommitted);
+        Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
+        commitMetrics.assertConservation();
     }
 
     /**
@@ -1809,7 +1886,13 @@ class KafkaSourceOwnerTest {
     @Test
     void protocolViolationIsCommitIneligibleAndPreservesEarlierStagedProgress() {
         var port = pumpedSource(List.of(PARTITION_0));
-        var owner = ownerFor(port);
+        var violations = new java.util.ArrayList<KafkaSourceInput.CaptureProtocolViolationDetected>();
+        var owner = ownerFor(
+            port,
+            GRACE,
+            KafkaSourceOwner.RecordContextFactory.NONE,
+            violations::add
+        );
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(generation, 1)));
@@ -1823,37 +1906,93 @@ class KafkaSourceOwnerTest {
             "poison"
         ));
 
-        Assertions.assertThrows(KafkaSourceOwner.CaptureProtocolViolation.class, owner::runOnce);
+        owner.runOnce();
 
+        Assertions.assertEquals(1, violations.size());
+        Assertions.assertTrue(port.isPaused(PARTITION_0));
         Assertions.assertEquals(2, commitMetrics.recordsRead);
         Assertions.assertEquals(1, commitMetrics.recordsCommitIneligible);
-        Assertions.assertEquals(1, commitMetrics.recordsOutstanding);
+        Assertions.assertEquals(1, commitMetrics.recordsCommitted);
+        Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
         commitMetrics.assertConservation();
-        Assertions.assertEquals(
-            java.util.Optional.of(11L),
-            owner.stagedCommitPosition(PARTITION_0),
-            "the poison record blocks itself and later offsets, not a valid earlier prefix"
+        Assertions.assertTrue(owner.stagedCommitPosition(PARTITION_0).isEmpty());
+        Assertions.assertTrue(
+            port.history().contains("commitAsync{traffic-0=11}"),
+            () -> "only the valid prefix before poison offset 12 may commit, so restart sees poison again: "
+                + port.history()
         );
     }
 
     @Test
     void lateProtocolViolationPreservesTheProtocolFatalPathWithoutMutatingRetiredState() {
         var port = pumpedSource(List.of(PARTITION_0));
-        var owner = ownerFor(port);
+        var violations = new java.util.ArrayList<KafkaSourceInput.CaptureProtocolViolationDetected>();
+        var owner = ownerFor(
+            port,
+            GRACE,
+            KafkaSourceOwner.RecordContextFactory.NONE,
+            violations::add
+        );
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsLost(List.of(PARTITION_0)));
         owner.runOnce();
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation));
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsAssigned(List.of(PARTITION_0)));
+        owner.runOnce();
+        var successor = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(successor, 1)
+        ));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(20))));
+        owner.runOnce();
+        drainIntake();
+
         sourceInputs.submit(new KafkaSourceInput.CaptureProtocolViolationDetected(
             new KafkaRecordId(generation, 10),
             "late poison"
         ));
 
-        Assertions.assertThrows(KafkaSourceOwner.CaptureProtocolViolation.class, owner::runOnce);
+        owner.runOnce();
 
-        Assertions.assertTrue(owner.partitionState(PARTITION_0).isEmpty());
+        Assertions.assertEquals(1, violations.size(), "the late violation remains diagnostically fatal");
+        Assertions.assertEquals(successor, owner.partitionState(PARTITION_0).orElseThrow().generation());
+        Assertions.assertTrue(port.isPaused(PARTITION_0), "the replay-wide violation still pauses a successor");
         Assertions.assertEquals(0, commitMetrics.recordsCommitIneligible);
-        Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
+        Assertions.assertEquals(1, commitMetrics.recordsOutstanding);
         commitMetrics.assertConservation();
+    }
+
+    @Test
+    void protocolViolationKeepsFutureAssignmentsPaused() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var violations = new java.util.ArrayList<KafkaSourceInput.CaptureProtocolViolationDetected>();
+        var owner = ownerFor(
+            port,
+            GRACE,
+            KafkaSourceOwner.RecordContextFactory.NONE,
+            violations::add
+        );
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)
+        ));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+        sourceInputs.submit(new KafkaSourceInput.CaptureProtocolViolationDetected(
+            new KafkaRecordId(generation, 10),
+            "poison"
+        ));
+        owner.runOnce();
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsLost(List.of(PARTITION_0)));
+        owner.runOnce();
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsAssigned(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        var successor = owner.partitionState(PARTITION_0).orElseThrow();
+        Assertions.assertNotEquals(generation, successor.generation());
+        Assertions.assertFalse(successor.lifecycleAllowsIntake());
+        Assertions.assertTrue(port.isPaused(PARTITION_0));
     }
 
     private static int indexOfType(List<ReplayIntakeInput> inputs, Class<?> type) {

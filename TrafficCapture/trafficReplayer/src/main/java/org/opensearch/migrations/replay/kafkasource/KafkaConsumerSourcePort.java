@@ -212,6 +212,11 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         }
     }
 
+    @Override
+    public void close() {
+        consumer.close();
+    }
+
     /**
      * The two the client uses to say this member's generation or membership is gone.
      * {@code CommitFailedException}'s own javadoc is explicit that "the commit cannot generally be retried

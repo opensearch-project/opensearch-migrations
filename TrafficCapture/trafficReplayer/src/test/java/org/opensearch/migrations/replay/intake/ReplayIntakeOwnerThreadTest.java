@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
@@ -641,6 +642,19 @@ class ReplayIntakeOwnerThreadTest {
         ) {
             everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
             closes.add(connectionProcessingId);
+        }
+
+        @Override
+        public void onGracefulGenerationCancellation(
+            ConnectionProcessingId connectionProcessingId,
+            CancellationGrace grace
+        ) {
+            everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
+        }
+
+        @Override
+        public void onForceGenerationCancellation(ConnectionProcessingId connectionProcessingId) {
+            everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
         }
 
         @Override
