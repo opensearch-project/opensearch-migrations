@@ -27,6 +27,10 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         AttributeKey.stringKey("incompleteReason");
     public static final AttributeKey<String> WRITER_TIME_TRANSITION_ATTRIBUTE =
         AttributeKey.stringKey("writerTimeTransition");
+    public static final AttributeKey<String> BATCH_ENTITLEMENT_ATTRIBUTE =
+        AttributeKey.stringKey("batchEntitlement");
+    public static final AttributeKey<String> DEMAND_STATE_ATTRIBUTE =
+        AttributeKey.stringKey("demandState");
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -54,6 +58,16 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
             "replayIntakeTargetConnectionExpirationsSent";
         public static final String BROKER_TIME_VIOLATIONS =
             "replayIntakeBrokerTimeViolations";
+        public static final String BATCH_REQUESTS_SUBMITTED =
+            "replayIntakeBatchRequestsSubmitted";
+        public static final String BATCHES_APPLIED = "replayIntakeBatchesApplied";
+        public static final String RETRY_READY_REQUEST_SUPPLY =
+            "replayIntakeRetryReadyRequestSupply";
+        public static final String RETRY_READY_SUPPLY_ADDITIONS =
+            "replayIntakeRetryReadySupplyAdditions";
+        public static final String RETRY_READY_SUPPLY_REMOVALS =
+            "replayIntakeRetryReadySupplyRemovals";
+        public static final String DEMAND_EVALUATIONS = "replayIntakeDemandEvaluations";
         public static final String CAPTURED_CLOSES_ACCEPTED = "replayIntakeCapturedClosesAccepted";
         public static final String CAPTURE_PROTOCOL_VIOLATIONS = "replayIntakeCaptureProtocolViolations";
         public static final String RECORD_BATCHES_REJECTED_AFTER_PROTOCOL_VIOLATION =
@@ -77,6 +91,12 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private final LongCounter sourceConnectionsExpired;
     private final LongCounter targetConnectionExpirationsSent;
     private final LongCounter brokerTimeViolations;
+    private final LongCounter batchRequestsSubmitted;
+    private final LongCounter batchesApplied;
+    private final LongUpDownCounter retryReadyRequestSupply;
+    private final LongCounter retryReadySupplyAdditions;
+    private final LongCounter retryReadySupplyRemovals;
+    private final LongCounter demandEvaluations;
     private final LongCounter capturedClosesAccepted;
     private final LongCounter captureProtocolViolations;
     private final LongCounter recordBatchesRejectedAfterProtocolViolation;
@@ -104,6 +124,16 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         targetConnectionExpirationsSent =
             counter(meter, MetricNames.TARGET_CONNECTION_EXPIRATIONS_SENT, "commands");
         brokerTimeViolations = counter(meter, MetricNames.BROKER_TIME_VIOLATIONS, "violations");
+        batchRequestsSubmitted = counter(meter, MetricNames.BATCH_REQUESTS_SUBMITTED, "requests");
+        batchesApplied = counter(meter, MetricNames.BATCHES_APPLIED, "batches");
+        retryReadyRequestSupply = meter.upDownCounterBuilder(MetricNames.RETRY_READY_REQUEST_SUPPLY)
+            .setUnit("requests")
+            .build();
+        retryReadySupplyAdditions =
+            counter(meter, MetricNames.RETRY_READY_SUPPLY_ADDITIONS, "requests");
+        retryReadySupplyRemovals =
+            counter(meter, MetricNames.RETRY_READY_SUPPLY_REMOVALS, "requests");
+        demandEvaluations = counter(meter, MetricNames.DEMAND_EVALUATIONS, "evaluations");
         capturedClosesAccepted = counter(meter, MetricNames.CAPTURED_CLOSES_ACCEPTED, "closes");
         captureProtocolViolations = counter(meter, MetricNames.CAPTURE_PROTOCOL_VIOLATIONS, "violations");
         recordBatchesRejectedAfterProtocolViolation =
@@ -195,6 +225,36 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     @Override
     public void brokerTimeViolation() {
         brokerTimeViolations.add(1);
+    }
+
+    @Override
+    public void batchRequested() {
+        batchRequestsSubmitted.add(1);
+    }
+
+    @Override
+    public void batchApplied(@NonNull PartitionIntakeState.BatchEntitlement entitlement) {
+        batchesApplied.add(
+            1,
+            Attributes.of(BATCH_ENTITLEMENT_ATTRIBUTE, entitlement.name())
+        );
+    }
+
+    @Override
+    public void retryReadySupplyChanged(int delta) {
+        if (delta != 1 && delta != -1) {
+            throw new IllegalArgumentException("retry-ready supply delta must be +1 or -1");
+        }
+        retryReadyRequestSupply.add(delta);
+        (delta > 0 ? retryReadySupplyAdditions : retryReadySupplyRemovals).add(1);
+    }
+
+    @Override
+    public void demandEvaluated(boolean open) {
+        demandEvaluations.add(
+            1,
+            Attributes.of(DEMAND_STATE_ATTRIBUTE, open ? "OPEN" : "SATISFIED")
+        );
     }
 
     @Override

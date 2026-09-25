@@ -22,15 +22,16 @@ class PartitionSourceStateTest {
         new PartitionGenerationId(new TopicPartition("traffic", 3), 7);
 
     @Test
-    void aPartitionIsUnreadableUntilABatchIsRequested() {
+    void assignmentBootstrapMakesThePartitionReadableBeforeAnExplicitBatchIsRequested() {
         var state = new PartitionSourceState(GENERATION);
 
-        Assertions.assertFalse(state.isReadable(), "no outstanding request means nothing to read for");
+        Assertions.assertTrue(state.isReadable(), "assignment installs one source-local bootstrap entitlement");
+        Assertions.assertTrue(state.isAssignmentBootstrapPending());
         Assertions.assertTrue(state.isKafkaPaused(), "a new generation starts paused");
 
         state.requestBatch(new PartitionBatchRequestId(GENERATION, 1));
 
-        Assertions.assertTrue(state.isReadable());
+        Assertions.assertTrue(state.isReadable(), "the explicit entitlement may overlap bootstrap");
     }
 
     /**
@@ -98,15 +99,27 @@ class PartitionSourceStateTest {
 
     /** An empty poll completes no request, so the request must survive for the next poll to satisfy. */
     @Test
-    void deliveringABatchClearsTheRequestAndRecordsWithoutOneAreAnInvariantFailure() {
+    void bootstrapIsDeliveredBeforeTheOverlappingExplicitRequest() {
         var state = new PartitionSourceState(GENERATION);
         var requestId = new PartitionBatchRequestId(GENERATION, 1);
         state.requestBatch(requestId);
 
-        Assertions.assertEquals(requestId, state.completeOutstandingRequest());
-        Assertions.assertTrue(state.outstandingRequest().isEmpty());
-        Assertions.assertFalse(state.isReadable(), "a delivered batch leaves nothing to read for");
+        Assertions.assertEquals(
+            new PartitionBatchRequestId(GENERATION, 0),
+            state.completeNextBatchEntitlement()
+        );
+        Assertions.assertFalse(state.isAssignmentBootstrapPending());
+        Assertions.assertEquals(
+            requestId,
+            state.outstandingRequest().orElseThrow(),
+            "bootstrap delivery must not consume the overlapping explicit request"
+        );
+        Assertions.assertTrue(state.isReadable());
 
-        Assertions.assertThrows(IllegalStateException.class, state::completeOutstandingRequest);
+        Assertions.assertEquals(requestId, state.completeNextBatchEntitlement());
+        Assertions.assertTrue(state.outstandingRequest().isEmpty());
+        Assertions.assertFalse(state.isReadable(), "both delivered entitlements leave nothing to read for");
+
+        Assertions.assertThrows(IllegalStateException.class, state::completeNextBatchEntitlement);
     }
 }

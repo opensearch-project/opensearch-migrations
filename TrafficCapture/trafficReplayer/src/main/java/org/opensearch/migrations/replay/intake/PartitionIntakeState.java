@@ -21,6 +21,7 @@ import java.util.function.IntConsumer;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -39,10 +40,6 @@ import lombok.NonNull;
  * <p>Every map is changed only by the replay-intake thread, which {@link OwnerThreadGuard} enforces on each
  * mutator. A record completing on a Netty loop instead would race the Kafka source's commit prefix.
  *
- * <p>REBUILD-LIMBO-NOTE(G7): {@code §6}'s {@code retryReadyRequestSupplyCount},
- * {@code bootstrapBatchState = pending | applying | consumed}, and
- * {@code requestedBatchState = idle | requested | applying}, which are {@code §9.1} and {@code §13}'s
- * request bookkeeping and demand model.
  * <p>REBUILD-LIMBO-NOTE(G8): {@code §6}'s {@code cancellationState} and {@code GenerationCleanupTracker},
  * which are {@code §15.2} and {@code §15.3}.
  */
@@ -90,6 +87,23 @@ public final class PartitionIntakeState {
         LATE_HEARTBEAT_IGNORED
     }
 
+    public enum BootstrapBatchState {
+        PENDING,
+        APPLYING,
+        CONSUMED
+    }
+
+    public enum RequestedBatchState {
+        IDLE,
+        REQUESTED,
+        APPLYING
+    }
+
+    public enum BatchEntitlement {
+        BOOTSTRAP,
+        EXPLICIT
+    }
+
     public record WriterExpirationResult(
         int expiredSourceConnections,
         List<ConnectionProcessingId> targetOwnersToExpire
@@ -111,11 +125,17 @@ public final class PartitionIntakeState {
         INCOMPLETE
     }
 
+    private enum TargetSupplyState {
+        PRESENT,
+        FINISHED_OR_CANCELLED
+    }
+
     private static final class RequestIntakeState {
         private final long requestCompletingLogAppendTime;
         private RetryInputState retryInput = RetryInputState.UNRESOLVED;
         private FinalInputState finalInput = FinalInputState.UNRESOLVED;
-        private boolean finishedOrCancelled;
+        private TargetSupplyState targetSupply = TargetSupplyState.PRESENT;
+        private boolean countedAsRetryReadySupply;
 
         private RequestIntakeState(long requestCompletingLogAppendTime) {
             this.requestCompletingLogAppendTime = requestCompletingLogAppendTime;
@@ -155,6 +175,7 @@ public final class PartitionIntakeState {
      */
     private final IntConsumer activeRecordTrackersChanged;
     private final Runnable recordTrackerRetired;
+    private final IntConsumer retryReadySupplyChanged;
 
     private final Map<KafkaRecordId, RecordWorkTracker> recordTrackersByKafkaRecordId =
         new LinkedHashMap<>();
@@ -200,6 +221,11 @@ public final class PartitionIntakeState {
         new LinkedHashMap<>();
     private final LinkedHashSet<ReplayRequestId> unresolvedRetryBoundaries =
         new LinkedHashSet<>();
+    private int retryReadyRequestSupplyCount;
+    private BootstrapBatchState bootstrapBatchState = BootstrapBatchState.PENDING;
+    private RequestedBatchState requestedBatchState = RequestedBatchState.IDLE;
+    private PartitionBatchRequestId requestedBatchRequestId;
+    private long nextBatchRequestLocalSequence = 1;
     private long nextConnectionLocalSequence;
 
     private long greatestObservedLogAppendTime = Long.MIN_VALUE;
@@ -218,7 +244,8 @@ public final class PartitionIntakeState {
             recordCompletionSink,
             activeRecordTrackersChanged,
             recordTrackerRetired,
-            new BrokerTimeConfiguration(30_000, 0, 5_000)
+            new BrokerTimeConfiguration(30_000, 0, 5_000),
+            ignored -> {}
         );
     }
 
@@ -230,16 +257,138 @@ public final class PartitionIntakeState {
         @NonNull Runnable recordTrackerRetired,
         @NonNull BrokerTimeConfiguration brokerTimeConfiguration
     ) {
+        this(
+            generation,
+            currentThreadIsOwner,
+            recordCompletionSink,
+            activeRecordTrackersChanged,
+            recordTrackerRetired,
+            brokerTimeConfiguration,
+            ignored -> {}
+        );
+    }
+
+    public PartitionIntakeState(
+        @NonNull PartitionGenerationId generation,
+        @NonNull BooleanSupplier currentThreadIsOwner,
+        @NonNull Consumer<KafkaRecordId> recordCompletionSink,
+        @NonNull IntConsumer activeRecordTrackersChanged,
+        @NonNull Runnable recordTrackerRetired,
+        @NonNull BrokerTimeConfiguration brokerTimeConfiguration,
+        @NonNull IntConsumer retryReadySupplyChanged
+    ) {
         this.generation = generation;
         this.ownerThreadGuard = new OwnerThreadGuard("replay intake " + generation, currentThreadIsOwner);
         this.recordCompletionSink = recordCompletionSink;
         this.activeRecordTrackersChanged = activeRecordTrackersChanged;
         this.recordTrackerRetired = recordTrackerRetired;
         this.brokerTimeConfiguration = brokerTimeConfiguration;
+        this.retryReadySupplyChanged = retryReadySupplyChanged;
     }
 
     public PartitionGenerationId generation() {
         return generation;
+    }
+
+    // ------------------------------------------------------------------ demand and batch entitlement
+
+    public int retryReadyRequestSupplyCount() {
+        ownerThreadGuard.requireOwnerThread();
+        return retryReadyRequestSupplyCount;
+    }
+
+    public BootstrapBatchState bootstrapBatchState() {
+        ownerThreadGuard.requireOwnerThread();
+        return bootstrapBatchState;
+    }
+
+    public RequestedBatchState requestedBatchState() {
+        ownerThreadGuard.requireOwnerThread();
+        return requestedBatchState;
+    }
+
+    public Optional<PartitionBatchRequestId> requestedBatchRequestId() {
+        ownerThreadGuard.requireOwnerThread();
+        return Optional.ofNullable(requestedBatchRequestId);
+    }
+
+    public boolean demandOpen(int requestSupplyTarget) {
+        ownerThreadGuard.requireOwnerThread();
+        requirePositiveRequestSupplyTarget(requestSupplyTarget);
+        return retryReadyRequestSupplyCount < requestSupplyTarget;
+    }
+
+    /**
+     * Allocates one explicit request only while demand is open and no earlier explicit request remains.
+     */
+    public Optional<PartitionBatchRequestId> requestNextBatchIfNeeded(int requestSupplyTarget) {
+        ownerThreadGuard.requireOwnerThread();
+        if (!demandOpen(requestSupplyTarget) || requestedBatchState != RequestedBatchState.IDLE) {
+            return Optional.empty();
+        }
+        var requestId = new PartitionBatchRequestId(generation, nextBatchRequestLocalSequence++);
+        requestedBatchRequestId = requestId;
+        requestedBatchState = RequestedBatchState.REQUESTED;
+        return Optional.of(requestId);
+    }
+
+    /**
+     * Opens the matching entitlement before any record in the delivered batch is applied.
+     */
+    public BatchEntitlement beginApplyingBatch(@NonNull PartitionBatchRequestId requestId) {
+        ownerThreadGuard.requireOwnerThread();
+        requireSameGeneration(requestId.generation());
+        if (requestId.localSequence() == 0) {
+            if (bootstrapBatchState != BootstrapBatchState.PENDING) {
+                throw new IllegalStateException(
+                    "bootstrap batch cannot begin from " + bootstrapBatchState + " for " + generation
+                );
+            }
+            bootstrapBatchState = BootstrapBatchState.APPLYING;
+            return BatchEntitlement.BOOTSTRAP;
+        }
+        if (requestedBatchState != RequestedBatchState.REQUESTED
+            || !requestId.equals(requestedBatchRequestId)) {
+            throw new IllegalStateException(
+                "explicit batch " + requestId + " does not match requested state "
+                    + requestedBatchState + " " + requestedBatchRequestId
+            );
+        }
+        requestedBatchState = RequestedBatchState.APPLYING;
+        return BatchEntitlement.EXPLICIT;
+    }
+
+    /**
+     * Closes the entitlement only after every record in the delivered batch has been applied.
+     */
+    public void finishApplyingBatch(
+        @NonNull PartitionBatchRequestId requestId,
+        @NonNull BatchEntitlement entitlement
+    ) {
+        ownerThreadGuard.requireOwnerThread();
+        requireSameGeneration(requestId.generation());
+        switch (entitlement) {
+            case BOOTSTRAP -> {
+                if (requestId.localSequence() != 0
+                    || bootstrapBatchState != BootstrapBatchState.APPLYING) {
+                    throw new IllegalStateException(
+                        "bootstrap batch " + requestId + " cannot finish from " + bootstrapBatchState
+                    );
+                }
+                bootstrapBatchState = BootstrapBatchState.CONSUMED;
+            }
+            case EXPLICIT -> {
+                if (requestedBatchState != RequestedBatchState.APPLYING
+                    || !requestId.equals(requestedBatchRequestId)) {
+                    throw new IllegalStateException(
+                        "explicit batch " + requestId + " cannot finish from "
+                            + requestedBatchState + " " + requestedBatchRequestId
+                    );
+                }
+                requestedBatchState = RequestedBatchState.IDLE;
+                requestedBatchRequestId = null;
+            }
+        }
     }
 
     // ------------------------------------------------------------------ record work tracking
@@ -439,8 +588,7 @@ public final class PartitionIntakeState {
         }
         request.finalInput = FinalInputState.COMPLETE;
         if (request.retryInput == RetryInputState.UNRESOLVED) {
-            request.retryInput = RetryInputState.COMPLETE;
-            unresolvedRetryBoundaries.remove(requestId);
+            resolveRetryInput(requestId, request, RetryInputState.COMPLETE);
             return true;
         }
         return false;
@@ -459,8 +607,7 @@ public final class PartitionIntakeState {
         }
         request.finalInput = FinalInputState.INCOMPLETE;
         if (request.retryInput == RetryInputState.UNRESOLVED) {
-            request.retryInput = RetryInputState.UNAVAILABLE;
-            unresolvedRetryBoundaries.remove(requestId);
+            resolveRetryInput(requestId, request, RetryInputState.UNAVAILABLE);
             return true;
         }
         return false;
@@ -479,8 +626,7 @@ public final class PartitionIntakeState {
                     request.requestCompletingLogAppendTime,
                     brokerTimeConfiguration.sourceResponseRetryWindowMillis()
                 )) {
-                request.retryInput = RetryInputState.UNAVAILABLE;
-                unresolvedRetryBoundaries.remove(requestId);
+                resolveRetryInput(requestId, request, RetryInputState.UNAVAILABLE);
                 resolved.add(requestId);
             }
         }
@@ -492,33 +638,57 @@ public final class PartitionIntakeState {
         ownerThreadGuard.requireOwnerThread();
         var resolved = new ArrayList<ReplayRequestId>();
         for (var requestId : List.copyOf(unresolvedRetryBoundaries)) {
-            requireRequest(requestId).retryInput = RetryInputState.UNAVAILABLE;
-            unresolvedRetryBoundaries.remove(requestId);
+            resolveRetryInput(
+                requestId,
+                requireRequest(requestId),
+                RetryInputState.UNAVAILABLE
+            );
             resolved.add(requestId);
         }
         return List.copyOf(resolved);
     }
 
     public void connectionRequestFinished(@NonNull ReplayRequestId requestId) {
+        targetSupplyFinishedOrCancelled(requestId);
+    }
+
+    /**
+     * Removes a request from target supply exactly once. G8 invokes the same transition for cancellation.
+     */
+    public void targetSupplyFinishedOrCancelled(@NonNull ReplayRequestId requestId) {
         ownerThreadGuard.requireOwnerThread();
         var request = requireRequest(requestId);
-        if (request.finishedOrCancelled) {
-            throw new IllegalStateException("Connection request was already finished: " + requestId);
+        if (request.targetSupply == TargetSupplyState.FINISHED_OR_CANCELLED) {
+            throw new IllegalStateException("Target supply already finished or cancelled: " + requestId);
         }
-        request.finishedOrCancelled = true;
+        request.targetSupply = TargetSupplyState.FINISHED_OR_CANCELLED;
+        if (request.countedAsRetryReadySupply) {
+            request.countedAsRetryReadySupply = false;
+            changeRetryReadySupply(-1);
+        }
     }
 
     public boolean requestCanCountAsRetryReadySupply(@NonNull ReplayRequestId requestId) {
         ownerThreadGuard.requireOwnerThread();
         var request = requireRequest(requestId);
-        return !request.finishedOrCancelled && request.retryInput != RetryInputState.UNRESOLVED;
+        return request.targetSupply == TargetSupplyState.PRESENT
+            && request.retryInput != RetryInputState.UNRESOLVED;
     }
 
     public void removeRequest(@NonNull ReplayRequestId requestId) {
         ownerThreadGuard.requireOwnerThread();
-        if (requestStateByReplayRequestId.remove(requestId) == null) {
-            throw new IllegalStateException("No replay-intake request state for " + requestId);
+        var request = requireRequest(requestId);
+        if (request.targetSupply != TargetSupplyState.FINISHED_OR_CANCELLED) {
+            throw new IllegalStateException(
+                "Request processing finished before target supply ended: " + requestId
+            );
         }
+        if (request.countedAsRetryReadySupply) {
+            throw new IllegalStateException(
+                "Request processing finished while still counted as retry-ready supply: " + requestId
+            );
+        }
+        requestStateByReplayRequestId.remove(requestId);
         unresolvedRetryBoundaries.remove(requestId);
     }
 
@@ -685,6 +855,51 @@ public final class PartitionIntakeState {
     }
 
     // ------------------------------------------------------------------ internals
+
+    private void resolveRetryInput(
+        ReplayRequestId requestId,
+        RequestIntakeState request,
+        RetryInputState resolvedState
+    ) {
+        if (resolvedState == RetryInputState.UNRESOLVED) {
+            throw new IllegalArgumentException("retry input must resolve to complete or unavailable");
+        }
+        if (request.retryInput != RetryInputState.UNRESOLVED) {
+            throw new IllegalStateException("Retry input was already resolved for " + requestId);
+        }
+        request.retryInput = resolvedState;
+        unresolvedRetryBoundaries.remove(requestId);
+        if (request.targetSupply == TargetSupplyState.PRESENT
+            && !request.countedAsRetryReadySupply) {
+            request.countedAsRetryReadySupply = true;
+            changeRetryReadySupply(1);
+        }
+    }
+
+    private void changeRetryReadySupply(int delta) {
+        var changed = Math.addExact(retryReadyRequestSupplyCount, delta);
+        if (changed < 0) {
+            throw new IllegalStateException(
+                "retry-ready request supply became negative for " + generation
+            );
+        }
+        retryReadyRequestSupplyCount = changed;
+        retryReadySupplyChanged.accept(delta);
+    }
+
+    private static void requirePositiveRequestSupplyTarget(int requestSupplyTarget) {
+        if (requestSupplyTarget <= 0) {
+            throw new IllegalArgumentException("requestSupplyTarget must be positive");
+        }
+    }
+
+    private void requireSameGeneration(PartitionGenerationId otherGeneration) {
+        if (!generation.equals(otherGeneration)) {
+            throw new IllegalStateException(
+                "Partition generation " + otherGeneration + " does not match " + generation
+            );
+        }
+    }
 
     private void requireSameGeneration(KafkaRecordId recordId) {
         if (!generation.equals(recordId.generation())) {

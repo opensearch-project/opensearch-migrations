@@ -590,7 +590,7 @@ public final class KafkaSourceOwner {
             port.pause(topicPartition);
             state.setKafkaPaused(true);
         }
-        var requestId = state.completeOutstandingRequest();
+        var requestId = state.completeNextBatchEntitlement();
         // Stamped here, by the only component that knows the generation. The adapter returns raw records
         // precisely so it needs no generation map of its own to keep in step (kafkaLLD §5).
         var stamped = records.stream().map(raw -> {

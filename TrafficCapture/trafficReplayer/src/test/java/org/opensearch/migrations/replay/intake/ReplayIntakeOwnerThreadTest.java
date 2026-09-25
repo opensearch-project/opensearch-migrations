@@ -11,6 +11,7 @@ package org.opensearch.migrations.replay.intake;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -45,6 +46,168 @@ import org.junit.jupiter.api.Test;
  * construction, and FIFO stop fence.
  */
 class ReplayIntakeOwnerThreadTest {
+
+    @Test
+    void assignmentBootstrapAndExplicitBatchStayOrderedAndRequestOnlyAfterFullApplication() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var sourceInputs = new KafkaSourceInputQueue(new WakeupController(() -> {}, rootContext));
+            var observedOffsets = new ArrayList<Long>();
+            var emittedWhileExplicitBatchWasApplying = new ArrayList<KafkaSourceInput>();
+            var owner = new ReplayIntakeOwner(
+                new ReplayIntakeInputQueue(),
+                sourceInputs,
+                new RecordingSink(() -> true, new CountDownLatch(0), new CountDownLatch(0)),
+                failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
+                rootContext.replayIntakeMetrics,
+                record -> {
+                    observedOffsets.add(record.recordId().offset());
+                    if (record.recordId().offset() >= 2) {
+                        emittedWhileExplicitBatchWasApplying.addAll(sourceInputs.drain());
+                    }
+                },
+                new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
+                2
+            );
+            var script = new RecordScript("traffic")
+                .addHeartbeat(0, 0, Instant.ofEpochMilli(1_000), "writer", 100)
+                .addHeartbeat(0, 1, Instant.ofEpochMilli(1_001), "writer", 100)
+                .addHeartbeat(0, 2, Instant.ofEpochMilli(1_002), "writer", 100)
+                .addHeartbeat(0, 3, Instant.ofEpochMilli(1_003), "writer", 100);
+            var generation = script.generation(0);
+
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+
+            var assignmentOutputs = sourceInputs.drain();
+            Assertions.assertEquals(1, assignmentOutputs.size());
+            var explicitOne = Assertions.assertInstanceOf(
+                KafkaSourceInput.RequestNextPartitionBatch.class,
+                assignmentOutputs.get(0)
+            ).requestId();
+            Assertions.assertEquals(new PartitionBatchRequestId(generation, 1), explicitOne);
+            var state = owner.partitionState(generation).orElseThrow();
+            Assertions.assertEquals(
+                PartitionIntakeState.BootstrapBatchState.PENDING,
+                state.bootstrapBatchState()
+            );
+            Assertions.assertEquals(
+                PartitionIntakeState.RequestedBatchState.REQUESTED,
+                state.requestedBatchState(),
+                "assignment may install one explicit request while bootstrap remains pending"
+            );
+
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+                new PartitionBatchRequestId(generation, 0),
+                script.records().subList(0, 2)
+            ));
+            Assertions.assertEquals(
+                PartitionIntakeState.BootstrapBatchState.CONSUMED,
+                state.bootstrapBatchState()
+            );
+            Assertions.assertEquals(
+                PartitionIntakeState.RequestedBatchState.REQUESTED,
+                state.requestedBatchState(),
+                "bootstrap must not resolve the overlapping explicit entitlement"
+            );
+            Assertions.assertTrue(
+                sourceInputs.drain().stream()
+                    .noneMatch(KafkaSourceInput.RequestNextPartitionBatch.class::isInstance),
+                "applying bootstrap must not create a second explicit request"
+            );
+
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+                explicitOne,
+                script.records().subList(2, 4)
+            ));
+
+            Assertions.assertTrue(
+                emittedWhileExplicitBatchWasApplying.stream()
+                    .noneMatch(KafkaSourceInput.RequestNextPartitionBatch.class::isInstance),
+                "the next request must not be issued while any record in the current batch remains unapplied"
+            );
+            var afterBatch = sourceInputs.drain();
+            var explicitTwo = afterBatch.stream()
+                .filter(KafkaSourceInput.RequestNextPartitionBatch.class::isInstance)
+                .map(KafkaSourceInput.RequestNextPartitionBatch.class::cast)
+                .map(KafkaSourceInput.RequestNextPartitionBatch::requestId)
+                .findFirst()
+                .orElseThrow();
+            Assertions.assertEquals(new PartitionBatchRequestId(generation, 2), explicitTwo);
+            Assertions.assertEquals(List.of(0L, 1L, 2L, 3L), observedOffsets);
+
+            var metrics = telemetry.getFinishedMetrics();
+            Assertions.assertEquals(
+                2,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    metrics,
+                    ReplayIntakeMetrics.MetricNames.BATCH_REQUESTS_SUBMITTED
+                )
+            );
+            Assertions.assertEquals(
+                2,
+                sumMetricPoints(metrics, ReplayIntakeMetrics.MetricNames.BATCHES_APPLIED)
+            );
+            Assertions.assertEquals(
+                Set.of("BOOTSTRAP", "EXPLICIT"),
+                metricAttributeValues(
+                    metrics,
+                    ReplayIntakeMetrics.MetricNames.BATCHES_APPLIED,
+                    ReplayIntakeMetrics.BATCH_ENTITLEMENT_ATTRIBUTE
+                )
+            );
+            Assertions.assertEquals(
+                3,
+                sumMetricPoints(metrics, ReplayIntakeMetrics.MetricNames.DEMAND_EVALUATIONS)
+            );
+        }
+    }
+
+    @Test
+    void largeBatchStillAppliesTrailingHeartbeatEvidenceWithoutRecordOrByteCap() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var sourceInputs = new KafkaSourceInputQueue(new WakeupController(() -> {}, rootContext));
+            var observedOffsets = new ArrayList<Long>();
+            var owner = new ReplayIntakeOwner(
+                new ReplayIntakeInputQueue(),
+                sourceInputs,
+                new RecordingSink(() -> true, new CountDownLatch(0), new CountDownLatch(0)),
+                failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
+                ReplayIntakeOwner.Metrics.NOOP,
+                record -> observedOffsets.add(record.recordId().offset()),
+                new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
+                2
+            );
+            var script = new RecordScript("traffic");
+            var payload = "x".repeat(8_192);
+            for (int offset = 0; offset < 64; offset++) {
+                script.addProbe(
+                    0,
+                    offset,
+                    Instant.ofEpochMilli(1_000 + offset),
+                    "writer",
+                    payload + offset
+                );
+            }
+            script.addHeartbeat(0, 64, Instant.ofEpochMilli(1_064), "writer", 100);
+            var generation = script.generation(0);
+
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+            sourceInputs.drain();
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+                new PartitionBatchRequestId(generation, 0),
+                script.records()
+            ));
+
+            Assertions.assertEquals(65, observedOffsets.size());
+            Assertions.assertEquals(64L, observedOffsets.get(observedOffsets.size() - 1));
+            Assertions.assertEquals(
+                1_064,
+                owner.partitionState(generation).orElseThrow().greatestObservedLogAppendTime(),
+                "the trailing heartbeat remains reachable despite all preceding record bytes"
+            );
+        }
+    }
 
     @Test
     void aPayloadlessRecordWakesAnActiveSourcePollWithItsProtocolViolation() {
@@ -222,6 +385,21 @@ class ReplayIntakeOwnerThreadTest {
             }
         }
         return 0;
+    }
+
+    private static Set<String> metricAttributeValues(
+        Iterable<io.opentelemetry.sdk.metrics.data.MetricData> metrics,
+        String metricName,
+        io.opentelemetry.api.common.AttributeKey<String> attributeKey
+    ) {
+        for (var metric : metrics) {
+            if (metric.getName().equals(metricName)) {
+                return metric.getLongSumData().getPoints().stream()
+                    .map(point -> point.getAttributes().get(attributeKey))
+                    .collect(java.util.stream.Collectors.toSet());
+            }
+        }
+        return Set.of();
     }
 
     private static final class RecordingSink implements SourceAssemblySink {

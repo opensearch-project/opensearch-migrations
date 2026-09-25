@@ -417,11 +417,18 @@ class KafkaSourceOwnerTest {
             .toList();
         Assertions.assertEquals(2, batches.size(), "one batch per satisfied request");
         Assertions.assertEquals(
-            Set.of(request0, request1),
+            Set.of(
+                new PartitionBatchRequestId(generation0, 0),
+                new PartitionBatchRequestId(generation1, 0)
+            ),
             batches.stream().map(ReplayIntakeInput.PartitionRecordBatch::requestId)
                 .collect(java.util.stream.Collectors.toSet()),
-            "each outstanding request gets its own batch; no order is defined between them"
+            "the source-local bootstrap entitlement is delivered before either overlapping explicit request"
         );
+        Assertions.assertEquals(request0, owner.partitionState(PARTITION_0).orElseThrow()
+            .outstandingRequest().orElseThrow());
+        Assertions.assertEquals(request1, owner.partitionState(PARTITION_1).orElseThrow()
+            .outstandingRequest().orElseThrow());
         Assertions.assertTrue(port.isPaused(PARTITION_0) && port.isPaused(PARTITION_1));
     }
 
@@ -1224,6 +1231,12 @@ class KafkaSourceOwnerTest {
         assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
         var leaving = owner.partitionState(PARTITION_0).orElseThrow().generation();
         var retained = owner.partitionState(PARTITION_1).orElseThrow().generation();
+        port.scriptPoll(Map.of(
+            PARTITION_0, List.of(record(10)),
+            PARTITION_1, List.of(record(20))
+        ));
+        owner.runOnce();
+        drainIntake();
         port.clearHistory();
 
         port.scriptRebalanceDuringNextPoll(() -> {
@@ -1247,7 +1260,7 @@ class KafkaSourceOwnerTest {
         );
 
         // The next iteration is where the surviving request becomes a resume and a poll.
-        port.scriptPoll(Map.of(PARTITION_1, List.of(record(20))));
+        port.scriptPoll(Map.of(PARTITION_1, List.of(record(21))));
         owner.runOnce();
 
         Assertions.assertTrue(

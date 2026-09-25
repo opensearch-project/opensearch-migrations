@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 
@@ -403,6 +404,128 @@ class PartitionIntakeStateTest {
     }
 
     @Test
+    void retryReadySupplyCountsOnlyResolvedUnfinishedTargetTurnsAndLeavesExactlyOnce() {
+        var supplyDeltas = new ArrayList<Integer>();
+        var intake = ownerState(
+            new ArrayList<>(),
+            new PartitionIntakeState.BrokerTimeConfiguration(100, 10, 50),
+            supplyDeltas
+        );
+        var fast = new ReplayRequestId(LIFETIME, 30);
+        var slow = new ReplayRequestId(LIFETIME, 31);
+        var finishedBeforeResolution = new ReplayRequestId(LIFETIME, 32);
+
+        intake.registerRequest(fast, 100);
+        Assertions.assertEquals(0, intake.retryReadyRequestSupplyCount());
+        Assertions.assertTrue(intake.demandOpen(2), "an unresolved retry input is not supply");
+
+        Assertions.assertTrue(intake.sourceResponseCompleted(fast));
+        Assertions.assertEquals(1, intake.retryReadyRequestSupplyCount());
+        Assertions.assertTrue(
+            intake.demandOpen(2),
+            "a fast complete response satisfies one slot before the retry boundary, not the whole target"
+        );
+
+        intake.registerRequest(slow, 200);
+        Assertions.assertTrue(intake.resolveRetryBoundaries(249).isEmpty());
+        Assertions.assertEquals(1, intake.retryReadyRequestSupplyCount());
+        Assertions.assertEquals(List.of(slow), intake.resolveRetryBoundaries(250));
+        Assertions.assertEquals(2, intake.retryReadyRequestSupplyCount());
+        Assertions.assertFalse(intake.demandOpen(2), "unavailable is a resolved retry input and counts");
+
+        intake.registerRequest(finishedBeforeResolution, 300);
+        intake.targetSupplyFinishedOrCancelled(finishedBeforeResolution);
+        Assertions.assertEquals(
+            List.of(finishedBeforeResolution),
+            intake.resolveRetryBoundaries(350)
+        );
+        Assertions.assertEquals(
+            2,
+            intake.retryReadyRequestSupplyCount(),
+            "a late retry input cannot re-add a finished or cancelled target turn"
+        );
+        Assertions.assertFalse(
+            intake.sourceResponseCompleted(finishedBeforeResolution),
+            "the late final response cannot replace the frozen unavailable retry input"
+        );
+        Assertions.assertEquals(2, intake.retryReadyRequestSupplyCount());
+
+        intake.connectionRequestFinished(fast);
+        Assertions.assertEquals(1, intake.retryReadyRequestSupplyCount());
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> intake.connectionRequestFinished(fast),
+            "a finished request may leave supply only once"
+        );
+        intake.targetSupplyFinishedOrCancelled(slow);
+        Assertions.assertEquals(0, intake.retryReadyRequestSupplyCount());
+        Assertions.assertEquals(List.of(1, 1, -1, -1), supplyDeltas);
+
+        intake.removeRequest(fast);
+        intake.removeRequest(slow);
+        intake.removeRequest(finishedBeforeResolution);
+    }
+
+    @Test
+    void batchEntitlementsAreOrderedAndNoNewRequestIsAllocatedWhileOneIsApplying() {
+        var intake = ownerState(new ArrayList<>());
+        var explicitOne = intake.requestNextBatchIfNeeded(2).orElseThrow();
+
+        Assertions.assertEquals(1, explicitOne.localSequence());
+        Assertions.assertEquals(PartitionIntakeState.BootstrapBatchState.PENDING, intake.bootstrapBatchState());
+        Assertions.assertEquals(PartitionIntakeState.RequestedBatchState.REQUESTED, intake.requestedBatchState());
+
+        var bootstrap = new PartitionBatchRequestId(GENERATION, 0);
+        var bootstrapEntitlement = intake.beginApplyingBatch(bootstrap);
+        Assertions.assertEquals(PartitionIntakeState.BatchEntitlement.BOOTSTRAP, bootstrapEntitlement);
+        Assertions.assertTrue(
+            intake.requestNextBatchIfNeeded(2).isEmpty(),
+            "the overlapping explicit request remains the sole intake-issued request"
+        );
+        intake.finishApplyingBatch(bootstrap, bootstrapEntitlement);
+
+        var explicitEntitlement = intake.beginApplyingBatch(explicitOne);
+        Assertions.assertEquals(PartitionIntakeState.BatchEntitlement.EXPLICIT, explicitEntitlement);
+        Assertions.assertTrue(
+            intake.requestNextBatchIfNeeded(2).isEmpty(),
+            "the next request cannot be issued while the current batch is being applied"
+        );
+        intake.finishApplyingBatch(explicitOne, explicitEntitlement);
+
+        var explicitTwo = intake.requestNextBatchIfNeeded(2).orElseThrow();
+        Assertions.assertEquals(2, explicitTwo.localSequence());
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> intake.beginApplyingBatch(explicitOne),
+            "a delivered batch must match the one current entitlement"
+        );
+    }
+
+    @Test
+    void oneBatchMayOvershootTheSupplyTargetWithoutAnOwnershipCap() {
+        var deltas = new ArrayList<Integer>();
+        var intake = ownerState(
+            new ArrayList<>(),
+            new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
+            deltas
+        );
+
+        for (int request = 0; request < 128; request++) {
+            var requestId = new ReplayRequestId(LIFETIME, 100 + request);
+            intake.registerRequest(requestId, request);
+            intake.sourceResponseIncomplete(requestId);
+        }
+
+        Assertions.assertEquals(128, intake.retryReadyRequestSupplyCount());
+        Assertions.assertFalse(intake.demandOpen(2));
+        Assertions.assertEquals(
+            128,
+            deltas.stream().filter(delta -> delta == 1).count(),
+            "every resolved unfinished request remains supply; no ownership cap truncates the batch"
+        );
+    }
+
+    @Test
     void randomizedSharedRecordsWaitForEveryAssociatedRequest() {
         var random = new Random(0x5A4B_C0DEL);
         for (int trial = 0; trial < 200; trial++) {
@@ -467,13 +590,22 @@ class PartitionIntakeStateTest {
         List<KafkaRecordId> completions,
         PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration
     ) {
+        return ownerState(completions, brokerTimeConfiguration, new ArrayList<>());
+    }
+
+    private static PartitionIntakeState ownerState(
+        List<KafkaRecordId> completions,
+        PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        List<Integer> supplyDeltas
+    ) {
         return new PartitionIntakeState(
             GENERATION,
             () -> true,
             completions::add,
             ignored -> {},
             () -> {},
-            brokerTimeConfiguration
+            brokerTimeConfiguration,
+            supplyDeltas::add
         );
     }
 }

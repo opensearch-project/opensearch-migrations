@@ -79,6 +79,7 @@ public final class PartitionSourceState {
 
     private final PartitionGenerationId generation;
     private final ObservedRecordCommitQueue commitQueue;
+    private boolean assignmentBootstrapPending = true;
     private PartitionBatchRequestId outstandingRequest;
     private boolean priorGenerationCleanupPending;
     private boolean lifecycleAllowsIntake = true;
@@ -117,7 +118,13 @@ public final class PartitionSourceState {
      * another.
      */
     public boolean isReadable() {
-        return outstandingRequest != null && !priorGenerationCleanupPending && lifecycleAllowsIntake;
+        return (assignmentBootstrapPending || outstandingRequest != null)
+            && !priorGenerationCleanupPending
+            && lifecycleAllowsIntake;
+    }
+
+    public boolean isAssignmentBootstrapPending() {
+        return assignmentBootstrapPending;
     }
 
     public Optional<PartitionBatchRequestId> outstandingRequest() {
@@ -165,6 +172,20 @@ public final class PartitionSourceState {
         var completed = outstandingRequest;
         outstandingRequest = null;
         return completed;
+    }
+
+    /**
+     * Consumes the oldest source-local batch entitlement.
+     *
+     * <p>Assignment bootstrap is always first. One intake-issued explicit request may already overlap it,
+     * but it remains outstanding until the following nonempty batch.
+     */
+    public PartitionBatchRequestId completeNextBatchEntitlement() {
+        if (assignmentBootstrapPending) {
+            assignmentBootstrapPending = false;
+            return new PartitionBatchRequestId(generation, 0);
+        }
+        return completeOutstandingRequest();
     }
 
     /**
@@ -328,6 +349,8 @@ public final class PartitionSourceState {
             + generation
             + " readable="
             + isReadable()
+            + " bootstrapPending="
+            + assignmentBootstrapPending
             + " request="
             + outstandingRequest
             + " cleanupPending="

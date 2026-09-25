@@ -6,10 +6,10 @@
  * compatible open source license.
  */
 
-package org.opensearch.migrations.replay.lifecycle;
+package org.opensearch.migrations.replay.intake;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
 
 import lombok.NonNull;
 
@@ -23,6 +23,11 @@ public sealed interface RequestLifecycleInput extends ReplayIntakeInput permits
     @NonNull PartitionGenerationId partitionGenerationId();
 
     @NonNull ReplayRequestId requestId();
+
+    @Override
+    default PartitionGenerationId generation() {
+        return partitionGenerationId();
+    }
 
     record ConnectionRequestFinished(
         @NonNull PartitionGenerationId partitionGenerationId,
