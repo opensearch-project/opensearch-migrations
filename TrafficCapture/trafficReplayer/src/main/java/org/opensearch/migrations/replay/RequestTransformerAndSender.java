@@ -1,5 +1,14 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// getRetryCheckVisitor -> RequestReplayOwner.evaluateTargetResponse/applyRetryDecision.
+// shouldRetry -> RequestReplayOwner.RetryPolicy.
+// perResponseConsumer -> RequestReplayOwner target-attempt history + TupleFactory input.
+// transformAndSendRequest overloads -> RequestReplayOwner request preparation,
+//     applyPreparationResult, and startAttempt.
+// transformAllData -> RequestReplayOwner.RequestPreparer with IRequestTransformationContext.
+// REBUILD-TRACE-END(G5,source)
+
 // REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
 // regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its

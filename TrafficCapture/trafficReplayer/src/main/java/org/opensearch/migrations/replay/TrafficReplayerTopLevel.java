@@ -1,7 +1,738 @@
 package org.opensearch.migrations.replay;
 
-// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
+
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
+import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
+import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
+import org.opensearch.migrations.replay.intake.SourceAssemblySink;
+import org.opensearch.migrations.replay.kafkasource.GraceIntervalWait;
+import org.opensearch.migrations.replay.kafkasource.KafkaConsumerSourcePort;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
+import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
+import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
+import org.opensearch.migrations.replay.lifecycle.TargetChannelPort;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
+import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.sink.TupleWriter.PhysicalTupleSink;
+import org.opensearch.migrations.replay.sink.TupleWriter.TransformedTuple;
+import org.opensearch.migrations.replay.sink.TupleWriter.TupleDropped;
+import org.opensearch.migrations.replay.sink.TupleWriter.TupleTransformer;
+import org.opensearch.migrations.replay.sink.TupleSink;
+import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.transform.IJsonTransformer;
+
+import io.netty.channel.EventLoop;
+import lombok.NonNull;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
+
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// old constructors' component assembly -> Configuration + constructor + createConnection
+// old accumulator callback wiring -> ConnectionAssemblySink methods + IntakeLifecycleSink
+// old RequestSenderOrchestrator/ReplayEngine creation -> TargetConnectionOwner +
+//     RequestReplayOwner + TargetChannelPort created by createConnection
+// old ThreadLocalTupleWriter construction -> createConnection +
+//     ManagedTupleTransformerFactory/ManagedPhysicalTupleSinkFactory
+// old tuple-writer close -> releaseConnectionResources/closeManaged
+// old Kafka run setup -> constructor + startIntake + runSourceOnce + rebalanceListener
+// old makeNettyPacketConsumerConnectionPool/loadSslContext -> G9 startup configuration calling
+//     NettyPacketToHttpConsumer.create; the transport implementation is live in G5
+// old setupRunAndWait*/doSetup*/wrapUpWorkAndEmitSummary/waitForRemainingWork/shutdown ->
+//     G9 process supervisor and owner-loop startup/shutdown
+// old shouldRetry -> RequestReplayOwner.RetryPolicy
+// old currentAccumulator/currentReplayEngine inspection -> typed owner registries/activitySnapshot
+// REBUILD-TRACE-END(G5,target)
+
+/**
+ * G5's production composition root. G9 owns starting and supervising its two owner loops.
+ *
+ * <p>The Kafka adapter, both owner queues, replay intake, process-local connection registry,
+ * connection/request owners, tuple writer and context lifecycle are constructed as one reachable chain.
+ * Every connection is published only after its first event-loop submission has been accepted.</p>
+ */
+public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
+    implements AutoCloseable {
+
+    @FunctionalInterface
+    public interface TargetChannelFactory<P, R> {
+        TargetChannelPort<P, R> create(
+            ConnectionProcessingId connectionProcessingId,
+            EventLoop eventLoop,
+            IReplayContexts.IConnectionContext connectionContext
+        );
+    }
+
+    @FunctionalInterface
+    public interface ManagedTupleTransformerFactory<T> {
+        ManagedTupleTransformer<T> create(ConnectionProcessingId connectionProcessingId);
+    }
+
+    public interface ManagedTupleTransformer<T> extends TupleTransformer<T>, AutoCloseable {
+        @Override
+        void close() throws Exception;
+    }
+
+    @FunctionalInterface
+    public interface ManagedPhysicalTupleSinkFactory<T> {
+        ManagedPhysicalTupleSink<T> create(ConnectionProcessingId connectionProcessingId);
+    }
+
+    public interface ManagedPhysicalTupleSink<T> extends PhysicalTupleSink<T>, AutoCloseable {
+        @Override
+        void close() throws Exception;
+    }
+
+    public record Configuration<P extends AutoCloseable, R, T>(
+        @NonNull Clock clock,
+        @NonNull LongSupplier nanoTime,
+        @NonNull Function<Instant, Instant> replayTimeMapper,
+        @NonNull Function<ConnectionProcessingId, EventLoop> eventLoopFor,
+        @NonNull BiFunction<
+            ConnectionProcessingId,
+            IReplayContexts.IConnectionContext,
+            RequestReplayOwner.RequestPreparer<HttpMessageAndTimestamp.Request, P>
+        > requestPreparerFactory,
+        @NonNull RequestReplayOwner.RetryPolicy<R, HttpMessageAndTimestamp.Response> retryPolicy,
+        @NonNull TargetChannelFactory<P, R> targetChannelFactory,
+        @NonNull RequestReplayOwner.TupleFactory<
+            HttpMessageAndTimestamp.Request,
+            P,
+            R,
+            HttpMessageAndTimestamp.Response,
+            T
+        > tupleFactory,
+        @NonNull RequestReplayOwner.ResourceReleaser<
+            HttpMessageAndTimestamp.Request,
+            P,
+            R,
+            HttpMessageAndTimestamp.Response
+        > resourceReleaser,
+        @NonNull ManagedTupleTransformerFactory<T> tupleTransformerFactory,
+        @NonNull ManagedPhysicalTupleSinkFactory<T> tupleSinkFactory,
+        @NonNull Consumer<T> tupleReleaser,
+        @NonNull Duration tupleRetryDelay,
+        int maximumTargetAttempts
+    ) {
+        public Configuration {
+            if (tupleRetryDelay.isNegative()) {
+                throw new IllegalArgumentException("tupleRetryDelay must not be negative");
+            }
+            if (maximumTargetAttempts <= 0) {
+                throw new IllegalArgumentException("maximumTargetAttempts must be positive");
+            }
+        }
+    }
+
+    private final KafkaSourceInputQueue sourceInputs;
+    private final ReplayIntakeInputQueue intakeInputs;
+    private final KafkaSourceOwner sourceOwner;
+    private final ReplayIntakeOwner intakeOwner;
+    private final ConnectionAssemblySink connectionAssemblySink;
+    private final Configuration<P, R, T> configuration;
+    private final ChannelContextManager contextManager;
+    private final TargetAttemptPermitProvider permitProvider;
+    private final Consumer<Error> fatalHandler;
+    private boolean intakeStarted;
+
+    public TrafficReplayerTopLevel(
+        @NonNull org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
+        @NonNull RootReplayerContext rootContext,
+        @NonNull Configuration<P, R, T> configuration,
+        @NonNull Duration kafkaPollTimeout,
+        @NonNull Duration cancellationGrace,
+        @NonNull Consumer<Error> fatalHandler
+    ) {
+        this.configuration = configuration;
+        this.fatalHandler = fatalHandler;
+        this.contextManager = new ChannelContextManager(rootContext);
+        var wakeupController = new WakeupController(consumer::wakeup, rootContext);
+        this.sourceInputs = new KafkaSourceInputQueue(wakeupController);
+        this.intakeInputs = new ReplayIntakeInputQueue();
+        this.permitProvider = new TargetAttemptPermitProvider(
+            configuration.maximumTargetAttempts(),
+            new AtomicInteger(),
+            rootContext.getTargetAttemptPermitMetrics(),
+            fatalHandler::accept,
+            configuration.nanoTime()
+        );
+        this.connectionAssemblySink = new ConnectionAssemblySink(
+            configuration.replayTimeMapper()
+        );
+        this.intakeOwner = new ReplayIntakeOwner(
+            intakeInputs,
+            sourceInputs,
+            connectionAssemblySink,
+            fatalHandler::accept,
+            rootContext.getReplayIntakeMetrics()
+        );
+        this.sourceOwner = new KafkaSourceOwner(
+            new KafkaConsumerSourcePort(consumer, kafkaPollTimeout),
+            sourceInputs,
+            intakeInputs,
+            wakeupController,
+            cancellationGrace,
+            configuration.nanoTime(),
+            GraceIntervalWait.blockingOn(sourceInputs, configuration.nanoTime()),
+            rootContext.getKafkaCommitStateMetrics(),
+            rootContext::createKafkaRecordContext
+        );
+    }
+
+    public void startIntake() {
+        if (intakeStarted) {
+            throw new IllegalStateException("replay intake already started");
+        }
+        intakeStarted = true;
+        intakeOwner.start();
+    }
+
+    public void runSourceOnce() {
+        sourceOwner.runOnce();
+    }
+
+    public KafkaSourceOwner sourceOwner() {
+        return sourceOwner;
+    }
+
+    public ReplayIntakeOwner intakeOwner() {
+        return intakeOwner;
+    }
+
+    public ReplayIntakeInputQueue intakeInputs() {
+        return intakeInputs;
+    }
+
+    public KafkaSourceInputQueue sourceInputs() {
+        return sourceInputs;
+    }
+
+    int activeConnectionCount() {
+        return connectionAssemblySink.connections.size();
+    }
+
+    java.util.List<org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.Snapshot>
+    activitySnapshot(ConnectionProcessingId connectionProcessingId) {
+        return connectionAssemblySink.requireConnection(connectionProcessingId)
+            .owner.activitySnapshot();
+    }
+
+    /**
+     * The caller installs this listener on the same real consumer used to construct the source port.
+     */
+    public ConsumerRebalanceListener rebalanceListener() {
+        return new ConsumerRebalanceListener() {
+            @Override
+            public void onPartitionsRevoked(
+                java.util.Collection<org.apache.kafka.common.TopicPartition> partitions
+            ) {
+                try {
+                    sourceOwner.onPartitionsRevoked(partitions);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    fatalHandler.accept(new Error(
+                        "Kafka revocation callback was interrupted",
+                        interrupted
+                    ));
+                }
+            }
+
+            @Override
+            public void onPartitionsAssigned(
+                java.util.Collection<org.apache.kafka.common.TopicPartition> partitions
+            ) {
+                sourceOwner.onPartitionsAssigned(partitions);
+            }
+
+            @Override
+            public void onPartitionsLost(
+                java.util.Collection<org.apache.kafka.common.TopicPartition> partitions
+            ) {
+                sourceOwner.onPartitionsLost(partitions);
+            }
+        };
+    }
+
+    public static ManagedTupleTransformer<Map<String, Object>> deployedTupleTransformer(
+        @NonNull Supplier<IJsonTransformer> transformerSupplier
+    ) {
+        var transformer = Objects.requireNonNull(
+            transformerSupplier.get(),
+            "tuple transformer supplier returned null"
+        );
+        return new ManagedTupleTransformer<>() {
+            @Override
+            public TupleWriter.TupleTransformation<Map<String, Object>> transform(
+                IReplayContexts.ITupleHandlingContext replayContext,
+                Map<String, Object> tuple
+            ) {
+                final Object transformed;
+                try {
+                    transformed = transformer.transformJson(tuple);
+                } catch (RequestFilteredException intentionalDrop) {
+                    return new TupleDropped<>();
+                }
+                if (!(transformed instanceof Map<?, ?> transformedMap)) {
+                    throw new IllegalArgumentException(
+                        "Tuple transformer must return a JSON object or throw RequestFilteredException"
+                    );
+                }
+                @SuppressWarnings("unchecked")
+                var typed = (Map<String, Object>) transformedMap;
+                return new TransformedTuple<>(typed);
+            }
+
+            @Override
+            public void close() throws Exception {
+                transformer.close();
+            }
+        };
+    }
+
+    public static ManagedPhysicalTupleSink<Map<String, Object>> deployedTupleSink(
+        @NonNull TupleSink sink
+    ) {
+        return new ManagedPhysicalTupleSink<>() {
+            @Override
+            public CompletionStage<Void> write(
+                IReplayContexts.ITupleHandlingContext replayContext,
+                Map<String, Object> tuple
+            ) {
+                var completion = new java.util.concurrent.CompletableFuture<Void>();
+                sink.accept(tuple, completion);
+                return completion.minimalCompletionStage();
+            }
+
+            @Override
+            public void close() {
+                sink.close();
+            }
+        };
+    }
+
+    @Override
+    public void close() {
+        sourceInputs.close();
+        if (intakeStarted && intakeInputs.requestStopAfterDraining()) {
+            intakeOwner.termination().toCompletableFuture().join();
+        } else if (!intakeStarted) {
+            intakeInputs.closeNow();
+        }
+    }
+
+    private ConnectionBinding createConnection(
+        ConnectionAssemblySink assemblySink,
+        ConnectionProcessingId connectionId
+    ) {
+        var eventLoop = Objects.requireNonNull(
+            configuration.eventLoopFor().apply(connectionId),
+            "event-loop selector returned null"
+        );
+        var connectionContext = contextManager.apply(connectionId);
+        var tupleTransformer = Objects.requireNonNull(
+            configuration.tupleTransformerFactory().create(connectionId),
+            "tuple transformer factory returned null"
+        );
+        var tupleSink = Objects.requireNonNull(
+            configuration.tupleSinkFactory().create(connectionId),
+            "tuple sink factory returned null"
+        );
+        var tupleWriter = new TupleWriter<>(
+            eventLoop,
+            configuration.clock(),
+            configuration.tupleRetryDelay(),
+            tupleTransformer,
+            tupleSink,
+            configuration.tupleReleaser(),
+            fatalHandler::accept,
+            org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP
+        );
+        var terminalBinding = new AtomicReference<ConnectionBinding>();
+        var owner = new TargetConnectionOwner<
+            HttpMessageAndTimestamp.Request,
+            P,
+            R,
+            HttpMessageAndTimestamp.Response,
+            T
+        >(
+            connectionId,
+            eventLoop,
+            configuration.clock(),
+            configuration.nanoTime(),
+            configuration.replayTimeMapper(),
+            configuration.requestPreparerFactory().apply(connectionId, connectionContext),
+            configuration.retryPolicy(),
+            configuration.targetChannelFactory().create(
+                connectionId,
+                eventLoop,
+                connectionContext
+            ),
+            tupleWriter,
+            configuration.tupleFactory(),
+            configuration.resourceReleaser(),
+            permitProvider,
+            assemblySink.new IntakeLifecycleSink(connectionId),
+            fatalHandler::accept,
+            org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP,
+            () -> assemblySink.releaseTerminatedConnection(
+                connectionId,
+                Objects.requireNonNull(
+                    terminalBinding.get(),
+                    "connection binding was not installed before owner termination"
+                )
+            )
+        );
+        var binding = new ConnectionBinding(
+            owner,
+            connectionContext,
+            tupleTransformer,
+            tupleSink
+        );
+        terminalBinding.set(binding);
+        return binding;
+    }
+
+    private void releaseRejectedAdmission(
+        IReplayContexts.IRequestContext requestContext,
+        HttpMessageAndTimestamp.Request request,
+        Throwable failure
+    ) {
+        Throwable cleanupFailure = null;
+        try {
+            requestContext.close();
+        } catch (Throwable contextFailure) {
+            cleanupFailure = contextFailure;
+        }
+        try {
+            configuration.resourceReleaser().releaseSourceRequest(request);
+        } catch (Throwable releaseFailure) {
+            if (cleanupFailure == null) {
+                cleanupFailure = releaseFailure;
+            } else if (cleanupFailure != releaseFailure) {
+                cleanupFailure.addSuppressed(releaseFailure);
+            }
+        }
+        if (cleanupFailure != null) {
+            if (cleanupFailure != failure) {
+                cleanupFailure.addSuppressed(failure);
+            }
+            fatalHandler.accept(new Error(
+                "Rejected request admission cleanup failed for "
+                    + requestContext.getRequestId(),
+                cleanupFailure
+            ));
+        }
+    }
+
+    private void releaseConnectionResources(
+        ConnectionProcessingId connectionId,
+        ConnectionBinding binding
+    ) {
+        closeManaged(binding.tupleTransformer, "tuple transformer", connectionId);
+        closeManaged(binding.tupleSink, "tuple sink", connectionId);
+        contextManager.releaseContextFor(binding.connectionContext);
+    }
+
+    private void closeManaged(
+        AutoCloseable closeable,
+        String component,
+        ConnectionProcessingId connectionId
+    ) {
+        try {
+            closeable.close();
+        } catch (Exception failure) {
+            fatalHandler.accept(new Error(
+                "Failed to close " + component + " for " + connectionId,
+                failure
+            ));
+        }
+    }
+
+    private final class ConnectionBinding {
+        private final TargetConnectionOwner<
+            HttpMessageAndTimestamp.Request,
+            P,
+            R,
+            HttpMessageAndTimestamp.Response,
+            T
+        > owner;
+        private final IReplayContexts.IConnectionContext connectionContext;
+        private final ManagedTupleTransformer<T> tupleTransformer;
+        private final ManagedPhysicalTupleSink<T> tupleSink;
+        private volatile boolean intakeRemovalAccepted;
+
+        private ConnectionBinding(
+            TargetConnectionOwner<
+                HttpMessageAndTimestamp.Request,
+                P,
+                R,
+                HttpMessageAndTimestamp.Response,
+                T
+            > owner,
+            IReplayContexts.IConnectionContext connectionContext,
+            ManagedTupleTransformer<T> tupleTransformer,
+            ManagedPhysicalTupleSink<T> tupleSink
+        ) {
+            this.owner = owner;
+            this.connectionContext = connectionContext;
+            this.tupleTransformer = tupleTransformer;
+            this.tupleSink = tupleSink;
+        }
+    }
+
+    private final class ConnectionAssemblySink implements SourceAssemblySink {
+        private final Function<Instant, Instant> replayTimeMapper;
+        private final ConcurrentHashMap<ConnectionProcessingId, ConnectionBinding> connections =
+            new ConcurrentHashMap<>();
+
+        private ConnectionAssemblySink(Function<Instant, Instant> replayTimeMapper) {
+            this.replayTimeMapper = replayTimeMapper;
+        }
+
+        @Override
+        public void onRequestReconstituted(
+            ReplayRequestId requestId,
+            long capturedRequestOrdinal,
+            HttpMessageAndTimestamp.Request request,
+            Instant requestFirstByteSourceTime,
+            Instant requestEndOfMessageSourceTime,
+            long requestCompletingLogAppendTime
+        ) {
+            throw new IllegalStateException(
+                "production request delivery requires its replay context"
+            );
+        }
+
+        @Override
+        public void onRequestReconstituted(
+            HttpMessageAndTimestamp.Request request,
+            Instant requestEndOfMessageSourceTime,
+            long requestCompletingLogAppendTime,
+            IReplayContexts.IRequestContext requestContext
+        ) {
+            var requestId = requestContext.getRequestId();
+            var connectionId = requestContext.getConnectionProcessingId();
+            var binding = connections.get(connectionId);
+            var newBinding = binding == null;
+            if (binding == null) {
+                binding = createConnection(this, connectionId);
+            }
+            var admission = new TargetConnectionOwner.AdmitReconstitutedRequest<
+                HttpMessageAndTimestamp.Request,
+                HttpMessageAndTimestamp.Response
+            >(
+                request,
+                requestContext
+            );
+            final CompletionStage<TargetConnectionOwner.RequestAdmissionResult> accepted;
+            if (newBinding) {
+                try {
+                    accepted = binding.owner.submitForPublication(admission);
+                } catch (RuntimeException | Error failure) {
+                    releaseRejectedAdmission(requestContext, request, failure);
+                    releaseUnpublishedConnection(connectionId, binding);
+                    return;
+                }
+                connections.put(connectionId, binding);
+            } else {
+                accepted = binding.owner.submit(admission);
+            }
+            accepted.whenComplete((result, failure) -> {
+                if (failure != null) {
+                    releaseRejectedAdmission(requestContext, request, failure);
+                } else if (result instanceof TargetConnectionOwner.RequestAdmissionRejected rejected) {
+                    releaseRejectedAdmission(
+                        requestContext,
+                        request,
+                        rejected.cause()
+                    );
+                }
+            });
+        }
+
+        @Override
+        public void onSourceResponseComplete(
+            ReplayRequestId requestId,
+            HttpMessageAndTimestamp.Response response,
+            boolean keptAlive
+        ) {
+            var connectionId = requestId.connectionProcessingId();
+            requireConnection(connectionId).owner.submit(
+                new TargetConnectionOwner.SourceResponseComplete<
+                    HttpMessageAndTimestamp.Request,
+                    HttpMessageAndTimestamp.Response
+                >(
+                    connectionId,
+                    connectionId.generation(),
+                    requestId,
+                    response,
+                    keptAlive
+                )
+            );
+        }
+
+        @Override
+        public void onSourceResponseIncomplete(
+            ReplayRequestId requestId,
+            IncompleteReason reason
+        ) {
+            var connectionId = requestId.connectionProcessingId();
+            requireConnection(connectionId).owner.submit(
+                new TargetConnectionOwner.SourceResponseIncomplete<
+                    HttpMessageAndTimestamp.Request,
+                    HttpMessageAndTimestamp.Response
+                >(connectionId, connectionId.generation(), requestId, reason.name())
+            );
+        }
+
+        @Override
+        public void onCapturedClose(
+            ConnectionProcessingId connectionId,
+            long capturedOrdinal,
+            Instant closeTime
+        ) {
+            requireConnection(connectionId).owner.submit(
+                new TargetConnectionOwner.AdmitCapturedClose<
+                    HttpMessageAndTimestamp.Request,
+                    HttpMessageAndTimestamp.Response
+                >(connectionId, connectionId.generation(), capturedOrdinal,
+                    replayTimeMapper.apply(closeTime))
+            );
+        }
+
+        @Override
+        public void onConnectionOwnerFinished(ConnectionProcessingId connectionId) {
+            var binding = connections.remove(connectionId);
+            if (binding == null) {
+                throw new IllegalStateException("connection owner was not published for " + connectionId);
+            }
+            binding.intakeRemovalAccepted = true;
+        }
+
+        private ConnectionBinding requireConnection(ConnectionProcessingId connectionId) {
+            var binding = connections.get(connectionId);
+            if (binding == null) {
+                throw new IllegalStateException("no published connection owner for " + connectionId);
+            }
+            return binding;
+        }
+
+        private void releaseTerminatedConnection(
+            ConnectionProcessingId connectionId,
+            ConnectionBinding binding
+        ) {
+            if (!binding.intakeRemovalAccepted) {
+                fatalHandler.accept(new Error(
+                    "Connection owner terminated before intake removed " + connectionId
+                ));
+            }
+            releaseConnectionResources(connectionId, binding);
+        }
+
+        private void releaseUnpublishedConnection(
+            ConnectionProcessingId connectionId,
+            ConnectionBinding binding
+        ) {
+            releaseConnectionResources(connectionId, binding);
+        }
+
+        private final class IntakeLifecycleSink implements TargetConnectionOwner.LifecycleSink {
+            private final ConnectionProcessingId connectionId;
+
+            private IntakeLifecycleSink(ConnectionProcessingId connectionId) {
+                this.connectionId = connectionId;
+            }
+
+            @Override
+            public CompletionStage<Void> connectionRequestFinished(
+                org.opensearch.migrations.replay.identity.PartitionGenerationId generation,
+                ConnectionProcessingId reportedConnectionId,
+                ReplayRequestId requestId
+            ) {
+                requireLifecycleIdentity(reportedConnectionId);
+                return intakeInputs.submitAndAwaitHandling(
+                    new ReplayIntakeInput.ConnectionRequestFinished(generation, requestId)
+                );
+            }
+
+            @Override
+            public CompletionStage<Void> requestProcessingFinished(
+                org.opensearch.migrations.replay.identity.PartitionGenerationId generation,
+                ConnectionProcessingId reportedConnectionId,
+                ReplayRequestId requestId
+            ) {
+                requireLifecycleIdentity(reportedConnectionId);
+                return intakeInputs.submitAndAwaitHandling(
+                    new ReplayIntakeInput.RequestProcessingFinished(generation, requestId)
+                );
+            }
+
+            @Override
+            public CompletionStage<Void> connectionOwnerFinished(
+                org.opensearch.migrations.replay.identity.PartitionGenerationId generation,
+                ConnectionProcessingId reportedConnectionId
+            ) {
+                requireLifecycleIdentity(reportedConnectionId);
+                return intakeInputs.submitAndAwaitHandling(
+                    new ReplayIntakeInput.ConnectionOwnerFinished(generation, connectionId)
+                );
+            }
+
+            @Override
+            public CompletionStage<Void> connectionCleanupFinished(
+                org.opensearch.migrations.replay.identity.PartitionGenerationId generation,
+                ConnectionProcessingId reportedConnectionId
+            ) {
+                requireLifecycleIdentity(reportedConnectionId);
+                return intakeInputs.submitAndAwaitHandling(
+                    new ReplayIntakeInput.ConnectionCleanupFinished(generation, connectionId)
+                );
+            }
+
+            private void requireLifecycleIdentity(ConnectionProcessingId reportedConnectionId) {
+                if (!connectionId.equals(reportedConnectionId)) {
+                    throw new IllegalArgumentException(
+                        "lifecycle result for " + reportedConnectionId
+                            + " cannot route through " + connectionId
+                    );
+                }
+            }
+        }
+
+    }
+}
+
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// The inert predecessor below supplies the source functions named by REBUILD-TRACE(G5,target):
+// getCurrentAccumulator, getCurrentReplayEngine, every constructor,
+// makeNettyPacketConsumerConnectionPool, loadSslContext, setupRunAndWaitForReplayToFinish,
+// doSetupRunAndWaitForReplayToFinish, wrapUpWorkAndEmitSummary,
+// setupRunAndWaitForReplayWithShutdownChecks, doSetupRunAndWaitForReplayWithShutdownChecks,
+// waitForRemainingWork, handleAlreadySetFinishedSignal, writeStatusLogsForRemainingWork,
+// formatWorkItem, shouldRetry, shutdown, and close. Each maps to the exact owner or G9
+// disposition named above; none remains a second live orchestration path.
+// REBUILD-TRACE-END(G5,source)
+
+// REBUILD-LIMBO(G5) -- the carried predecessor members below remain inert. Javadoc is left outside
+// the marked regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
 // javadoc with it. See AGENTS.md section 8a.
 // Cascade from the left-behind legacy set. Unresolved: BlockingTrafficSource CapturedTrafficToHttpTransactionAccumulator ClientConnectionPool IRootReplayerContext NettyPacketToHttpConsumer . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.

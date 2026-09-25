@@ -1,163 +1,125 @@
 package org.opensearch.migrations.replay.kafka;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Test carried byte-identical. Unresolved: IgnoringSourcePartitionLifecycleListener InstrumentationTest ITrafficStreamKey . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
+import java.util.ArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
-// REBUILD-LIMBO-START(G10)
-/*
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.Collections;
-import java.util.HashMap;
-
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
-import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
-import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
-import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Timestamp;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.MockConsumer;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-
-*/
-// REBUILD-LIMBO-END(G10)
 /**
- * Tests #11, #12: Edge-path tests for partitionToActiveConnections tracking.
+ * Preserves the inherited connection-reuse assertions on the G5 connection-context registry.
  */
-// REBUILD-LIMBO-START(G10)
-/*
-class ActiveConnectionTrackingTest extends InstrumentationTest {
-
-    private static final String TOPIC = "test-topic";
-
-*/
-// REBUILD-LIMBO-END(G10)
-    /**
-     * Test #11: Consume multiple streams for the same connection (keep-alive reuse).
-     * Assert the connection remains in partitionToActiveConnections across keep-alive requests.
-     */
-// REBUILD-LIMBO-START(G10)
-/*
+class ActiveConnectionTrackingTest {
     @Test
-    void partitionToActiveConnections_connectionTrackedAcrossKeepAlive() throws Exception {
-        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
-        var tp = new TopicPartition(TOPIC, 0);
-        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
-
-        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
-            source.setSourcePartitionLifecycleListener(
-                new IgnoringSourcePartitionLifecycleListener()
+    void retainAndReleaseAreAtomicForOneConnectionLifetime() throws Exception {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var manager = new ChannelContextManager(
+                new RootReplayerContext(telemetry.openTelemetrySdk)
             );
-            mc.schedulePollTask(() -> {
-                mc.rebalance(Collections.singletonList(tp));
-                // Two streams for the same connection (keep-alive reuse)
-                for (int i = 0; i < 2; i++) {
-                    var ts = TrafficStream.newBuilder()
-                        .setNodeId("node1").setConnectionId("keep-alive-conn").setNumberOfThisLastChunk(0)
-                        .addSubStream(TrafficObservation.newBuilder()
-                            .setTs(Timestamp.newBuilder().setSeconds(1 + i).build())
-                            .setRead(ReadObservation.newBuilder()
-                                .setData(ByteString.copyFrom("GET / HTTP/1.1\r\n\r\n", StandardCharsets.UTF_8))
-                                .build())
-                            .build())
-                        .build();
-                    try (var baos = new ByteArrayOutputStream()) {
-                        CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
-                        mc.addRecord(new ConsumerRecord<>(TOPIC, 0, i, "k", baos.toByteArray()));
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
+            var connectionId = connectionId("keep-alive", 1, 0);
+            var contexts = ConcurrentHashMap.<IReplayContexts.IConnectionContext>newKeySet();
+            var retained = new CountDownLatch(8);
+            var release = new CountDownLatch(1);
+            var executor = Executors.newFixedThreadPool(8);
+            var futures = new ArrayList<java.util.concurrent.Future<?>>();
+            try {
+                for (int i = 0; i < 8; i++) {
+                    futures.add(executor.submit(() -> {
+                        var context = manager.retainOrCreateContext(connectionId);
+                        contexts.add(context);
+                        retained.countDown();
+                        release.await();
+                        manager.releaseContextFor(context);
+                        return null;
+                    }));
                 }
-            });
+                Assertions.assertTrue(retained.await(5, TimeUnit.SECONDS));
+                Assertions.assertEquals(1, contexts.size());
+                release.countDown();
+                for (var future : futures) {
+                    future.get(5, TimeUnit.SECONDS);
+                }
+            } finally {
+                release.countDown();
+                executor.shutdownNow();
+            }
 
-            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
+            var closedContext = contexts.iterator().next();
+            var laterContext = manager.retainOrCreateContext(connectionId);
+            Assertions.assertNotSame(closedContext, laterContext);
+            manager.releaseContextFor(laterContext);
 
-            var active = source.partitionToActiveConnections.get(0);
-            Assertions.assertNotNull(active);
-            var connKey = new ScopedConnectionIdKey("node1", "keep-alive-conn");
-            Assertions.assertTrue(active.contains(connKey),
-                "Connection must remain in partitionToActiveConnections across keep-alive streams");
+            var metrics = telemetry.getFinishedMetrics();
+            assertLongPoint(
+                metrics,
+                IReplayContexts.MetricNames.ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED,
+                0
+            );
         }
     }
 
-*/
-// REBUILD-LIMBO-END(G10)
-    /**
-     * Test #12: Add two connections to partitionToActiveConnections for the same partition.
-     * Fire onConnectionAccumulationComplete for one connection. Assert only that connection is removed.
-     */
-// REBUILD-LIMBO-START(G10)
-/*
     @Test
-    void onConnectionAccumulationComplete_removesCorrectKeyFromActiveConnections() throws Exception {
-        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
-        var tp = new TopicPartition(TOPIC, 0);
-        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
-
-        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
-            source.setSourcePartitionLifecycleListener(
-                new IgnoringSourcePartitionLifecycleListener()
+    void releaseRemovesOnlyTheMatchingConnectionLifetime() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var manager = new ChannelContextManager(
+                new RootReplayerContext(telemetry.openTelemetrySdk)
             );
-            mc.schedulePollTask(() -> {
-                mc.rebalance(Collections.singletonList(tp));
-                // Two distinct connections on partition 0
-                for (int i = 0; i < 2; i++) {
-                    var ts = TrafficStream.newBuilder()
-                        .setNodeId("node1").setConnectionId("conn" + i).setNumberOfThisLastChunk(0)
-                        .addSubStream(TrafficObservation.newBuilder()
-                            .setTs(Timestamp.newBuilder().setSeconds(1).build())
-                            .setRead(ReadObservation.newBuilder()
-                                .setData(ByteString.copyFrom("GET / HTTP/1.1\r\n\r\n", StandardCharsets.UTF_8))
-                                .build())
-                            .build())
-                        .build();
-                    try (var baos = new ByteArrayOutputStream()) {
-                        CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
-                        mc.addRecord(new ConsumerRecord<>(TOPIC, 0, i, "k", baos.toByteArray()));
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-            });
+            var firstId = connectionId("first", 2, 0);
+            var secondId = connectionId("second", 2, 0);
+            var first = manager.retainOrCreateContext(firstId);
+            var second = manager.retainOrCreateContext(secondId);
 
-            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-
-            var active = source.partitionToActiveConnections.get(0);
-            Assertions.assertEquals(2, active.size(), "Both connections must be tracked");
-
-            // Fire onConnectionAccumulationComplete for conn0 only
-            var tsk = mock(ITrafficStreamKey.class);
-            when(tsk.getNodeId()).thenReturn("node1");
-            when(tsk.getConnectionId()).thenReturn("conn0");
-            source.onConnectionAccumulationComplete(tsk);
-
-            Assertions.assertEquals(1, active.size(), "Only one connection should remain after onConnectionAccumulationComplete");
-            Assertions.assertFalse(active.contains(new ScopedConnectionIdKey("node1", "conn0")),
-                "conn0 must be removed");
-            Assertions.assertTrue(active.contains(new ScopedConnectionIdKey("node1", "conn1")),
-                "conn1 must still be present");
+            manager.releaseContextFor(first);
+            var retainedSecond = manager.retainOrCreateContext(secondId);
+            Assertions.assertSame(second, retainedSecond);
+            manager.releaseContextFor(second);
+            manager.releaseContextFor(retainedSecond);
         }
+    }
+
+    private static ConnectionProcessingId connectionId(
+        String connection,
+        long generation,
+        long lifetime
+    ) {
+        return new ConnectionProcessingId(
+            new PartitionGenerationId(new TopicPartition("topic", 0), generation),
+            new CapturedConnectionId("writer", connection),
+            lifetime
+        );
+    }
+
+    private static void assertLongPoint(
+        Iterable<MetricData> metrics,
+        String name,
+        long expectedValue
+    ) {
+        for (var metric : metrics) {
+            if (metric.getName().equals(name)) {
+                var point = metric.getLongSumData()
+                    .getPoints()
+                    .stream()
+                    .filter(candidate -> candidate.getAttributes().equals(Attributes.empty()))
+                    .findFirst()
+                    .orElseThrow();
+                Assertions.assertEquals(expectedValue, point.getValue());
+                return;
+            }
+        }
+        throw new AssertionError("Missing metric " + name);
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G10)

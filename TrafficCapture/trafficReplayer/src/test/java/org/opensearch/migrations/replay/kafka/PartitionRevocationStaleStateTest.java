@@ -1,12 +1,7 @@
 package org.opensearch.migrations.replay.kafka;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Test carried byte-identical. Unresolved: AccumulationCallbacks CapturedTrafficToHttpTransactionAccumulator ChannelContextManager HttpMessageAndTimestamp InstrumentationTest . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
+// REBUILD-LIMBO-NOTE(G10): Remaining marked members cover the retired accumulator and synthetic-close
+// predecessor. G5 promotes only the connection-lifetime context assertions.
 
 // REBUILD-LIMBO-START(G10)
 /*
@@ -43,73 +38,86 @@ import org.junit.jupiter.api.Test;
 
 */
 // REBUILD-LIMBO-END(G10)
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
+
+import org.apache.kafka.common.TopicPartition;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
 /**
- * Verifies that stale per-connection state (ChannelContextManager and
- * CapturedTrafficToHttpTransactionAccumulator) is discarded when a Kafka partition
- * is revoked and reassigned (detected via a generation bump on the ITrafficStreamKey).
+ * Verifies that connection contexts are scoped to complete process-local lifetimes.
  */
-// REBUILD-LIMBO-START(G10)
-/*
-public class PartitionRevocationStaleStateTest extends InstrumentationTest {
-
-    @Override
-    protected TestContext makeInstrumentationContext() {
-        return TestContext.withTracking(false, true);
-    }
-
-    // -------------------------------------------------------------------------
-    // ChannelContextManager tests
-    // -------------------------------------------------------------------------
-
-*/
-// REBUILD-LIMBO-END(G10)
+public class PartitionRevocationStaleStateTest {
     /**
-     * When the same connectionId arrives with a higher generation, the old context
-     * must be replaced (and force-closed) rather than reused.
+     * A later generation for the same captured connection is a distinct lifetime and may coexist
+     * while the prior owner finishes.
      */
-// REBUILD-LIMBO-START(G10)
-/*
     @Test
-    void channelContextManager_staleContextReplacedOnGenerationBump() {
-        var mgr = new ChannelContextManager(rootContext);
+    void generationBumpCreatesASeparateContextWithoutCrossRouting() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var manager = new ChannelContextManager(
+                new RootReplayerContext(telemetry.openTelemetrySdk)
+            );
+            var generationOne = connectionId(1, 0);
+            var generationTwo = connectionId(2, 0);
+            var first = manager.retainOrCreateContext(generationOne);
+            var second = manager.retainOrCreateContext(generationTwo);
 
-        var keyGen1 = makeKafkaKey("node1", "conn1", 1, 0, 0);
-        var keyGen2 = makeKafkaKey("node1", "conn1", 2, 0, 1);
+            Assertions.assertNotSame(first, second);
+            Assertions.assertEquals(generationOne, first.getConnectionProcessingId());
+            Assertions.assertEquals(generationTwo, second.getConnectionProcessingId());
 
-        var ctxGen1 = mgr.retainOrCreateContext(keyGen1);
-        var ctxGen2 = mgr.retainOrCreateContext(keyGen2);
-
-        Assertions.assertNotSame(ctxGen1, ctxGen2,
-            "A new context must be created when the generation increases");
+            manager.releaseContextFor(first);
+            var secondRetainedAgain = manager.retainOrCreateContext(generationTwo);
+            Assertions.assertSame(second, secondRetainedAgain);
+            manager.releaseContextFor(second);
+            manager.releaseContextFor(secondRetainedAgain);
+        }
     }
 
-*/
-// REBUILD-LIMBO-END(G10)
     /**
-     * Same generation → same context object is returned (existing behaviour preserved).
+     * A fresh process-local lifetime in the same partition generation must not reuse the prior
+     * context.
      */
-// REBUILD-LIMBO-START(G10)
-/*
     @Test
-    void channelContextManager_sameGenerationReturnsSameContext() {
-        var mgr = new ChannelContextManager(rootContext);
+    void freshLifetimeWithinOneGenerationUsesASeparateContext() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var manager = new ChannelContextManager(
+                new RootReplayerContext(telemetry.openTelemetrySdk)
+            );
+            var firstLifetime = connectionId(4, 0);
+            var secondLifetime = connectionId(4, 1);
+            var first = manager.retainOrCreateContext(firstLifetime);
+            var second = manager.retainOrCreateContext(secondLifetime);
 
-        var keyA = makeKafkaKey("node1", "conn1", 1, 0, 0);
-        var keyB = makeKafkaKey("node1", "conn1", 1, 0, 1);
-
-        var ctxA = mgr.retainOrCreateContext(keyA);
-        var ctxB = mgr.retainOrCreateContext(keyB);
-
-        Assertions.assertSame(ctxA, ctxB,
-            "Same generation must reuse the existing context");
+            Assertions.assertNotSame(first, second);
+            manager.releaseContextFor(first);
+            manager.releaseContextFor(second);
+        }
     }
 
+    private static ConnectionProcessingId connectionId(long generation, long lifetime) {
+        return new ConnectionProcessingId(
+            new PartitionGenerationId(new TopicPartition("topic", 1), generation),
+            new CapturedConnectionId("writer", "connection"),
+            lifetime
+        );
+    }
+
+// REBUILD-LIMBO-START(G10)
+/*
     // -------------------------------------------------------------------------
     // CapturedTrafficToHttpTransactionAccumulator tests
     // -------------------------------------------------------------------------
 
 */
 // REBUILD-LIMBO-END(G10)
+}
     /**
      * When a traffic stream arrives for a connection that already has an accumulation
      * from a lower generation, the old accumulation must be discarded via

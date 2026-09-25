@@ -36,10 +36,44 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparat
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
 import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
+
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator connection map/rotation ->
+//     ReplayIntakeOwner connection routing + this owner's process-local lifetime
+// RequestSenderOrchestrator.scheduleWork/scheduleRequest/scheduleClose ->
+//     submit/applyRequestAdmission/applyCapturedClose plus admission/execution queues
+// RequestSenderOrchestrator bindNettySchedule* -> scheduleAdmissionHead/scheduleExecutionHead
+// RequestSenderOrchestrator scheduleOnConnectionReplaySession ->
+//     evaluateExecutionHead/acquirePermit/applyPermitResult
+// old cached ConnectionReplaySession turn ownership -> activeTurn + requestRegistry
+// old first-write callback -> firstTargetWriteSubmitted; new final boundary ->
+//     finalTargetWriteSubmitted
+// old request callback removal -> connectionTurnFinished/requestProcessingFinished with registry
+// old source response dispatch -> routeRequest + RequestReplayOwner typed source inputs
+// old connection close/expiration/cancellation callbacks ->
+//     closeTargetChannel/expireConnection/gracefulCancel/forceCancel/tryFinishOwner
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// submit/applyRequestAdmission/applyCapturedClose ->
+//     RequestSenderOrchestrator scheduleWork/scheduleRequest/scheduleClose.
+// scheduleAdmissionHead/promoteDueAdmissions/scheduleExecutionHead ->
+//     RequestSenderOrchestrator bindNettySchedule* and scheduleOnConnectionReplaySession.
+// evaluateExecutionHead/acquirePermit/applyPermitResult ->
+//     scheduleSendRequestOnConnectionReplaySession and cached ConnectionReplaySession turn ownership.
+// firstTargetWriteSubmitted/finalTargetWriteSubmitted ->
+//     predecessor first-write callback and the designed final-write boundary.
+// connectionTurnFinished/requestProcessingFinished/requestCleanupFinished ->
+//     predecessor request callback removal and cleanup, split into typed milestones.
+// routeRequest and typed source-response inputs -> predecessor source-response dispatch.
+// closeTargetChannel/expireConnection/gracefulCancel/forceCancel/tryFinishOwner ->
+//     predecessor connection close, expiration, cancellation, and final removal callbacks.
+// requestRegistry/activeTurn -> predecessor cached ConnectionReplaySession and callback registry.
+// REBUILD-TRACE-END(G5,target)
 
 /**
  * Event-loop-confined owner of one process-local target connection and its request registry.
@@ -63,14 +97,31 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     public record AdmitReconstitutedRequest<S, F>(
-        @NonNull ConnectionProcessingId connectionProcessingId,
-        @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull ReplayRequestId requestId,
-        long capturedRequestOrdinal,
-        @NonNull Instant requestFirstByteSourceTime,
         @NonNull S sourceRequest,
-        @NonNull String activityIdentity
-    ) implements ConnectionInput<S, F> {}
+        @NonNull IReplayContexts.IRequestContext replayContext
+    ) implements ConnectionInput<S, F> {
+        @Override
+        public ConnectionProcessingId connectionProcessingId() {
+            return replayContext.getConnectionProcessingId();
+        }
+
+        @Override
+        public PartitionGenerationId partitionGenerationId() {
+            return replayContext.getConnectionProcessingId().generation();
+        }
+
+        public ReplayRequestId requestId() {
+            return replayContext.getRequestId();
+        }
+
+        public long capturedRequestOrdinal() {
+            return replayContext.getCapturedRequestOrdinal();
+        }
+
+        public Instant requestFirstByteSourceTime() {
+            return replayContext.getTimeOfOriginalRequest();
+        }
+    }
 
     public record AdmitCapturedClose<S, F>(
         @NonNull ConnectionProcessingId connectionProcessingId,
@@ -83,7 +134,8 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull ConnectionProcessingId connectionProcessingId,
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ReplayRequestId requestId,
-        @NonNull F response
+        @NonNull F response,
+        boolean keptAlive
     ) implements ConnectionInput<S, F> {}
 
     public record SourceResponseUnavailableForRetry<S, F>(
@@ -168,6 +220,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private enum PreparationReadiness {
         WAITING,
         READY,
+        FILTERED,
         CANCELLED
     }
 
@@ -189,9 +242,8 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
 
     private static final class RequestEntry<S, P extends AutoCloseable, R, F, T>
         implements AdmissionEntry {
-        private final ReplayRequestId requestId;
-        private final long capturedOrdinal;
         private final Instant nominalTargetTime;
+        private final IReplayContexts.IRequestContext replayContext;
         private final RequestReplayOwner<S, P, R, F, T> owner;
         private boolean firstTargetWriteSubmitted;
         private boolean finalTargetWriteSubmitted;
@@ -200,20 +252,22 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         private boolean connectionRequestFinishedSubmitted;
 
         private RequestEntry(
-            ReplayRequestId requestId,
-            long capturedOrdinal,
             Instant nominalTargetTime,
+            IReplayContexts.IRequestContext replayContext,
             RequestReplayOwner<S, P, R, F, T> owner
         ) {
-            this.requestId = requestId;
-            this.capturedOrdinal = capturedOrdinal;
             this.nominalTargetTime = nominalTargetTime;
+            this.replayContext = replayContext;
             this.owner = owner;
+        }
+
+        private ReplayRequestId requestId() {
+            return replayContext.getRequestId();
         }
 
         @Override
         public long capturedOrdinal() {
-            return capturedOrdinal;
+            return replayContext.getCapturedRequestOrdinal();
         }
 
         @Override
@@ -233,7 +287,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
 
         @Override
         public long capturedOrdinal() {
-            return request.capturedOrdinal;
+            return request.capturedOrdinal();
         }
 
         @Override
@@ -290,6 +344,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private final LifecycleSink lifecycleSink;
     private final FatalHandler fatalHandler;
     private final OutstandingOperationRegistry.CountHook countHook;
+    private final Runnable ownerTerminated;
     private final OutstandingOperationRegistry operations;
     private final Deque<AdmissionEntry> admissionQueue = new ArrayDeque<>();
     private final Deque<ExecutionEntry> executionQueue = new ArrayDeque<>();
@@ -301,6 +356,8 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private SourceLifetime sourceLifetime = SourceLifetime.OPEN;
     private ScheduledFuture<?> admissionTimer;
     private ScheduledFuture<?> executionTimer;
+    private IReplayContexts.IScheduledContext admissionTimerContext;
+    private IReplayContexts.IScheduledContext executionTimerContext;
     private RequestEntry<S, P, R, F, T> activeTurn;
     private PendingPermit<S, P, R, F, T> pendingPermit;
     private long lastCapturedOrdinal = Long.MIN_VALUE;
@@ -325,6 +382,44 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull FatalHandler fatalHandler,
         @NonNull OutstandingOperationRegistry.CountHook countHook
     ) {
+        this(
+            connectionProcessingId,
+            eventLoop,
+            clock,
+            nanoTime,
+            replayTimeMapper,
+            preparer,
+            retryPolicy,
+            targetChannel,
+            tupleWriter,
+            tupleFactory,
+            resourceReleaser,
+            permitProvider,
+            lifecycleSink,
+            fatalHandler,
+            countHook,
+            () -> {}
+        );
+    }
+
+    public TargetConnectionOwner(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull LongSupplier nanoTime,
+        @NonNull Function<Instant, Instant> replayTimeMapper,
+        @NonNull RequestReplayOwner.RequestPreparer<S, P> preparer,
+        @NonNull RequestReplayOwner.RetryPolicy<R, F> retryPolicy,
+        @NonNull TargetChannelPort<P, R> targetChannel,
+        @NonNull TupleWriter<T> tupleWriter,
+        @NonNull RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory,
+        @NonNull RequestReplayOwner.ResourceReleaser<S, P, R, F> resourceReleaser,
+        @NonNull TargetAttemptPermitProvider permitProvider,
+        @NonNull LifecycleSink lifecycleSink,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull OutstandingOperationRegistry.CountHook countHook,
+        @NonNull Runnable ownerTerminated
+    ) {
         this.connectionProcessingId = connectionProcessingId;
         this.partitionGenerationId = connectionProcessingId.generation();
         this.eventLoop = eventLoop;
@@ -341,6 +436,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         this.lifecycleSink = lifecycleSink;
         this.fatalHandler = fatalHandler;
         this.countHook = countHook;
+        this.ownerTerminated = ownerTerminated;
         this.operations = new OutstandingOperationRegistry(
             "connection " + connectionProcessingId,
             eventLoop,
@@ -359,6 +455,37 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull AdmitReconstitutedRequest<S, F> admission
     ) {
         return submitInput(admission, () -> applyRequestAdmission(admission));
+    }
+
+    /**
+     * Submits the first request before replay intake publishes this owner for later routing.
+     *
+     * <p>A normal return means the event loop accepted the task. Event-loop submission rejection
+     * is process-fatal and is rethrown so the construction path cannot publish this owner.</p>
+     */
+    public CompletionStage<RequestAdmissionResult> submitForPublication(
+        @NonNull AdmitReconstitutedRequest<S, F> admission
+    ) {
+        var completion = new CompletableFuture<RequestAdmissionResult>();
+        try {
+            eventLoop.execute(() -> {
+                try {
+                    requireOwnerThread();
+                    completion.complete(applyRequestAdmission(admission));
+                } catch (Throwable failure) {
+                    completion.completeExceptionally(failure);
+                    impossible(
+                        "connection input " + admission.getClass().getSimpleName(),
+                        failure
+                    );
+                }
+            });
+        } catch (RuntimeException | Error failure) {
+            completion.completeExceptionally(failure);
+            reportFatal("required connection-input submission", failure);
+            throw failure;
+        }
+        return completion.minimalCompletionStage();
     }
 
     public CompletionStage<InputApplied> submit(@NonNull AdmitCapturedClose<S, F> input) {
@@ -435,6 +562,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         for (var requestOwner : publishedRequestOwners) {
             snapshot.addAll(requestOwner.operations().snapshots());
         }
+        snapshot.addAll(tupleWriter.operations().snapshots());
         return List.copyOf(snapshot);
     }
 
@@ -458,7 +586,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 validateIdentity(complete);
                 var request = routeRequest(complete.requestId());
                 if (request != null) {
-                    request.sourceResponseComplete(complete.response());
+                    request.sourceResponseComplete(
+                        complete.response(),
+                        complete.keptAlive()
+                    );
                 }
                 yield new InputApplied();
             }
@@ -516,21 +647,6 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 ))
             );
         }
-        if (!admission.requestId().connectionProcessingId().equals(connectionProcessingId)) {
-            throw new IllegalArgumentException(
-                "request belongs to " + admission.requestId().connectionProcessingId()
-            );
-        }
-        if (admission.requestId().capturedRequestOrdinal()
-            != admission.capturedRequestOrdinal()) {
-            var failure = new IllegalArgumentException(
-                "request identity ordinal "
-                    + admission.requestId().capturedRequestOrdinal()
-                    + " does not match admitted ordinal "
-                    + admission.capturedRequestOrdinal()
-            );
-            throw failure;
-        }
         if (requestRegistry.containsKey(admission.requestId())) {
             var failure = new IllegalStateException(
                 "request is already registered: " + admission.requestId()
@@ -551,11 +667,9 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             "replay-time mapping returned no nominal target time"
         );
         var requestOwner = new RequestReplayOwner<>(
-            partitionGenerationId,
-            connectionProcessingId,
-            admission.requestId(),
             nominalTargetTime,
             admission.sourceRequest(),
+            admission.replayContext(),
             eventLoop,
             clock,
             nanoTime,
@@ -570,9 +684,8 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             countHook
         );
         var entry = new RequestEntry<S, P, R, F, T>(
-            admission.requestId(),
-            admission.capturedRequestOrdinal(),
             nominalTargetTime,
+            admission.replayContext(),
             requestOwner
         );
         requestRegistry.put(admission.requestId(), entry);
@@ -629,12 +742,24 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         try {
+            if (head instanceof RequestEntry<?, ?, ?, ?, ?> request) {
+                admissionTimerContext = request.replayContext.createScheduledContext(
+                    head.admissionTime()
+                );
+            }
             admissionTimer = eventLoop.schedule(
-                () -> runTransition("admission timer", this::promoteDueAdmissions),
+                () -> runTransition(
+                    "admission timer",
+                    () -> {
+                        closeAdmissionTimerContext();
+                        promoteDueAdmissions();
+                    }
+                ),
                 delay.toNanos(),
                 TimeUnit.NANOSECONDS
             );
         } catch (Throwable failure) {
+            closeAdmissionTimerContext();
             impossible("admission timer submission", failure);
         }
     }
@@ -666,7 +791,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         if (executionQueue.isEmpty()
             || activeTurn != null
             || pendingPermit != null
-            || sourceLifetime == SourceLifetime.CANCELLING) {
+            || cancellationBlocksExecutionHead()) {
             return;
         }
         var head = executionQueue.peekFirst();
@@ -676,12 +801,24 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         try {
+            if (head instanceof RequestExecutionEntry<?, ?, ?, ?, ?> request) {
+                executionTimerContext = request.request.replayContext.createScheduledContext(
+                    head.executionTime()
+                );
+            }
             executionTimer = eventLoop.schedule(
-                () -> runTransition("execution timer", this::evaluateExecutionHead),
+                () -> runTransition(
+                    "execution timer",
+                    () -> {
+                        closeExecutionTimerContext();
+                        evaluateExecutionHead();
+                    }
+                ),
                 delay.toNanos(),
                 TimeUnit.NANOSECONDS
             );
         } catch (Throwable failure) {
+            closeExecutionTimerContext();
             impossible("execution timer submission", failure);
         }
     }
@@ -692,7 +829,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         if (executionQueue.isEmpty()
             || activeTurn != null
             || pendingPermit != null
-            || sourceLifetime == SourceLifetime.CANCELLING) {
+            || cancellationBlocksExecutionHead()) {
             maybeCloseAfterSourceEnd();
             return;
         }
@@ -711,6 +848,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                         activeTurn = typed.request;
                         acquirePermit(typed.request, null);
                     }
+                    case FILTERED -> {
+                        activeTurn = typed.request;
+                        typed.request.targetTurnStarted = true;
+                        typed.request.owner.beginFilteredTurn();
+                    }
                     case CANCELLED -> {
                         executionQueue.removeFirst();
                         evaluateExecutionHead();
@@ -722,6 +864,15 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    private boolean cancellationBlocksExecutionHead() {
+        if (sourceLifetime != SourceLifetime.CANCELLING || executionQueue.isEmpty()) {
+            return false;
+        }
+        var head = executionQueue.peekFirst();
+        return !(head instanceof RequestExecutionEntry<?, ?, ?, ?, ?> request)
+            || request.readiness != PreparationReadiness.FILTERED;
+    }
+
     private void acquirePermit(
         RequestEntry<S, P, R, F, T> request,
         CompletableFuture<Void> retryDelivery
@@ -729,7 +880,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         var registration = operations.register(
             partitionGenerationId,
             connectionProcessingId,
-            request.requestId,
+            request.requestId(),
             OperationType.PERMIT_ACQUISITION,
             request.nominalTargetTime,
             WaitReason.WAITING_FOR_PERMIT
@@ -737,7 +888,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         final TargetAttemptPermitProvider.Acquisition acquisition;
         try {
             acquisition = Objects.requireNonNull(
-                permitProvider.acquire(request.requestId),
+                permitProvider.acquire(request.requestId()),
                 "permit provider returned no acquisition"
             );
         } catch (Throwable failure) {
@@ -980,7 +1131,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                     partitionGenerationId,
                     connectionProcessingId
                 ),
-            () -> {}
+            ownerTerminated
         );
     }
 
@@ -1050,8 +1201,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         switch (result) {
-            case RequestPreparationReady<?> ignored ->
-                execution.readiness = PreparationReadiness.READY;
+            case RequestPreparationReady<?> ready ->
+                execution.readiness = ready.transformationStatus().isSkipped()
+                    ? PreparationReadiness.FILTERED
+                    : PreparationReadiness.READY;
             case RequestPreparationCancelled<?> ignored ->
                 execution.readiness = PreparationReadiness.CANCELLED;
         }
@@ -1063,7 +1216,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     ) {
         for (var entry : executionQueue) {
             if (entry instanceof RequestExecutionEntry<?, ?, ?, ?, ?> request
-                && request.request.requestId.equals(requestId)) {
+                && request.request.requestId().equals(requestId)) {
                 @SuppressWarnings("unchecked")
                 var typed = (RequestExecutionEntry<S, P, R, F, T>) request;
                 return typed;
@@ -1242,7 +1395,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         CancellationException cause
     ) {
         if (pendingPermit != null
-            && pendingPermit.request().requestId.equals(requestId)) {
+            && pendingPermit.request().requestId().equals(requestId)) {
             pendingPermit.acquisition().cancel(cause);
         }
     }
@@ -1304,8 +1457,8 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                         impossible(operation + " acceptance", cause);
                         return;
                     }
-                    afterAcceptance.run();
                     operations.complete(registration);
+                    afterAcceptance.run();
                     tryFinishOwner();
                     completion.complete(null);
                 }
@@ -1340,12 +1493,28 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             admissionTimer.cancel(false);
             admissionTimer = null;
         }
+        closeAdmissionTimerContext();
     }
 
     private void cancelExecutionTimer() {
         if (executionTimer != null) {
             executionTimer.cancel(false);
             executionTimer = null;
+        }
+        closeExecutionTimerContext();
+    }
+
+    private void closeAdmissionTimerContext() {
+        if (admissionTimerContext != null) {
+            admissionTimerContext.close();
+            admissionTimerContext = null;
+        }
+    }
+
+    private void closeExecutionTimerContext() {
+        if (executionTimerContext != null) {
+            executionTimerContext.close();
+            executionTimerContext = null;
         }
     }
 

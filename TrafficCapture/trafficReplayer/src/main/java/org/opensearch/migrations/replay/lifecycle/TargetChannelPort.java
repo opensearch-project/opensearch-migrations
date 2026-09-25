@@ -15,6 +15,7 @@ import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import lombok.NonNull;
 
@@ -29,17 +30,27 @@ import lombok.NonNull;
  */
 public interface TargetChannelPort<P, R> {
     record AttemptInput<P>(
-        @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull ConnectionProcessingId connectionProcessingId,
-        @NonNull ReplayRequestId requestId,
         int attemptNumber,
         @NonNull P preparedRequest,
+        @NonNull IReplayContexts.ITargetRequestContext replayContext,
         @NonNull WriteMilestoneListener writeMilestones
     ) {
         public AttemptInput {
             if (attemptNumber <= 0) {
                 throw new IllegalArgumentException("attemptNumber must be positive");
             }
+        }
+
+        public ReplayRequestId requestId() {
+            return replayContext.getRequestId();
+        }
+
+        public ConnectionProcessingId connectionProcessingId() {
+            return replayContext.getConnectionProcessingId();
+        }
+
+        public PartitionGenerationId partitionGenerationId() {
+            return replayContext.getConnectionProcessingId().generation();
         }
     }
 

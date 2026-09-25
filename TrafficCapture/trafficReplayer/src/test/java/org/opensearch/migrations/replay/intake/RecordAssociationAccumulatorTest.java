@@ -471,9 +471,16 @@ class RecordAssociationAccumulatorTest {
         }
 
         @Override
-        public void onCapturedClose(ConnectionProcessingId connectionProcessingId, Instant closeTime) {
+        public void onCapturedClose(
+            ConnectionProcessingId connectionProcessingId,
+            long capturedOrdinal,
+            Instant closeTime
+        ) {
             closes.add(connectionProcessingId);
         }
+
+        @Override
+        public void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId) {}
     }
 
     private static TrafficStream stream(int number, TrafficObservation... observations) {

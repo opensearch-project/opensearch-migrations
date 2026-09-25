@@ -1,5 +1,27 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestSenderOrchestrator constructors -> TrafficReplayerTopLevel.createConnection constructs
+//     TargetConnectionOwner, RequestReplayOwner, and NettyPacketToHttpConsumer.
+// scheduleAtFixedRate -> G9 supervisor/activity scheduling; no request-lifecycle timer is global.
+// scheduleWork/submitUnorderedWorkToEventLoop overloads ->
+//     TargetConnectionOwner.submitInput/postRequired + OutstandingOperationRegistry.
+// scheduleRequest -> TargetConnectionOwner.submit(AdmitReconstitutedRequest).
+// cancelConnection -> TargetConnectionOwner graceful/force cancellation typed inputs.
+// scheduleClose/scheduleCloseOnConnectionReplaySession ->
+//     TargetConnectionOwner.submit(AdmitCapturedClose)/applyCapturedClose.
+// bindNettyScheduleToCompletableFuture overloads ->
+//     TargetConnectionOwner scheduleAdmissionHead/scheduleExecutionHead and
+//     RequestReplayOwner.scheduleRetry/retryTimerFired.
+// scheduleSendRequestOnConnectionReplaySession/scheduleOnConnectionReplaySession ->
+//     TargetConnectionOwner.evaluateExecutionHead/acquirePermit/applyPermitResult.
+// now/getDelayFromNowMs -> injected Clock + TargetConnectionOwner.nonNegativeDelay.
+// doubleRetryDelayCapped -> RequestReplayOwner.RetryPolicy/configured retry decision.
+// sendRequestWithRetries -> RequestReplayOwner.startAttempt/applyTargetAttemptOutcome/
+//     evaluateTargetResponse/applyRetryDecision/scheduleRetry.
+// sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.sendPacket/schedulePacket/finalizeResponse.
+// REBUILD-TRACE-END(G5,source)
+
 // REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
 // regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its

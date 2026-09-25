@@ -277,9 +277,18 @@ class ReplayIntakeOwnerThreadTest {
         }
 
         @Override
-        public void onCapturedClose(ConnectionProcessingId connectionProcessingId, Instant closeTime) {
+        public void onCapturedClose(
+            ConnectionProcessingId connectionProcessingId,
+            long capturedOrdinal,
+            Instant closeTime
+        ) {
             everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
             closes.add(connectionProcessingId);
+        }
+
+        @Override
+        public void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId) {
+            everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
         }
     }
 

@@ -19,12 +19,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
 import org.opensearch.migrations.replay.testing.FakeClock;
 import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 
+import io.opentelemetry.api.OpenTelemetry;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -41,6 +45,7 @@ class TupleWriterTest {
 
     @Test
     void oneLogicalWriteOwnsPhysicalRetriesUntilDurable() {
+        var contexts = new ContextFixture();
         var clock = new FakeClock();
         var eventLoop = new TestEventLoop(clock);
         var sink = new ScriptedSink();
@@ -56,7 +61,9 @@ class TupleWriterTest {
             OutstandingOperationRegistry.CountHook.NOOP
         );
 
-        var write = writer.write(new TupleWriter.WriteTuple<>(REQUEST_ID, "tuple"));
+        var write = writer.write(
+            new TupleWriter.WriteTuple<>(contexts.tuple, "tuple")
+        );
         eventLoop.runUntilIdle();
         Assertions.assertEquals(1, sink.writes.get());
 
@@ -76,10 +83,12 @@ class TupleWriterTest {
         Assertions.assertEquals(1, releases.get());
         Assertions.assertEquals(0, writer.operations().activeCount());
         Assertions.assertTrue(fatalFailures.isEmpty());
+        contexts.close();
     }
 
     @Test
     void cancellationIsTypedAndLatePhysicalCompletionCannotBecomeDurability() {
+        var contexts = new ContextFixture();
         var clock = new FakeClock();
         var eventLoop = new TestEventLoop(clock);
         var sink = new ScriptedSink();
@@ -94,7 +103,9 @@ class TupleWriterTest {
             fatalFailures::add,
             OutstandingOperationRegistry.CountHook.NOOP
         );
-        var write = writer.write(new TupleWriter.WriteTuple<>(REQUEST_ID, "tuple"));
+        var write = writer.write(
+            new TupleWriter.WriteTuple<>(contexts.tuple, "tuple")
+        );
         eventLoop.runUntilIdle();
 
         var cancellation = new CancellationException("cancelled");
@@ -117,6 +128,45 @@ class TupleWriterTest {
         );
         Assertions.assertEquals(1, releases.get());
         Assertions.assertTrue(fatalFailures.isEmpty());
+        contexts.close();
+    }
+
+    @Test
+    void intentionalWholeTupleDropSkipsTheSinkAndCompletesDurably() {
+        var contexts = new ContextFixture();
+        var clock = new FakeClock();
+        var eventLoop = new TestEventLoop(clock);
+        var sink = new ScriptedSink();
+        var transformations = new AtomicInteger();
+        var releases = new AtomicInteger();
+        var writer = new TupleWriter<>(
+            eventLoop,
+            clock,
+            Duration.ZERO,
+            (replayContext, tuple) -> {
+                transformations.incrementAndGet();
+                return new TupleWriter.TupleDropped<>();
+            },
+            sink,
+            ignored -> releases.incrementAndGet(),
+            failure -> Assertions.fail(failure),
+            OutstandingOperationRegistry.CountHook.NOOP
+        );
+
+        var write = writer.write(
+            new TupleWriter.WriteTuple<>(contexts.tuple, "candidate")
+        );
+        eventLoop.runUntilIdle();
+
+        Assertions.assertInstanceOf(
+            TupleWriter.TupleDurable.class,
+            write.completion().toCompletableFuture().join()
+        );
+        Assertions.assertEquals(1, transformations.get());
+        Assertions.assertEquals(0, sink.writes.get());
+        Assertions.assertEquals(1, releases.get());
+        Assertions.assertEquals(0, writer.operations().activeCount());
+        contexts.close();
     }
 
     private static final class ScriptedSink
@@ -126,7 +176,10 @@ class TupleWriterTest {
         private final Queue<CompletableFuture<Void>> completions = new ArrayDeque<>();
 
         @Override
-        public CompletionStage<Void> write(String tuple) {
+        public CompletionStage<Void> write(
+            IReplayContexts.ITupleHandlingContext replayContext,
+            String tuple
+        ) {
             writes.incrementAndGet();
             var completion = new CompletableFuture<Void>();
             completions.add(completion);
@@ -141,6 +194,37 @@ class TupleWriterTest {
 
         void durableNext() {
             completions.remove().complete(null);
+        }
+    }
+
+    private static final class ContextFixture implements AutoCloseable {
+        private final RootReplayerContext root =
+            new RootReplayerContext(OpenTelemetry.noop());
+        private final IReplayContexts.IKafkaRecordContext record =
+            root.createKafkaRecordContext(
+                new KafkaRecordId(REQUEST_ID.connectionProcessingId().generation(), 0),
+                0
+            );
+        private final IReplayContexts.ITrafficStreamsLifecycleContext traffic =
+            record.createTrafficStreamContext(0);
+        private final IReplayContexts.IRequestContext request =
+            traffic.createRequestContext(
+                REQUEST_ID,
+                java.time.Instant.EPOCH
+            );
+        private final IReplayContexts.ITupleHandlingContext tuple;
+
+        private ContextFixture() {
+            request.onRequestReconstituted();
+            tuple = request.createTupleContext();
+        }
+
+        @Override
+        public void close() {
+            tuple.close();
+            request.close();
+            traffic.close();
+            record.complete(IReplayContexts.RecordDisposition.COMMIT_INELIGIBLE);
         }
     }
 }

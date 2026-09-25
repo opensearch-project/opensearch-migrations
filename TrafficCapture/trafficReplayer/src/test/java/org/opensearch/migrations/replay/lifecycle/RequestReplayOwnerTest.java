@@ -160,7 +160,8 @@ class RequestReplayOwnerTest {
                 TargetConnectionOwnerTestSupport.CONNECTION,
                 TargetConnectionOwnerTestSupport.GENERATION,
                 TargetConnectionOwnerTestSupport.request(6),
-                "wrong-request"
+                "wrong-request",
+                true
             )
         );
         fixture.eventLoop.runUntilIdle();

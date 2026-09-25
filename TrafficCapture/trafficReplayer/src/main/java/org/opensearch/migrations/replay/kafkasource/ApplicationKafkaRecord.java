@@ -11,6 +11,7 @@ package org.opensearch.migrations.replay.kafkasource;
 import java.util.Objects;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
 /**
@@ -35,8 +36,18 @@ public record ApplicationKafkaRecord(
     KafkaRecordId recordId,
     long logAppendTimeMillis,
     int serializedSizeBytes,
-    CaptureRecord envelope
+    CaptureRecord envelope,
+    IReplayContexts.IKafkaRecordContext replayContext
 ) {
+    public ApplicationKafkaRecord(
+        KafkaRecordId recordId,
+        long logAppendTimeMillis,
+        int serializedSizeBytes,
+        CaptureRecord envelope
+    ) {
+        this(recordId, logAppendTimeMillis, serializedSizeBytes, envelope, null);
+    }
+
     public ApplicationKafkaRecord {
         Objects.requireNonNull(recordId, "recordId");
         Objects.requireNonNull(envelope, "envelope");

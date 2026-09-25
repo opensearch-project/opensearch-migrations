@@ -83,9 +83,9 @@ public final class PartitionIntakeState {
      * identity instead of opening a successor. The cutoff therefore lasts exactly as long as the lifetime
      * state it points at and is never a separate or durable identity tombstone.
      *
-     * <p>REBUILD-LIMBO-NOTE(G5): {@code ConnectionOwnerFinished} drops a closed lifetime's entry here together
-     * with its {@link #activeConnectionProcessingById} entry, which is where post-close rejection for that
-     * captured identity stops.
+     * <p>{@code ConnectionOwnerFinished} drops a closed lifetime's entry here together with its
+     * {@link #activeConnectionProcessingById} entry, which is where post-close rejection for that captured
+     * identity stops.
      */
     private final Map<CapturedConnectionId, SourceConnectionState>
         activeSourceConnectionsByCapturedConnectionId = new LinkedHashMap<>();
@@ -93,9 +93,8 @@ public final class PartitionIntakeState {
      * {@code §6}: "Older expired {@code ConnectionProcessingId} values may remain here while their target and
      * tuple work finishes." An expired lifetime's entry therefore outlives its captured-identity mapping.
      *
-     * <p>REBUILD-LIMBO-NOTE(G5): removed on {@code ConnectionOwnerFinished} ({@code §4.1}), which is the event
-     * that reports the owner has nothing left. Until G5 sends it, an ended lifetime stays here for the
-     * generation's remaining life.
+     * <p>Removed on {@code ConnectionOwnerFinished} ({@code §4.1}), which reports that the owner has nothing
+     * left.
      */
     private final Map<ConnectionProcessingId, SourceConnectionState> activeConnectionProcessingById =
         new LinkedHashMap<>();
@@ -277,6 +276,16 @@ public final class PartitionIntakeState {
         return Optional.ofNullable(activeConnectionProcessingById.get(id));
     }
 
+    public void removeConnectionOwner(@NonNull ConnectionProcessingId id) {
+        ownerThreadGuard.requireOwnerThread();
+        requireSameGeneration(id);
+        var lifetime = activeConnectionProcessingById.remove(id);
+        if (lifetime == null) {
+            throw new IllegalStateException("No active connection owner for " + id);
+        }
+        activeSourceConnectionsByCapturedConnectionId.remove(id.capturedConnectionId(), lifetime);
+    }
+
     // ------------------------------------------------------------------ broker time
 
     /**
@@ -315,6 +324,14 @@ public final class PartitionIntakeState {
         if (!generation.equals(recordId.generation())) {
             throw new IllegalStateException(
                 "Kafka record " + recordId + " does not belong to generation " + generation
+            );
+        }
+    }
+
+    private void requireSameGeneration(ConnectionProcessingId connectionProcessingId) {
+        if (!generation.equals(connectionProcessingId.generation())) {
+            throw new IllegalStateException(
+                "Connection " + connectionProcessingId + " does not belong to generation " + generation
             );
         }
     }

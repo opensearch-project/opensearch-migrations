@@ -25,10 +25,30 @@ import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
+
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// pollBatch raw-record stamping -> handlePollResult creates IKafkaRecordContext with KafkaRecordId
+// old request/accumulator-owned trace closure -> completeCommittedRecordContexts only after
+//     acknowledged commit, completeRecordContext on commit-ineligible disposition, and
+//     completeGenerationRecordContexts when this process relinquishes the generation
+// old implicit parent lookups -> ApplicationKafkaRecord carries the record context into intake
+// commit authority and commit API calls remain in the same KafkaSourceOwner functions
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// handlePollResult's RecordContextFactory creation -> predecessor pollBatch record-read span creation.
+// ApplicationKafkaRecord recordContext propagation -> predecessor request/accumulator parent lookup.
+// completeCommittedRecordContexts -> predecessor trace closure after acknowledged commit.
+// completeRecordContext(commit-ineligible) -> predecessor terminal non-commit trace closure.
+// completeGenerationRecordContexts -> predecessor generation-end trace closure after this process
+//     relinquishes responsibility; it does not claim that this process redelivers the record.
+// submitLoopCommitIfEligible/submitRevocationCommit and commit callbacks ->
+//     same predecessor Kafka-source commit-authority functions.
+// REBUILD-TRACE-END(G5,target)
 
 /**
  * Owns Kafka reading, per-partition demand, and commit authority. Runs on the dedicated Kafka thread and
@@ -70,6 +90,16 @@ public final class KafkaSourceOwner {
         default void commitResolved(CommitResolution resolution) {}
     }
 
+    @FunctionalInterface
+    public interface RecordContextFactory {
+        RecordContextFactory NONE = (recordId, serializedSizeBytes) -> null;
+
+        IReplayContexts.IKafkaRecordContext create(
+            KafkaRecordId recordId,
+            int serializedSizeBytes
+        );
+    }
+
     private final KafkaSourcePort port;
     private final KafkaSourceInputQueue sourceInputs;
     private final ReplayIntakeInputQueue intakeInputs;
@@ -78,8 +108,11 @@ public final class KafkaSourceOwner {
     private final LongSupplier monotonicNanos;
     private final GraceIntervalWait graceWait;
     private final Metrics metrics;
+    private final RecordContextFactory recordContextFactory;
 
     private final Map<TopicPartition, PartitionSourceState> partitions = new LinkedHashMap<>();
+    private final Map<KafkaRecordId, IReplayContexts.IKafkaRecordContext> recordContexts =
+        new LinkedHashMap<>();
     private final Map<TopicPartition, Long> stagedCommitPositions = new LinkedHashMap<>();
     /**
      * The one accepted asynchronous operation that has not resolved.
@@ -120,7 +153,8 @@ public final class KafkaSourceOwner {
             cancellationGrace,
             monotonicNanos,
             graceWait,
-            Metrics.NOOP
+            Metrics.NOOP,
+            RecordContextFactory.NONE
         );
     }
 
@@ -134,6 +168,30 @@ public final class KafkaSourceOwner {
         GraceIntervalWait graceWait,
         Metrics metrics
     ) {
+        this(
+            port,
+            sourceInputs,
+            intakeInputs,
+            wakeupController,
+            cancellationGrace,
+            monotonicNanos,
+            graceWait,
+            metrics,
+            RecordContextFactory.NONE
+        );
+    }
+
+    public KafkaSourceOwner(
+        KafkaSourcePort port,
+        KafkaSourceInputQueue sourceInputs,
+        ReplayIntakeInputQueue intakeInputs,
+        WakeupController wakeupController,
+        Duration cancellationGrace,
+        LongSupplier monotonicNanos,
+        GraceIntervalWait graceWait,
+        Metrics metrics,
+        RecordContextFactory recordContextFactory
+    ) {
         this.port = Objects.requireNonNull(port, "port");
         this.sourceInputs = Objects.requireNonNull(sourceInputs, "sourceInputs");
         this.intakeInputs = Objects.requireNonNull(intakeInputs, "intakeInputs");
@@ -142,6 +200,10 @@ public final class KafkaSourceOwner {
         this.monotonicNanos = Objects.requireNonNull(monotonicNanos, "monotonicNanos");
         this.graceWait = Objects.requireNonNull(graceWait, "graceWait");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
+        this.recordContextFactory = Objects.requireNonNull(
+            recordContextFactory,
+            "recordContextFactory"
+        );
         if (cancellationGrace.isNegative()) {
             throw new IllegalArgumentException("cancellationGrace must not be negative");
         }
@@ -258,6 +320,10 @@ public final class KafkaSourceOwner {
         currentStateFor(violation.generation()).ifPresent(state -> {
             state.endIntake();
             state.commitQueue().markCommitIneligible(violation.recordId());
+            completeRecordContext(
+                violation.recordId(),
+                IReplayContexts.RecordDisposition.COMMIT_INELIGIBLE
+            );
             metrics.recordsCommitIneligible(1);
             metrics.recordsOutstandingChanged(-1);
             // A position already staged is necessarily before the violating record, because only
@@ -434,6 +500,7 @@ public final class KafkaSourceOwner {
 
             if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
                 state.creditRecordsCommitted(detail.recordsCovered());
+                completeCommittedRecordContexts(detail.generation(), detail.nextPosition());
                 metrics.recordsCommitted(detail.recordsCovered().total());
                 metrics.recordsOutstandingChanged(-detail.recordsCovered().total());
                 // A still-owned partition restores records after an unknown outcome. An acknowledgement of the
@@ -545,14 +612,21 @@ public final class KafkaSourceOwner {
         var requestId = state.completeOutstandingRequest();
         // Stamped here, by the only component that knows the generation. The adapter returns raw records
         // precisely so it needs no generation map of its own to keep in step (kafkaLLD §5).
-        var stamped = records.stream()
-            .map(raw -> new ApplicationKafkaRecord(
-                new KafkaRecordId(state.generation(), raw.offset()),
+        var stamped = records.stream().map(raw -> {
+            var recordId = new KafkaRecordId(state.generation(), raw.offset());
+            var context = recordContextFactory.create(recordId, raw.serializedSizeBytes());
+            if (context != null && recordContexts.putIfAbsent(recordId, context) != null) {
+                context.complete(IReplayContexts.RecordDisposition.GENERATION_ENDED_UNCOMMITTED);
+                throw new IllegalStateException("record context already exists for " + recordId);
+            }
+            return new ApplicationKafkaRecord(
+                recordId,
                 raw.logAppendTimeMillis(),
                 raw.serializedSizeBytes(),
-                raw.envelope()
-            ))
-            .toList();
+                raw.envelope(),
+                context
+            );
+        }).toList();
         stamped.forEach(record -> state.commitQueue().register(record.recordId()));
         state.countRecordsRead(stamped.size());
         metrics.recordsRead(stamped.size());
@@ -698,6 +772,7 @@ public final class KafkaSourceOwner {
             state.markAsyncCommitUnresolved();
         }
         recordRetirementConservation(state, activeSubmission);
+        completeGenerationRecordContexts(state.generation());
         log.atInfo()
             .setMessage("Retiring generation {}: committed {} of {} records read, commitUncertainty={}")
             .addArgument(state::generation)
@@ -761,6 +836,42 @@ public final class KafkaSourceOwner {
     private void recordAbandonment(AbandonmentCause cause, long count) {
         if (count > 0) {
             metrics.recordsAbandonedAtRevocation(cause, count);
+        }
+    }
+
+    private void completeCommittedRecordContexts(
+        PartitionGenerationId generation,
+        long nextPosition
+    ) {
+        var completed = recordContexts.entrySet().stream()
+            .filter(entry -> entry.getKey().generation().equals(generation))
+            .filter(entry -> entry.getKey().offset() < nextPosition)
+            .map(Map.Entry::getKey)
+            .toList();
+        completed.forEach(recordId ->
+            completeRecordContext(recordId, IReplayContexts.RecordDisposition.COMMITTED)
+        );
+    }
+
+    private void completeGenerationRecordContexts(PartitionGenerationId generation) {
+        var unfinished = recordContexts.keySet().stream()
+            .filter(recordId -> recordId.generation().equals(generation))
+            .toList();
+        unfinished.forEach(recordId ->
+            completeRecordContext(
+                recordId,
+                IReplayContexts.RecordDisposition.GENERATION_ENDED_UNCOMMITTED
+            )
+        );
+    }
+
+    private void completeRecordContext(
+        KafkaRecordId recordId,
+        IReplayContexts.RecordDisposition disposition
+    ) {
+        var context = recordContexts.remove(recordId);
+        if (context != null) {
+            context.complete(disposition);
         }
     }
 

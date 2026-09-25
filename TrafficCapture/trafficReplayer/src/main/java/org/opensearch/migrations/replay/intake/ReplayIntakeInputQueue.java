@@ -8,6 +8,8 @@
 
 package org.opensearch.migrations.replay.intake;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import lombok.NonNull;
@@ -26,7 +28,10 @@ public final class ReplayIntakeInputQueue {
 
     sealed interface Entry permits SubmittedInput, StopAfterDraining {}
 
-    record SubmittedInput(@NonNull ReplayIntakeInput input) implements Entry {}
+    record SubmittedInput(
+        @NonNull ReplayIntakeInput input,
+        CompletableFuture<Void> handled
+    ) implements Entry {}
 
     enum StopAfterDraining implements Entry {
         INSTANCE
@@ -39,7 +44,28 @@ public final class ReplayIntakeInputQueue {
         if (!accepting) {
             return false;
         }
-        return entries.offer(new SubmittedInput(input));
+        return entries.offer(new SubmittedInput(input, null));
+    }
+
+    /**
+     * Submits a correctness-required lifecycle input and completes only after replay intake applies it.
+     */
+    public synchronized CompletionStage<Void> submitAndAwaitHandling(
+        @NonNull ReplayIntakeInput input
+    ) {
+        var handled = new CompletableFuture<Void>();
+        if (!accepting) {
+            handled.completeExceptionally(
+                new IllegalStateException("Replay-intake input queue is closed; refusing " + input)
+            );
+            return handled.minimalCompletionStage();
+        }
+        if (!entries.offer(new SubmittedInput(input, handled))) {
+            handled.completeExceptionally(
+                new IllegalStateException("Replay-intake input queue refused " + input)
+            );
+        }
+        return handled.minimalCompletionStage();
     }
 
     /**
@@ -81,6 +107,13 @@ public final class ReplayIntakeInputQueue {
     /** Abrupt failure-path closure: reject new work and discard anything not yet removed by the owner. */
     public synchronized void closeNow() {
         accepting = false;
+        for (var entry : entries) {
+            if (entry instanceof SubmittedInput submitted && submitted.handled() != null) {
+                submitted.handled().completeExceptionally(
+                    new IllegalStateException("Replay-intake owner closed before applying input")
+                );
+            }
+        }
         entries.clear();
     }
 }

@@ -24,6 +24,7 @@ import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.WaitReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationCancelled;
@@ -34,10 +35,48 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOu
 import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.sink.TupleWriter.TupleWriteCancelled;
 import org.opensearch.migrations.replay.sink.TupleWriter.TupleWriteResult;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
+
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestTransformerAndSender.transformAndSendRequest/transformAllData ->
+//     BeginRequestPreparation handling + applyPreparationResult
+// RequestTransformerAndSender.shouldRetry/perResponseConsumer ->
+//     RetryPolicy + evaluateTargetResponse/applyRetryDecision
+// RequestSenderOrchestrator.scheduleRequest/scheduleSendRequestOnConnectionReplaySession ->
+//     TargetConnectionOwner execution-head turn + startAttempt
+// RequestSenderOrchestrator.sendPackets -> TargetChannelPort.startAttempt and typed outcome
+// RequestSenderOrchestrator bindNettySchedule* retry work ->
+//     scheduleRetry/retryTimerFired; the permit is released before this wait
+// old first-write callback -> observeFirstWrite; final-write ownership -> observeFinalWrite
+// old target result future chain -> applyTargetAttemptOutcome/evaluateTargetResponse
+// old source-response retry/final tuple coupling -> sourceResponseChanged + explicit source states
+// old tuple construction/write callback -> tryStartTuple/applyTupleResult/TupleWriter
+// old request completion callback -> emitConnectionTurnFinished + tryEmitProcessingFinished
+// old cancellation/future exception discovery -> cancelPreparation/cancelTargetWork/abortAttempt/
+//     cancelTuple/tryEmitCleanup with typed cancellation states
+// old request-owned cleanup -> close*Context + releaseRequestResources
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// applyPreparationResult/startAttempt -> RequestTransformerAndSender transformAndSendRequest/
+//     transformAllData and RequestSenderOrchestrator scheduleSendRequestOnConnectionReplaySession.
+// evaluateTargetResponse/applyRetryDecision -> RequestTransformerAndSender getRetryCheckVisitor/
+//     shouldRetry/perResponseConsumer.
+// startAttempt/applyTargetAttemptOutcome -> RequestSenderOrchestrator sendRequestWithRetries.
+// scheduleRetry/retryTimerFired -> RequestSenderOrchestrator bindNettySchedule* retry branch.
+// observeFirstWrite/observeFinalWrite -> predecessor first-write callback plus the designed final-write
+//     boundary that had no predecessor.
+// sourceResponseChanged/tryStartTuple/applyTupleResult ->
+//     predecessor source-response future and tuple-write chain.
+// emitConnectionTurnFinished/tryEmitProcessingFinished ->
+//     predecessor request completion callback split into the two designed milestones.
+// cancelPreparation/cancelTargetWork/abortAttempt/cancelTuple/tryEmitCleanup ->
+//     predecessor cancellation and exceptional-future discovery.
+// close*Context/releaseRequestResources -> predecessor request-local cleanup.
+// REBUILD-TRACE-END(G5,target)
 
 /**
  * Exhaustive event-loop-confined lifecycle owner for one replay request.
@@ -57,7 +96,8 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         permits CompleteFinalSourceResponse, IncompleteFinalSourceResponse {}
 
     public record CompleteFinalSourceResponse<F>(
-        @NonNull F response
+        @NonNull F response,
+        boolean keptAlive
     ) implements FinalSourceResponse<F> {}
 
     public record IncompleteFinalSourceResponse<F>(
@@ -70,14 +110,30 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     public record RequestResult<S, P, R, F>(
+        @NonNull ReplayRequestId requestId,
         @NonNull S sourceRequest,
-        @NonNull P preparedRequest,
+        P preparedRequest,
+        @NonNull HttpRequestTransformationStatus transformationStatus,
         @NonNull List<TargetAttemptOutcome<R>> targetAttemptHistory,
-        @NonNull TargetAttemptOutcome.TargetResponseObtained<R> terminalTargetResponse,
+        TargetAttemptOutcome.TargetResponseObtained<R> terminalTargetResponse,
         @NonNull FinalSourceResponse<F> finalSourceResponse
     ) {
         public RequestResult {
             targetAttemptHistory = List.copyOf(targetAttemptHistory);
+            if (transformationStatus.isCompleted()) {
+                Objects.requireNonNull(preparedRequest, "completed request has no prepared request");
+                Objects.requireNonNull(terminalTargetResponse, "completed request has no target response");
+            } else if (transformationStatus.isSkipped()) {
+                if (preparedRequest != null || terminalTargetResponse != null || !targetAttemptHistory.isEmpty()) {
+                    throw new IllegalArgumentException(
+                        "skipped request must have no prepared request, target response, or attempts"
+                    );
+                }
+            } else {
+                throw new IllegalArgumentException(
+                    "tuple input requires a completed or skipped transformation status"
+                );
+            }
         }
     }
 
@@ -93,7 +149,11 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
     @FunctionalInterface
     public interface RequestPreparer<S, P> {
-        PreparationOperation<P> begin(ReplayRequestId requestId, S sourceRequest);
+        PreparationOperation<P> begin(
+            ReplayRequestId requestId,
+            S sourceRequest,
+            IReplayContexts.IRequestTransformationContext replayContext
+        );
     }
 
     public interface RetryPolicy<R, F> {
@@ -106,7 +166,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
     @FunctionalInterface
     public interface TupleFactory<S, P, R, F, T> {
-        T create(RequestResult<S, P, R, F> result);
+        T create(
+            IReplayContexts.ITupleHandlingContext replayContext,
+            RequestResult<S, P, R, F> result
+        );
     }
 
     public interface ResourceReleaser<S, P, R, F> {
@@ -161,10 +224,13 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
         record Preparing<P>(
             PreparationOperation<P> operation,
-            OutstandingOperationRegistry.Registration registration
+            OutstandingOperationRegistry.Registration registration,
+            IReplayContexts.IRequestTransformationContext replayContext
         ) implements PreparationState<P> {}
 
-        record Ready<P>(P preparedRequest) implements PreparationState<P> {}
+        record Ready<P>(
+            RequestPreparationReady<P> preparation
+        ) implements PreparationState<P> {}
 
         record Cancelled<P>(CancellationException cause) implements PreparationState<P> {}
     }
@@ -178,6 +244,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             TargetServerState.WaitingForRetrySourceResponse,
             TargetServerState.WaitingForRetryTime,
             TargetServerState.Finished,
+            TargetServerState.Filtered,
             TargetServerState.Cancelled {
 
         record NotStarted<R>() implements TargetServerState<R> {}
@@ -219,6 +286,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             TargetAttemptOutcome.TargetResponseObtained<R> response
         ) implements TargetServerState<R> {}
 
+        record Filtered<R>(
+            HttpRequestTransformationStatus status
+        ) implements TargetServerState<R> {}
+
         record Cancelled<R>(CancellationException cause) implements TargetServerState<R> {}
     }
 
@@ -241,7 +312,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
         record Unresolved<F>() implements FinalSourceState<F> {}
 
-        record Complete<F>(F response) implements FinalSourceState<F> {}
+        record Complete<F>(F response, boolean keptAlive) implements FinalSourceState<F> {}
 
         record Incomplete<F>(String reason) implements FinalSourceState<F> {}
     }
@@ -282,11 +353,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         ACCEPTED
     }
 
-    private final PartitionGenerationId partitionGenerationId;
-    private final ConnectionProcessingId connectionProcessingId;
-    private final ReplayRequestId requestId;
     private final Instant nominalTargetTime;
     private final S sourceRequest;
+    private final IReplayContexts.IRequestContext replayContext;
     private final EventLoop eventLoop;
     private final Clock clock;
     private final LongSupplier nanoTime;
@@ -313,17 +382,19 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private ScheduledFuture<?> gracefulDeadlineTimer;
     private OutstandingOperationRegistry.Registration retryPermitRegistration;
     private OutstandingOperationRegistry.Registration finalSourceWaitRegistration;
+    private IReplayContexts.IScheduledContext retryTimerContext;
     private int nextAttemptNumber = 1;
     private int firstWriteAttempt;
     private int finalWriteAttempt;
     private boolean resourcesReleased;
+    private boolean replayContextClosed;
+    private IReplayContexts.ITargetRequestContext targetAttemptContext;
+    private IReplayContexts.ITupleHandlingContext tupleContext;
 
     RequestReplayOwner(
-        @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull ConnectionProcessingId connectionProcessingId,
-        @NonNull ReplayRequestId requestId,
         @NonNull Instant nominalTargetTime,
         @NonNull S sourceRequest,
+        @NonNull IReplayContexts.IRequestContext replayContext,
         @NonNull EventLoop eventLoop,
         @NonNull Clock clock,
         @NonNull LongSupplier nanoTime,
@@ -337,11 +408,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull FatalHandler fatalHandler,
         @NonNull OutstandingOperationRegistry.CountHook countHook
     ) {
-        this.partitionGenerationId = partitionGenerationId;
-        this.connectionProcessingId = connectionProcessingId;
-        this.requestId = requestId;
         this.nominalTargetTime = nominalTargetTime;
         this.sourceRequest = sourceRequest;
+        this.replayContext = replayContext;
         this.eventLoop = eventLoop;
         this.clock = clock;
         this.nanoTime = nanoTime;
@@ -354,7 +423,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         this.callbacks = callbacks;
         this.fatalHandler = fatalHandler;
         this.operations = new OutstandingOperationRegistry(
-            "request " + requestId,
+            "request " + requestId(),
             eventLoop,
             clock,
             fatalHandler::onFatal,
@@ -363,7 +432,15 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     ReplayRequestId requestId() {
-        return requestId;
+        return replayContext.getRequestId();
+    }
+
+    private ConnectionProcessingId connectionProcessingId() {
+        return replayContext.getConnectionProcessingId();
+    }
+
+    private PartitionGenerationId partitionGenerationId() {
+        return connectionProcessingId().generation();
     }
 
     OutstandingOperationRegistry operations() {
@@ -392,21 +469,27 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         var registration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.REQUEST_PREPARATION,
             nominalTargetTime,
             WaitReason.PREPARING
         );
         final PreparationOperation<P> operation;
+        var transformationContext = replayContext.createTransformationContext();
         try {
             operation = Objects.requireNonNull(
-                preparer.begin(requestId, sourceRequest),
+                preparer.begin(requestId(), sourceRequest, transformationContext),
                 "request preparer returned no operation"
             );
-            preparationState = new PreparationState.Preparing<>(operation, registration);
+            preparationState = new PreparationState.Preparing<>(
+                operation,
+                registration,
+                transformationContext
+            );
         } catch (Throwable failure) {
+            transformationContext.close();
             impossible("request preparation submission", failure);
             return;
         }
@@ -417,6 +500,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 "request preparation returned no completion stage"
             );
         } catch (Throwable failure) {
+            transformationContext.close();
             impossible("request preparation completion", failure);
             return;
         }
@@ -424,14 +508,17 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             postRequired(
                 "request preparation result",
                 () -> applyPreparationResult(registration, result, unwrap(failure)),
-                rejection -> releaseLatePreparation(result)
+                rejection -> {
+                    transformationContext.close();
+                    releaseLatePreparation(result);
+                }
             )
         );
     }
 
     void acceptAttemptPermit(TargetAttemptPermitProvider.Permit permit) {
         requireOwnerThread();
-        if (!permit.requestId().equals(requestId)) {
+        if (!permit.requestId().equals(requestId())) {
             permit.close();
             impossible(
                 "attempt permit delivery",
@@ -460,10 +547,28 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         startAttempt(permit);
     }
 
-    void sourceResponseComplete(F response) {
+    void beginFilteredTurn() {
+        requireOwnerThread();
+        if (!(preparationState instanceof PreparationState.Ready<P> ready)
+            || !ready.preparation().transformationStatus().isSkipped()
+            || !(targetServerState instanceof TargetServerState.NotStarted<R>)) {
+            impossible(
+                "filtered target turn",
+                new IllegalStateException("request is not ready for a filtered target turn")
+            );
+            return;
+        }
+        targetServerState = new TargetServerState.Filtered<>(
+            ready.preparation().transformationStatus()
+        );
+        emitConnectionTurnFinished(ConnectionTurnCompletion.TARGET_WORK_FINISHED);
+        tryStartTuple();
+    }
+
+    void sourceResponseComplete(F response, boolean keptAlive) {
         requireOwnerThread();
         if (finalSourceState instanceof FinalSourceState.Unresolved<F>) {
-            finalSourceState = new FinalSourceState.Complete<>(response);
+            finalSourceState = new FinalSourceState.Complete<>(response, keptAlive);
         } else {
             impossible(
                 "complete final source response",
@@ -523,11 +628,17 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 return;
             }
         }
-        if (!finalTargetWriteWasSubmitted()) {
+        if (!finalTargetWriteWasSubmitted() && !wasIntentionallyFiltered()) {
             forceCancel(cause);
             return;
         }
         scheduleGracefulDeadline(deadline, cause);
+    }
+
+    private boolean wasIntentionallyFiltered() {
+        return targetServerState instanceof TargetServerState.Filtered<R>
+            || (preparationState instanceof PreparationState.Ready<P> ready
+                && ready.preparation().transformationStatus().isSkipped());
     }
 
     void forceCancel(CancellationException cause) {
@@ -555,19 +666,29 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         Throwable failure
     ) {
         requireOwnerThread();
+        var matchingPreparation =
+            preparationState instanceof PreparationState.Preparing<P> preparing
+                && preparing.registration() == registration
+                    ? preparing
+                    : null;
         if (failure != null) {
+            if (matchingPreparation != null) {
+                matchingPreparation.replayContext().close();
+            }
             impossible("request preparation exceptional completion", failure);
             return;
         }
         if (result == null) {
+            if (matchingPreparation != null) {
+                matchingPreparation.replayContext().close();
+            }
             impossible(
                 "request preparation completion",
                 new NullPointerException("request preparation completed without a result")
             );
             return;
         }
-        if (!(preparationState instanceof PreparationState.Preparing<P> preparing)
-            || preparing.registration() != registration) {
+        if (matchingPreparation == null) {
             releaseLatePreparation(result);
             if (!(preparationState instanceof PreparationState.Cancelled<P>)) {
                 impossible(
@@ -579,21 +700,22 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             }
             return;
         }
+        matchingPreparation.replayContext().close();
         switch (result) {
             case RequestPreparationReady<P> ready -> {
                 if (cancellationState instanceof CancellationState.Forced forced) {
-                    preparationState = new PreparationState.Ready<>(ready.value());
+                    preparationState = new PreparationState.Ready<>(ready);
                     operations.complete(registration);
                     closePreparedOnly();
                     preparationState = new PreparationState.Cancelled<>(forced.cause());
                     tryEmitCleanup();
                     return;
                 }
-                preparationState = new PreparationState.Ready<>(ready.value());
+                preparationState = new PreparationState.Ready<>(ready);
                 deliverRequired(
                     registration,
                     "preparation readiness",
-                    () -> callbacks.preparationFinished(requestId, result),
+                    () -> callbacks.preparationFinished(requestId(), result),
                     this::tryStartTuple
                 );
             }
@@ -623,11 +745,19 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             );
             return;
         }
+        if (!ready.preparation().transformationStatus().isCompleted()) {
+            permit.close();
+            impossible(
+                "target attempt start",
+                new IllegalStateException("filtered request received a target-attempt permit")
+            );
+            return;
+        }
         var attemptNumber = nextAttemptNumber++;
         var registration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.TARGET_ATTEMPT,
             nominalTargetTime,
             WaitReason.WAITING_FOR_TARGET
@@ -637,16 +767,16 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             permit,
             registration
         );
+        var currentTargetAttemptContext = replayContext.createTargetRequestContext();
+        targetAttemptContext = currentTargetAttemptContext;
         final TargetChannelPort.Attempt<R> attempt;
         try {
             attempt = Objects.requireNonNull(
                 targetChannel.startAttempt(
                     new TargetChannelPort.AttemptInput<>(
-                        partitionGenerationId,
-                        connectionProcessingId,
-                        requestId,
                         attemptNumber,
-                        ready.preparedRequest(),
+                        ready.preparation().value(),
+                        currentTargetAttemptContext,
                         new TargetChannelPort.WriteMilestoneListener() {
                             @Override
                             public void firstTargetWriteSubmitted(int reportedAttempt) {
@@ -663,6 +793,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 "target channel returned no attempt"
             );
         } catch (Throwable failure) {
+            closeTargetAttemptContext();
             permit.close();
             impossible("target attempt submission", failure);
             return;
@@ -680,6 +811,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 "target attempt returned no outcome stage"
             );
         } catch (Throwable failure) {
+            closeTargetAttemptContext();
             permit.close();
             impossible("target attempt outcome registration", failure);
             return;
@@ -693,7 +825,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                     result,
                     unwrap(failure)
                 ),
-                rejection -> permit.close()
+                rejection -> {
+                    currentTargetAttemptContext.close();
+                    permit.close();
+                }
             )
         );
     }
@@ -706,9 +841,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 if (firstWriteAttempt == 0) {
                     firstWriteAttempt = attemptNumber;
                     var registration = operations.register(
-                        partitionGenerationId,
-                        connectionProcessingId,
-                        requestId,
+                        partitionGenerationId(),
+                        connectionProcessingId(),
+                        requestId(),
                         OperationType.TARGET_WRITE_MILESTONE,
                         nominalTargetTime,
                         WaitReason.WAITING_FOR_RECEIVER
@@ -716,7 +851,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                     deliverRequired(
                         registration,
                         "first target write",
-                        () -> callbacks.firstTargetWriteSubmitted(requestId),
+                        () -> callbacks.firstTargetWriteSubmitted(requestId()),
                         () -> {}
                     );
                 } else if (firstWriteAttempt == attemptNumber) {
@@ -749,9 +884,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 if (finalWriteAttempt == 0) {
                     finalWriteAttempt = attemptNumber;
                     var registration = operations.register(
-                        partitionGenerationId,
-                        connectionProcessingId,
-                        requestId,
+                        partitionGenerationId(),
+                        connectionProcessingId(),
+                        requestId(),
                         OperationType.TARGET_WRITE_MILESTONE,
                         nominalTargetTime,
                         WaitReason.WAITING_FOR_RECEIVER
@@ -759,7 +894,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                     deliverRequired(
                         registration,
                         "final target write",
-                        () -> callbacks.finalTargetWriteSubmitted(requestId),
+                        () -> callbacks.finalTargetWriteSubmitted(requestId()),
                         () -> {}
                     );
                 } else if (finalWriteAttempt == attemptNumber) {
@@ -819,11 +954,13 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         if (failure != null) {
+            closeTargetAttemptContext();
             active.permit().close();
             impossible("target attempt exceptional completion", failure);
             return;
         }
         if (outcome == null) {
+            closeTargetAttemptContext();
             active.permit().close();
             impossible(
                 "target attempt completion",
@@ -833,6 +970,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         if (outcome instanceof TargetAttemptOutcome.TargetResponseObtained<R>
             && finalWriteAttempt == 0) {
+            closeTargetAttemptContext();
             active.permit().close();
             impossible(
                 "target response before final write",
@@ -843,6 +981,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         attemptHistory.add(outcome);
+        closeTargetAttemptContext();
         active.permit().close();
         operations.complete(registration);
         switch (outcome) {
@@ -865,9 +1004,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         if (needsSource && retrySourceState instanceof RetrySourceState.Unresolved<F>) {
             var registration = operations.register(
-                partitionGenerationId,
-                connectionProcessingId,
-                requestId,
+                partitionGenerationId(),
+                connectionProcessingId(),
+                requestId(),
                 OperationType.RETRY_SOURCE_RESPONSE_WAIT,
                 nominalTargetTime,
                 WaitReason.WAITING_FOR_RETRY_SOURCE_RESPONSE
@@ -934,14 +1073,17 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         var registration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.RETRY_TIMER,
             nominalTargetTime,
             WaitReason.WAITING_FOR_RETRY_TIME
         );
         try {
+            retryTimerContext = replayContext.createScheduledContext(
+                clock.instant().plus(delay)
+            );
             var timer = eventLoop.schedule(
                 () -> retryTimerFired(registration),
                 delay.toNanos(),
@@ -952,6 +1094,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 registration
             );
         } catch (Throwable failure) {
+            closeRetryTimerContext();
             impossible("retry timer submission", failure);
         }
     }
@@ -966,6 +1109,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             );
             return;
         }
+        closeRetryTimerContext();
         if (cancellationState instanceof CancellationState.Forced forced) {
             targetServerState = new TargetServerState.Cancelled<>(forced.cause());
             operations.complete(registration);
@@ -975,9 +1119,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         targetServerState = new TargetServerState.WaitingForPermit<>();
         operations.complete(registration);
         retryPermitRegistration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.PERMIT_ACQUISITION,
             nominalTargetTime,
             WaitReason.WAITING_FOR_PERMIT
@@ -985,7 +1129,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         final CompletionStage<Void> delivery;
         try {
             delivery = Objects.requireNonNull(
-                callbacks.requestAttemptPermit(requestId),
+                callbacks.requestAttemptPermit(requestId()),
                 "connection owner returned no retry-permit delivery"
             );
         } catch (Throwable failure) {
@@ -1034,9 +1178,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         turnMilestone = MilestoneState.SUBMITTED;
         var registration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.REQUIRED_DELIVERY,
             nominalTargetTime,
             WaitReason.WAITING_FOR_RECEIVER
@@ -1044,7 +1188,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         deliverRequired(
             registration,
             "connection-turn completion",
-            () -> callbacks.connectionTurnFinished(requestId, completion),
+            () -> callbacks.connectionTurnFinished(requestId(), completion),
             () -> {
                 turnMilestone = MilestoneState.ACCEPTED;
                 tryEmitProcessingFinished();
@@ -1055,18 +1199,27 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
     private void tryStartTuple() {
         if (!(tupleState instanceof TupleState.NotReady)
-            || !(preparationState instanceof PreparationState.Ready<P> ready)
-            || !(targetServerState instanceof TargetServerState.Finished<R> finished)) {
+            || !(preparationState instanceof PreparationState.Ready<P> ready)) {
             return;
+        }
+        final TargetAttemptOutcome.TargetResponseObtained<R> terminalTargetResponse;
+        switch (targetServerState) {
+            case TargetServerState.Finished<R> finished ->
+                terminalTargetResponse = finished.response();
+            case TargetServerState.Filtered<R> ignored ->
+                terminalTargetResponse = null;
+            default -> {
+                return;
+            }
         }
         final FinalSourceResponse<F> finalResponse;
         switch (finalSourceState) {
             case FinalSourceState.Unresolved<F> ignored -> {
                 if (finalSourceWaitRegistration == null) {
                     finalSourceWaitRegistration = operations.register(
-                        partitionGenerationId,
-                        connectionProcessingId,
-                        requestId,
+                        partitionGenerationId(),
+                        connectionProcessingId(),
+                        requestId(),
                         OperationType.FINAL_SOURCE_RESPONSE_WAIT,
                         nominalTargetTime,
                         WaitReason.WAITING_FOR_FINAL_SOURCE_RESPONSE
@@ -1075,32 +1228,41 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 return;
             }
             case FinalSourceState.Complete<F> complete ->
-                finalResponse = new CompleteFinalSourceResponse<>(complete.response());
+                finalResponse = new CompleteFinalSourceResponse<>(
+                    complete.response(),
+                    complete.keptAlive()
+                );
             case FinalSourceState.Incomplete<F> incomplete ->
                 finalResponse = new IncompleteFinalSourceResponse<>(incomplete.reason());
         }
         final T tuple;
+        var currentTupleContext = replayContext.createTupleContext();
+        tupleContext = currentTupleContext;
         try {
             tuple = Objects.requireNonNull(
                 tupleFactory.create(
+                    currentTupleContext,
                     new RequestResult<>(
+                        requestId(),
                         sourceRequest,
-                        ready.preparedRequest(),
+                        ready.preparation().value(),
+                        ready.preparation().transformationStatus(),
                         attemptHistory,
-                        finished.response(),
+                        terminalTargetResponse,
                         finalResponse
                     )
                 ),
                 "tuple factory returned no tuple"
             );
         } catch (Throwable failure) {
+            closeTupleContext();
             impossible("tuple construction", failure);
             return;
         }
         var registration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.TUPLE_DURABILITY,
             nominalTargetTime,
             WaitReason.WAITING_FOR_TUPLE_DURABILITY
@@ -1108,19 +1270,33 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         final TupleWriter.LogicalWrite write;
         try {
             write = Objects.requireNonNull(
-                tupleWriter.write(new TupleWriter.WriteTuple<>(requestId, tuple)),
+                tupleWriter.write(
+                    new TupleWriter.WriteTuple<>(tupleContext, tuple)
+                ),
                 "tuple writer returned no logical write"
             );
         } catch (Throwable failure) {
+            closeTupleContext();
             impossible("logical tuple write", failure);
             return;
         }
         tupleState = new TupleState.Writing(write, registration);
-        write.completion().whenComplete((result, failure) ->
+        final CompletionStage<TupleWriteResult> completion;
+        try {
+            completion = Objects.requireNonNull(
+                write.completion(),
+                "tuple writer returned no completion stage"
+            );
+        } catch (Throwable failure) {
+            closeTupleContext();
+            impossible("logical tuple write completion", failure);
+            return;
+        }
+        completion.whenComplete((result, failure) ->
             postRequired(
                 "tuple write result",
                 () -> applyTupleResult(registration, result, unwrap(failure)),
-                ignored -> {}
+                ignored -> currentTupleContext.close()
             )
         );
     }
@@ -1140,10 +1316,12 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         if (failure != null) {
+            closeTupleContext();
             impossible("tuple write exceptional completion", failure);
             return;
         }
         if (result == null) {
+            closeTupleContext();
             impossible(
                 "tuple write completion",
                 new NullPointerException("tuple writer completed without a typed result")
@@ -1152,12 +1330,15 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         switch (result) {
             case TupleWriter.TupleDurable ignored -> {
+                closeTupleContext();
                 tupleState = new TupleState.Durable();
                 releaseRequestResources();
                 operations.complete(registration);
                 tryEmitProcessingFinished();
+                tryEmitCleanup();
             }
             case TupleWriteCancelled cancelled -> {
+                closeTupleContext();
                 tupleState = new TupleState.Cancelled(cancelled.cause());
                 if (!(cancellationState instanceof CancellationState.Forced)) {
                     impossible("unexpected tuple cancellation", cancelled.cause());
@@ -1179,9 +1360,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         processingMilestone = MilestoneState.SUBMITTED;
         var registration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.REQUIRED_DELIVERY,
             nominalTargetTime,
             WaitReason.WAITING_FOR_RECEIVER
@@ -1189,10 +1370,11 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         deliverRequired(
             registration,
             "request-processing completion",
-            () -> callbacks.requestProcessingFinished(requestId),
+            () -> callbacks.requestProcessingFinished(requestId()),
             () -> {
                 processingMilestone = MilestoneState.ACCEPTED;
                 cancelGracefulDeadline();
+                closeReplayContext();
             }
         );
     }
@@ -1218,7 +1400,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             case TargetServerState.NotStarted<R> ignored ->
                 targetServerState = new TargetServerState.Cancelled<>(cause);
             case TargetServerState.WaitingForPermit<R> ignored -> {
-                callbacks.cancelAttemptPermit(requestId, cause);
+                callbacks.cancelAttemptPermit(requestId(), cause);
                 targetServerState = new TargetServerState.Cancelled<>(cause);
                 if (retryPermitRegistration != null) {
                     operations.complete(retryPermitRegistration);
@@ -1229,6 +1411,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 );
             }
             case TargetServerState.StartingAttempt<R> starting -> {
+                closeTargetAttemptContext();
                 starting.permit().close();
                 operations.complete(starting.registration());
                 targetServerState = new TargetServerState.Cancelled<>(cause);
@@ -1248,6 +1431,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             }
             case TargetServerState.WaitingForRetryTime<R> waiting -> {
                 waiting.timer().cancel(false);
+                closeRetryTimerContext();
                 operations.complete(waiting.registration());
                 targetServerState = new TargetServerState.Cancelled<>(cause);
                 emitConnectionTurnFinished(
@@ -1255,6 +1439,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 );
             }
             case TargetServerState.Finished<R> ignored -> {}
+            case TargetServerState.Filtered<R> ignored -> {}
             case TargetServerState.Cancelled<R> ignored -> {}
         }
     }
@@ -1264,9 +1449,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         CancellationException cause
     ) {
         var abortRegistration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.CANCELLATION_CLEANUP,
             nominalTargetTime,
             WaitReason.WAITING_FOR_CHANNEL_TEARDOWN
@@ -1285,14 +1470,22 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 "target attempt abort returned no completion stage"
             );
         } catch (Throwable failure) {
+            closeTargetAttemptContext();
+            active.permit().close();
             impossible("target attempt abort", failure);
             return;
         }
+        var currentTargetAttemptContext = targetAttemptContext;
         abort.whenComplete((ignored, failure) ->
             postRequired(
                 "target attempt abort completion",
                 () -> finishAbortedAttempt(active.attemptNumber(), cause, unwrap(failure)),
-                rejection -> active.permit().close()
+                rejection -> {
+                    if (currentTargetAttemptContext != null) {
+                        currentTargetAttemptContext.close();
+                    }
+                    active.permit().close();
+                }
             )
         );
     }
@@ -1311,9 +1504,12 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         if (failure != null) {
+            closeTargetAttemptContext();
+            aborting.permit().close();
             impossible("target channel teardown", failure);
             return;
         }
+        closeTargetAttemptContext();
         aborting.permit().close();
         operations.complete(aborting.attemptRegistration());
         operations.complete(aborting.abortRegistration());
@@ -1341,6 +1537,34 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    private void closeTargetAttemptContext() {
+        if (targetAttemptContext != null) {
+            targetAttemptContext.close();
+            targetAttemptContext = null;
+        }
+    }
+
+    private void closeTupleContext() {
+        if (tupleContext != null) {
+            tupleContext.close();
+            tupleContext = null;
+        }
+    }
+
+    private void closeRetryTimerContext() {
+        if (retryTimerContext != null) {
+            retryTimerContext.close();
+            retryTimerContext = null;
+        }
+    }
+
+    private void closeReplayContext() {
+        if (!replayContextClosed) {
+            replayContextClosed = true;
+            replayContext.close();
+        }
+    }
+
     private void tryEmitCleanup() {
         if (!(cancellationState instanceof CancellationState.Forced forced)
             || cleanupMilestone != MilestoneState.NOT_SUBMITTED
@@ -1358,9 +1582,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         releaseRequestResources();
         cleanupMilestone = MilestoneState.SUBMITTED;
         var registration = operations.register(
-            partitionGenerationId,
-            connectionProcessingId,
-            requestId,
+            partitionGenerationId(),
+            connectionProcessingId(),
+            requestId(),
             OperationType.REQUIRED_DELIVERY,
             nominalTargetTime,
             WaitReason.WAITING_FOR_RECEIVER
@@ -1368,8 +1592,11 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         deliverRequired(
             registration,
             "request cleanup",
-            () -> callbacks.requestCleanupFinished(requestId, forced.cause()),
-            () -> cleanupMilestone = MilestoneState.ACCEPTED
+            () -> callbacks.requestCleanupFinished(requestId(), forced.cause()),
+            () -> {
+                cleanupMilestone = MilestoneState.ACCEPTED;
+                closeReplayContext();
+            }
         );
     }
 
@@ -1429,7 +1656,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     private void releaseLatePreparation(RequestPreparationResult<P> result) {
-        if (result instanceof RequestPreparationReady<P> ready) {
+        if (result instanceof RequestPreparationReady<P> ready && ready.value() != null) {
             try {
                 resourceReleaser.releasePreparedRequest(ready.value());
             } catch (Throwable failure) {
@@ -1439,9 +1666,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     private void closePreparedOnly() {
-        if (preparationState instanceof PreparationState.Ready<P> ready) {
+        if (preparationState instanceof PreparationState.Ready<P> ready
+            && ready.preparation().value() != null) {
             try {
-                resourceReleaser.releasePreparedRequest(ready.preparedRequest());
+                resourceReleaser.releasePreparedRequest(ready.preparation().value());
             } catch (Throwable failure) {
                 reportFatal("prepared-request release", failure);
             }
@@ -1455,8 +1683,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         resourcesReleased = true;
         try {
             resourceReleaser.releaseSourceRequest(sourceRequest);
-            if (preparationState instanceof PreparationState.Ready<P> ready) {
-                resourceReleaser.releasePreparedRequest(ready.preparedRequest());
+            if (preparationState instanceof PreparationState.Ready<P> ready
+                && ready.preparation().value() != null) {
+                resourceReleaser.releasePreparedRequest(ready.preparation().value());
             }
             for (var outcome : attemptHistory) {
                 if (outcome
@@ -1505,7 +1734,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private void requireOwnerThread() {
         if (!eventLoop.inEventLoop()) {
             throw new IllegalStateException(
-                "request owner for " + requestId + " accessed outside its event loop"
+                "request owner for " + requestId() + " accessed outside its event loop"
             );
         }
     }
@@ -1516,7 +1745,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
     private void reportFatal(String operation, Throwable cause) {
         fatalHandler.onFatal(new Error(
-            "Request-owner failure for " + requestId + ": " + operation,
+            "Request-owner failure for " + requestId() + ": " + operation,
             cause
         ));
     }

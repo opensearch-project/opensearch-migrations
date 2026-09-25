@@ -1,70 +1,95 @@
 package org.opensearch.migrations.replay.tracing;
 
-
-
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 
 import lombok.Getter;
+import lombok.NonNull;
 
-public class ChannelContextManager implements Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> {
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// old string/channel-key context lookup -> apply/retainOrCreateContext keyed by
+//     ConnectionProcessingId, including partition generation and process-local lifetime
+// old separate map lookup then atomic refcount increment -> ConcurrentHashMap.compute in
+//     retainOrCreateContext
+// old separate decrement then map removal -> releaseContextFor's single compute transition
+// old context close by unrelated callers -> final-reference close inside releaseContextFor
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// constructor -> predecessor constructor with the root context narrowed to IRootReplayerContext.
+// apply/retainOrCreateContext -> predecessor apply/retainOrCreateContext, keyed by
+//     ConnectionProcessingId and using one atomic compute transition.
+// RefCountedContext.retain -> predecessor incrementRefCount, now checked inside compute.
+// releaseContextFor/RefCountedContext.isFinalReference/releaseRetainedReference ->
+//     predecessor releaseContextFor/release, with decrement/removal/close in one compute transition.
+// REBUILD-TRACE-END(G5,target)
+
+/**
+ * Reference-counted connection contexts keyed by the complete process-local connection lifetime.
+ */
+public class ChannelContextManager
+    implements Function<ConnectionProcessingId, IReplayContexts.IConnectionContext> {
     @Getter
-    private final RootReplayerContext globalContext;
+    private final IRootReplayerContext globalContext;
 
-    public ChannelContextManager(RootReplayerContext globalContext) {
+    public ChannelContextManager(@NonNull IRootReplayerContext globalContext) {
         this.globalContext = globalContext;
     }
 
-    private static class RefCountedContext {
+    private static final class RefCountedContext {
         @Getter
-        final IReplayContexts.IChannelKeyContext context;
+        private final IReplayContexts.IConnectionContext context;
         private int refCount;
-        final int generation;
 
-        RefCountedContext(IReplayContexts.IChannelKeyContext context, int generation) {
+        private RefCountedContext(IReplayContexts.IConnectionContext context) {
             this.context = context;
-            this.generation = generation;
+            this.refCount = 1;
         }
 
-        IReplayContexts.IChannelKeyContext retain() {
-            refCount++;
-            return context;
+        private void retain() {
+            if (refCount == Integer.MAX_VALUE) {
+                throw new IllegalStateException(
+                    "connection context reference count overflow for "
+                        + context.getConnectionProcessingId()
+                );
+            }
+            refCount = Math.incrementExact(refCount);
         }
 
-        /**
-         * Returns true if this was the final release
-         *
-         * @return
-         */
-        boolean release() {
-            refCount--;
-            assert refCount >= 0;
-            return refCount == 0;
+        private boolean isFinalReference() {
+            return refCount == 1;
+        }
+
+        private void releaseRetainedReference() {
+            if (refCount <= 1) {
+                throw new IllegalStateException(
+                    "invalid retained-reference release for "
+                        + context.getConnectionProcessingId()
+                );
+            }
+            refCount = Math.decrementExact(refCount);
         }
     }
 
-    ConcurrentHashMap<String, RefCountedContext> connectionToChannelContextMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ConnectionProcessingId, RefCountedContext>
+        connectionToChannelContextMap = new ConcurrentHashMap<>();
 
-    public IReplayContexts.IChannelKeyContext apply(ITrafficStreamKey tsk) {
-        return retainOrCreateContext(tsk);
+    @Override
+    public IReplayContexts.IConnectionContext apply(ConnectionProcessingId connectionProcessingId) {
+        return retainOrCreateContext(connectionProcessingId);
     }
 
-    public IReplayContexts.IChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
-        var incomingGeneration = tsk.getSourceGeneration();
+    public IReplayContexts.IConnectionContext retainOrCreateContext(
+        @NonNull ConnectionProcessingId connectionProcessingId
+    ) {
         return connectionToChannelContextMap.compute(
-            tsk.getConnectionId(),
-            (k, existing) -> {
-                if (existing != null && existing.generation < incomingGeneration) {
-                    // Stale context from a previous partition assignment — force-close it.
-                    // Its ref count will never drain naturally since all pending commits for
-                    // the old generation are dropped as IGNORED.
-                    existing.context.close();
-                    existing = null;
-                }
+            connectionProcessingId,
+            (ignored, existing) -> {
                 if (existing == null) {
-                    existing = new RefCountedContext(globalContext.createChannelContext(tsk), incomingGeneration);
+                    return new RefCountedContext(
+                        globalContext.createConnectionContext(connectionProcessingId)
+                    );
                 }
                 existing.retain();
                 return existing;
@@ -72,16 +97,31 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
         ).context;
     }
 
-    public IReplayContexts.IChannelKeyContext releaseContextFor(IReplayContexts.IChannelKeyContext ctx) {
-        var connId = ctx.getConnectionId();
-        var refCountedCtx = connectionToChannelContextMap.get(connId);
-        assert ctx == refCountedCtx.context : "consistency mismatch";
-        var finalRelease = refCountedCtx.release();
-        if (finalRelease) {
-            ctx.close();
-            connectionToChannelContextMap.remove(connId);
-        }
-        return ctx;
+    public IReplayContexts.IConnectionContext releaseContextFor(
+        @NonNull IReplayContexts.IConnectionContext context
+    ) {
+        var connectionProcessingId = context.getConnectionProcessingId();
+        connectionToChannelContextMap.compute(
+            connectionProcessingId,
+            (ignored, existing) -> {
+                if (existing == null) {
+                    throw new IllegalStateException(
+                        "no retained connection context for " + connectionProcessingId
+                    );
+                }
+                if (existing.context != context) {
+                    throw new IllegalStateException(
+                        "connection context identity mismatch for " + connectionProcessingId
+                    );
+                }
+                if (existing.isFinalReference()) {
+                    context.close();
+                    return null;
+                }
+                existing.releaseRetainedReference();
+                return existing;
+            }
+        );
+        return context;
     }
 }
-

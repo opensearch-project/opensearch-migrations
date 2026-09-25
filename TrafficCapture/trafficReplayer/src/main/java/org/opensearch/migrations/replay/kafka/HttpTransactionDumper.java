@@ -105,11 +105,19 @@ public class HttpTransactionDumper implements SourceAssemblySink {
     @Override
     public void onCapturedClose(
         @NonNull ConnectionProcessingId connectionProcessingId,
+        long capturedOrdinal,
         @NonNull Instant closeTime
     ) {
         out.println(linePrefix
             + buildPrefix(connectionProcessingId, closeTime, closeTime)
             + " CLOSED");
+    }
+
+    @Override
+    public void onConnectionOwnerFinished(
+        @NonNull ConnectionProcessingId connectionProcessingId
+    ) {
+        // Dump modes construct no target-side owner.
     }
 
     // Dynamic column widths — start with reasonable defaults, grow as needed

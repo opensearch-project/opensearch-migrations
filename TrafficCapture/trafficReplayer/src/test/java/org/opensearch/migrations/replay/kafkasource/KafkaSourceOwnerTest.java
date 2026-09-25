@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -80,6 +81,14 @@ class KafkaSourceOwnerTest {
     }
 
     private KafkaSourceOwner ownerFor(PumpedKafkaSource port, Duration cancellationGrace) {
+        return ownerFor(port, cancellationGrace, KafkaSourceOwner.RecordContextFactory.NONE);
+    }
+
+    private KafkaSourceOwner ownerFor(
+        PumpedKafkaSource port,
+        Duration cancellationGrace,
+        KafkaSourceOwner.RecordContextFactory recordContextFactory
+    ) {
         return new KafkaSourceOwner(
             port,
             sourceInputs,
@@ -109,7 +118,8 @@ class KafkaSourceOwnerTest {
                 clockNanos.updateAndGet(now -> Math.max(now, deadline.monotonicDeadlineNanos()));
                 return false;
             },
-            commitMetrics
+            commitMetrics,
+            recordContextFactory
         );
     }
 
@@ -239,6 +249,67 @@ class KafkaSourceOwnerTest {
     ) {
         assignThroughPoll(owner, port, List.of(topicPartition));
         return owner.partitionState(topicPartition).orElseThrow().generation();
+    }
+
+    @Test
+    void recordContextRemainsOpenUntilKafkaAcknowledgesItsCommit() {
+        try (var recordTelemetry = new InMemoryInstrumentationBundle(true, false)) {
+            var recordRoot = new RootReplayerContext(recordTelemetry.openTelemetrySdk);
+            var port = pumpedSource(List.of(PARTITION_0));
+            var owner = ownerFor(port, GRACE, recordRoot::createKafkaRecordContext);
+            var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation, 1)));
+            port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+
+            owner.runOnce();
+
+            Assertions.assertTrue(
+                recordTelemetry.getFinishedSpans().stream()
+                    .noneMatch(span -> span.getName().equals(IReplayContexts.ActivityNames.RECORD_LIFETIME)),
+                "record lifetime must remain open after poll delivery and while processing or commit is pending"
+            );
+
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation, 10)));
+            port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+            owner.runOnce();
+
+            var recordSpan = recordTelemetry.getFinishedSpans().stream()
+                .filter(span -> span.getName().equals(IReplayContexts.ActivityNames.RECORD_LIFETIME))
+                .findFirst()
+                .orElseThrow();
+            Assertions.assertEquals(
+                "committed",
+                recordSpan.getAttributes().get(IReplayContexts.TraceAttributes.RECORD_DISPOSITION)
+            );
+        }
+    }
+
+    @Test
+    void generationLossClosesRecordContextAsUncommitted() {
+        try (var recordTelemetry = new InMemoryInstrumentationBundle(true, false)) {
+            var recordRoot = new RootReplayerContext(recordTelemetry.openTelemetrySdk);
+            var port = pumpedSource(List.of(PARTITION_0));
+            var owner = ownerFor(port, GRACE, recordRoot::createKafkaRecordContext);
+            var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation, 1)));
+            port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+            owner.runOnce();
+
+            port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsLost(List.of(PARTITION_0)));
+            owner.runOnce();
+
+            var recordSpan = recordTelemetry.getFinishedSpans().stream()
+                .filter(span -> span.getName().equals(IReplayContexts.ActivityNames.RECORD_LIFETIME))
+                .findFirst()
+                .orElseThrow();
+            Assertions.assertEquals(
+                "generation_ended_uncommitted",
+                recordSpan.getAttributes().get(IReplayContexts.TraceAttributes.RECORD_DISPOSITION)
+            );
+        }
     }
 
     /** §17.4: {@code onPartitionsAssigned} pauses the complete resulting assignment before Kafka may fetch. */
