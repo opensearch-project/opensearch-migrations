@@ -1,167 +1,231 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Test carried byte-identical. Unresolved: AsyncPermitPoolMetrics InstrumentationTest TestContext . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G10)
-/*
-
-import java.util.ArrayDeque;
-import java.util.Queue;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
-import org.opensearch.migrations.replay.tracing.AsyncPermitPoolMetrics;
-import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
 
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-class AsyncPermitPoolTest extends InstrumentationTest {
-    @Override
-    protected TestContext makeInstrumentationContext() {
-        return TestContext.withAllTracking();
-    }
-
+class TargetAttemptPermitProviderTest {
     @Test
-    void grantsInFifoOrderAndReleasesExactlyOnce() {
-        var executor = new QueuedExecutor();
-        var pool = new AsyncPermitPool(1, executor);
-        var firstFuture = pool.acquire(request(0), 1).toCompletableFuture();
-        var secondFuture = pool.acquire(request(1), 1).toCompletableFuture();
+    void capacityOneGrantsOnlyOneAttemptAndReleaseWakesAPendingAcquisition() {
+        var fixture = new Fixture(1);
 
-        executor.runAll();
-        var first = firstFuture.join();
-        Assertions.assertFalse(secondFuture.isDone());
+        var first = acquired(fixture.provider.acquire(request(0)));
+        var second = fixture.provider.acquire(request(1));
+
+        Assertions.assertEquals(1, fixture.activeTargetAttempts.get());
+        Assertions.assertFalse(second.completion().toCompletableFuture().isDone());
 
         first.close();
-        first.close();
-        executor.runAll();
 
-        Assertions.assertEquals(request(1), secondFuture.join().requestId());
+        var secondPermit = acquired(second);
+        Assertions.assertEquals(request(1), secondPermit.requestId());
+        Assertions.assertEquals(1, fixture.activeTargetAttempts.get());
+        secondPermit.close();
+        Assertions.assertEquals(0, fixture.activeTargetAttempts.get());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
-    void cancellationAndShutdownSettleEveryQueuedAcquire() {
-        var executor = new QueuedExecutor();
-        var pool = new AsyncPermitPool(1, executor);
-        var active = pool.acquire(request(0), 1).toCompletableFuture();
-        var cancelled = pool.acquire(request(1), 1).toCompletableFuture();
-        var closed = pool.acquire(request(2), 1).toCompletableFuture();
-        executor.runAll();
+    void cancellingAPendingAcquisitionConsumesNoPermitAndReturnsTypedCancellation() {
+        var fixture = new Fixture(1);
+        var active = acquired(fixture.provider.acquire(request(0)));
+        var pending = fixture.provider.acquire(request(1));
+        var cause = new CancellationException("generation cancelled");
 
-        pool.cancel(id -> id.equals(request(1)), new CancellationException("session aborted"));
-        pool.close(new CancellationException("pool closed"));
-        executor.runAll();
+        Assertions.assertTrue(pending.cancel(cause));
+        var cancelled = Assertions.assertInstanceOf(
+            TargetAttemptPermitProvider.AcquisitionCancelled.class,
+            pending.completion().toCompletableFuture().join()
+        );
+        Assertions.assertSame(cause, cancelled.cause());
+        Assertions.assertEquals(1, fixture.activeTargetAttempts.get());
 
-        Assertions.assertTrue(cancelled.isCompletedExceptionally());
-        Assertions.assertTrue(closed.isCompletedExceptionally());
-        active.join().close();
-        executor.runAll();
+        active.close();
+        var replacement = acquired(fixture.provider.acquire(request(2)));
+        Assertions.assertEquals(1, fixture.activeTargetAttempts.get());
+        replacement.close();
+        Assertions.assertEquals(0, fixture.activeTargetAttempts.get());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
-    void recordsAvailabilityQueueingLeaseDurationAndCancellation() {
-        var executor = new QueuedExecutor();
-        var nanoTime = new AtomicLong();
-        var pool = new AsyncPermitPool(
-            2,
-            executor,
-            rootContext.getPermitPoolMetrics(),
+    void permitReleaseIsOneShotAndDuplicateReleaseDoesNotCorruptTheCounter() {
+        var fixture = new Fixture(1);
+        var permit = acquired(fixture.provider.acquire(request(0)));
+
+        permit.close();
+        permit.close();
+
+        Assertions.assertEquals(0, fixture.activeTargetAttempts.get());
+        Assertions.assertEquals(1, fixture.fatalFailures.size());
+        Assertions.assertTrue(
+            fixture.fatalFailures.get(0).getCause().getMessage().contains("more than once")
+        );
+    }
+
+    @Test
+    void impossibleReleaseReachesFatalHandlingBeforeChangingTheCounter() {
+        var fixture = new Fixture(1);
+        var permit = acquired(fixture.provider.acquire(request(0)));
+        fixture.activeTargetAttempts.set(0);
+
+        permit.close();
+
+        Assertions.assertEquals(0, fixture.activeTargetAttempts.get());
+        Assertions.assertEquals(1, fixture.fatalFailures.size());
+        Assertions.assertTrue(
+            fixture.fatalFailures.get(0).getCause().getMessage().contains(
+                "cannot release permit"
+            )
+        );
+    }
+
+    @Test
+    void constructionRejectsAnAlreadyCorruptApplicationCounter() {
+        var counter = new AtomicInteger(2);
+        var failures = new ArrayList<Error>();
+
+        var thrown = Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> new TargetAttemptPermitProvider(
+                1,
+                counter,
+                TargetAttemptPermitProvider.Metrics.NOOP,
+                failures::add
+            )
+        );
+
+        Assertions.assertEquals(2, counter.get());
+        Assertions.assertEquals(1, failures.size());
+        Assertions.assertSame(thrown, failures.get(0).getCause());
+    }
+
+    @Test
+    void heldDurationAndPermitConservationAreObserved() {
+        var metrics = new RecordingMetrics();
+        var nanoTime = new AtomicLong(1_000_000);
+        var counter = new AtomicInteger();
+        var failures = new ArrayList<Error>();
+        var provider = new TargetAttemptPermitProvider(
+            1,
+            counter,
+            metrics,
+            failures::add,
             nanoTime::get
         );
-        var first = pool.acquire(request(0), 1).toCompletableFuture();
-        var explicitlyCancelled = pool.acquire(request(1), 2).toCompletableFuture();
-        executor.runAll();
+        var permit = acquired(provider.acquire(request(0)));
 
-        assertLongSum(AsyncPermitPoolMetrics.MetricNames.AVAILABLE, 1);
-        assertLongSum(AsyncPermitPoolMetrics.MetricNames.QUEUED, 1);
+        nanoTime.set(6_000_000);
+        permit.close();
 
-        nanoTime.set(5_000_000);
-        pool.cancel(request(1)::equals, new CancellationException("session aborted"));
-        executor.runAll();
-        assertLongSum(AsyncPermitPoolMetrics.MetricNames.QUEUED, 0);
-        assertLongSum(AsyncPermitPoolMetrics.MetricNames.CANCELLATION_COUNT, 1);
-        Assertions.assertTrue(explicitlyCancelled.isCompletedExceptionally());
-
-        first.join().close();
-        executor.runAll();
-        var heldAtShutdown = pool.acquire(request(2), 2).toCompletableFuture();
-        var cancelledAtShutdown = pool.acquire(request(3), 1).toCompletableFuture();
-        executor.runAll();
-
-        nanoTime.set(12_000_000);
-        pool.close(new CancellationException("pool closed"));
-        executor.runAll();
-        heldAtShutdown.join().close();
-        executor.runAll();
-        var rejectedAfterShutdown = pool.acquire(request(4), 1).toCompletableFuture();
-        executor.runAll();
-
-        assertLongSum(AsyncPermitPoolMetrics.MetricNames.AVAILABLE, 0);
-        assertLongSum(AsyncPermitPoolMetrics.MetricNames.QUEUED, 0);
-        assertLongSum(AsyncPermitPoolMetrics.MetricNames.CANCELLATION_COUNT, 3);
-        Assertions.assertTrue(cancelledAtShutdown.isCompletedExceptionally());
-        Assertions.assertTrue(rejectedAfterShutdown.isCompletedExceptionally());
-
-        var heldDuration = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
-            .stream()
-            .filter(metric -> metric.getName().equals(AsyncPermitPoolMetrics.MetricNames.HELD_DURATION))
-            .findFirst()
-            .orElseThrow()
-            .getHistogramData()
-            .getPoints()
-            .stream()
-            .findFirst()
-            .orElseThrow();
-        Assertions.assertEquals(2, heldDuration.getCount());
-        Assertions.assertEquals(12.0, heldDuration.getSum());
+        Assertions.assertEquals(1, metrics.acquisitions);
+        Assertions.assertEquals(1, metrics.permitsAcquired);
+        Assertions.assertEquals(1, metrics.permitsReleased);
+        Assertions.assertEquals(0, metrics.activePermits);
+        Assertions.assertEquals(List.of(Duration.ofMillis(5)), metrics.heldDurations);
+        Assertions.assertEquals(0, counter.get());
+        Assertions.assertTrue(failures.isEmpty());
     }
 
-    private void assertLongSum(String metricName, long expected) {
-        var metric = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
-            .stream()
-            .filter(candidate -> candidate.getName().equals(metricName))
-            .findFirst()
-            .orElseThrow();
-        Assertions.assertEquals(
-            expected,
-            metric.getLongSumData().getPoints().stream().findFirst().orElseThrow().getValue()
-        );
+    private static TargetAttemptPermitProvider.Permit acquired(
+        TargetAttemptPermitProvider.Acquisition acquisition
+    ) {
+        return Assertions.assertInstanceOf(
+            TargetAttemptPermitProvider.PermitAcquired.class,
+            acquisition.completion().toCompletableFuture().join()
+        ).permit();
     }
 
-    private static ReplayRequestId request(int index) {
+    private static ReplayRequestId request(long ordinal) {
         return new ReplayRequestId(
-            new ConnectionSessionKey(new SourceConnectionKey("node", "connection"), 0, 1),
-            index
+            new ConnectionProcessingId(
+                new PartitionGenerationId(new TopicPartition("topic", 0), 1),
+                new CapturedConnectionId("node", "connection"),
+                1
+            ),
+            ordinal
         );
     }
 
-    private static class QueuedExecutor implements Executor {
-        private final Queue<Runnable> tasks = new ArrayDeque<>();
+    private static final class Fixture {
+        private final AtomicInteger activeTargetAttempts = new AtomicInteger();
+        private final ArrayList<Error> fatalFailures = new ArrayList<>();
+        private final TargetAttemptPermitProvider provider;
+
+        private Fixture(int capacity) {
+            provider = new TargetAttemptPermitProvider(
+                capacity,
+                activeTargetAttempts,
+                TargetAttemptPermitProvider.Metrics.NOOP,
+                fatalFailures::add
+            );
+        }
+    }
+
+    private static final class RecordingMetrics
+        implements TargetAttemptPermitProvider.Metrics {
+
+        private int acquisitions;
+        private int pending;
+        private int cancellations;
+        private int permitsAcquired;
+        private int activePermits;
+        private int permitsReleased;
+        private final ArrayList<Duration> heldDurations = new ArrayList<>();
 
         @Override
-        public void execute(Runnable command) {
-            tasks.add(command);
+        public void acquisitionRequested() {
+            acquisitions++;
         }
 
-        void runAll() {
-            while (!tasks.isEmpty()) {
-                tasks.remove().run();
-            }
+        @Override
+        public void acquisitionPendingChanged(int delta) {
+            pending += delta;
+        }
+
+        @Override
+        public void acquisitionCancelled() {
+            cancellations++;
+        }
+
+        @Override
+        public void permitAcquired() {
+            permitsAcquired++;
+        }
+
+        @Override
+        public void activePermitsChanged(int delta) {
+            activePermits += delta;
+        }
+
+        @Override
+        public void permitReleased() {
+            permitsReleased++;
+        }
+
+        @Override
+        public void permitHeld(Duration duration) {
+            heldDurations.add(duration);
         }
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G10)

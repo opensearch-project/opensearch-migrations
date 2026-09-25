@@ -1,15 +1,12 @@
-package org.opensearch.migrations.replay.tracing;
-
-// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: TargetAttemptPermitProvider . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G2)
 /*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
+package org.opensearch.migrations.replay.tracing;
 
 import java.time.Duration;
 
@@ -21,56 +18,88 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
-public final class AsyncPermitPoolMetrics implements TargetAttemptPermitProvider.Metrics {
+/** Fixed-cardinality telemetry for the application target-attempt limit. */
+public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProvider.Metrics {
     public static final class MetricNames {
         private MetricNames() {}
 
-        public static final String AVAILABLE = "permitPoolAvailable";
-        public static final String QUEUED = "permitPoolQueued";
-        public static final String HELD_DURATION = "permitPoolHeldDuration";
-        public static final String CANCELLATION_COUNT = "permitPoolCancellationCount";
+        public static final String ACQUISITION_REQUESTS =
+            "targetAttemptPermitAcquisitionRequests";
+        public static final String ACQUISITIONS_PENDING =
+            "targetAttemptPermitAcquisitionsPending";
+        public static final String ACQUISITIONS_CANCELLED =
+            "targetAttemptPermitAcquisitionsCancelled";
+        public static final String PERMITS_ACQUIRED = "targetAttemptPermitsAcquired";
+        public static final String PERMITS_ACTIVE = "targetAttemptPermitsActive";
+        public static final String PERMITS_RELEASED = "targetAttemptPermitsReleased";
+        public static final String PERMIT_HELD_DURATION =
+            "targetAttemptPermitHeldDuration";
     }
 
-    private final LongUpDownCounter available;
-    private final LongUpDownCounter queued;
-    private final DoubleHistogram heldDuration;
-    private final LongCounter cancellationCount;
+    private final LongCounter acquisitionRequests;
+    private final LongUpDownCounter acquisitionsPending;
+    private final LongCounter acquisitionsCancelled;
+    private final LongCounter permitsAcquired;
+    private final LongUpDownCounter permitsActive;
+    private final LongCounter permitsReleased;
+    private final DoubleHistogram permitHeldDuration;
 
-    public AsyncPermitPoolMetrics(@NonNull Meter meter) {
-        available = meter.upDownCounterBuilder(MetricNames.AVAILABLE)
+    public TargetAttemptPermitMetrics(@NonNull Meter meter) {
+        acquisitionRequests = meter.counterBuilder(MetricNames.ACQUISITION_REQUESTS)
+            .setUnit("requests")
+            .build();
+        acquisitionsPending = meter.upDownCounterBuilder(MetricNames.ACQUISITIONS_PENDING)
+            .setUnit("requests")
+            .build();
+        acquisitionsCancelled = meter.counterBuilder(MetricNames.ACQUISITIONS_CANCELLED)
+            .setUnit("requests")
+            .build();
+        permitsAcquired = meter.counterBuilder(MetricNames.PERMITS_ACQUIRED)
             .setUnit("permits")
             .build();
-        queued = meter.upDownCounterBuilder(MetricNames.QUEUED)
-            .setUnit("requests")
+        permitsActive = meter.upDownCounterBuilder(MetricNames.PERMITS_ACTIVE)
+            .setUnit("permits")
             .build();
-        heldDuration = meter.histogramBuilder(MetricNames.HELD_DURATION)
+        permitsReleased = meter.counterBuilder(MetricNames.PERMITS_RELEASED)
+            .setUnit("permits")
+            .build();
+        permitHeldDuration = meter.histogramBuilder(MetricNames.PERMIT_HELD_DURATION)
             .setUnit("ms")
             .build();
-        cancellationCount = meter.counterBuilder(MetricNames.CANCELLATION_COUNT)
-            .setUnit("requests")
-            .build();
     }
 
     @Override
-    public void availableChanged(int delta) {
-        available.add(delta);
+    public void acquisitionRequested() {
+        acquisitionRequests.add(1);
     }
 
     @Override
-    public void queuedChanged(int delta) {
-        queued.add(delta);
+    public void acquisitionPendingChanged(int delta) {
+        acquisitionsPending.add(delta);
+    }
+
+    @Override
+    public void acquisitionCancelled() {
+        acquisitionsCancelled.add(1);
+    }
+
+    @Override
+    public void permitAcquired() {
+        permitsAcquired.add(1);
+    }
+
+    @Override
+    public void activePermitsChanged(int delta) {
+        permitsActive.add(delta);
+    }
+
+    @Override
+    public void permitReleased() {
+        permitsReleased.add(1);
     }
 
     @Override
     public void permitHeld(@NonNull Duration duration) {
-        heldDuration.record(duration.toNanos() / 1_000_000.0);
-    }
-
-    @Override
-    public void cancelled(int count) {
-        cancellationCount.add(count);
+        permitHeldDuration.record(duration.toNanos() / 1_000_000.0);
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G2)
