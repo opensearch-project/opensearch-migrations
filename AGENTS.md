@@ -282,7 +282,13 @@ codex exec --ephemeral \
 Where designs specify structure, they win. Otherwise:
 
 - Comments state present constraints and invariants, not rebuild history. No tombstones for deleted code.
-  Two temporary exceptions: `REBUILD-LIMBO` notes and a workaround's required removal milestone.
+  The exceptions are `REBUILD-LIMBO` notes, a workaround's required removal milestone, and the owner's
+  per-phase `REBUILD-TRACE` equivalence records. Trace records map rewritten functions bidirectionally from
+  legacy source to live target, remain through all later phases for reviewers and agents, and are removed
+  only in the final pre-merge cleanup.
+- `tools/java-without-limbo.py` omits `REBUILD-TRACE` records as well as limbo bodies from ordinary code
+  searches. Reviewers read trace records as navigation aids, then verify them against executable code and
+  history; a trace comment is never evidence of a live caller or preserved behavior.
 - Replace old production paths as soon as the new end-to-end path is viable. An outer adapter may be
   acceptable; legacy concepts must not enter core owner state, public contracts, or switches. A known broken
   test with a repair milestone is preferable to a new compatibility layer in the core model.
@@ -310,7 +316,8 @@ strip should ordinarily retain roughly half the original content. Carry every re
 G11 while its legacy source still exists in the parent commit.
 
 Cross-file attribution remains an open verification task: push a disposable branch containing a representative
-cross-file copy and compare GitHub blame with local `git blame -C -C -C`. Until that measurement says otherwise,
+cross-file copy and compare GitHub blame with ordinary local `git blame`; `-C -C -C` is diagnostic only and
+is not a substitute for preserving attribution in the default view. Until that measurement says otherwise,
 preserve UI-visible blame through move/copy-first sequencing.
 
 ### 7.2 In-place limbo rules

@@ -1,15 +1,15 @@
 # Capture/replay context tools
 
-## Live Java without limbo
+## Java code without limbo or traceability records
 
 Validate marker structure and print one Java source file with every
-`REBUILD-LIMBO-START(...)`/`END(...)` region omitted:
+`REBUILD-LIMBO-START(...)`/`END(...)` region and every `REBUILD-TRACE` record omitted:
 
 ```bash
 tools/java-without-limbo.py print path/to/Source.java
 ```
 
-Search live lines across one or more Java files while retaining original line numbers:
+Search executable-source lines across one or more Java files while retaining original line numbers:
 
 ```bash
 tools/java-without-limbo.py search 'Owner|Mailbox' path/to/One.java path/to/Two.java
@@ -17,7 +17,9 @@ tools/java-without-limbo.py search -F 'literal text' path/to/Source.java
 ```
 
 Search returns `0` for a match, `1` for no match, and `2` for invalid input or malformed, nested,
-unmatched, or mismatched limbo regions. The tool never modifies source.
+unmatched, or mismatched limbo/traceability scaffolding. Traceability records remain available to
+reviewers through an explicit `rg 'REBUILD-TRACE'`; ordinary code searches omit them so a mapping
+comment cannot be mistaken for a live symbol or caller. The tool never modifies source.
 
 Self-test:
 

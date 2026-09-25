@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Reconstructs the original source of a REBUILD-LIMBO-marked file.
+# Reconstructs the original source of a REBUILD-LIMBO-marked file while omitting
+# rebuild-lifetime REBUILD-TRACE review records.
 #
 #   awk -f tools/unmark-limbo.awk path/to/Marked.java
 #
@@ -20,10 +21,14 @@
 # markers around it and leaving the rest marked, which keeps blame on every line. This script is for
 # the whole-file case and for verifying that nothing was lost in the marking.
 #
-# Four marker kinds: START/END delimit a region, ESCAPED-LINE guards a comment delimiter inside one, and
+# Four limbo marker kinds: START/END delimit a region, ESCAPED-LINE guards a comment delimiter inside one, and
 # NOTE marks live code a later milestone must change -- a stand-in type, a temporary root, a signature that
 # loses a parameter. A NOTE is not a region and hides nothing; it exists so `grep -rn REBUILD-LIMBO-NOTE(Gn)`
 # enumerates what that milestone has to touch, which a type name alone does not.
+#
+# REBUILD-TRACE-START/END blocks and single-line REBUILD-TRACE records are review-only source/target
+# equivalence maps. They intentionally survive milestone closeout, but they are omitted here so adding a
+# traceability note beside byte-recoverable carried source does not look like source drift.
 #
 # Markers may be indented, because a member-level region sits at the indentation of the member it
 # wraps. A `*/` is treated as a region closer only while a region is open, so an indented javadoc
@@ -36,6 +41,11 @@
 # Javadoc is never inside a region, so it needs no unescaping: Java does not nest block comments, and
 # escaping javadoc to survive an enclosing region is both lossy to reverse and destroys its blame.
 # Only non-javadoc block comments inside implementation are guarded, and that guard is one prefix.
+
+/^[[:space:]]*\/\/ REBUILD-TRACE-START\(/       { intrace = 1; next }
+intrace && /^[[:space:]]*\/\/ REBUILD-TRACE-END\(/ { intrace = 0; next }
+intrace                                            { next }
+/^[[:space:]]*\/\/ REBUILD-TRACE\(/             { next }
 
 /^[[:space:]]*\/\/ REBUILD-LIMBO\(/              { inhdr = 1; next }
 inhdr && /^[[:space:]]*\/\/ /                    { next }

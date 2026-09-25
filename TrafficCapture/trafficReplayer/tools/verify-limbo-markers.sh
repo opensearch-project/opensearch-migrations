@@ -12,7 +12,8 @@
 #      bare `/*` and every REBUILD-LIMBO-END is immediately preceded by a bare `*/`, so javac never sees
 #      the region. A malformed pair is the one way marked code could go on compiling -- or could stop the
 #      file compiling at all -- so it is the thing worth checking mechanically.
-#   2. Un-marking is mechanical. Reconstruction through unmark-limbo.awk leaves no marker behind, and for
+#   2. Un-marking is mechanical. Reconstruction through unmark-limbo.awk leaves no marker behind, omits
+#      review-only REBUILD-TRACE records, and for
 #      a whole-file-marked file every code line comes back exactly, in order, compared against the
 #      content that was marked as recovered from the commit that marked it.
 #
@@ -37,13 +38,13 @@ if [ ! -f "$AWK" ]; then
     exit 2
 fi
 
-marked=$(grep -rl 'REBUILD-LIMBO-START' "$SRC" | sort)
-if [ -z "$marked" ]; then
-    echo "No marked files under $SRC. Nothing to verify -- the rebuild is complete by this measure."
+scaffolded=$(grep -rlE 'REBUILD-LIMBO-START|REBUILD-TRACE(-START)?\(' "$SRC" | sort -u)
+if [ -z "$scaffolded" ]; then
+    echo "No limbo or traceability scaffolding under $SRC. Nothing to verify."
     exit 0
 fi
 
-marked_count=$(printf '%s\n' "$marked" | wc -l | tr -d ' ')
+scaffolded_count=$(printf '%s\n' "$scaffolded" | wc -l | tr -d ' ')
 malformed=0
 unbalanced=0
 residue=0
@@ -52,8 +53,9 @@ unrecovered=0
 duplicated=0
 whole_file_checked=0
 body_checked=0
+trace_checked=0
 
-for file in $marked; do
+for file in $scaffolded; do
     starts=$(grep -c '^[[:space:]]*// REBUILD-LIMBO-START(' "$file")
     ends=$(grep -c '^[[:space:]]*// REBUILD-LIMBO-END(' "$file")
     if [ "$starts" -ne "$ends" ]; then
@@ -84,14 +86,75 @@ for file in $marked; do
         malformed=$((malformed + 1))
     fi
 
+    # Traceability records are retained through the rebuild but are not carried source. Validate that a
+    # START/END record contains comments only, cannot conceal executable code, and closes with the same
+    # milestone/side key. The reconstruction awk then drops these records before historical comparison.
+    trace_bad=$(awk '
+        function key_for(line, kind, key) {
+            key = line
+            sub("^.*REBUILD-TRACE-" kind "\\(", "", key)
+            sub("\\).*$", "", key)
+            return key
+        }
+        /^[[:space:]]*\/\/ REBUILD-TRACE-START\([^,()[:space:]]+,(source|target)\):([[:space:]].*)?$/ {
+            if (intrace) {
+                print "  line " NR ": nested REBUILD-TRACE-START"
+            } else {
+                intrace = 1
+                trace_key = key_for($0, "START")
+                trace_line = NR
+            }
+            next
+        }
+        /^[[:space:]]*\/\/ REBUILD-TRACE-END\([^,()[:space:]]+,(source|target)\)[[:space:]]*$/ {
+            ending_key = key_for($0, "END")
+            if (!intrace) {
+                print "  line " NR ": unmatched REBUILD-TRACE-END"
+            } else if (ending_key != trace_key) {
+                print "  line " NR ": REBUILD-TRACE-START(" trace_key ") at line " trace_line \
+                    " closes with END(" ending_key ")"
+                intrace = 0
+            } else {
+                intrace = 0
+            }
+            next
+        }
+        /^[[:space:]]*\/\/ REBUILD-TRACE\([^,()[:space:]]+,(source|target)\):([[:space:]].*)?$/ {
+            if (intrace) print "  line " NR ": inline REBUILD-TRACE nested in a trace block"
+            next
+        }
+        !intrace && /REBUILD-TRACE/ {
+            print "  line " NR ": malformed REBUILD-TRACE marker"
+            next
+        }
+        intrace && $0 !~ /^[[:space:]]*\/\// && $0 !~ /^[[:space:]]*$/ {
+            print "  line " NR ": REBUILD-TRACE block contains a non-comment line"
+        }
+        END {
+            if (intrace) {
+                print "  end of file: REBUILD-TRACE-START(" trace_key ") at line " trace_line \
+                    " has no matching END"
+            }
+        }
+    ' "$file")
+    if [ -n "$trace_bad" ]; then
+        echo "MALFORMED TRACE: $file"
+        echo "$trace_bad"
+        malformed=$((malformed + 1))
+    fi
+    if grep -q 'REBUILD-TRACE' "$file"; then
+        trace_checked=$((trace_checked + 1))
+    fi
+
     # Property 2a: reconstruction leaves no marker behind. Matches marker syntax rather than any mention
     # of the word, because live prose legitimately refers to REBUILD-LIMBO and must survive.
     left=$(awk -f "$AWK" "$file" \
-        | grep -c '^[[:space:]]*// REBUILD-LIMBO\(-START\|-END\|-ESCAPED-LINE\|-NOTE\)\?(')
+        | grep -Ec '^[[:space:]]*// (REBUILD-LIMBO(-START|-END|-ESCAPED-LINE|-NOTE)?|REBUILD-TRACE(-START|-END)?)\(')
     if [ "$left" -ne 0 ]; then
         echo "RESIDUE: $file leaves $left marker line(s) after reconstruction"
         awk -f "$AWK" "$file" \
-            | grep -n '^[[:space:]]*// REBUILD-LIMBO\(-START\|-END\|-ESCAPED-LINE\|-NOTE\)\?(' | sed 's/^/  /'
+            | grep -En '^[[:space:]]*// (REBUILD-LIMBO(-START|-END|-ESCAPED-LINE|-NOTE)?|REBUILD-TRACE(-START|-END)?)\(' \
+            | sed 's/^/  /'
         residue=$((residue + 1))
     fi
 
@@ -162,9 +225,10 @@ for file in $marked; do
 done
 
 echo
-echo "Checked $marked_count marked file(s) under $SRC."
+echo "Checked $scaffolded_count limbo/traceability-scaffolded file(s) under $SRC."
 echo "  no marked code line missing, checked directly for $body_checked file(s) with region bodies"
 echo "  order and duplication proved exactly, by diff against history, for $whole_file_checked whole-file-marked file(s)"
+echo "  traceability records validated and ignored for historical comparison in $trace_checked marked file(s)"
 failures=$((malformed + unbalanced + residue + drifted + unrecovered + duplicated))
 if [ "$failures" -ne 0 ]; then
     echo "FAIL: $unbalanced unbalanced, $malformed malformed, $residue with residue, $drifted drifted," \

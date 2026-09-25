@@ -70,7 +70,9 @@ Before editing, map every responsibility the milestone must create, move, remove
 - You MUST identify missing links, unreachable components, design silence, compatibility choices,
   inherited-file/history risks, and responsibility-placement mismatches.
 - You MUST use `tools/java-without-limbo.py search` or `print` when inspecting live Java so
-  `REBUILD-LIMBO` bodies cannot contaminate the live-code analysis.
+  `REBUILD-LIMBO` bodies and `REBUILD-TRACE` equivalence records cannot contaminate the live-code analysis.
+- You MUST read the selected milestone's `REBUILD-TRACE` records as a bidirectional source/target map, but
+  MUST verify every mapping against executable code and history rather than treating the comment as proof.
 - Before proposing any new file, class, method, or test, You MUST search marked regions and history
   for its predecessor because Plan A preserves inherited source and blame in place.
 - You MUST NOT begin implementation before each responsibility has a complete usable chain or a
@@ -89,6 +91,9 @@ Codex owns implementation, integration, register updates, and final commit messa
   the rejection is an explicit recorded decision.
 - You MUST keep tests with the production behavior they prove and add observability with the
   component that needs it.
+- For every function whose responsibility is rewritten, split, moved, or deliberately retired, You MUST
+  add a bidirectional `REBUILD-TRACE` source/target record. These records remain through later milestones
+  for equivalence review and are removed only during the owner's final pre-merge cleanup.
 - You MUST use direct `codex exec` CLI workers only where `AGENTS.md` permits isolated work.
 - You MUST NOT use Brazil because this repository's required build path is Gradle.
 - You MUST NOT launch API-based subagents because `AGENTS.md` requires direct CLI workers.
