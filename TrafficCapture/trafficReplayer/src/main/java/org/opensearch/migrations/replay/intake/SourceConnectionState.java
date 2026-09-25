@@ -265,6 +265,26 @@ public final class SourceConnectionState {
         );
     }
 
+    /**
+     * Ends incomplete source assembly because its partition generation stopped accepting records.
+     *
+     * <p>The caller deliberately does not ordinary-complete the returned associations: cancellation cleanup
+     * removes their record trackers without producing Kafka commit authority.</p>
+     */
+    public ObservationOutcome cancelGeneration() {
+        if (lifetime != Lifetime.OPEN) {
+            return ObservationOutcome.none();
+        }
+        var outcome = stopAssembling(SourceAssemblySink.IncompleteReason.GENERATION_CANCELLED);
+        lifetime = Lifetime.EXPIRED;
+        return new ObservationOutcome(
+            outcome.associationsToAdd(),
+            outcome.associationsFinished(),
+            outcome.relabels(),
+            true
+        );
+    }
+
     public boolean hasConnectionOwner() {
         return requestEverReconstituted;
     }

@@ -467,6 +467,48 @@ class PartitionIntakeStateTest {
     }
 
     @Test
+    void forceCancellationUsesTheSharedSupplyTransitionExactlyOnceAndLateRetryCannotReadd() {
+        var supplyDeltas = new ArrayList<Integer>();
+        var intake = ownerState(
+            new ArrayList<>(),
+            new PartitionIntakeState.BrokerTimeConfiguration(100, 10, 50),
+            supplyDeltas
+        );
+        var counted = new ReplayRequestId(LIFETIME, 40);
+        var unresolved = new ReplayRequestId(LIFETIME, 41);
+
+        intake.registerRequest(counted, 100);
+        Assertions.assertTrue(intake.sourceResponseCompleted(counted));
+        intake.registerRequest(unresolved, 200);
+        Assertions.assertEquals(1, intake.retryReadyRequestSupplyCount());
+
+        var force = intake.beginForceCancellation();
+
+        Assertions.assertTrue(force.cleanupComplete());
+        Assertions.assertEquals(0, intake.retryReadyRequestSupplyCount());
+        Assertions.assertEquals(List.of(1, -1), supplyDeltas);
+        Assertions.assertFalse(
+            intake.applyConnectionRequestFinishedInput(counted),
+            "a queued normal milestone cannot remove cancelled supply a second time"
+        );
+        Assertions.assertEquals(
+            List.of(unresolved),
+            intake.resolveRetryBoundaries(250),
+            "the frozen retry input can still arrive after cancellation"
+        );
+        Assertions.assertFalse(intake.requestCanCountAsRetryReadySupply(unresolved));
+        Assertions.assertEquals(0, intake.retryReadyRequestSupplyCount());
+        Assertions.assertEquals(List.of(1, -1), supplyDeltas);
+
+        intake.beginForceCancellation();
+        Assertions.assertEquals(
+            List.of(1, -1),
+            supplyDeltas,
+            "duplicate force delivery must not repeat the shared supply transition"
+        );
+    }
+
+    @Test
     void batchEntitlementsAreOrderedAndNoNewRequestIsAllocatedWhileOneIsApplying() {
         var intake = ownerState(new ArrayList<>());
         var explicitOne = intake.requestNextBatchIfNeeded(2).orElseThrow();

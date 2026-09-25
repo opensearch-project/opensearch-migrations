@@ -11,6 +11,7 @@ package org.opensearch.migrations.replay.tracing;
 import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
 import org.opensearch.migrations.replay.intake.PartitionIntakeState;
 import org.opensearch.migrations.replay.intake.SourceAssemblySink;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
@@ -31,6 +32,8 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         AttributeKey.stringKey("batchEntitlement");
     public static final AttributeKey<String> DEMAND_STATE_ATTRIBUTE =
         AttributeKey.stringKey("demandState");
+    public static final AttributeKey<String> GRACE_MODE_ATTRIBUTE =
+        AttributeKey.stringKey("graceMode");
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -73,6 +76,14 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         public static final String CAPTURE_PROTOCOL_VIOLATIONS = "replayIntakeCaptureProtocolViolations";
         public static final String RECORD_BATCHES_REJECTED_AFTER_PROTOCOL_VIOLATION =
             "replayIntakeRecordBatchesRejectedAfterProtocolViolation";
+        public static final String GENERATION_GRACE_STARTED =
+            "replayIntakeGenerationGraceStarted";
+        public static final String GENERATION_FORCE_STARTED =
+            "replayIntakeGenerationForceStarted";
+        public static final String GENERATION_CLEANUP_FINISHED =
+            "replayIntakeGenerationCleanupFinished";
+        public static final String STALE_GENERATION_INPUTS_IGNORED =
+            "replayIntakeStaleGenerationInputsIgnored";
     }
 
     private final LongCounter ownerStarted;
@@ -101,6 +112,10 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private final LongCounter capturedClosesAccepted;
     private final LongCounter captureProtocolViolations;
     private final LongCounter recordBatchesRejectedAfterProtocolViolation;
+    private final LongCounter generationGraceStarted;
+    private final LongCounter generationForceStarted;
+    private final LongCounter generationCleanupFinished;
+    private final LongCounter staleGenerationInputsIgnored;
 
     public ReplayIntakeMetrics(@NonNull Meter meter) {
         ownerStarted = counter(meter, MetricNames.OWNER_STARTED, "owners");
@@ -140,6 +155,12 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         captureProtocolViolations = counter(meter, MetricNames.CAPTURE_PROTOCOL_VIOLATIONS, "violations");
         recordBatchesRejectedAfterProtocolViolation =
             counter(meter, MetricNames.RECORD_BATCHES_REJECTED_AFTER_PROTOCOL_VIOLATION, "batches");
+        generationGraceStarted = counter(meter, MetricNames.GENERATION_GRACE_STARTED, "generations");
+        generationForceStarted = counter(meter, MetricNames.GENERATION_FORCE_STARTED, "generations");
+        generationCleanupFinished =
+            counter(meter, MetricNames.GENERATION_CLEANUP_FINISHED, "generations");
+        staleGenerationInputsIgnored =
+            counter(meter, MetricNames.STALE_GENERATION_INPUTS_IGNORED, "inputs");
     }
 
     @Override
@@ -274,6 +295,35 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     @Override
     public void recordBatchRejectedAfterProtocolViolation() {
         recordBatchesRejectedAfterProtocolViolation.add(1);
+    }
+
+    @Override
+    public void generationGraceStarted(@NonNull CancellationGrace grace) {
+        generationGraceStarted.add(
+            1,
+            Attributes.of(
+                GRACE_MODE_ATTRIBUTE,
+                grace instanceof CancellationGrace.Revocation ? "REVOCATION" : "SHUTDOWN"
+            )
+        );
+    }
+
+    @Override
+    public void generationForceStarted() {
+        generationForceStarted.add(1);
+    }
+
+    @Override
+    public void generationCleanupFinished() {
+        generationCleanupFinished.add(1);
+    }
+
+    @Override
+    public void staleGenerationInputIgnored(@NonNull ReplayIntakeOwner.InputKind inputKind) {
+        staleGenerationInputsIgnored.add(
+            1,
+            Attributes.of(INPUT_KIND_ATTRIBUTE, inputKind.name())
+        );
     }
 
     private static LongCounter counter(Meter meter, String name, String unit) {

@@ -55,12 +55,13 @@ public final class TupleWriter<T> {
         @NonNull CancellationException cause
     ) implements TupleWriteResult {}
 
-    @FunctionalInterface
     public interface PhysicalTupleSink<T> {
         CompletionStage<Void> write(
             IReplayContexts.ITupleHandlingContext replayContext,
             T tuple
         );
+
+        void flush();
     }
 
     public sealed interface TupleTransformation<T>
@@ -109,6 +110,7 @@ public final class TupleWriter<T> {
     private final FatalHandler fatalHandler;
     private final OutstandingOperationRegistry operations;
     private final Map<ReplayRequestId, WriteOperation> active = new LinkedHashMap<>();
+    private boolean eagerFlush;
 
     // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
     // ThreadLocalTupleWriter.<init>(IntFunction) -> TupleWriter.<init>(7-argument)
@@ -197,6 +199,23 @@ public final class TupleWriter<T> {
         return operations;
     }
 
+    /**
+     * Enters eager-flush operation for generation grace. Idempotent and confined to the writer's event loop.
+     */
+    public void enterGrace() {
+        postRequired(
+            "tuple grace entry",
+            () -> {
+                if (eagerFlush) {
+                    return;
+                }
+                eagerFlush = true;
+                flushSink();
+            },
+            ignored -> {}
+        );
+    }
+
     // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
     // ThreadLocalTupleWriter.writeTuple -> TupleWriter.start
     // REBUILD-TRACE-END(G5,source)
@@ -281,6 +300,9 @@ public final class TupleWriter<T> {
                 ),
                 "physical tuple sink returned no completion stage"
             );
+            if (eagerFlush) {
+                flushSink();
+            }
         } catch (Throwable failure) {
             onPhysicalWriteComplete(operation, physicalRegistration, failure);
             return;
@@ -292,6 +314,15 @@ public final class TupleWriter<T> {
                 ignoredFailure -> {}
             )
         );
+    }
+
+    private void flushSink() {
+        requireOwnerThread();
+        try {
+            sink.flush();
+        } catch (Throwable failure) {
+            reportFatal("tuple sink flush", failure);
+        }
     }
 
     // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.

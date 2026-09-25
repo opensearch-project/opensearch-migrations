@@ -18,6 +18,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -44,6 +45,24 @@ import lombok.NonNull;
  * which are {@code §15.2} and {@code §15.3}.
  */
 public final class PartitionIntakeState {
+
+    public enum GenerationCancellationState {
+        ACTIVE,
+        REVOCATION_GRACE,
+        REVOCATION_FORCED,
+        SHUTDOWN_GRACE
+    }
+
+    public record GenerationCancellationPlan(
+        List<ConnectionProcessingId> connectionOwners,
+        boolean cleanupComplete
+    ) {
+        public GenerationCancellationPlan {
+            connectionOwners = List.copyOf(connectionOwners);
+        }
+    }
+
+    public record CleanupAcknowledgement(boolean accepted, boolean cleanupComplete) {}
 
     public record BrokerTimeConfiguration(
         long heartbeatExpirationMillis,
@@ -142,6 +161,27 @@ public final class PartitionIntakeState {
         }
     }
 
+    private static final class GenerationCleanupTracker {
+        private final LinkedHashSet<ConnectionProcessingId> pendingConnectionOwners;
+
+        private GenerationCleanupTracker(Iterable<ConnectionProcessingId> connectionOwners) {
+            this.pendingConnectionOwners = new LinkedHashSet<>();
+            connectionOwners.forEach(pendingConnectionOwners::add);
+        }
+
+        private boolean acknowledge(ConnectionProcessingId connectionProcessingId) {
+            return pendingConnectionOwners.remove(connectionProcessingId);
+        }
+
+        private boolean isComplete() {
+            return pendingConnectionOwners.isEmpty();
+        }
+
+        private int pendingConnectionOwnerCount() {
+            return pendingConnectionOwners.size();
+        }
+    }
+
     private static final class WriterPartitionTimeState {
         private ExpirationReference reference;
         private long heartbeatIntervalMillis;
@@ -230,6 +270,8 @@ public final class PartitionIntakeState {
 
     private long greatestObservedLogAppendTime = Long.MIN_VALUE;
     private KafkaRecordId captureProtocolViolationRecord;
+    private GenerationCancellationState cancellationState = GenerationCancellationState.ACTIVE;
+    private GenerationCleanupTracker cleanupTracker;
 
     public PartitionIntakeState(
         @NonNull PartitionGenerationId generation,
@@ -312,6 +354,21 @@ public final class PartitionIntakeState {
         return Optional.ofNullable(requestedBatchRequestId);
     }
 
+    public GenerationCancellationState cancellationState() {
+        ownerThreadGuard.requireOwnerThread();
+        return cancellationState;
+    }
+
+    public int pendingCleanupConnectionOwnerCount() {
+        ownerThreadGuard.requireOwnerThread();
+        return cleanupTracker == null ? 0 : cleanupTracker.pendingConnectionOwnerCount();
+    }
+
+    public boolean acceptsRecordApplication() {
+        ownerThreadGuard.requireOwnerThread();
+        return cancellationState == GenerationCancellationState.ACTIVE;
+    }
+
     public boolean demandOpen(int requestSupplyTarget) {
         ownerThreadGuard.requireOwnerThread();
         requirePositiveRequestSupplyTarget(requestSupplyTarget);
@@ -323,7 +380,9 @@ public final class PartitionIntakeState {
      */
     public Optional<PartitionBatchRequestId> requestNextBatchIfNeeded(int requestSupplyTarget) {
         ownerThreadGuard.requireOwnerThread();
-        if (!demandOpen(requestSupplyTarget) || requestedBatchState != RequestedBatchState.IDLE) {
+        if (!acceptsRecordApplication()
+            || !demandOpen(requestSupplyTarget)
+            || requestedBatchState != RequestedBatchState.IDLE) {
             return Optional.empty();
         }
         var requestId = new PartitionBatchRequestId(generation, nextBatchRequestLocalSequence++);
@@ -560,6 +619,119 @@ public final class PartitionIntakeState {
         activeSourceConnectionsByCapturedConnectionId.remove(id.capturedConnectionId(), lifetime);
     }
 
+    /**
+     * Stops source intake and returns every target owner that must receive the same typed grace value.
+     */
+    public GenerationCancellationPlan beginGracefulCancellation(
+        @NonNull CancellationGrace grace
+    ) {
+        ownerThreadGuard.requireOwnerThread();
+        if (cancellationState != GenerationCancellationState.ACTIVE) {
+            return new GenerationCancellationPlan(List.of(), cleanupTracker != null && cleanupTracker.isComplete());
+        }
+        var gracefulState = switch (grace) {
+            case CancellationGrace.Revocation ignored -> GenerationCancellationState.REVOCATION_GRACE;
+            case CancellationGrace.Shutdown ignored -> GenerationCancellationState.SHUTDOWN_GRACE;
+        };
+        return beginCancellation(gracefulState);
+    }
+
+    private GenerationCancellationPlan beginCancellation(
+        GenerationCancellationState nextState
+    ) {
+        cancellationState = nextState;
+        endBatchEntitlements();
+
+        var connectionOwners = activeConnectionProcessingById.values().stream()
+            .filter(SourceConnectionState::hasConnectionOwner)
+            .map(SourceConnectionState::connectionProcessingId)
+            .distinct()
+            .toList();
+        cleanupTracker = new GenerationCleanupTracker(connectionOwners);
+
+        // Ending source assembly may emit final-source-response inputs needed by already-admitted requests.
+        // Its record associations deliberately remain until generation cleanup, so cancellation cannot turn
+        // an unfinished record into RecordProcessingFinished.
+        new LinkedHashSet<>(activeConnectionProcessingById.values())
+            .forEach(SourceConnectionState::cancelGeneration);
+        activeSourceConnectionsByCapturedConnectionId.clear();
+        activeConnectionProcessingById.clear();
+
+        return new GenerationCancellationPlan(connectionOwners, cleanupTracker.isComplete());
+    }
+
+    /**
+     * Upgrades revocation grace to forced cleanup and removes every remaining request from Kafka demand.
+     */
+    public GenerationCancellationPlan beginForceCancellation() {
+        ownerThreadGuard.requireOwnerThread();
+        if (cancellationState == GenerationCancellationState.ACTIVE) {
+            var plan = beginCancellation(GenerationCancellationState.REVOCATION_FORCED);
+            finishOrCancelEveryTargetSupply();
+            return plan;
+        }
+        if (cancellationState == GenerationCancellationState.SHUTDOWN_GRACE) {
+            throw new IllegalStateException("orderly shutdown cannot be upgraded to force cancellation");
+        }
+        if (cancellationState == GenerationCancellationState.REVOCATION_FORCED) {
+            return new GenerationCancellationPlan(
+                List.of(),
+                cleanupTracker != null && cleanupTracker.isComplete()
+            );
+        }
+        cancellationState = GenerationCancellationState.REVOCATION_FORCED;
+        finishOrCancelEveryTargetSupply();
+        return new GenerationCancellationPlan(
+            cleanupTracker == null
+                ? List.of()
+                : List.copyOf(cleanupTracker.pendingConnectionOwners),
+            cleanupTracker != null && cleanupTracker.isComplete()
+        );
+    }
+
+    /**
+     * Applies a typed per-owner terminal acknowledgement. Duplicate and wrong-generation acknowledgements are
+     * diagnostic-only at the caller; this method mutates only the exact pending identity.
+     */
+    public CleanupAcknowledgement acknowledgeConnectionCleanup(
+        @NonNull ConnectionProcessingId connectionProcessingId
+    ) {
+        ownerThreadGuard.requireOwnerThread();
+        requireSameGeneration(connectionProcessingId);
+        if (cleanupTracker == null || !cleanupTracker.acknowledge(connectionProcessingId)) {
+            return new CleanupAcknowledgement(false, cleanupTracker != null && cleanupTracker.isComplete());
+        }
+        return new CleanupAcknowledgement(true, cleanupTracker.isComplete());
+    }
+
+    /**
+     * Removes cancellation-owned bookkeeping without emitting normal record completion.
+     */
+    public void discardCancelledGenerationBookkeeping() {
+        ownerThreadGuard.requireOwnerThread();
+        if (cleanupTracker == null || !cleanupTracker.isComplete()) {
+            throw new IllegalStateException("generation cleanup is not complete for " + generation);
+        }
+        finishOrCancelEveryTargetSupply();
+        requestStateByReplayRequestId.clear();
+        unresolvedRetryBoundaries.clear();
+        if (retryReadyRequestSupplyCount != 0) {
+            throw new IllegalStateException(
+                "retry-ready supply remained after cancellation cleanup for " + generation
+            );
+        }
+        recordsByAssociation.clear();
+        var trackerCount = recordTrackersByKafkaRecordId.size();
+        recordTrackersByKafkaRecordId.clear();
+        for (var i = 0; i < trackerCount; i++) {
+            activeRecordTrackersChanged.accept(-1);
+            recordTrackerRetired.run();
+        }
+        writerTimeStateByWriterNodeId.clear();
+        activeSourceConnectionsByCapturedConnectionId.clear();
+        activeConnectionProcessingById.clear();
+    }
+
     public void registerRequest(
         @NonNull ReplayRequestId requestId,
         long requestCompletingLogAppendTime
@@ -653,6 +825,19 @@ public final class PartitionIntakeState {
     }
 
     /**
+     * Applies the queued normal milestone unless forced cancellation already used the same shared transition.
+     */
+    public boolean applyConnectionRequestFinishedInput(@NonNull ReplayRequestId requestId) {
+        ownerThreadGuard.requireOwnerThread();
+        var request = requestStateByReplayRequestId.get(requestId);
+        if (request == null || request.targetSupply == TargetSupplyState.FINISHED_OR_CANCELLED) {
+            return false;
+        }
+        finishOrCancelTargetSupply(request);
+        return true;
+    }
+
+    /**
      * Removes a request from target supply exactly once. G8 invokes the same transition for cancellation.
      */
     public void targetSupplyFinishedOrCancelled(@NonNull ReplayRequestId requestId) {
@@ -661,6 +846,10 @@ public final class PartitionIntakeState {
         if (request.targetSupply == TargetSupplyState.FINISHED_OR_CANCELLED) {
             throw new IllegalStateException("Target supply already finished or cancelled: " + requestId);
         }
+        finishOrCancelTargetSupply(request);
+    }
+
+    private void finishOrCancelTargetSupply(RequestIntakeState request) {
         request.targetSupply = TargetSupplyState.FINISHED_OR_CANCELLED;
         if (request.countedAsRetryReadySupply) {
             request.countedAsRetryReadySupply = false;
@@ -668,11 +857,25 @@ public final class PartitionIntakeState {
         }
     }
 
+    private void finishOrCancelEveryTargetSupply() {
+        requestStateByReplayRequestId.values().forEach(request -> {
+            if (request.targetSupply == TargetSupplyState.PRESENT) {
+                finishOrCancelTargetSupply(request);
+            }
+        });
+    }
+
     public boolean requestCanCountAsRetryReadySupply(@NonNull ReplayRequestId requestId) {
         ownerThreadGuard.requireOwnerThread();
         var request = requireRequest(requestId);
         return request.targetSupply == TargetSupplyState.PRESENT
             && request.retryInput != RetryInputState.UNRESOLVED;
+    }
+
+    public boolean hasRequest(@NonNull ReplayRequestId requestId) {
+        ownerThreadGuard.requireOwnerThread();
+        requireSameGeneration(requestId.connectionProcessingId());
+        return requestStateByReplayRequestId.containsKey(requestId);
     }
 
     public void removeRequest(@NonNull ReplayRequestId requestId) {
@@ -852,6 +1055,14 @@ public final class PartitionIntakeState {
         if (captureProtocolViolationRecord == null) {
             captureProtocolViolationRecord = recordId;
         }
+    }
+
+    private void endBatchEntitlements() {
+        if (bootstrapBatchState != BootstrapBatchState.CONSUMED) {
+            bootstrapBatchState = BootstrapBatchState.CONSUMED;
+        }
+        requestedBatchState = RequestedBatchState.IDLE;
+        requestedBatchRequestId = null;
     }
 
     // ------------------------------------------------------------------ internals

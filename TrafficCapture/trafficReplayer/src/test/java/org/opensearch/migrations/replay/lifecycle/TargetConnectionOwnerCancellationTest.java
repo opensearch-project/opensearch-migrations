@@ -14,6 +14,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 
 import org.junit.jupiter.api.Assertions;
@@ -24,6 +25,71 @@ import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTe
 import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.request;
 
 class TargetConnectionOwnerCancellationTest {
+    @Test
+    void shutdownGraceDrainsPartlyWrittenAndQueuedRequestsThroughOrdinaryCompletion() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(20, Instant.EPOCH);
+        fixture.admit(21, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(20);
+        fixture.preparer.ready(21);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.owner.submit(new TargetConnectionOwner.GracefulConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            CancellationGrace.Shutdown.INSTANCE,
+            new CancellationException("orderly shutdown")
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(1, fixture.tupleSink.flushes, "shutdown grace must flush on entry");
+        Assertions.assertEquals(0, fixture.targetChannel.attempt(0).abortCalls);
+        Assertions.assertEquals(
+            1,
+            fixture.targetChannel.attempts.size(),
+            "the queued request remains admitted but waits for the active turn"
+        );
+
+        fixture.completeSource(20, "source-response-20");
+        fixture.targetChannel.attempt(0).targetResponse("target-response-20");
+        fixture.eventLoop.runUntilIdle();
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            2,
+            fixture.targetChannel.attempts.size(),
+            "shutdown must allow the already-admitted queued request to begin"
+        );
+        Assertions.assertEquals(0, fixture.targetChannel.attempt(1).abortCalls);
+        fixture.completeSource(21, "source-response-21");
+        fixture.targetChannel.attempt(1).targetResponse("target-response-21");
+        fixture.eventLoop.runUntilIdle();
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            java.util.List.of(
+                "turn:20",
+                "processing:20",
+                "turn:21",
+                "processing:21",
+                "owner-finished"
+            ),
+            fixture.lifecycleEvents,
+            "a drained shutdown emits only ordinary lifecycle milestones"
+        );
+        Assertions.assertEquals(
+            3,
+            fixture.tupleSink.flushes,
+            "grace entry and both accepted tuples must each flush"
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
     @Test
     void connectionCleanupWaitsForEveryOwnerOperationRegistration() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture();
@@ -183,7 +249,9 @@ class TargetConnectionOwnerCancellationTest {
         fixture.owner.submit(new TargetConnectionOwner.GracefulConnectionCancellation<>(
             CONNECTION,
             GENERATION,
-            new CancellationDeadline(Duration.ofSeconds(5).toNanos()),
+            new org.opensearch.migrations.replay.identity.CancellationGrace.Revocation(
+                new CancellationDeadline(Duration.ofSeconds(5).toNanos())
+            ),
             new CancellationException("graceful revocation")
         ));
         fixture.eventLoop.runUntilIdle();
@@ -215,7 +283,9 @@ class TargetConnectionOwnerCancellationTest {
         fixture.owner.submit(new TargetConnectionOwner.GracefulConnectionCancellation<>(
             CONNECTION,
             GENERATION,
-            new CancellationDeadline(Duration.ofSeconds(5).toNanos()),
+            new org.opensearch.migrations.replay.identity.CancellationGrace.Revocation(
+                new CancellationDeadline(Duration.ofSeconds(5).toNanos())
+            ),
             new CancellationException("graceful revocation during request write")
         ));
         fixture.eventLoop.runUntilIdle();

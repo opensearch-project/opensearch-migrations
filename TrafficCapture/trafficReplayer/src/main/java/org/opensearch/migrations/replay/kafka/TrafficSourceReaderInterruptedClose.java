@@ -33,6 +33,14 @@ import lombok.RequiredArgsConstructor;
 public class TrafficSourceReaderInterruptedClose implements ITrafficStreamWithKey {
     private final ITrafficStreamKey key;
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedClose.getStream -> RETIRED
+// Typed generation cancellation and cleanup replace the synthetic record; G11 retains process teardown only.
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G11)
+/*
     @Override
     public TrafficStream getStream() {
         // Stub — accumulator detects this type before accessing the stream

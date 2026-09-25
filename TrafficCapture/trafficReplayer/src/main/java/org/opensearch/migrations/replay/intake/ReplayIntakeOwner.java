@@ -17,6 +17,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ThreadFactory;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -85,6 +86,10 @@ public final class ReplayIntakeOwner {
         default void capturedCloseAccepted() {}
         default void captureProtocolViolation() {}
         default void recordBatchRejectedAfterProtocolViolation() {}
+        default void generationGraceStarted(CancellationGrace grace) {}
+        default void generationForceStarted() {}
+        default void generationCleanupFinished() {}
+        default void staleGenerationInputIgnored(InputKind inputKind) {}
     }
 
     @FunctionalInterface
@@ -307,15 +312,16 @@ public final class ReplayIntakeOwner {
             case ReplayIntakeInput.PartitionRecordBatch batch -> applyRecordBatch(batch);
             case RequestLifecycleInput.RequestProcessingFinished finished ->
                 applyRequestProcessingFinished(finished);
-            // REBUILD-LIMBO-NOTE(G8): §15.1 graceful cancellation, §15.2 force cancellation and §15.3's
-            // cleanup tracker, which is what sends GenerationCleanupFinished back to the source.
-            case ReplayIntakeInput.GracefulGenerationCancellation ignored -> unimplemented(input, "G8");
-            case ReplayIntakeInput.ForceGenerationCancellation ignored -> unimplemented(input, "G8");
-            case ReplayIntakeInput.ConnectionCleanupFinished ignored -> unimplemented(input, "G8");
+            case ReplayIntakeInput.GracefulGenerationCancellation graceful ->
+                applyGracefulGenerationCancellation(graceful);
+            case ReplayIntakeInput.ForceGenerationCancellation forced ->
+                applyForceGenerationCancellation(forced);
+            case ReplayIntakeInput.ConnectionCleanupFinished finished ->
+                applyConnectionCleanupFinished(finished);
             case ReplayIntakeInput.FinalizedArchivePartitionEnd finalized ->
                 applyFinalizedArchivePartitionEnd(finalized);
             case RequestLifecycleInput.ConnectionRequestFinished finished ->
-                requireGeneration(finished.generation()).connectionRequestFinished(finished.requestId());
+                applyConnectionRequestFinished(finished);
             case ReplayIntakeInput.ConnectionOwnerFinished finished ->
                 applyConnectionOwnerFinished(finished);
         }
@@ -343,13 +349,6 @@ public final class ReplayIntakeOwner {
             case ReplayIntakeInput.ConnectionCleanupFinished ignored ->
                 InputKind.CONNECTION_CLEANUP_FINISHED;
         };
-    }
-
-    private void unimplemented(ReplayIntakeInput input, String milestone) {
-        throw new IllegalStateException(
-            "replay intake received " + input.getClass().getSimpleName() + ", which " + milestone
-                + " implements; reaching it now means something was wired ahead of its handler"
-        );
     }
 
     // ---------------------------------------------------------------- inputs
@@ -382,7 +381,11 @@ public final class ReplayIntakeOwner {
      * submit the next request."
      */
     private void applyRecordBatch(ReplayIntakeInput.PartitionRecordBatch batch) {
-        var state = requireGeneration(batch.requestId().generation());
+        var state = partitions.get(batch.requestId().generation());
+        if (state == null || !state.acceptsRecordApplication()) {
+            metrics.staleGenerationInputIgnored(InputKind.PARTITION_RECORD_BATCH);
+            return;
+        }
         var entitlement = state.beginApplyingBatch(batch.requestId());
         // §16: the first capture-protocol violation kills the whole replay. Completion and cleanup inputs may
         // still drain already-admitted work, but no queued batch from any partition may admit another record.
@@ -413,11 +416,63 @@ public final class ReplayIntakeOwner {
     private void applyRequestProcessingFinished(
         RequestLifecycleInput.RequestProcessingFinished finished
     ) {
-        // REBUILD-LIMBO-NOTE(G8): cancellation can make a late completion stale after generation cleanup.
-        // G8 adds the cancellation/cleanup state that decides whether to consume or ignore that late input.
-        var state = requireGeneration(finished.generation());
+        var state = partitions.get(finished.generation());
+        if (state == null || !state.hasRequest(finished.requestId())) {
+            metrics.staleGenerationInputIgnored(InputKind.REQUEST_PROCESSING_FINISHED);
+            return;
+        }
         state.associationFinished(new RecordAssociationId.Request(finished.requestId()));
         state.removeRequest(finished.requestId());
+    }
+
+    private void applyConnectionRequestFinished(
+        RequestLifecycleInput.ConnectionRequestFinished finished
+    ) {
+        var state = partitions.get(finished.generation());
+        if (state == null
+            || !state.applyConnectionRequestFinishedInput(finished.requestId())) {
+            metrics.staleGenerationInputIgnored(InputKind.CONNECTION_REQUEST_FINISHED);
+        }
+    }
+
+    private void applyGracefulGenerationCancellation(
+        ReplayIntakeInput.GracefulGenerationCancellation graceful
+    ) {
+        var state = partitions.get(graceful.generation());
+        if (state == null) {
+            metrics.staleGenerationInputIgnored(InputKind.GRACEFUL_GENERATION_CANCELLATION);
+            return;
+        }
+        var previousState = state.cancellationState();
+        var plan = state.beginGracefulCancellation(graceful.grace());
+        if (previousState == PartitionIntakeState.GenerationCancellationState.ACTIVE) {
+            metrics.generationGraceStarted(graceful.grace());
+        }
+        plan.connectionOwners().forEach(connectionProcessingId ->
+            assemblySink.onGracefulGenerationCancellation(connectionProcessingId, graceful.grace())
+        );
+        if (plan.cleanupComplete()) {
+            finishGenerationCleanup(state);
+        }
+    }
+
+    private void applyForceGenerationCancellation(
+        ReplayIntakeInput.ForceGenerationCancellation forced
+    ) {
+        var state = partitions.get(forced.generation());
+        if (state == null) {
+            metrics.staleGenerationInputIgnored(InputKind.FORCE_GENERATION_CANCELLATION);
+            return;
+        }
+        var previousState = state.cancellationState();
+        var plan = state.beginForceCancellation();
+        if (previousState != PartitionIntakeState.GenerationCancellationState.REVOCATION_FORCED) {
+            metrics.generationForceStarted();
+        }
+        plan.connectionOwners().forEach(assemblySink::onForceGenerationCancellation);
+        if (plan.cleanupComplete()) {
+            finishGenerationCleanup(state);
+        }
     }
 
     private void applyFinalizedArchivePartitionEnd(
@@ -430,9 +485,70 @@ public final class ReplayIntakeOwner {
     }
 
     private void applyConnectionOwnerFinished(ReplayIntakeInput.ConnectionOwnerFinished finished) {
-        requireGeneration(finished.generation())
-            .removeConnectionOwner(finished.connectionProcessingId());
-        assemblySink.onConnectionOwnerFinished(finished.connectionProcessingId());
+        var state = partitions.get(finished.generation());
+        if (state == null) {
+            metrics.staleGenerationInputIgnored(InputKind.CONNECTION_OWNER_FINISHED);
+            return;
+        }
+        if (!finished.connectionProcessingId().generation().equals(state.generation())) {
+            metrics.staleGenerationInputIgnored(InputKind.CONNECTION_OWNER_FINISHED);
+            return;
+        }
+        if (state.cancellationState() == PartitionIntakeState.GenerationCancellationState.ACTIVE) {
+            state.removeConnectionOwner(finished.connectionProcessingId());
+            assemblySink.onConnectionOwnerFinished(finished.connectionProcessingId());
+            return;
+        }
+        applyConnectionTerminalAcknowledgement(
+            state,
+            finished.connectionProcessingId(),
+            InputKind.CONNECTION_OWNER_FINISHED
+        );
+    }
+
+    private void applyConnectionCleanupFinished(
+        ReplayIntakeInput.ConnectionCleanupFinished finished
+    ) {
+        var state = partitions.get(finished.generation());
+        if (state == null) {
+            metrics.staleGenerationInputIgnored(InputKind.CONNECTION_CLEANUP_FINISHED);
+            return;
+        }
+        applyConnectionTerminalAcknowledgement(
+            state,
+            finished.connectionProcessingId(),
+            InputKind.CONNECTION_CLEANUP_FINISHED
+        );
+    }
+
+    private void applyConnectionTerminalAcknowledgement(
+        PartitionIntakeState state,
+        ConnectionProcessingId connectionProcessingId,
+        InputKind inputKind
+    ) {
+        if (!connectionProcessingId.generation().equals(state.generation())) {
+            metrics.staleGenerationInputIgnored(inputKind);
+            return;
+        }
+        var acknowledgement = state.acknowledgeConnectionCleanup(connectionProcessingId);
+        if (!acknowledgement.accepted()) {
+            metrics.staleGenerationInputIgnored(inputKind);
+            return;
+        }
+        assemblySink.onConnectionOwnerFinished(connectionProcessingId);
+        if (acknowledgement.cleanupComplete()) {
+            finishGenerationCleanup(state);
+        }
+    }
+
+    private void finishGenerationCleanup(PartitionIntakeState state) {
+        var generation = state.generation();
+        state.discardCancelledGenerationBookkeeping();
+        if (!partitions.remove(generation, state)) {
+            throw new IllegalStateException("generation disappeared during cleanup: " + generation);
+        }
+        submitRequired(new KafkaSourceInput.GenerationCleanupFinished(generation));
+        metrics.generationCleanupFinished();
     }
 
     /**
@@ -472,11 +588,10 @@ public final class ReplayIntakeOwner {
     // REBUILD-TRACE-END(G6,target)
     private boolean applyRecord(PartitionIntakeState state, ApplicationKafkaRecord record) {
         // 1. Validate that its generation is active for application.
-        // REBUILD-LIMBO-NOTE(G8): §15 cancellation state extends this check beyond identity equality: a
-        // generation being cancelled is no longer active for new record application.
-        if (!state.generation().equals(record.recordId().generation())) {
+        if (!state.generation().equals(record.recordId().generation())
+            || !state.acceptsRecordApplication()) {
             throw new IllegalStateException(
-                "record " + record.recordId() + " does not belong to generation " + state.generation()
+                "record " + record.recordId() + " cannot apply to generation " + state.generation()
             );
         }
         // 2. Create its RecordWorkTracker.
@@ -759,6 +874,19 @@ public final class ReplayIntakeOwner {
         @Override
         public void onCapturedConnectionExpired(ConnectionProcessingId connectionProcessingId) {
             delegate.onCapturedConnectionExpired(connectionProcessingId);
+        }
+
+        @Override
+        public void onGracefulGenerationCancellation(
+            ConnectionProcessingId connectionProcessingId,
+            CancellationGrace grace
+        ) {
+            delegate.onGracefulGenerationCancellation(connectionProcessingId, grace);
+        }
+
+        @Override
+        public void onForceGenerationCancellation(ConnectionProcessingId connectionProcessingId) {
+            delegate.onForceGenerationCancellation(connectionProcessingId);
         }
     }
 

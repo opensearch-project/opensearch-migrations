@@ -175,6 +175,9 @@ class TrafficReplayerTopLevelConstructionTest {
                     }
 
                     @Override
+                    public void flush() {}
+
+                    @Override
                     public void close() {}
                 },
                 ignored -> {},

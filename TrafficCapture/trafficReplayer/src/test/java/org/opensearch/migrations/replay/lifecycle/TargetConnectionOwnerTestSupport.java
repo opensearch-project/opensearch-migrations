@@ -440,6 +440,7 @@ final class TargetConnectionOwnerTestSupport {
 
         final List<String> writes = new ArrayList<>();
         final Queue<CompletableFuture<Void>> completions = new ArrayDeque<>();
+        int flushes;
 
         @Override
         public CompletionStage<Void> write(
@@ -450,6 +451,11 @@ final class TargetConnectionOwnerTestSupport {
             var completion = new CompletableFuture<Void>();
             completions.add(completion);
             return completion;
+        }
+
+        @Override
+        public void flush() {
+            flushes++;
         }
 
         void durableNext() {

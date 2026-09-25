@@ -594,8 +594,6 @@ public class RequestSenderOrchestrator {
 // RequestSenderOrchestrator.scheduleRequest ->
 //     TargetConnectionOwner.submit(AdmitReconstitutedRequest)
 // RequestSenderOrchestrator.scheduleRequest -> TargetConnectionOwner.applyRequestAdmission
-// RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.gracefulCancel
-// RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.forceCancel
 // RequestSenderOrchestrator.scheduleClose ->
 //     TargetConnectionOwner.submit(AdmitCapturedClose)
 // RequestSenderOrchestrator.scheduleClose -> TargetConnectionOwner.applyCapturedClose
@@ -633,6 +631,14 @@ public class RequestSenderOrchestrator {
 // These baseline sources are inspected at 2fe4538a and were already absent before the Plan A carry;
 // restoring their deleted bodies here would violate the history-preserving carry baseline.
 // REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.applyGrace
+// [The inherited slice is the revocation branch; CancellationGrace.Shutdown is G8 net-new.]
+// RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.gracefulCancel
+// RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.forceCancel
+// These records are anchored at the surviving replacement seam because the exact source method
+// was already absent before Plan A's carry baseline; the source is inspected at 2fe4538a.
+// REBUILD-TRACE-END(G8,source)
 // REBUILD-LIMBO-START(G5)
 /*
     private final class RuntimeTargetExchange implements TargetConnectionOwner.TargetExchange<PreparedActorRequest, Object> {

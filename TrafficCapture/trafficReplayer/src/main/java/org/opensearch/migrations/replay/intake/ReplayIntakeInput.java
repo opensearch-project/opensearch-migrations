@@ -11,7 +11,7 @@ package org.opensearch.migrations.replay.intake;
 import java.util.List;
 import java.util.Objects;
 
-import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
@@ -92,21 +92,21 @@ public sealed interface ReplayIntakeInput permits
     }
 
     /**
-     * Kafka began revoking the partition and supplied the grace deadline.
+     * The generation entered revocation or orderly-shutdown grace.
      *
      * <p>Intake stops admitting records from the generation, cancels work that has not started an external
-     * operation, and distributes scoped graceful cancellation. Work already sent to the target, and the tuple
-     * chain that work requires, may finish before the deadline.</p>
+     * operation, and distributes the typed grace mode. Revocation is deadline-bound; orderly shutdown drains
+     * admitted complete requests without a process-local deadline.</p>
      */
-    record GracefulGenerationCancellation(PartitionGenerationId generation, CancellationDeadline deadline)
+    record GracefulGenerationCancellation(PartitionGenerationId generation, CancellationGrace grace)
         implements ReplayIntakeInput {
         public GracefulGenerationCancellation {
             Objects.requireNonNull(generation, "generation");
-            Objects.requireNonNull(deadline, "deadline");
+            Objects.requireNonNull(grace, "grace");
         }
     }
 
-    /** The revocation grace period ended; every remaining owner in the generation begins immediate cleanup. */
+    /** Every remaining owner in the revoked generation begins immediate cancellation cleanup. */
     record ForceGenerationCancellation(PartitionGenerationId generation) implements ReplayIntakeInput {
         public ForceGenerationCancellation {
             Objects.requireNonNull(generation, "generation");

@@ -27,6 +27,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
@@ -134,7 +135,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     public record GracefulConnectionCancellation<S, F>(
         @NonNull ConnectionProcessingId connectionProcessingId,
         @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull CancellationDeadline deadline,
+        @NonNull CancellationGrace grace,
         @NonNull CancellationException cause
     ) implements ConnectionInput<S, F> {}
 
@@ -188,6 +189,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         OPEN,
         CAPTURED_CLOSE_ADMITTED,
         EXPIRED,
+        SHUTDOWN_DRAINING,
         CANCELLING,
         CLOSED
     }
@@ -660,7 +662,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             }
             case GracefulConnectionCancellation<S, F> graceful -> {
                 validateIdentity(graceful);
-                gracefulCancel(graceful.deadline(), graceful.cause());
+                applyGrace(graceful.grace(), graceful.cause());
                 yield new InputApplied();
             }
             case ForceConnectionCancellation<S, F> forced -> {
@@ -1127,14 +1129,31 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         maybeCloseAfterSourceEnd();
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.applyGrace
+    // [The inherited slice is the revocation branch; CancellationGrace.Shutdown is G8 net-new.]
+    // REBUILD-TRACE-END(G8,target)
+    private void applyGrace(
+        CancellationGrace grace,
+        CancellationException cause
+    ) {
+        tupleWriter.enterGrace();
+        switch (grace) {
+            case CancellationGrace.Revocation revocation ->
+                gracefulCancel(revocation.deadline(), cause);
+            case CancellationGrace.Shutdown ignored ->
+                beginShutdownDrain();
+        }
+    }
+
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
     // RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.gracefulCancel
-    // REBUILD-TRACE-END(G5,target)
+    // REBUILD-TRACE-END(G8,target)
     private void gracefulCancel(
         CancellationDeadline deadline,
         CancellationException cause
     ) {
-        if (sourceLifetime == SourceLifetime.CLOSED) {
+        if (sourceLifetime == SourceLifetime.CANCELLING) {
             return;
         }
         sourceLifetime = SourceLifetime.CANCELLING;
@@ -1151,9 +1170,18 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         maybeCloseAfterSourceEnd();
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    private void beginShutdownDrain() {
+        if (sourceLifetime == SourceLifetime.CANCELLING
+            || sourceLifetime == SourceLifetime.SHUTDOWN_DRAINING) {
+            return;
+        }
+        sourceLifetime = SourceLifetime.SHUTDOWN_DRAINING;
+        maybeCloseAfterSourceEnd();
+    }
+
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
     // RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.forceCancel
-    // REBUILD-TRACE-END(G5,target)
+    // REBUILD-TRACE-END(G8,target)
     private void forceCancel(CancellationException cause) {
         sourceLifetime = SourceLifetime.CANCELLING;
         cancelAdmissionTimer();
@@ -1176,6 +1204,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private void maybeCloseAfterSourceEnd() {
         if ((sourceLifetime == SourceLifetime.CAPTURED_CLOSE_ADMITTED
             || sourceLifetime == SourceLifetime.EXPIRED
+            || sourceLifetime == SourceLifetime.SHUTDOWN_DRAINING
             || sourceLifetime == SourceLifetime.CANCELLING)
             && admissionQueue.isEmpty()
             && executionQueue.isEmpty()
