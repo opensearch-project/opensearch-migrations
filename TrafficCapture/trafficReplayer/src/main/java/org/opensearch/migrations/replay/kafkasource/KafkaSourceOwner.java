@@ -867,18 +867,9 @@ public final class KafkaSourceOwner {
         } finally {
             wakeupController.leaveProtectedOperation();
         }
-        if (outcome == KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN) {
-            // Synchronous submissions never enter inFlightCommitOperation, so the retirement check cannot
-            // reconstruct this outcome. The operation-level result applies to every submitted partition.
-            submitted.keySet().forEach(topicPartition -> {
-                var state = partitions.get(topicPartition);
-                if (state != null) {
-                    state.markSyncCommitOutcomeUnknown();
-                }
-            });
-        }
         // The synchronous call was accepted by the client. A failed batched operation may have applied some
-        // positions, so no returned outcome proves the broker position stayed put.
+        // positions, so no returned outcome proves the broker position stayed put. The common resolution path
+        // restores that uncertain coverage and marks each still-live generation accordingly.
         resolveCommitOperation(operation, outcome, false);
     }
 

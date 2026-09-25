@@ -748,9 +748,8 @@ class KafkaSourceOwnerTest {
     /**
      * A synchronous revocation commit returning an unknown outcome is reported at retirement.
      *
-     * <p>This is the case the in-flight check cannot see, because a synchronous submission never enters
-     * {@code inFlightCommitPositions} — so it has to be marked explicitly. Removing that one line fails this
-     * test and nothing else.
+     * <p>A synchronous submission never enters the asynchronous in-flight slot. Its operation-level resolution
+     * therefore restores the uncertain coverage directly before retirement.
      */
     @Test
     void aSynchronousUnknownOutcomeIsReportedAtRetirement() throws Exception {
