@@ -67,6 +67,11 @@ public final class ReplayIntakeOwner {
         default void recordApplied() {}
         default void activeRecordTrackersChanged(int delta) {}
         default void recordTrackerRetired() {}
+        default void recordAssociationChanged(
+            KafkaRecordId recordId,
+            RecordAssociationId association,
+            boolean added
+        ) {}
         default void requestReconstituted() {}
         default void responseCompleted(boolean keptAlive) {}
         default void responseIncomplete(SourceAssemblySink.IncompleteReason reason) {}
@@ -303,7 +308,8 @@ public final class ReplayIntakeOwner {
             this::isOwnerThreadOrUnstarted,
             this::submitRecordProcessingFinished,
             metrics::activeRecordTrackersChanged,
-            metrics::recordTrackerRetired
+            metrics::recordTrackerRetired,
+            metrics::recordAssociationChanged
         );
     }
 
@@ -425,7 +431,13 @@ public final class ReplayIntakeOwner {
     ) {
         var capturedConnectionId =
             new CapturedConnectionId(trafficStream.getNodeId(), trafficStream.getConnectionId());
-        var connection = state.connectionFor(capturedConnectionId, trafficStream, assemblySink);
+        SourceConnectionState connection;
+        try {
+            connection = state.connectionFor(capturedConnectionId, trafficStream, assemblySink);
+        } catch (SourceConnectionState.CaptureProtocolViolation violation) {
+            submitProtocolViolation(record.recordId(), violation.getMessage());
+            return false;
+        }
         for (var observation : trafficStream.getSubStreamList()) {
             SourceConnectionState.ObservationOutcome outcome;
             try {

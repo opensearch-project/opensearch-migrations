@@ -97,7 +97,7 @@ public class RootReplayerContext extends RootOtelContext {
         kafkaCommitInstruments = KafkaConsumerContexts.KafkaCommitScopeContext.makeMetrics(meter);
         rebalanceCallbackInstruments =
             KafkaConsumerContexts.RebalanceCallbackScopeContext.makeMetrics(meter);
-        replayIntakeMetrics = new ReplayIntakeMetrics(meter);
+        replayIntakeMetrics = new ReplayIntakeMetrics(meter, sdk.getTracer(SCOPE_NAME));
 
 // REBUILD-LIMBO-START(G5)
 // Construction returns with the owner and operation instruments above.

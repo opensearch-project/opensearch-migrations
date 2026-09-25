@@ -33,8 +33,7 @@ public interface SourceAssemblySink {
     /**
      * A request the parser reconstituted ({@code §9.1}).
      *
-     * @param requestFirstByteSourceTime the first request byte's source event time, which {@code §3.1} uses
-     *                             to calculate the nominal target send time
+     * @param requestFirstByteSourceTime the first request byte's source event time
      * @param requestEndOfMessageSourceTime the request end marker's source event time
      * @param requestCompletingLogAppendTime {@code §9.1}'s "request-completing record {@code LogAppendTime
      *                             B}", frozen here because {@code §11}'s retry boundary is measured from it

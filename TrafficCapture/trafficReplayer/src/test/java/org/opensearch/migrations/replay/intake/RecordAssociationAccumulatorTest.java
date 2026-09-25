@@ -10,8 +10,9 @@ package org.opensearch.migrations.replay.intake;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -55,7 +56,7 @@ class RecordAssociationAccumulatorTest {
     private static final String CONNECTION = "connection";
     private static final Timestamp OBSERVATION_TIME = Timestamp.newBuilder().setSeconds(1).build();
 
-    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, true);
+    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(true, true);
     private final RootReplayerContext rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
     private final WakeupController wakeupController =
         new WakeupController(() -> {}, rootContext);
@@ -104,11 +105,7 @@ class RecordAssociationAccumulatorTest {
         assignAndApply(script);
 
         var recordId = new KafkaRecordId(script.generation(0), 0);
-        Assertions.assertEquals(
-            Set.of("request-0", "assembly-1"),
-            script.expectedAssociationsOf(recordId),
-            "the independent script oracle names the two operations that must hold this record"
-        );
+        script.assertAssociations(recordId, observedAssociationNames(recordId));
         Assertions.assertTrue(sourceCompletions().isEmpty());
 
         finishRequest(script, 0);
@@ -140,10 +137,8 @@ class RecordAssociationAccumulatorTest {
             .addTraffic(0, 1, Instant.ofEpochMilli(2_000), WRITER, response, "request-0");
         assignAndApply(script);
 
-        script.records().forEach(record -> Assertions.assertEquals(
-            Set.of("request-0"),
-            script.expectedAssociationsOf(record.recordId())
-        ));
+        script.records().forEach(record ->
+            script.assertAssociations(record.recordId(), observedAssociationNames(record.recordId())));
         Assertions.assertTrue(sourceCompletions().isEmpty());
         finishRequest(script, 0);
 
@@ -186,6 +181,11 @@ class RecordAssociationAccumulatorTest {
                 ReplayIntakeMetrics.MetricNames.RECORD_TRACKERS_RETIRED
             ),
             "both accepted source-queue submissions retire their record trackers"
+        );
+        Assertions.assertTrue(
+            metrics.stream().anyMatch(metric ->
+                ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS.equals(metric.getName())),
+            "the active-tracker instrument must be present even when its balanced value is zero"
         );
         Assertions.assertEquals(
             0,
@@ -394,6 +394,28 @@ class RecordAssociationAccumulatorTest {
             .filter(KafkaSourceInput.RecordProcessingFinished.class::isInstance)
             .map(input -> ((KafkaSourceInput.RecordProcessingFinished) input).recordId())
             .toList();
+    }
+
+    private Collection<String> observedAssociationNames(KafkaRecordId recordId) {
+        var currentAssociations = new LinkedHashSet<String>();
+        telemetry.getFinishedSpans().stream()
+            .filter(span -> ReplayIntakeMetrics.RECORD_ASSOCIATION_CHANGED_SPAN.equals(span.getName()))
+            .filter(span -> recordId.toString().equals(
+                span.getAttributes().get(ReplayIntakeMetrics.RECORD_ID_ATTRIBUTE)))
+            .forEach(span -> {
+                var kind = span.getAttributes().get(ReplayIntakeMetrics.ASSOCIATION_KIND_ATTRIBUTE);
+                var ordinal = span.getAttributes().get(
+                    ReplayIntakeMetrics.CAPTURED_REQUEST_ORDINAL_ATTRIBUTE);
+                var name = ordinal == null ? kind : kind + "-" + ordinal;
+                var action = span.getAttributes().get(ReplayIntakeMetrics.ASSOCIATION_ACTION_ATTRIBUTE);
+                if ("added".equals(action)) {
+                    Assertions.assertTrue(currentAssociations.add(name), "duplicate association add: " + name);
+                } else {
+                    Assertions.assertEquals("removed", action);
+                    Assertions.assertTrue(currentAssociations.remove(name), "association removed before add: " + name);
+                }
+            });
+        return currentAssociations;
     }
 
     private final List<KafkaSourceInput> drainedSourceInputs = new ArrayList<>();

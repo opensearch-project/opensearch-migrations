@@ -9,13 +9,16 @@
 package org.opensearch.migrations.replay.tracing;
 
 import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
+import org.opensearch.migrations.replay.intake.RecordAssociationId;
 import org.opensearch.migrations.replay.intake.SourceAssemblySink;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.api.trace.Tracer;
 import lombok.NonNull;
 
 /** Fixed-cardinality observability for replay intake and source assembly. */
@@ -24,6 +27,15 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     public static final AttributeKey<String> INPUT_KIND_ATTRIBUTE = AttributeKey.stringKey("inputKind");
     public static final AttributeKey<String> INCOMPLETE_REASON_ATTRIBUTE =
         AttributeKey.stringKey("incompleteReason");
+    public static final AttributeKey<String> RECORD_ID_ATTRIBUTE = AttributeKey.stringKey("recordId");
+    public static final AttributeKey<String> ASSOCIATION_ID_ATTRIBUTE = AttributeKey.stringKey("associationId");
+    public static final AttributeKey<String> ASSOCIATION_KIND_ATTRIBUTE =
+        AttributeKey.stringKey("associationKind");
+    public static final AttributeKey<String> ASSOCIATION_ACTION_ATTRIBUTE =
+        AttributeKey.stringKey("associationAction");
+    public static final AttributeKey<Long> CAPTURED_REQUEST_ORDINAL_ATTRIBUTE =
+        AttributeKey.longKey("capturedRequestOrdinal");
+    public static final String RECORD_ASSOCIATION_CHANGED_SPAN = "replayIntakeRecordAssociationChanged";
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -57,8 +69,10 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private final LongCounter capturedClosesAccepted;
     private final LongCounter captureProtocolViolations;
     private final LongCounter recordBatchesRejectedAfterProtocolViolation;
+    private final Tracer tracer;
 
-    public ReplayIntakeMetrics(@NonNull Meter meter) {
+    public ReplayIntakeMetrics(@NonNull Meter meter, @NonNull Tracer tracer) {
+        this.tracer = tracer;
         ownerStarted = counter(meter, MetricNames.OWNER_STARTED, "owners");
         ownerStoppedAfterDraining = counter(meter, MetricNames.OWNER_STOPPED_AFTER_DRAINING, "owners");
         inputsApplied = counter(meter, MetricNames.INPUTS_APPLIED, "inputs");
@@ -105,6 +119,40 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     @Override
     public void recordTrackerRetired() {
         recordTrackersRetired.add(1);
+    }
+
+    @Override
+    public void recordAssociationChanged(
+        @NonNull KafkaRecordId recordId,
+        @NonNull RecordAssociationId association,
+        boolean added
+    ) {
+        var span = tracer.spanBuilder(RECORD_ASSOCIATION_CHANGED_SPAN).startSpan();
+        try {
+            span.setAttribute(RECORD_ID_ATTRIBUTE, recordId.toString());
+            span.setAttribute(ASSOCIATION_ID_ATTRIBUTE, association.toString());
+            span.setAttribute(ASSOCIATION_ACTION_ATTRIBUTE, added ? "added" : "removed");
+            switch (association) {
+                case RecordAssociationId.Request request -> {
+                    span.setAttribute(ASSOCIATION_KIND_ATTRIBUTE, "request");
+                    span.setAttribute(
+                        CAPTURED_REQUEST_ORDINAL_ATTRIBUTE,
+                        request.replayRequestId().capturedRequestOrdinal()
+                    );
+                }
+                case RecordAssociationId.RequestAssembly assembly -> {
+                    span.setAttribute(ASSOCIATION_KIND_ATTRIBUTE, "assembly");
+                    span.setAttribute(
+                        CAPTURED_REQUEST_ORDINAL_ATTRIBUTE,
+                        assembly.capturedRequestOrdinal()
+                    );
+                }
+                case RecordAssociationId.TerminalConnection ignored ->
+                    span.setAttribute(ASSOCIATION_KIND_ATTRIBUTE, "terminal");
+            }
+        } finally {
+            span.end();
+        }
     }
 
     @Override

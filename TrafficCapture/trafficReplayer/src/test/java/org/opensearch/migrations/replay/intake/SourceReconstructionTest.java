@@ -502,21 +502,31 @@ class SourceReconstructionTest {
      */
     @Test
     void anObservationAfterACapturedCloseIsAProtocolViolation() {
-        var script = new RecordScript(TOPIC).addTraffic(
-            0,
-            0,
-            Instant.ofEpochMilli(1_000),
-            WRITER,
-            stream(
+        var script = new RecordScript(TOPIC)
+            .addTraffic(
                 0,
-                read(1, REQUEST_BYTES),
-                endOfMessage(2),
-                write(3, "HTTP/1.1 200 OK\r\n\r\n"),
-                close(4),
-                read(5, "GET /after-the-close HTTP/1.1\r\n\r\n"),
-                endOfMessage(6)
+                0,
+                Instant.ofEpochMilli(1_000),
+                WRITER,
+                stream(
+                    0,
+                    read(1, REQUEST_BYTES),
+                    endOfMessage(2),
+                    write(3, "HTTP/1.1 200 OK\r\n\r\n"),
+                    close(4)
+                )
             )
-        );
+            .addTraffic(
+                0,
+                1,
+                Instant.ofEpochMilli(2_000),
+                WRITER,
+                stream(
+                    1,
+                    read(5, "GET /after-the-close HTTP/1.1\r\n\r\n"),
+                    endOfMessage(6)
+                )
+            );
 
         applyAll(script);
 

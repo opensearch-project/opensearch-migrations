@@ -116,7 +116,8 @@ class PartitionIntakeStateTest {
                 throw new IllegalStateException("source queue rejected required submission");
             },
             activeTrackers::addAndGet,
-            retiredTrackers::incrementAndGet
+            retiredTrackers::incrementAndGet,
+            (recordId, association, added) -> {}
         );
 
         intake.registerRecord(RECORD);
@@ -136,7 +137,8 @@ class PartitionIntakeStateTest {
             () -> false,
             ignored -> {},
             ignored -> {},
-            () -> {}
+            () -> {},
+            (recordId, association, added) -> {}
         );
 
         Assertions.assertThrows(IllegalStateException.class, () -> intake.registerRecord(RECORD));
@@ -354,7 +356,8 @@ class PartitionIntakeStateTest {
             () -> true,
             completions::add,
             ignored -> {},
-            () -> {}
+            () -> {},
+            (recordId, association, added) -> {}
         );
     }
 }

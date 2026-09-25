@@ -644,12 +644,15 @@ generation cleanup obligation settles. This receives the cancellation members of
 `StaleAccumulationCancelOnRejoinTest`, `StaleAccumulationCancelOnRejoinKafkaTest`,
 `PartitionRevocationStaleStateTest`, `TrafficSourceReaderInterruptedCloseWiringTest`, and
 `TrafficSourceReaderInterruptedCloseAccountingTest`. Preserve the assertions; do not restore
-`TrafficSourceReaderInterruptedClose`.
+`TrafficSourceReaderInterruptedClose`. Generation cleanup also decrements
+`replayIntakeActiveRecordTrackers` for every unfinished tracker it removes, without adding generation as a
+metric dimension.
 
 **Exit:** cancellation cleanup cannot produce a commit request; a newer generation waits for the
 previous one's cleanup; unrelated partitions continue throughout; a corrupted record terminates within
 the drain limit without committing past the violating offset and stops at the same record on restart. The
-inherited revocation/cleanup assertions above pass through typed cancellation and cleanup inputs.
+inherited revocation/cleanup assertions above pass through typed cancellation and cleanup inputs, and the
+process-wide active-record-tracker gauge returns to its pre-generation value when cleanup completes.
 Contributes `R15`, `R16`, `R17`.
 
 Per `../AGENTS.md` §4 and the human's explicit direction: `R16` and `R17` must have solid, fast,
