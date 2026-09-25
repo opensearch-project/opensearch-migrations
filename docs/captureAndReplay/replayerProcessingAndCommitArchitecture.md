@@ -948,8 +948,8 @@ order. On its event loop, the owner:
 3. near a request's preparation time, moves that request to the execution queue and asks its
    request-replay owner to begin transformation;
 4. records the returned preparation result on the matching execution-queue entry; and
-5. at the captured execution time, begins the target turn only for the prepared execution-queue
-   head.
+5. at the captured execution time, applies `connLLD §6` to the prepared execution-queue head,
+   beginning target replay or completing an intentionally filtered turn.
 
 Transformation results may return out of order. They can only update their existing
 execution-queue entries; they cannot change queue order. If the head is not prepared at its
@@ -976,7 +976,7 @@ One request-replay owner exists for each reconstituted request. It owns:
 - request-preparation resources;
 - any target-concurrency permit assigned to the request;
 - its current target attempt and retry timer;
-- its terminal target outcome;
+- its terminal target outcome or expected request-filtering result;
 - its immutable source-response input for retry policy;
 - its final complete or incomplete captured source-response result for tuple output;
 - its complete tuple and tuple-durability result; and
@@ -1042,10 +1042,10 @@ signature.
 
 ### 7.5 Tuple output
 
-Every reconstituted request produces one tuple after both the terminal target result and the final
-complete or incomplete captured source-response result are available. A
-`SourceResponseUnavailableForRetry` result is not a final tuple input and does not start tuple
-output.
+Every reconstituted request produces one tuple candidate after both the terminal target result—or an
+expected request-filtering result that intentionally skipped target replay—and the final complete or
+incomplete captured source-response result are available. A `SourceResponseUnavailableForRetry`
+result is not a final tuple input and does not start tuple output.
 
 A complete tuple may record:
 
@@ -1055,18 +1055,20 @@ A complete tuple may record:
 - the complete target-attempt history required by configured output behavior; and
 - the source-versus-target comparison.
 
-An expired source response contributes no partial bytes represented as a complete response.
-
-Tuple output is retried indefinitely while the partition generation and process remain valid. Cancellation
-or process termination leaves the supporting Kafka records uncommitted.
+An expired source response contributes no partial bytes represented as a complete response. A
+request filtered before target replay contributes its skipped transformation status and no target
+response. Every tuple candidate follows `connLLD §12`: intentional transformation drop completes
+the logical write without a sink write; emitted output is retried while the generation and process
+remain valid. Cancellation or process termination leaves the supporting Kafka records uncommitted.
 
 Request-processing completion and tuple writing and are different steps in one required typed chain:
 
 ```text
 request-replay owner determines that tuple inputs are available
-    -> emits one write-tuple request carrying the complete tuple
+    -> emits one write-tuple request carrying the complete tuple candidate
     -> the required link invokes the tuple writer
-    -> the tuple writer owns retry scheduling and retries until durable
+    -> the tuple writer transforms the candidate
+    -> transformed output is retried until durable, or intentional drop completes without a sink write
     -> the required link delivers tuple-durable to the request-replay owner
     -> the request-replay owner releases request-specific resources
     -> emits one request-processing-finished result
@@ -1332,8 +1334,9 @@ When revocation begins, the Kafka source submits one scoped graceful-cancellatio
 intake. That input identifies the revoked partition generation and the grace deadline.
 
 1. replay intake stops admitting new work from that partition generation;
-2. as each owner processes the cancellation, it immediately cancels every request whose **final**
-   request bytes have not been written to the target — work not yet begun, work queued behind a
+2. as each owner processes the cancellation, it immediately cancels every request whose target
+   path is not complete — one whose **final** request bytes have not been written to the target and
+   which was not intentionally filtered. This includes work not yet begun, work queued behind a
    request that is still finishing, and work partway through sending. A request only partly written
    cannot finish without issuing further target writes, and graceful cancellation starts no new
    external work, so waiting on it spends the interval on something that cannot complete;
@@ -1426,6 +1429,9 @@ No timeout declares cancellation successful. A timeout may terminate the process
 
 During the revocation grace period, normally completed work may continue producing commit requests.
 The Kafka source owner may attempt those commits while Kafka still accepts them.
+
+Normal request completion established before the request owner handles force cancellation remains
+normal completion, even if its required result reaches replay intake concurrently with cancellation.
 
 After ownership is gone:
 
@@ -1675,6 +1681,7 @@ output, and Kafka-record completion remain independent and may continue afterwar
   commit.
 - A target that never returns a response keeps retrying until cancellation.
 - Tuple output keeps retrying until cancellation or success.
+- Filtered-request and tuple-transformation/drop behavior passes `connLLD §19.3`.
 - The tuple writer, rather than the request-replay owner, schedules every retry and returns one
   durable result for the logical tuple write.
 - `ConnectionExceptionObservation` does not terminate reconstruction.
