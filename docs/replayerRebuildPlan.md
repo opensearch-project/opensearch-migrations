@@ -148,22 +148,30 @@ work, not deferred work. Status for each lives in `docs/replayerRebuildStatus.md
    interim-only record stays associated until the request lifecycle releases it. `TrafficStreamDumperTest`
    and `HttpTransactionDumperTest` prove both diagnostic consumers preserve the typed distinction.
    `SourceAssemblyEvidenceTest` proves real proxy → Kafka → rebuilt intake → `dump-http` interoperability for
-   `100`, `103`, and the later `200`. One direct `/private/tmp` Codex worker falsified classification and
-   request continuation independently at `0ca6f634f`, observed both intended test failures, and restored a
-   clean worktree at that exact revision.
+   `100`, `103`, and the later `200`. The owner settled all three edge semantics found by the first review:
+   source bytes that do not complete an interim header are ordinary final-response writes ordered before
+   exception and close; a final response received before request EOM is retained and attached when EOM
+   allocates the request identity; and a typed interim with no current request is ignored and never carried
+   forward. Those rulings are now explicit in `kafkaLLD §9` and `procCommit §5.2`.
 
-   The first read-only conformance pass found three edge semantics on which the amended designs are silent:
-   disposition of an identified but truncated interim at connection close, an ordinary final `Write` observed
-   before request EOM, and a typed interim observed with no current request. PA2 item 5 remains open until the
-   owner selects those semantics and authorizes any corresponding narrow design text. The unambiguous findings
-   from that pass are already corrected: steady-state final writes no longer take a heap-copy detour,
-   post-EOM typed interims have deterministic evidence, and a segmented interim straddling request EOM is
-   retained rather than cleared.
+   One direct `/private/tmp` Codex worker at `b08be26e7` independently falsified typed classification, request
+   continuation, incomplete-response ordering, suppressed-response isolation, and exception-time
+   required-capture failure handling; every mutation produced the intended assertion failure and the worker
+   restored the exact clean revision. A synthetic reviewer-injected telemetry fault at `f1832b5b0` confirmed
+   that the defensive terminal-close path still captures the held write and close when diagnostic reporting
+   fails. This was not an observed production failure and creates no additional PA2 telemetry requirement;
+   the defensive terminal-close behavior remains without expanding telemetry-failure handling. The final
+   production review returned no design-conformance defects.
+
+   No source interim-header size bound is added. The source server is trusted, while the existing client-input
+   bounds already constrain untrusted input. The typed producer/consumer chain and all five PA2 repairs are
+   therefore closed on the recorded evidence.
 
 **PA2 Exit:** all five focused repairs above have direct tests, their temporary replayer-side workarounds are
 deleted, intentional suppression followed by a stream boundary preserves the successor
 `priorRequestsReceived` ordinal, and source interim responses are emitted only as the typed whole or segmented
-observations consumed by G3, with no ordinary-`Write` compatibility path.
+observations consumed by G3, with no ordinary-`Write` compatibility path. PA2 and G3 are closed with the
+evidence recorded above and in `docs/replayerRebuildStatus.md`.
 
 If one agent owns both proxy and replayer, these are explicit scheduled checkpoints, not fictional
 parallelism. Proxy work may be interleaved with replayer work, but PA3 cannot be deferred into final

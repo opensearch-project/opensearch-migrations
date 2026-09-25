@@ -737,6 +737,16 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         }
 
         @Override
+        public void onSourceInterimResponse(
+            ReplayRequestId requestId,
+            HttpMessageAndTimestamp.InterimResponse interimResponse
+        ) {
+            // Replay intake owns the exact source-interim bytes and their record associations. The deployed
+            // tuple contract consumes only the final source response, so this source-observation callback has
+            // no target-owner message to send. In particular, do not route it through target interim handling.
+        }
+
+        @Override
         public void onSourceResponseComplete(
             ReplayRequestId requestId,
             HttpMessageAndTimestamp.Response response,
