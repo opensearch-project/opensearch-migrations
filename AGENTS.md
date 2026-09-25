@@ -286,6 +286,26 @@ Where designs specify structure, they win. Otherwise:
   per-phase `REBUILD-TRACE` equivalence records. Trace records map rewritten functions bidirectionally from
   legacy source to live target, remain through all later phases for reviewers and agents, and are removed
   only in the final pre-merge cleanup.
+- The trace baseline is behavior executable on mainline at the settled rebuild branch point
+  `2fe4538aef16eafa098545e76545873335bf2d11`. Baseline eligibility applies to the responsibility, not the
+  age of its target file: a post-baseline method may be the target of a trace when it receives responsibility
+  that was executable at the baseline. Trace only that inherited responsibility slice. A responsibility with
+  no baseline predecessor is net-new and receives no inherited-behavior trace. Mainline code that remains in
+  the same method without a substantive behavior rewrite also receives no trace merely because its caller,
+  context type, or surrounding architecture changed.
+- Trace a mainline function only when its responsibility moved, split, merged, was substantially rewritten in
+  place, or was deliberately retired. Every mapping names exact methods in the form
+  `OldClass.oldMethod -> NewClass.newMethod`; qualify overloads when the name alone is ambiguous. A split uses
+  one exact target per line. A retirement uses `OldClass.oldMethod -> RETIRED` and names the design or owner
+  decision that made the behavior unnecessary. Phrases such as “constructors and helpers,” “same-named live
+  behavior,” or a class-to-class reachability summary are not equivalence mappings.
+- Put the source record beside the inherited source or its retained predecessor and the matching target record
+  beside the live target. A rewrite in place may colocate the two records. Trace comments are a bidirectional
+  index, so the source and target records must name the same mapping; they do not prove equivalence.
+- Before bulk-adding or materially revising one phase's trace records, complete three to five representative
+  mappings, including at least one moved or split responsibility and one candidate rejected as unchanged or
+  net-new, and obtain owner confirmation. Existing broad records are not grandfathered; audit them against this
+  rule.
 - `tools/java-without-limbo.py` omits `REBUILD-TRACE` records as well as limbo bodies from ordinary code
   searches. Reviewers read trace records as navigation aids, then verify them against executable code and
   history; a trace comment is never evidence of a live caller or preserved behavior.

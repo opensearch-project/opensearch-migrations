@@ -28,13 +28,17 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// constructor/consumeBytes/finalizeRequest/redrive/signing helpers -> same-named live pipeline.
-// predecessor transformation-context creation/close -> RequestReplayOwner begin/applyPreparationResult.
+// HttpJsonTransformingConsumer.<init>(..., IReplayerHttpTransactionContext)
+//     -> RequestReplayOwner.beginPreparation [create request transformation context].
+// HttpJsonTransformingConsumer.finalizeRequest
+//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
+// HttpJsonTransformingConsumer.finalizeDeferredSigning
+//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
+// HttpJsonTransformingConsumer.finalizeNormalPath
+//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
+// HttpJsonTransformingConsumer.redriveWithoutTransformation
+//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
 // REBUILD-TRACE-END(G5,source)
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// deployedRequestPreparer supplies the request-owned transformation context and consumes the typed
-// result; parser, fallback, filter, signing, byte, and transformation-status behavior remains here.
-// REBUILD-TRACE-END(G5,target)
 
 /**
  * This class implements a packet consuming interface by using an EmbeddedChannel to write individual
