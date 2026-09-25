@@ -16,6 +16,7 @@ import java.util.List;
 
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IWireCaptureContexts;
+import org.opensearch.migrations.trafficcapture.netty.tracing.WireCaptureContexts;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -143,6 +144,26 @@ class SourceInterimResponseCaptureTest {
     }
 
     @Test
+    void telemetryFailureEndingTheConnectionStillCapturesTheFlushAndCloseEvents() throws Exception {
+        var offloader = new RecordingOffloader();
+        var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);
+        try (var rootContext = new FailFirstResponseInstrumentsRootContext()) {
+            var channel = channel(rootContext, offloader, captureProcessState);
+            channel.writeInbound(ascii("GET /thing HTTP/1.1\r\nHost: source\r\n\r\n"));
+            var heldBytes = "HTTP/1.1 100 Cont";
+            channel.writeOutbound(ascii(heldBytes));
+            channel.close();
+            channel.runPendingTasks();
+
+            Assertions.assertEquals(List.of("write:" + heldBytes, "close"), offloader.events);
+            Assertions.assertEquals(CaptureProcessState.State.CAPTURE, captureProcessState.state());
+            Assertions.assertEquals(1, rootContext.responseInstrumentFailures());
+            channel.releaseOutbound();
+            channel.releaseInbound();
+        }
+    }
+
+    @Test
     void exceptionFlushFailureUsesTheRequiredCaptureFailurePolicy() throws Exception {
         var offloader = new RecordingOffloader();
         offloader.failFinalWrites = true;
@@ -248,6 +269,27 @@ class SourceInterimResponseCaptureTest {
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
             // The test inspects the capture observation order directly.
+        }
+    }
+
+    /**
+     * Fails the first response-metric lookup, which is the one the end-of-connection client byte
+     * count performs. Later lookups succeed so that closing the response scope still works.
+     */
+    private static final class FailFirstResponseInstrumentsRootContext extends TestRootContext {
+        private int failures;
+
+        @Override
+        public WireCaptureContexts.ResponseContext.MetricInstruments getResponseInstruments() {
+            if (failures == 0) {
+                failures++;
+                throw new IllegalStateException("response instrument lookup failed");
+            }
+            return super.getResponseInstruments();
+        }
+
+        private int responseInstrumentFailures() {
+            return failures;
         }
     }
 }

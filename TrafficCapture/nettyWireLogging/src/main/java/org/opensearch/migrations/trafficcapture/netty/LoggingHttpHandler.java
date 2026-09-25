@@ -322,7 +322,20 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         cancelConnectionDeadline();
         cancelRequestAssemblyDeadline();
         try {
-            reportRemainingBytesWrittenToClient();
+            try {
+                reportRemainingBytesWrittenToClient();
+            } catch (Exception telemetryFailure) {
+                // The connection's final client byte count is diagnostic, so losing it must not skip
+                // the terminal CloseObservation below. An Error deliberately stays with the
+                // required-capture handler, which reports it as process instability.
+                log.atWarn()
+                    .setCause(telemetryFailure)
+                    .setMessage(
+                        "Unable to report the bytes written to the client while ending the "
+                            + "connection; continuing with terminal capture"
+                    )
+                    .log();
+            }
             if (!captureProcessState.shouldCapture()) {
                 pendingSourceResponseBytes.reset();
                 captureCloseFuture = CompletableFuture.completedFuture(null);
