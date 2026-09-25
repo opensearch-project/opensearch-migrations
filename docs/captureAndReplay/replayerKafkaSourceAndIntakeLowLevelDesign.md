@@ -716,6 +716,17 @@ Ordinary `WriteObservation` and `WriteSegmentObservation` values are final-respo
 are never accepted as an interim-response compatibility encoding. Captures written before the typed
 protocol change have no interim-response decoder or fallback.
 
+An ordinary final-response observation received while a request is still being assembled is retained
+without completing or discarding the request, advancing its captured request ordinal, changing its
+request bytes, or leaving request assembly. Whole and segmented final-response bytes and their record
+associations remain with the request assembly until end-of-message allocates `ReplayRequestId`; replay
+intake then relabels those associations and installs the retained bytes as that request's initial
+final-response state. `EndOfSegmentsIndication` finalizes an active pre-EOM final-response segment.
+
+A typed interim response observed while replay intake is discarding an inherited request tail or is
+between requests has no current request identity. Replay intake ignores it and never assigns its bytes
+or record associations to a later request.
+
 ### 9.1 Complete request
 
 When the parser reconstitutes a request:
