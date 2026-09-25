@@ -39,8 +39,8 @@ import lombok.NonNull;
  * <p>Every map is changed only by the replay-intake thread, which {@link OwnerThreadGuard} enforces on each
  * mutator. A record completing on a Netty loop instead would race the Kafka source's commit prefix.
  *
- * <p>REBUILD-LIMBO-NOTE(G7): {@code §6}'s {@code requestStateByReplayRequestId},
- * {@code retryReadyRequestSupplyCount}, {@code bootstrapBatchState = pending | applying | consumed}, and
+ * <p>REBUILD-LIMBO-NOTE(G7): {@code §6}'s {@code retryReadyRequestSupplyCount},
+ * {@code bootstrapBatchState = pending | applying | consumed}, and
  * {@code requestedBatchState = idle | requested | applying}, which are {@code §9.1} and {@code §13}'s
  * request bookkeeping and demand model.
  * <p>REBUILD-LIMBO-NOTE(G8): {@code §6}'s {@code cancellationState} and {@code GenerationCleanupTracker},
@@ -198,6 +198,8 @@ public final class PartitionIntakeState {
         new LinkedHashMap<>();
     private final Map<ReplayRequestId, RequestIntakeState> requestStateByReplayRequestId =
         new LinkedHashMap<>();
+    private final LinkedHashSet<ReplayRequestId> unresolvedRetryBoundaries =
+        new LinkedHashSet<>();
     private long nextConnectionLocalSequence;
 
     private long greatestObservedLogAppendTime = Long.MIN_VALUE;
@@ -421,6 +423,7 @@ public final class PartitionIntakeState {
         ) != null) {
             throw new IllegalStateException("Replay request was already registered: " + requestId);
         }
+        unresolvedRetryBoundaries.add(requestId);
     }
 
     /**
@@ -437,6 +440,7 @@ public final class PartitionIntakeState {
         request.finalInput = FinalInputState.COMPLETE;
         if (request.retryInput == RetryInputState.UNRESOLVED) {
             request.retryInput = RetryInputState.COMPLETE;
+            unresolvedRetryBoundaries.remove(requestId);
             return true;
         }
         return false;
@@ -456,6 +460,7 @@ public final class PartitionIntakeState {
         request.finalInput = FinalInputState.INCOMPLETE;
         if (request.retryInput == RetryInputState.UNRESOLVED) {
             request.retryInput = RetryInputState.UNAVAILABLE;
+            unresolvedRetryBoundaries.remove(requestId);
             return true;
         }
         return false;
@@ -467,17 +472,18 @@ public final class PartitionIntakeState {
     public List<ReplayRequestId> resolveRetryBoundaries(long recordLogAppendTimeMillis) {
         ownerThreadGuard.requireOwnerThread();
         var resolved = new ArrayList<ReplayRequestId>();
-        requestStateByReplayRequestId.forEach((requestId, request) -> {
-            if (request.retryInput == RetryInputState.UNRESOLVED
-                && reaches(
+        for (var requestId : List.copyOf(unresolvedRetryBoundaries)) {
+            var request = requireRequest(requestId);
+            if (reaches(
                     recordLogAppendTimeMillis,
                     request.requestCompletingLogAppendTime,
                     brokerTimeConfiguration.sourceResponseRetryWindowMillis()
                 )) {
                 request.retryInput = RetryInputState.UNAVAILABLE;
+                unresolvedRetryBoundaries.remove(requestId);
                 resolved.add(requestId);
             }
-        });
+        }
         return List.copyOf(resolved);
     }
 
@@ -485,12 +491,11 @@ public final class PartitionIntakeState {
     public List<ReplayRequestId> resolveAllRetryBoundaries() {
         ownerThreadGuard.requireOwnerThread();
         var resolved = new ArrayList<ReplayRequestId>();
-        requestStateByReplayRequestId.forEach((requestId, request) -> {
-            if (request.retryInput == RetryInputState.UNRESOLVED) {
-                request.retryInput = RetryInputState.UNAVAILABLE;
-                resolved.add(requestId);
-            }
-        });
+        for (var requestId : List.copyOf(unresolvedRetryBoundaries)) {
+            requireRequest(requestId).retryInput = RetryInputState.UNAVAILABLE;
+            unresolvedRetryBoundaries.remove(requestId);
+            resolved.add(requestId);
+        }
         return List.copyOf(resolved);
     }
 
@@ -514,6 +519,7 @@ public final class PartitionIntakeState {
         if (requestStateByReplayRequestId.remove(requestId) == null) {
             throw new IllegalStateException("No replay-intake request state for " + requestId);
         }
+        unresolvedRetryBoundaries.remove(requestId);
     }
 
     // ------------------------------------------------------------------ broker time
@@ -652,7 +658,6 @@ public final class PartitionIntakeState {
                 ownersToExpire.add(lifetime.connectionProcessingId());
             }
         }
-        writerTimeStateByWriterNodeId.remove(writerNodeId);
         return new WriterExpirationResult(expiredSourceConnections, ownersToExpire);
     }
 
