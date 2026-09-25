@@ -105,7 +105,7 @@ refuted. Full measurements remain in the archived status.
 | Marked `replay/lifecycle/ReplayIntakeInput` references deleted enclosing predecessors | B | open owner decision | Retire as dead or restore enough predecessor shape for mechanical reconstruction |
 | `replayIntakeInputsApplied` counts a rejected post-violation batch | B | wontfix | Input applied the terminal-state rule; record and rejection counters remain separate |
 | Post-close observations across records | C | fixed; final review clean | Keep the explicitly closed lifetime in the existing current mapping while knowable; reject later observations without adding an identity tombstone |
-| Request timing evidence | C | values preserved; consumer decision open | Carry first-byte source time, request-EOM source time, and request-completing Kafka `LogAppendTime`; owner must choose the pacing anchor before G5/G7 consumes them |
+| Request timing evidence | C | resolved by owner | Carry first-byte source time, request-EOM source time, and request-completing Kafka `LogAppendTime`; nominal target send time is anchored to request first byte |
 | Bare `SegmentEnd` without an active segment | C | fixed by owner ruling | Ignore it in request and response assembly; deterministic tests cover both |
 | Duplicate/out-of-order batch validation | C | withdrawn | `ObservedRecordCommitQueue` already owns ordering; do not add a second model |
 | Typed source-interim protocol | owner decision | blocked on design/PA2 | PA2 item 5 produces typed whole/segmented observations; G3 consumes only those, with no ordinary-`Write` or old-capture compatibility path |
@@ -311,6 +311,7 @@ Every row records explicit owner authorization. The detailed rationale is retain
 
 | Date | Section | Authorized change |
 |---|---|---|
+| 2026-09-25 | `connLLD §3.1`, `§5.1` | Nominal target send time is anchored to the captured source timestamp of the request's first byte, preserving the current main-branch scheduling behavior |
 | 2026-09-24 | `kafkaLLD §9`, `§9.4`, `§16`; `procCommit §5.2`, `§10.2` | Inherited incomplete request reserves one ordinal; EOM/write/drop ends tail discard without advancing again; first capture-protocol violation latches replay-wide admission cutoff with a 60-second side-effect drain |
 | 2026-09-24 | `kafkaLLD §9`; `procCommit §5.2` | Superseded later the same day: the ordinary-`Write` informational fallback remains historical only; typed source-interim observations now require a separately authorized amendment before production removes the fallback |
 | 2026-09-24 | `kafkaLLD §9.3` | Captured close discards only incomplete request assembly and completes response assembly as `SourceResponseComplete(keptAlive=false)` before ordered close |
@@ -336,7 +337,7 @@ Every row records explicit owner authorization. The detailed rationale is retain
 |---|---|---|
 | G3 closure | blocked(PA2/design) | Production conformance review is complete; obtain the exact source-interim design authorization and land PA2 item 5 producer/consumer interoperability |
 | Authoritative source-interim design still describes the superseded ordinary-`Write` fallback | open; blocks typed G3 closure | Obtain explicit authorization for the exact design amendment; PA2 item 5 and G3 then implement only typed observations |
-| Which preserved source timestamp anchors nominal target send time | open; blocks consuming G5/G7 wiring | Options are request first byte, request EOM, or another explicit formula. Recommendation: first byte; authorize the exact design amendment before consumption |
+| Which preserved source timestamp anchors nominal target send time | resolved by owner, 2026-09-25 | Request first byte; design amended and G5/G7 may consume it |
 | Conservation wording mismatch between AGENTS equation and D-3 decision | open, non-blocking | Owner confirmation required before semantic reconciliation |
 | Rejected-versus-unknown commit outcome split was assigned to G2 but not proved | resolved ownership discrepancy | G2 scope/Exit now excludes it; G4 scope/Exit and the deferral ledger own the complete issuance, resolution, abandonment, observability, and evidence chain |
 | `FinalTargetWriteSubmitted` was added as a second milestone by implication | open owner veto | Retain unless the owner rejects it; first-write still owns channel reuse while final-write owns graceful-cancellation completion |

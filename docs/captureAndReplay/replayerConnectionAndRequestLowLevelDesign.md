@@ -108,10 +108,14 @@ generation or connection-processing lifetime.
 
 - `ReplayRequestId`;
 - captured request ordinal;
-- captured source time used to calculate the nominal target send time;
+- the captured source timestamp of the request's first byte, used to calculate the nominal target
+  send time;
 - immutable reconstituted source request data;
 - transformation and target metadata already fixed for the replay run; and
 - an activity-monitor identity.
+
+The replay-time transformation maps that request-first-byte source timestamp to the nominal target
+send time `T` used by the admission and execution queues.
 
 Admission returns:
 
