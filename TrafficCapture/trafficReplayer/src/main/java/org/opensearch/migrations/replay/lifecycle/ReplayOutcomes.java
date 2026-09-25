@@ -6,6 +6,15 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 
 import lombok.NonNull;
 
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// PreparationOutcome success/filter/fallback handling -> RequestPreparationReady transformation status.
+// Preparation cancellation -> RequestPreparationCancelled.
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestPreparationReady carries completed and fallback-error prepared requests, plus intentional drop;
+// RequestPreparationCancelled remains the only other preparation result.
+// REBUILD-TRACE-END(G5,target)
+
 public final class ReplayOutcomes {
     private ReplayOutcomes() {}
 
@@ -21,10 +30,10 @@ public final class ReplayOutcomes {
         }
 
         public RequestPreparationReady {
-            if (transformationStatus.isCompleted()) {
+            if (transformationStatus.isCompleted() || transformationStatus.isError()) {
                 if (value == null) {
                     throw new IllegalArgumentException(
-                        "completed request preparation requires a prepared request"
+                        "replayable request preparation requires a prepared request"
                     );
                 }
             } else if (transformationStatus.isSkipped()) {
@@ -35,7 +44,7 @@ public final class ReplayOutcomes {
                 }
             } else {
                 throw new IllegalArgumentException(
-                    "request preparation readiness must be completed or skipped"
+                    "request preparation readiness must be completed, fallback-error, or skipped"
                 );
             }
         }

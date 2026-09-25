@@ -70,7 +70,8 @@ import lombok.NonNull;
 // observeFirstWrite/observeFinalWrite -> predecessor first-write callback plus the designed final-write
 //     boundary that had no predecessor.
 // sourceResponseChanged/tryStartTuple/applyTupleResult ->
-//     predecessor source-response future and tuple-write chain.
+//     predecessor source-response future and tuple-write chain; RequestResult retains completed,
+//     fallback-error, and intentionally skipped transformation status for tuple construction.
 // emitConnectionTurnFinished/tryEmitProcessingFinished ->
 //     predecessor request completion callback split into the two designed milestones.
 // cancelPreparation/cancelTargetWork/abortAttempt/cancelTuple/tryEmitCleanup ->
@@ -120,9 +121,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     ) {
         public RequestResult {
             targetAttemptHistory = List.copyOf(targetAttemptHistory);
-            if (transformationStatus.isCompleted()) {
-                Objects.requireNonNull(preparedRequest, "completed request has no prepared request");
-                Objects.requireNonNull(terminalTargetResponse, "completed request has no target response");
+            if (transformationStatus.isCompleted() || transformationStatus.isError()) {
+                Objects.requireNonNull(preparedRequest, "replayable request has no prepared request");
+                Objects.requireNonNull(terminalTargetResponse, "replayable request has no target response");
             } else if (transformationStatus.isSkipped()) {
                 if (preparedRequest != null || terminalTargetResponse != null || !targetAttemptHistory.isEmpty()) {
                     throw new IllegalArgumentException(
@@ -131,7 +132,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 }
             } else {
                 throw new IllegalArgumentException(
-                    "tuple input requires a completed or skipped transformation status"
+                    "tuple input requires a completed, fallback-error, or skipped transformation status"
                 );
             }
         }
@@ -745,7 +746,8 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             );
             return;
         }
-        if (!ready.preparation().transformationStatus().isCompleted()) {
+        var transformationStatus = ready.preparation().transformationStatus();
+        if (!(transformationStatus.isCompleted() || transformationStatus.isError())) {
             permit.close();
             impossible(
                 "target attempt start",

@@ -1,8 +1,10 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+import java.util.List;
 import java.util.concurrent.CancellationException;
 
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +26,28 @@ class ReplayOutcomesTest {
         );
         Assertions.assertTrue(filtered.transformationStatus().isSkipped());
         Assertions.assertNull(filtered.value());
+    }
+
+    @Test
+    void transformationFallbackRemainsAReplayableReadyAndTupleResult() {
+        var transformationFailure = new IllegalArgumentException("use original request");
+        var errorStatus = HttpRequestTransformationStatus.makeError(transformationFailure);
+        var ready = new ReplayOutcomes.RequestPreparationReady<>("fallback", errorStatus);
+        var terminal = new TargetAttemptOutcome.TargetResponseObtained<>("target response");
+
+        var result = new RequestReplayOwner.RequestResult<>(
+            TargetConnectionOwnerTestSupport.request(1),
+            "source request",
+            ready.value(),
+            ready.transformationStatus(),
+            List.of(terminal),
+            terminal,
+            new RequestReplayOwner.CompleteFinalSourceResponse<>("source response", true)
+        );
+
+        Assertions.assertSame(transformationFailure, result.transformationStatus().getException());
+        Assertions.assertEquals("fallback", result.preparedRequest());
+        Assertions.assertSame(terminal, result.terminalTargetResponse());
     }
 
     private static String describePreparation(
