@@ -26,6 +26,8 @@ import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.WaitReason;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationCancelled;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
@@ -62,6 +64,11 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull String reason
     ) implements FinalSourceResponse<F> {}
 
+    public enum ConnectionTurnCompletion {
+        TARGET_WORK_FINISHED,
+        CANCELLATION_ENDED_STARTED_TURN
+    }
+
     public record RequestResult<S, P, R, F>(
         @NonNull S sourceRequest,
         @NonNull P preparedRequest,
@@ -77,6 +84,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     public interface PreparationOperation<P> {
         CompletionStage<RequestPreparationResult<P>> completion();
 
+        /**
+         * Requests cancellation. The operation must settle {@link #completion()} exactly once with
+         * {@link RequestPreparationCancelled} carrying this cause.
+         */
         void cancel(CancellationException cause);
     }
 
@@ -122,7 +133,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
         CompletionStage<Void> finalTargetWriteSubmitted(ReplayRequestId requestId);
 
-        CompletionStage<Void> connectionTurnFinished(ReplayRequestId requestId);
+        CompletionStage<Void> connectionTurnFinished(
+            ReplayRequestId requestId,
+            ConnectionTurnCompletion completion
+        );
 
         CompletionStage<Void> requestProcessingFinished(ReplayRequestId requestId);
 
@@ -521,11 +535,17 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         if (cancellationState instanceof CancellationState.Forced) {
             return;
         }
+        if (tupleState instanceof TupleState.Durable) {
+            cancelGracefulDeadline();
+            tryEmitProcessingFinished();
+            return;
+        }
         cancellationState = new CancellationState.Forced(cause);
         cancelGracefulDeadline();
         cancelPreparation(cause);
         cancelTargetWork(cause);
         cancelTuple(cause);
+        cancelFinalSourceWait();
         tryEmitCleanup();
     }
 
@@ -560,7 +580,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         switch (result) {
-            case RequestPreparationResult.Ready<P> ready -> {
+            case RequestPreparationReady<P> ready -> {
                 if (cancellationState instanceof CancellationState.Forced forced) {
                     preparationState = new PreparationState.Ready<>(ready.value());
                     operations.complete(registration);
@@ -577,7 +597,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                     this::tryStartTuple
                 );
             }
-            case RequestPreparationResult.Cancelled<P> cancelled -> {
+            case RequestPreparationCancelled<P> cancelled -> {
                 preparationState = new PreparationState.Cancelled<>(cancelled.cause());
                 operations.complete(registration);
                 if (!(cancellationState instanceof CancellationState.Forced)) {
@@ -824,13 +844,13 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         attemptHistory.add(outcome);
         active.permit().close();
+        operations.complete(registration);
         switch (outcome) {
             case TargetAttemptOutcome.NoTargetResponseObtained<R> ignored ->
                 scheduleRetry();
             case TargetAttemptOutcome.TargetResponseObtained<R> obtained ->
                 evaluateTargetResponse(obtained);
         }
-        operations.complete(registration);
     }
 
     private void evaluateTargetResponse(
@@ -886,7 +906,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             case RetryDecision.RetryRequired ignored -> scheduleRetry();
             case RetryDecision.TargetServerAttemptsFinished ignored -> {
                 targetServerState = new TargetServerState.Finished<>(response);
-                emitConnectionTurnFinished();
+                emitConnectionTurnFinished(
+                    ConnectionTurnCompletion.TARGET_WORK_FINISHED
+                );
                 tryStartTuple();
             }
         }
@@ -991,8 +1013,8 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private void sourceResponseChanged() {
         if (targetServerState
             instanceof TargetServerState.WaitingForRetrySourceResponse<R> waiting) {
-            applyRetryDecision(waiting.response());
             operations.complete(waiting.registration());
+            applyRetryDecision(waiting.response());
         }
         if (finalSourceWaitRegistration != null
             && !(finalSourceState instanceof FinalSourceState.Unresolved<F>)) {
@@ -1002,7 +1024,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         tryStartTuple();
     }
 
-    private void emitConnectionTurnFinished() {
+    private void emitConnectionTurnFinished(ConnectionTurnCompletion completion) {
         if (turnMilestone != MilestoneState.NOT_SUBMITTED) {
             impossible(
                 "connection-turn completion",
@@ -1022,7 +1044,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         deliverRequired(
             registration,
             "connection-turn completion",
-            () -> callbacks.connectionTurnFinished(requestId),
+            () -> callbacks.connectionTurnFinished(requestId, completion),
             () -> {
                 turnMilestone = MilestoneState.ACCEPTED;
                 tryEmitProcessingFinished();
@@ -1202,11 +1224,17 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                     operations.complete(retryPermitRegistration);
                     retryPermitRegistration = null;
                 }
+                emitConnectionTurnFinished(
+                    ConnectionTurnCompletion.CANCELLATION_ENDED_STARTED_TURN
+                );
             }
             case TargetServerState.StartingAttempt<R> starting -> {
                 starting.permit().close();
                 operations.complete(starting.registration());
                 targetServerState = new TargetServerState.Cancelled<>(cause);
+                emitConnectionTurnFinished(
+                    ConnectionTurnCompletion.CANCELLATION_ENDED_STARTED_TURN
+                );
             }
             case TargetServerState.AttemptInProgress<R> active ->
                 abortAttempt(active, cause);
@@ -1214,11 +1242,17 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             case TargetServerState.WaitingForRetrySourceResponse<R> waiting -> {
                 operations.complete(waiting.registration());
                 targetServerState = new TargetServerState.Cancelled<>(cause);
+                emitConnectionTurnFinished(
+                    ConnectionTurnCompletion.CANCELLATION_ENDED_STARTED_TURN
+                );
             }
             case TargetServerState.WaitingForRetryTime<R> waiting -> {
                 waiting.timer().cancel(false);
                 operations.complete(waiting.registration());
                 targetServerState = new TargetServerState.Cancelled<>(cause);
+                emitConnectionTurnFinished(
+                    ConnectionTurnCompletion.CANCELLATION_ENDED_STARTED_TURN
+                );
             }
             case TargetServerState.Finished<R> ignored -> {}
             case TargetServerState.Cancelled<R> ignored -> {}
@@ -1281,9 +1315,12 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         aborting.permit().close();
-        targetServerState = new TargetServerState.Cancelled<>(cause);
         operations.complete(aborting.attemptRegistration());
         operations.complete(aborting.abortRegistration());
+        targetServerState = new TargetServerState.Cancelled<>(cause);
+        emitConnectionTurnFinished(
+            ConnectionTurnCompletion.CANCELLATION_ENDED_STARTED_TURN
+        );
         tryEmitCleanup();
     }
 
@@ -1294,6 +1331,13 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             case TupleState.Writing writing -> writing.write().cancel(cause);
             case TupleState.Durable ignored -> {}
             case TupleState.Cancelled ignored -> {}
+        }
+    }
+
+    private void cancelFinalSourceWait() {
+        if (finalSourceWaitRegistration != null) {
+            operations.complete(finalSourceWaitRegistration);
+            finalSourceWaitRegistration = null;
         }
     }
 
@@ -1385,7 +1429,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     private void releaseLatePreparation(RequestPreparationResult<P> result) {
-        if (result instanceof RequestPreparationResult.Ready<P> ready) {
+        if (result instanceof RequestPreparationReady<P> ready) {
             try {
                 resourceReleaser.releasePreparedRequest(ready.value());
             } catch (Throwable failure) {

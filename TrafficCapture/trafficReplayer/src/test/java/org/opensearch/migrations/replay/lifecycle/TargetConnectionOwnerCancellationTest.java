@@ -11,7 +11,9 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 
 import org.junit.jupiter.api.Assertions;
@@ -22,6 +24,146 @@ import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTe
 import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.request;
 
 class TargetConnectionOwnerCancellationTest {
+    @Test
+    void connectionCleanupWaitsForEveryOwnerOperationRegistration() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        var blocker = new AtomicReference<OutstandingOperationRegistry.Registration>();
+        fixture.eventLoop.execute(() -> blocker.set(fixture.owner.operations().register(
+            GENERATION,
+            CONNECTION,
+            null,
+            OperationType.CANCELLATION_CLEANUP,
+            null,
+            OutstandingOperationRegistry.WaitReason.WAITING_FOR_CHANNEL_TEARDOWN
+        )));
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new CancellationException("generation cancelled")
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
+
+        fixture.eventLoop.execute(() ->
+            fixture.owner.operations().complete(blocker.get())
+        );
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            java.util.List.of("cleanup-finished"),
+            fixture.lifecycleEvents
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void durableTupleBeforeForceCompletesNormallyAfterTurnAcceptance() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        var turnAcceptance = new java.util.concurrent.CompletableFuture<Void>();
+        fixture.lifecycleAcceptances.put("turn:5", turnAcceptance);
+        fixture.admit(5, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(5);
+        fixture.completeSource(5, "source-response");
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target-response");
+        fixture.eventLoop.runUntilIdle();
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new CancellationException("force after durability")
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            java.util.List.of("turn:5"),
+            fixture.lifecycleEvents
+        );
+
+        turnAcceptance.complete(null);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            java.util.List.of("turn:5", "processing:5", "cleanup-finished"),
+            fixture.lifecycleEvents
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void forceCancellationReleasesFinalSourceWaitBeforeCleanup() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(6, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(6);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target-response");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertTrue(
+            fixture.owner.activitySnapshot().stream().anyMatch(snapshot ->
+                snapshot.operationType() == OperationType.FINAL_SOURCE_RESPONSE_WAIT
+            )
+        );
+
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new CancellationException("force while waiting for final source")
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertTrue(
+            fixture.owner.activitySnapshot().stream().noneMatch(snapshot ->
+                snapshot.operationType() == OperationType.FINAL_SOURCE_RESPONSE_WAIT
+            )
+        );
+        Assertions.assertEquals(
+            java.util.List.of("turn:6", "cleanup-finished"),
+            fixture.lifecycleEvents
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void gracefulCancellationUsesInjectedMonotonicClockAndFinishesBeforeDeadline() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(8, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(8);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.targetChannel.attempt(0).finalWrite();
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.owner.submit(new TargetConnectionOwner.GracefulConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new CancellationDeadline(Duration.ofSeconds(5).toNanos()),
+            new CancellationException("graceful revocation")
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.completeSource(8, "source-response");
+        fixture.targetChannel.attempt(0).targetResponse("target-response");
+        fixture.eventLoop.runUntilIdle();
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+        fixture.eventLoop.advance(Duration.ofSeconds(5));
+
+        Assertions.assertEquals(
+            java.util.List.of("turn:8", "processing:8", "cleanup-finished"),
+            fixture.lifecycleEvents
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
     @Test
     void cancellationBeforeSendingProducesCleanupWithoutNormalRequestMilestones() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture();

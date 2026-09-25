@@ -11,8 +11,10 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestAdmissionAccepted;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestAdmissionRejected;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,47 @@ import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTe
 import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.GENERATION;
 
 class TargetConnectionOwnerAdmissionTest {
+    @Test
+    void admissionResultContainsOnlyAcceptedAndExpectedCancellationRejection() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new java.util.concurrent.CancellationException("generation cancelled")
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        var result = fixture.admit(1, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertInstanceOf(
+            RequestAdmissionRejected.class,
+            result.toCompletableFuture().join()
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void duplicateAdmissionIsFatalRatherThanExpectedRejection() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(2, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+
+        var duplicate = fixture.admit(2, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertThrows(
+            CompletionException.class,
+            () -> duplicate.toCompletableFuture().join()
+        );
+        Assertions.assertTrue(
+            fixture.fatalFailures.stream().anyMatch(error ->
+                error.getMessage().contains("AdmitReconstitutedRequest")
+                    && error.getCause().getMessage().contains("already registered")
+            )
+        );
+    }
+
     @Test
     void preparationUsesFirstByteTimingAndOutOfOrderReadinessCannotOvertake() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture();

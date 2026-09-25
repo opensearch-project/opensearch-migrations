@@ -25,6 +25,8 @@ import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationCancelled;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
@@ -92,7 +94,7 @@ final class TargetConnectionOwnerTestSupport {
                 CONNECTION,
                 eventLoop,
                 clock,
-                System::nanoTime,
+                () -> Duration.between(Instant.EPOCH, clock.instant()).toNanos(),
                 sourceTime -> sourceTime,
                 preparer,
                 retryPolicy,
@@ -133,7 +135,7 @@ final class TargetConnectionOwnerTestSupport {
             );
         }
 
-        CompletionStage<TargetConnectionOwner.InputResult> admit(
+        CompletionStage<TargetConnectionOwner.RequestAdmissionResult> admit(
             long ordinal,
             Instant firstByteTime
         ) {
@@ -234,7 +236,7 @@ final class TargetConnectionOwnerTestSupport {
 
                 @Override
                 public void cancel(CancellationException cause) {
-                    completion.complete(new RequestPreparationResult.Cancelled<>(cause));
+                    completion.complete(new RequestPreparationCancelled<>(cause));
                 }
             };
         }
@@ -243,7 +245,7 @@ final class TargetConnectionOwnerTestSupport {
             completions.computeIfAbsent(
                 request(ordinal),
                 ignored -> new CompletableFuture<>()
-            ).complete(new RequestPreparationResult.Ready<>(
+            ).complete(new RequestPreparationReady<>(
                 new TestPrepared("prepared-" + ordinal)
             ));
         }
