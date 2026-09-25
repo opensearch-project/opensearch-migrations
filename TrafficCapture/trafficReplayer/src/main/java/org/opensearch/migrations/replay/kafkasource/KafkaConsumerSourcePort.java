@@ -16,7 +16,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
@@ -109,25 +108,21 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
     }
 
     @Override
-    public void commitAsync(
+    public AsyncCommitSubmission commitAsync(
         Map<TopicPartition, Long> nextPositions,
         java.util.function.Consumer<CommitOutcome> onResolved
     ) {
-        // One resolution per submission, enforced rather than assumed. The client registers its callback partway
-        // through the call and can still throw after that -- ConsumerCoordinator's closing pollNoWakeup raises
-        // interrupt and metadata errors -- so a throw does not prove no callback was registered. §5.7 allows one
-        // commit operation at a time and the caller releases that slot on resolution, so resolving twice would
-        // release a slot the next operation holds.
-        var resolvedAlready = new AtomicBoolean();
-        java.util.function.Consumer<CommitOutcome> resolveOnce = outcome -> {
-            if (resolvedAlready.compareAndSet(false, true)) {
-                onResolved.accept(outcome);
-            }
-        };
+        // The operation-level resolution latch belongs to KafkaSourceOwner, which owns the operation identity
+        // and the one-in-flight slot. This local flag answers only whether the callback ran before this method
+        // threw, so the adapter can distinguish a pre-acceptance rejection from a post-acceptance exception.
+        // Kafka confines both this call and callback delivery to the consumer thread.
+        var callbackDelivered = new boolean[] { false };
         try {
-            consumer.commitAsync(toOffsets(nextPositions), (offsets, failure) ->
-                resolveOnce.accept(classifyAsync(failure))
-            );
+            consumer.commitAsync(toOffsets(nextPositions), (offsets, failure) -> {
+                callbackDelivered[0] = true;
+                onResolved.accept(classifyAsync(failure));
+            });
+            return AsyncCommitSubmission.acceptedByClient();
         } catch (WakeupException absorbedByTheSubmission) {
             // Propagated for the same reason commitSync propagates it: §5.4 leaves the owner as the only
             // boundary that may interpret a wakeup. Classifying it here would instead reach the structural
@@ -135,9 +130,25 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
             // process on a routine queued input. The owner records the absorption and resolves the submission.
             throw absorbedByTheSubmission;
         } catch (RuntimeException refusedBeforeSubmission) {
-            // A refused submission must still resolve: §5.7 allows one commit operation at a time, so a caller
-            // waiting for a resolution that cannot arrive never commits again.
-            resolveOnce.accept(classifyAsync(refusedBeforeSubmission));
+            if (callbackDelivered[0]) {
+                // The callback already resolved the accepted operation. The owner-level identity makes a
+                // subsequent thrown-path resolution inert, so reporting acceptance here cannot release a later
+                // operation's slot.
+                return AsyncCommitSubmission.acceptedByClient();
+            }
+            if (refusedBeforeSubmission instanceof TimeoutException) {
+                // The consumer-group protocol can enqueue the event before timing out while preparing its
+                // offsets. It may reach the broker and may still invoke the callback later, so this is unknown,
+                // not a rejection. The owner's operation latch makes that later callback idempotent.
+                onResolved.accept(CommitOutcome.OUTCOME_UNKNOWN);
+                return AsyncCommitSubmission.acceptedByClient();
+            }
+            if (isRetriable(refusedBeforeSubmission) || isGenerationStale(refusedBeforeSubmission)) {
+                return AsyncCommitSubmission.rejectedBeforeAcceptance(
+                    classifyAsync(refusedBeforeSubmission)
+                );
+            }
+            throw structurallyInvalid(refusedBeforeSubmission);
         }
     }
 

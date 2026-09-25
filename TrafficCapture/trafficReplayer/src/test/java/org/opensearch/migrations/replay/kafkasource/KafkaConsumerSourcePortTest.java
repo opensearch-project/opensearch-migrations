@@ -190,13 +190,15 @@ class KafkaConsumerSourcePortTest {
         );
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
 
-        port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
 
         Assertions.assertEquals(
-            List.of(KafkaSourcePort.CommitOutcome.GENERATION_STALE),
-            resolutions,
-            "a refused submission must resolve, or the one-in-flight slot is never released"
+            KafkaSourcePort.AsyncCommitSubmission.rejectedBeforeAcceptance(
+                KafkaSourcePort.CommitOutcome.GENERATION_STALE
+            ),
+            submission
         );
+        Assertions.assertEquals(List.of(), resolutions);
     }
 
     /**
@@ -216,12 +218,16 @@ class KafkaConsumerSourcePortTest {
         );
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
 
-        port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
 
         Assertions.assertEquals(
             List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
             resolutions,
             "the same failure type the synchronous path calls unknown must not be fatal here"
+        );
+        Assertions.assertTrue(
+            submission.accepted(),
+            "a timeout after the consumer-group event was accepted is uncertain, not a proven rejection"
         );
     }
 
@@ -299,12 +305,13 @@ class KafkaConsumerSourcePortTest {
         var port = new KafkaConsumerSourcePort(new ThrowsAfterRegisteringConsumer(), Duration.ofSeconds(1));
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
 
-        port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
 
         Assertions.assertEquals(
             List.of(KafkaSourcePort.CommitOutcome.RETRIABLE),
             resolutions,
             "one submission resolves once; a second resolution credits or re-stages the same positions twice"
         );
+        Assertions.assertTrue(submission.accepted());
     }
 }
