@@ -1,56 +1,146 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.sink;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
-// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
-// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+import java.time.Duration;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Queue;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 
-// REBUILD-LIMBO-START(G11)
-/*
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
+import org.opensearch.migrations.replay.testing.FakeClock;
+import org.opensearch.migrations.replay.testing.TestEventLoop;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
-
-import org.opensearch.migrations.replay.ParsedHttpMessagesAsDicts;
-import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
-
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-
-class ThreadLocalTupleWriterTest {
+class TupleWriterTest {
+    private static final ReplayRequestId REQUEST_ID = new ReplayRequestId(
+        new ConnectionProcessingId(
+            new PartitionGenerationId(new TopicPartition("traffic", 0), 1),
+            new CapturedConnectionId("node", "connection"),
+            1
+        ),
+        0
+    );
 
     @Test
-    void appliesTupleTransformBeforeWritingToSink() {
-        var writtenTuple = new AtomicReference<Map<String, Object>>();
-        var parsed = mock(ParsedHttpMessagesAsDicts.class);
-        var tuple = mock(SourceTargetCaptureTuple.class);
-        var tupleMap = new LinkedHashMap<String, Object>();
-        tupleMap.put("connectionId", "stream.0");
-        when(parsed.toTupleMap(tuple)).thenReturn(tupleMap);
+    void oneLogicalWriteOwnsPhysicalRetriesUntilDurable() {
+        var clock = new FakeClock();
+        var eventLoop = new TestEventLoop(clock);
+        var sink = new ScriptedSink();
+        var fatalFailures = new ArrayList<Error>();
+        var releases = new AtomicInteger();
+        var writer = new TupleWriter<>(
+            eventLoop,
+            clock,
+            Duration.ofSeconds(1),
+            sink,
+            ignored -> releases.incrementAndGet(),
+            fatalFailures::add,
+            OutstandingOperationRegistry.CountHook.NOOP
+        );
 
-        try (var writer = new ThreadLocalTupleWriter(
-            sinkIndex -> new CallbackTupleSink(writtenTuple::set),
-            () -> incoming -> {
-                @SuppressWarnings("unchecked")
-                var map = (Map<String, Object>) incoming;
-                map.put("transformApplied", true);
-                return map;
-            }
-        )) {
-            writer.writeTuple(tuple, parsed).join();
+        var write = writer.write(new TupleWriter.WriteTuple<>(REQUEST_ID, "tuple"));
+        eventLoop.runUntilIdle();
+        Assertions.assertEquals(1, sink.writes.get());
+
+        sink.failNext();
+        eventLoop.runUntilIdle();
+        Assertions.assertFalse(write.completion().toCompletableFuture().isDone());
+
+        eventLoop.advance(Duration.ofSeconds(1));
+        Assertions.assertEquals(2, sink.writes.get());
+        sink.durableNext();
+        eventLoop.runUntilIdle();
+
+        Assertions.assertInstanceOf(
+            TupleWriter.TupleDurable.class,
+            write.completion().toCompletableFuture().join()
+        );
+        Assertions.assertEquals(1, releases.get());
+        Assertions.assertEquals(0, writer.operations().activeCount());
+        Assertions.assertTrue(fatalFailures.isEmpty());
+    }
+
+    @Test
+    void cancellationIsTypedAndLatePhysicalCompletionCannotBecomeDurability() {
+        var clock = new FakeClock();
+        var eventLoop = new TestEventLoop(clock);
+        var sink = new ScriptedSink();
+        var fatalFailures = new ArrayList<Error>();
+        var releases = new AtomicInteger();
+        var writer = new TupleWriter<>(
+            eventLoop,
+            clock,
+            Duration.ofSeconds(1),
+            sink,
+            ignored -> releases.incrementAndGet(),
+            fatalFailures::add,
+            OutstandingOperationRegistry.CountHook.NOOP
+        );
+        var write = writer.write(new TupleWriter.WriteTuple<>(REQUEST_ID, "tuple"));
+        eventLoop.runUntilIdle();
+
+        var cancellation = new CancellationException("cancelled");
+        write.cancel(cancellation);
+        eventLoop.runUntilIdle();
+
+        var cancelled = Assertions.assertInstanceOf(
+            TupleWriter.TupleWriteCancelled.class,
+            write.completion().toCompletableFuture().join()
+        );
+        Assertions.assertSame(cancellation, cancelled.cause());
+        Assertions.assertEquals(1, releases.get());
+
+        sink.durableNext();
+        eventLoop.runUntilIdle();
+
+        Assertions.assertInstanceOf(
+            TupleWriter.TupleWriteCancelled.class,
+            write.completion().toCompletableFuture().join()
+        );
+        Assertions.assertEquals(1, releases.get());
+        Assertions.assertTrue(fatalFailures.isEmpty());
+    }
+
+    private static final class ScriptedSink
+        implements TupleWriter.PhysicalTupleSink<String> {
+
+        private final AtomicInteger writes = new AtomicInteger();
+        private final Queue<CompletableFuture<Void>> completions = new ArrayDeque<>();
+
+        @Override
+        public CompletionStage<Void> write(String tuple) {
+            writes.incrementAndGet();
+            var completion = new CompletableFuture<Void>();
+            completions.add(completion);
+            return completion;
         }
 
-        Assertions.assertNotNull(writtenTuple.get());
-        Assertions.assertEquals(true, writtenTuple.get().get("transformApplied"));
+        void failNext() {
+            completions.remove().completeExceptionally(
+                new IllegalStateException("sink unavailable")
+            );
+        }
+
+        void durableNext() {
+            completions.remove().complete(null);
+        }
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G11)

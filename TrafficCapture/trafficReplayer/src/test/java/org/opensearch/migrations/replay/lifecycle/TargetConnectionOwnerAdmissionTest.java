@@ -1,643 +1,135 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Test carried byte-identical. Unresolved: TargetConnectionOwnerTestSupport TestEventLoop . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G10)
-/*
-
+import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.ProcessingCancellationResult;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestTurnResult;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.TestExchange;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.TestPrepared;
-import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestAdmissionAccepted;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.PARTITION_GENERATION;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.acceptingLifecycleSink;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.admit;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.owner;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.processing;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.request;
+import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.CONNECTION;
+import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.GENERATION;
 
 class TargetConnectionOwnerAdmissionTest {
     @Test
-    void preparationMayFinishOutOfOrderButExecutionRemainsInCapturedOrder() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            acceptingLifecycleSink()
-        );
-        var firstPreparation =
-            new CompletableFuture<PreparationOutcome<TestPrepared>>();
-        var secondPreparation =
-            new CompletableFuture<PreparationOutcome<TestPrepared>>();
-        var firstProcessing =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var secondProcessing =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-
-        var first = admit(
-            owner,
-            request(0),
-            0,
-            firstPreparation,
-            processing(firstProcessing)
-        );
-        var second = admit(
-            owner,
-            request(1),
-            1,
-            secondPreparation,
-            processing(secondProcessing)
-        );
-        secondPreparation.complete(
-            new PreparationOutcome.Prepared<>(new TestPrepared("second"))
-        );
-        eventLoop.runUntilIdle();
+    void preparationUsesFirstByteTimingAndOutOfOrderReadinessCannotOvertake() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        var firstAdmission = fixture.admit(7, Instant.EPOCH.plusSeconds(10));
+        var secondAdmission = fixture.admit(8, Instant.EPOCH.plusSeconds(11));
+        fixture.eventLoop.runUntilIdle();
 
         Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionAccepted.class,
-            first.admissionResult().toCompletableFuture().join()
+            RequestAdmissionAccepted.class,
+            firstAdmission.toCompletableFuture().join()
         );
         Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionAccepted.class,
-            second.admissionResult().toCompletableFuture().join()
+            RequestAdmissionAccepted.class,
+            secondAdmission.toCompletableFuture().join()
         );
-        Assertions.assertTrue(exchange.executed.isEmpty());
 
-        firstPreparation.complete(
-            new PreparationOutcome.Prepared<>(new TestPrepared("first"))
+        fixture.eventLoop.advance(Duration.ofSeconds(9));
+        Assertions.assertEquals(List.of(TargetConnectionOwnerTestSupport.request(7)),
+            fixture.preparer.begun);
+        Assertions.assertEquals(List.of(Instant.EPOCH.plusSeconds(9)),
+            fixture.preparer.beginTimes);
+
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
+        fixture.preparer.ready(8);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            List.of(
+                TargetConnectionOwnerTestSupport.request(7),
+                TargetConnectionOwnerTestSupport.request(8)
+            ),
+            fixture.preparer.begun
         );
-        eventLoop.runUntilIdle();
-        Assertions.assertEquals(List.of("first"), exchange.executed);
+        Assertions.assertEquals(
+            List.of(Instant.EPOCH.plusSeconds(9), Instant.EPOCH.plusSeconds(10)),
+            fixture.preparer.beginTimes
+        );
+        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+        Assertions.assertEquals(0, fixture.activePermits.get());
 
-        exchange.completeNext(new RequestTurnResult.Completed<>("first-response"));
-        eventLoop.runUntilIdle();
-        Assertions.assertEquals(List.of("first", "second"), exchange.executed);
-        Assertions.assertTrue(fatalFailures.isEmpty());
+        fixture.preparer.ready(7);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(1, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(
+            TargetConnectionOwnerTestSupport.request(7),
+            fixture.targetChannel.attempt(0).input.requestId()
+        );
+        Assertions.assertEquals(1, fixture.activePermits.get());
+
+        fixture.targetChannel.attempt(0).targetResponse("first");
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertEquals(1, fixture.targetChannel.attempts.size());
+
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
+        Assertions.assertEquals(2, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(
+            TargetConnectionOwnerTestSupport.request(8),
+            fixture.targetChannel.attempt(1).input.requestId()
+        );
+        Assertions.assertEquals(1, fixture.activePermits.get());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
-    void nonzeroCapturedOrdinalsPreserveRequestAndCloseOrder() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            acceptingLifecycleSink()
+    void preparationThatMissesNominalTimeRunsImmediatelyWhenReady() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(3, Instant.EPOCH.plusSeconds(2));
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
+        Assertions.assertEquals(
+            List.of(Instant.EPOCH.plusSeconds(1)),
+            fixture.preparer.beginTimes
         );
-        var firstPreparation =
-            new CompletableFuture<PreparationOutcome<TestPrepared>>();
-        var secondPreparation =
-            new CompletableFuture<PreparationOutcome<TestPrepared>>();
-        var firstProcessing =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var secondProcessing =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var first = owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(0),
-            7,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            TargetConnectionOwnerTestSupport.preparation(firstPreparation),
-            processing(firstProcessing)
-        );
-        var second = owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(1),
-            8,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            TargetConnectionOwnerTestSupport.preparation(secondPreparation),
-            processing(secondProcessing)
-        );
-        var close = owner.admitCloseWithAcceptance(
-            PARTITION_GENERATION,
-            9,
+        fixture.eventLoop.advance(Duration.ofSeconds(4));
+        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+
+        fixture.preparer.ready(3);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(1, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(Instant.EPOCH.plusSeconds(5), fixture.clock.instant());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void capturedCloseRemainsBehindEarlierRequestTurn() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(40, Instant.EPOCH);
+        fixture.owner.submit(new TargetConnectionOwner.AdmitCapturedClose<>(
+            CONNECTION,
+            GENERATION,
+            41,
             Instant.EPOCH
-        );
+        ));
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(40);
+        fixture.eventLoop.runUntilIdle();
 
-        secondPreparation.complete(
-            new PreparationOutcome.Prepared<>(new TestPrepared("second"))
-        );
-        firstPreparation.complete(
-            new PreparationOutcome.Prepared<>(new TestPrepared("first"))
-        );
-        eventLoop.runUntilIdle();
-        Assertions.assertEquals(List.of("first"), exchange.executed);
+        Assertions.assertEquals(1, fixture.targetChannel.attempts.size());
+        Assertions.assertTrue(fixture.targetChannel.closes.isEmpty());
 
-        exchange.completeNext(new RequestTurnResult.Completed<>("first-response"));
-        firstProcessing.complete(
-            new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-        );
-        eventLoop.runUntilIdle();
-        Assertions.assertEquals(List.of("first", "second"), exchange.executed);
+        fixture.targetChannel.attempt(0).targetResponse("response");
+        fixture.eventLoop.runUntilIdle();
 
-        exchange.completeNext(new RequestTurnResult.Completed<>("second-response"));
-        secondProcessing.complete(
-            new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-        );
-        eventLoop.runUntilIdle();
-
-        Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionAccepted.class,
-            first.admissionResult().toCompletableFuture().join()
-        );
-        Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionAccepted.class,
-            second.admissionResult().toCompletableFuture().join()
-        );
-        Assertions.assertTrue(close.admissionAccepted().toCompletableFuture().isDone());
-        Assertions.assertEquals(1, exchange.closeCalls);
-        Assertions.assertInstanceOf(
-            SessionOutcome.Closed.class,
-            close.closeCompletion().toCompletableFuture().join()
-        );
-        Assertions.assertTrue(fatalFailures.isEmpty());
-    }
-
-    @Test
-    void regressingCapturedOrdinalIsProcessFatal() {
-        var eventLoop = new TestEventLoop();
-        var fatalFailures = new ArrayList<Error>();
-        var owner = owner(
-            eventLoop,
-            new TestExchange(),
-            fatalFailures,
-            acceptingLifecycleSink()
-        );
-        var firstProcessing =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var rejectedPrepared = new TestPrepared("regressing");
-        var preparationCancellations = new AtomicInteger();
-        var processingCancellations = new AtomicInteger();
-        var rejectedProcessingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var rejectedPreparation =
-            new TargetConnectionOwner.RequestPreparation<TestPrepared>() {
-                @Override
-                public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                    return CompletableFuture.completedFuture(
-                        new PreparationOutcome.Prepared<>(rejectedPrepared)
-                    );
-                }
-
-                @Override
-                public CompletionStage<Void> cancel(CancellationException cause) {
-                    preparationCancellations.incrementAndGet();
-                    rejectedPrepared.close();
-                    return CompletableFuture.completedFuture(null);
-                }
-            };
-        var rejectedProcessing = TargetConnectionOwner.RequestProcessingRegistration
-            .withTypedCancellation(
-                rejectedProcessingCompletion,
-                cause -> {
-                    processingCancellations.incrementAndGet();
-                    rejectedProcessingCompletion.complete(
-                        new TargetConnectionOwner.RequestProcessingOutcome
-                            .RequestCleanupFinished(cause)
-                    );
-                    return CompletableFuture.completedFuture(
-                        new ProcessingCancellationResult.CancellationWon()
-                    );
-                }
-            );
-        owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(0),
-            7,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            TargetConnectionOwnerTestSupport.preparation(new CompletableFuture<>()),
-            processing(firstProcessing)
-        );
-        var regressing = owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(1),
-            7,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            rejectedPreparation,
-            rejectedProcessing
-        );
-        eventLoop.runUntilIdle();
-
-        Assertions.assertEquals(1, fatalFailures.size());
-        Assertions.assertTrue(
-            fatalFailures.get(0).getCause().getMessage().contains(
-                "captured ordinal 7 did not follow 7"
-            )
-        );
-        var rejected = Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionRejected.class,
-            regressing.admissionResult().toCompletableFuture().join()
-        );
-        Assertions.assertEquals(0, preparationCancellations.get());
-        Assertions.assertEquals(0, processingCancellations.get());
-        Assertions.assertEquals(0, rejectedPrepared.closeCount);
-
-        rejectedPreparation.cancel(rejected.cause()).toCompletableFuture().join();
-        rejectedProcessing.rejectAdmission(rejected.cause()).toCompletableFuture().join();
-
-        Assertions.assertEquals(1, preparationCancellations.get());
-        Assertions.assertEquals(1, processingCancellations.get());
-        Assertions.assertEquals(1, rejectedPrepared.closeCount);
-    }
-
-    @Test
-    void wrongGenerationIsRejectedWithoutTakingCleanupOwnership() {
-        var eventLoop = new TestEventLoop();
-        var fatalFailures = new ArrayList<Error>();
-        var owner = owner(
-            eventLoop,
-            new TestExchange(),
-            fatalFailures,
-            acceptingLifecycleSink()
-        );
-        var prepared = new TestPrepared("wrong-generation");
-        var preparationCancellations = new AtomicInteger();
-        var processingCancellations = new AtomicInteger();
-        var processingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var preparation = new TargetConnectionOwner.RequestPreparation<TestPrepared>() {
-            @Override
-            public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                return CompletableFuture.completedFuture(
-                    new PreparationOutcome.Prepared<>(prepared)
-                );
-            }
-
-            @Override
-            public CompletionStage<Void> cancel(CancellationException cause) {
-                preparationCancellations.incrementAndGet();
-                prepared.close();
-                return CompletableFuture.completedFuture(null);
-            }
-        };
-        var processing = TargetConnectionOwner.RequestProcessingRegistration
-            .withTypedCancellation(
-                processingCompletion,
-                cause -> {
-                    processingCancellations.incrementAndGet();
-                    processingCompletion.complete(
-                        new TargetConnectionOwner.RequestProcessingOutcome
-                            .RequestCleanupFinished(cause)
-                    );
-                    return CompletableFuture.completedFuture(
-                        new ProcessingCancellationResult.CancellationWon()
-                    );
-                }
-            );
-        var wrongGeneration = new PartitionGenerationId(
-            PARTITION_GENERATION.topicPartition(),
-            PARTITION_GENERATION.localSequence() + 1
-        );
-
-        var admission = owner.admitRequestWithAcceptance(
-            wrongGeneration,
-            request(0),
-            0,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            preparation,
-            processing
-        );
-        eventLoop.runUntilIdle();
-
-        var rejected = Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionRejected.class,
-            admission.admissionResult().toCompletableFuture().join()
-        );
-        Assertions.assertEquals(0, preparationCancellations.get());
-        Assertions.assertEquals(0, processingCancellations.get());
-        Assertions.assertEquals(0, prepared.closeCount);
-        Assertions.assertTrue(fatalFailures.isEmpty());
-
-        preparation.cancel(rejected.cause()).toCompletableFuture().join();
-        processing.rejectAdmission(rejected.cause()).toCompletableFuture().join();
-
-        Assertions.assertEquals(1, preparationCancellations.get());
-        Assertions.assertEquals(1, processingCancellations.get());
-        Assertions.assertEquals(1, prepared.closeCount);
-    }
-
-    @Test
-    void rejectedMailboxSubmissionReturnsCleanupOwnershipToSender() {
-        var eventLoop = new TestEventLoop();
-        var fatalFailures = new ArrayList<Error>();
-        var owner = owner(
-            eventLoop,
-            new TestExchange(),
-            fatalFailures,
-            acceptingLifecycleSink()
-        );
-        var prepared = new TestPrepared("rejected");
-        var preparationCancellations = new AtomicInteger();
-        var processingCancellations = new AtomicInteger();
-        var processingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var preparation = new TargetConnectionOwner.RequestPreparation<TestPrepared>() {
-            @Override
-            public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                return CompletableFuture.completedFuture(
-                    new PreparationOutcome.Prepared<>(prepared)
-                );
-            }
-
-            @Override
-            public CompletionStage<Void> cancel(CancellationException cause) {
-                preparationCancellations.incrementAndGet();
-                prepared.close();
-                return CompletableFuture.completedFuture(null);
-            }
-        };
-        var processing = TargetConnectionOwner.RequestProcessingRegistration
-            .withTypedCancellation(
-                processingCompletion,
-                cause -> {
-                    processingCancellations.incrementAndGet();
-                    processingCompletion.complete(
-                        new TargetConnectionOwner.RequestProcessingOutcome
-                            .RequestCleanupFinished(cause)
-                    );
-                    return CompletableFuture.completedFuture(
-                        new ProcessingCancellationResult.CancellationWon()
-                    );
-                }
-            );
-        eventLoop.rejectNewTasks();
-
-        var admission = owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(0),
-            0,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            preparation,
-            processing
-        );
-
-        var rejected = Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionRejected.class,
-            admission.admissionResult().toCompletableFuture().join()
-        );
-        Assertions.assertInstanceOf(
-            RequestTurnResult.Cancelled.class,
-            admission.turnCompletion().toCompletableFuture().join()
-        );
-        Assertions.assertEquals(0, preparationCancellations.get());
-        Assertions.assertEquals(0, processingCancellations.get());
-        Assertions.assertEquals(0, prepared.closeCount);
-        Assertions.assertEquals(1, fatalFailures.size());
-
-        preparation.cancel(rejected.cause()).toCompletableFuture().join();
-        processing.rejectAdmission(rejected.cause()).toCompletableFuture().join();
-
-        Assertions.assertEquals(1, preparationCancellations.get());
-        Assertions.assertEquals(1, processingCancellations.get());
-        Assertions.assertEquals(1, prepared.closeCount);
-    }
-
-    @Test
-    void acceptedAdmissionRemainsOwnerOwnedWhenPreparationBeginThrows() {
-        var eventLoop = new TestEventLoop();
-        var fatalFailures = new ArrayList<Error>();
-        var beginFailure = new IllegalStateException("begin failed");
-        var processingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var processing = processing(processingCompletion);
-        var preparation = new TargetConnectionOwner.RequestPreparation<TestPrepared>() {
-            @Override
-            public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                return new CompletableFuture<>();
-            }
-
-            @Override
-            public void begin() {
-                throw beginFailure;
-            }
-
-            @Override
-            public CompletionStage<Void> cancel(CancellationException cause) {
-                return CompletableFuture.completedFuture(null);
-            }
-        };
-        var owner = owner(
-            eventLoop,
-            new TestExchange(),
-            fatalFailures,
-            acceptingLifecycleSink()
-        );
-
-        var admission = owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(0),
-            0,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            preparation,
-            processing
-        );
-        eventLoop.runUntilIdle();
-
-        Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionAccepted.class,
-            admission.admissionResult().toCompletableFuture().join()
-        );
-        Assertions.assertEquals(1, fatalFailures.size());
-        Assertions.assertSame(beginFailure, fatalFailures.get(0).getCause());
-        Assertions.assertSame(
-            beginFailure,
-            Assertions.assertThrows(
-                java.util.concurrent.CompletionException.class,
-                () -> admission.turnCompletion().toCompletableFuture().join()
-            ).getCause()
-        );
-        Assertions.assertSame(
-            beginFailure,
-            Assertions.assertThrows(
-                java.util.concurrent.CompletionException.class,
-                () -> processing.lifecycleHandled().toCompletableFuture().join()
-            ).getCause()
-        );
-    }
-
-    @Test
-    void admissionAfterCapturedCloseReturnsCleanupOwnershipToSender() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            acceptingLifecycleSink()
-        );
-        owner.admitCloseWithAcceptance(PARTITION_GENERATION, 0, Instant.EPOCH);
-        eventLoop.runUntilIdle();
-        var preparationCancellations = new AtomicInteger();
-        var processingCancellations = new AtomicInteger();
-        var processingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var preparation = new TargetConnectionOwner.RequestPreparation<TestPrepared>() {
-            @Override
-            public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                return new CompletableFuture<>();
-            }
-
-            @Override
-            public CompletionStage<Void> cancel(CancellationException cause) {
-                preparationCancellations.incrementAndGet();
-                return CompletableFuture.completedFuture(null);
-            }
-        };
-        var processing = TargetConnectionOwner.RequestProcessingRegistration
-            .withTypedCancellation(
-                processingCompletion,
-                cause -> {
-                    processingCancellations.incrementAndGet();
-                    processingCompletion.complete(
-                        new TargetConnectionOwner.RequestProcessingOutcome
-                            .RequestCleanupFinished(cause)
-                    );
-                    return CompletableFuture.completedFuture(
-                        new ProcessingCancellationResult.CancellationWon()
-                    );
-                }
-            );
-
-        var admission = owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(0),
-            1,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            preparation,
-            processing
-        );
-        eventLoop.runUntilIdle();
-
-        var rejected = Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestAdmissionRejected.class,
-            admission.admissionResult().toCompletableFuture().join()
-        );
-        Assertions.assertEquals(0, preparationCancellations.get());
-        Assertions.assertEquals(0, processingCancellations.get());
-        Assertions.assertTrue(exchange.executed.isEmpty());
-
-        preparation.cancel(rejected.cause()).toCompletableFuture().join();
-        processing.rejectAdmission(rejected.cause()).toCompletableFuture().join();
-
-        Assertions.assertEquals(1, preparationCancellations.get());
-        Assertions.assertEquals(1, processingCancellations.get());
-        Assertions.assertTrue(fatalFailures.isEmpty());
-    }
-
-    @Test
-    void rejectedScheduledPreparationStartIsProcessFatal() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            acceptingLifecycleSink()
-        );
-        var processingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(0),
-            0,
-            Instant.EPOCH.plus(10, ChronoUnit.SECONDS),
-            Instant.EPOCH.plus(10, ChronoUnit.SECONDS),
-            TargetConnectionOwnerTestSupport.preparation(new CompletableFuture<>()),
-            processing(processingCompletion)
-        );
-        eventLoop.rejectNewTasks();
-
-        eventLoop.runUntilIdle();
-
-        Assertions.assertEquals(1, fatalFailures.size());
-        Assertions.assertTrue(
-            fatalFailures.get(0).getMessage().contains(
-                "scheduled preparation start"
-            )
-        );
-        Assertions.assertTrue(exchange.executed.isEmpty());
-    }
-
-    @Test
-    void rejectedOrderedCloseAdmissionIsProcessFatal() {
-        var eventLoop = new TestEventLoop();
-        var fatalFailures = new ArrayList<Error>();
-        var owner = owner(
-            eventLoop,
-            new TestExchange(),
-            fatalFailures,
-            acceptingLifecycleSink()
-        );
-        eventLoop.rejectNewTasks();
-
-        var close = owner.admitCloseWithAcceptance(
-            PARTITION_GENERATION,
-            0,
-            Instant.EPOCH
-        );
-
-        Assertions.assertEquals(1, fatalFailures.size());
-        Assertions.assertTrue(
-            fatalFailures.get(0).getMessage().contains("ordered close admission")
-        );
-        Assertions.assertInstanceOf(
-            RejectedExecutionException.class,
-            fatalFailures.get(0).getCause()
-        );
-        var admissionFailure = Assertions.assertThrows(
-            java.util.concurrent.CompletionException.class,
-            () -> close.admissionAccepted().toCompletableFuture().join()
-        );
-        Assertions.assertSame(
-            fatalFailures.get(0).getCause(),
-            admissionFailure.getCause()
-        );
-        var failed = Assertions.assertInstanceOf(
-            SessionOutcome.Failed.class,
-            close.closeCompletion().toCompletableFuture().join()
-        );
-        Assertions.assertSame(admissionFailure.getCause(), failed.cause());
+        Assertions.assertEquals(List.of(CONNECTION), fixture.targetChannel.closes);
+        Assertions.assertEquals(List.of("turn:40"), fixture.lifecycleEvents);
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G10)

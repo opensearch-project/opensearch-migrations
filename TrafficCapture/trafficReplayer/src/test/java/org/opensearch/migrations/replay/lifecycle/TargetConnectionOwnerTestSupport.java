@@ -1,157 +1,193 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Test carried byte-identical. Unresolved: TargetConnectionOwner TestEventLoop . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G10)
-/*
-
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestTurnResult;
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.testing.FakeClock;
 import org.opensearch.migrations.replay.testing.TestEventLoop;
 
 import org.apache.kafka.common.TopicPartition;
 
 final class TargetConnectionOwnerTestSupport {
-    static final PartitionGenerationId PARTITION_GENERATION =
+    static final PartitionGenerationId GENERATION =
         new PartitionGenerationId(new TopicPartition("traffic", 2), 7);
+    static final ConnectionProcessingId CONNECTION = new ConnectionProcessingId(
+        GENERATION,
+        new CapturedConnectionId("node", "connection"),
+        3
+    );
 
     private TargetConnectionOwnerTestSupport() {}
 
-    static ConnectionSessionKey session() {
-        return new ConnectionSessionKey(
-            new SourceConnectionKey("node", "connection"),
-            0,
-            1
-        );
+    static ReplayRequestId request(long ordinal) {
+        return new ReplayRequestId(CONNECTION, ordinal);
     }
 
-    static ReplayRequestId request(int index) {
-        return new ReplayRequestId(session(), index);
-    }
+    static final class Fixture {
+        final FakeClock clock = new FakeClock();
+        final TestEventLoop eventLoop = new TestEventLoop(clock);
+        final List<Error> fatalFailures = new ArrayList<>();
+        final AtomicInteger activePermits = new AtomicInteger();
+        final FakePreparer preparer = new FakePreparer(clock);
+        final FakeRetryPolicy retryPolicy = new FakeRetryPolicy();
+        final FakeTargetChannel targetChannel = new FakeTargetChannel();
+        final FakeTupleSink tupleSink = new FakeTupleSink();
+        final List<RequestReplayOwner.RequestResult<String, TestPrepared, String, String>>
+            tupleInputs = new ArrayList<>();
+        final List<String> lifecycleEvents = new ArrayList<>();
+        final Map<String, CompletableFuture<Void>> lifecycleAcceptances =
+            new LinkedHashMap<>();
+        final TargetAttemptPermitProvider permitProvider;
+        final TupleWriter<String> tupleWriter;
+        final TargetConnectionOwner<String, TestPrepared, String, String, String> owner;
 
-    static TargetConnectionOwner<TestPrepared, String> owner(
-        TestEventLoop eventLoop,
-        TestExchange exchange,
-        List<Error> fatalFailures,
-        TargetConnectionOwner.RequestLifecycleSink lifecycleSink
-    ) {
-        return new TargetConnectionOwner<>(
-            session(),
-            PARTITION_GENERATION,
-            eventLoop,
-            exchange,
-            TargetConnectionOwner.Metrics.NOOP,
-            fatalFailures::add,
-            lifecycleSink
-        );
-    }
-
-    static TargetConnectionOwner.RequestAdmission<String> admit(
-        TargetConnectionOwner<TestPrepared, String> owner,
-        ReplayRequestId requestId,
-        long capturedOrdinal,
-        CompletionStage<PreparationOutcome<TestPrepared>> preparation,
-        TargetConnectionOwner.RequestProcessingRegistration processing
-    ) {
-        return owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            requestId,
-            capturedOrdinal,
-            Instant.EPOCH,
-            Instant.EPOCH,
-            preparation(preparation),
-            processing
-        );
-    }
-
-    static TargetConnectionOwner.RequestPreparation<TestPrepared> preparation(
-        CompletionStage<PreparationOutcome<TestPrepared>> completion
-    ) {
-        return new TargetConnectionOwner.RequestPreparation<>() {
-            @Override
-            public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                return completion;
-            }
-
-            @Override
-            public CompletionStage<Void> cancel(CancellationException cause) {
-                return CompletableFuture.completedFuture(null);
-            }
-        };
-    }
-
-    static TargetConnectionOwner.RequestProcessingRegistration processing(
-        CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome> completion
-    ) {
-        return new TargetConnectionOwner.RequestProcessingRegistration(
-            completion,
-            cause -> {
-                var cancellationWon = completion.complete(
-                    new TargetConnectionOwner.RequestProcessingOutcome.RequestCleanupFinished(
-                        cause
-                    )
-                );
-                return CompletableFuture.completedFuture(
-                    cancellationWon
-                        ? new ReplayOutcomes.ProcessingCancellationResult.CancellationWon()
-                        : new ReplayOutcomes.ProcessingCancellationResult.ProcessingCompletionWon()
-                );
-            }
-        );
-    }
-
-    static TargetConnectionOwner.RequestLifecycleSink acceptingLifecycleSink() {
-        return new TargetConnectionOwner.RequestLifecycleSink() {
-            @Override
-            public CompletionStage<Void> connectionRequestFinished(
-                PartitionGenerationId partitionGenerationId,
-                ReplayRequestId requestId
-            ) {
-                return CompletableFuture.completedFuture(null);
-            }
-
-            @Override
-            public CompletionStage<Void> requestProcessingFinished(
-                PartitionGenerationId partitionGenerationId,
-                ReplayRequestId requestId
-            ) {
-                return CompletableFuture.completedFuture(null);
-            }
-        };
-    }
-
-    static final class TestPrepared implements TargetConnectionOwner.PreparedRequest {
-        final String name;
-        int connectionTurnFinishedCount;
-        int closeCount;
-
-        TestPrepared(String name) {
-            this.name = name;
+        Fixture() {
+            this(1);
         }
 
-        @Override
-        public void connectionTurnFinished() {
-            connectionTurnFinishedCount++;
+        Fixture(int permitCapacity) {
+            permitProvider = new TargetAttemptPermitProvider(
+                permitCapacity,
+                activePermits,
+                TargetAttemptPermitProvider.Metrics.NOOP,
+                fatalFailures::add
+            );
+            tupleWriter = new TupleWriter<>(
+                eventLoop,
+                clock,
+                Duration.ofSeconds(1),
+                tupleSink,
+                ignored -> {},
+                fatalFailures::add,
+                OutstandingOperationRegistry.CountHook.NOOP
+            );
+            owner = new TargetConnectionOwner<>(
+                CONNECTION,
+                eventLoop,
+                clock,
+                System::nanoTime,
+                sourceTime -> sourceTime,
+                preparer,
+                retryPolicy,
+                targetChannel,
+                tupleWriter,
+                result -> {
+                    tupleInputs.add(result);
+                    return result.sourceRequest()
+                        + "|"
+                        + result.terminalTargetResponse().response()
+                        + "|"
+                        + describeFinal(result.finalSourceResponse());
+                },
+                new RequestReplayOwner.ResourceReleaser<>() {
+                    @Override
+                    public void releaseSourceRequest(String sourceRequest) {}
+
+                    @Override
+                    public void releasePreparedRequest(TestPrepared preparedRequest) {
+                        preparedRequest.close();
+                    }
+
+                    @Override
+                    public void releaseTargetResponse(String targetResponse) {}
+
+                    @Override
+                    public void releaseSourceResponse(String sourceResponse) {}
+                },
+                permitProvider,
+                new RecordingLifecycleSink(lifecycleEvents, lifecycleAcceptances),
+                fatalFailures::add,
+                OutstandingOperationRegistry.CountHook.NOOP
+            );
+        }
+
+        CompletionStage<TargetConnectionOwner.InputResult> admit(
+            long ordinal,
+            Instant firstByteTime
+        ) {
+            return owner.submit(
+                new TargetConnectionOwner.AdmitReconstitutedRequest<>(
+                    CONNECTION,
+                    GENERATION,
+                    request(ordinal),
+                    ordinal,
+                    firstByteTime,
+                    "source-" + ordinal,
+                    "activity-" + ordinal
+                )
+            );
+        }
+
+        void completeSource(long ordinal, String response) {
+            owner.submit(new TargetConnectionOwner.SourceResponseComplete<>(
+                CONNECTION,
+                GENERATION,
+                request(ordinal),
+                response
+            ));
+        }
+
+        void incompleteSource(long ordinal) {
+            owner.submit(new TargetConnectionOwner.SourceResponseIncomplete<>(
+                CONNECTION,
+                GENERATION,
+                request(ordinal),
+                "expired"
+            ));
+        }
+
+        void unavailableForRetry(long ordinal) {
+            owner.submit(new TargetConnectionOwner.SourceResponseUnavailableForRetry<>(
+                CONNECTION,
+                GENERATION,
+                request(ordinal)
+            ));
+        }
+
+        private static String describeFinal(
+            RequestReplayOwner.FinalSourceResponse<String> response
+        ) {
+            return switch (response) {
+                case RequestReplayOwner.CompleteFinalSourceResponse<String> complete ->
+                    complete.response();
+                case RequestReplayOwner.IncompleteFinalSourceResponse<String> incomplete ->
+                    "incomplete:" + incomplete.reason();
+            };
+        }
+    }
+
+    static final class TestPrepared implements AutoCloseable {
+        final String value;
+        int closeCount;
+
+        TestPrepared(String value) {
+            this.value = value;
         }
 
         @Override
@@ -160,45 +196,225 @@ final class TargetConnectionOwnerTestSupport {
         }
     }
 
-    static final class TestExchange
-        implements TargetConnectionOwner.TargetExchange<TestPrepared, String> {
+    static final class FakePreparer
+        implements RequestReplayOwner.RequestPreparer<String, TestPrepared> {
 
-        final List<String> executed = new ArrayList<>();
-        final Queue<CompletableFuture<RequestTurnResult<String>>> active =
-            new ArrayDeque<>();
-        final CompletableFuture<Void> abortCompletion = new CompletableFuture<>();
-        CompletableFuture<Void> closeCompletion = CompletableFuture.completedFuture(null);
-        Consumer<ReplayRequestId> onExecute = ignored -> {};
-        int closeCalls;
+        final FakeClock clock;
+        final Map<ReplayRequestId, CompletableFuture<RequestPreparationResult<TestPrepared>>>
+            completions = new LinkedHashMap<>();
+        final List<ReplayRequestId> begun = new ArrayList<>();
+        final List<Instant> beginTimes = new ArrayList<>();
 
-        @Override
-        public CompletionStage<RequestTurnResult<String>> execute(
-            ReplayRequestId requestId,
-            TestPrepared preparedRequest
-        ) {
-            executed.add(preparedRequest.name);
-            onExecute.accept(requestId);
-            var completion = new CompletableFuture<RequestTurnResult<String>>();
-            active.add(completion);
-            return completion;
+        FakePreparer(FakeClock clock) {
+            this.clock = clock;
         }
 
         @Override
-        public CompletionStage<Void> close() {
-            closeCalls++;
+        public RequestReplayOwner.PreparationOperation<TestPrepared> begin(
+            ReplayRequestId requestId,
+            String sourceRequest
+        ) {
+            begun.add(requestId);
+            beginTimes.add(clock.instant());
+            var completion = completions.computeIfAbsent(
+                requestId,
+                ignored -> new CompletableFuture<>()
+            );
+            return new RequestReplayOwner.PreparationOperation<>() {
+                @Override
+                public CompletionStage<RequestPreparationResult<TestPrepared>> completion() {
+                    return completion;
+                }
+
+                @Override
+                public void cancel(CancellationException cause) {
+                    completion.complete(new RequestPreparationResult.Cancelled<>(cause));
+                }
+            };
+        }
+
+        void ready(long ordinal) {
+            completions.computeIfAbsent(
+                request(ordinal),
+                ignored -> new CompletableFuture<>()
+            ).complete(new RequestPreparationResult.Ready<>(
+                new TestPrepared("prepared-" + ordinal)
+            ));
+        }
+    }
+
+    static final class FakeRetryPolicy
+        implements RequestReplayOwner.RetryPolicy<String, String> {
+
+        boolean requiresSourceResponse;
+        Duration retryDelay = Duration.ofSeconds(1);
+        final Queue<RetryDecision> decisions = new ArrayDeque<>();
+        final List<RequestReplayOwner.RetrySourceResponse<String>> observedSources =
+            new ArrayList<>();
+
+        @Override
+        public boolean requiresSourceResponse(String targetResponse) {
+            return requiresSourceResponse;
+        }
+
+        @Override
+        public RetryDecision decide(
+            String targetResponse,
+            RequestReplayOwner.RetrySourceResponse<String> sourceResponse
+        ) {
+            observedSources.add(sourceResponse);
+            return decisions.isEmpty()
+                ? new RetryDecision.TargetServerAttemptsFinished()
+                : decisions.remove();
+        }
+
+        @Override
+        public Duration retryDelay(int completedAttemptCount) {
+            return retryDelay;
+        }
+    }
+
+    static final class FakeTargetChannel
+        implements TargetChannelPort<TestPrepared, String> {
+
+        final List<AttemptRecord> attempts = new ArrayList<>();
+        final List<ConnectionProcessingId> closes = new ArrayList<>();
+        CompletableFuture<Void> closeCompletion = CompletableFuture.completedFuture(null);
+
+        @Override
+        public Attempt<String> startAttempt(AttemptInput<TestPrepared> input) {
+            var record = new AttemptRecord(input);
+            attempts.add(record);
+            return record;
+        }
+
+        @Override
+        public CompletionStage<Void> close(ConnectionProcessingId connectionProcessingId) {
+            closes.add(connectionProcessingId);
             return closeCompletion;
         }
 
-        @Override
-        public CompletionStage<Void> abort(CancellationException cause) {
-            return abortCompletion;
+        AttemptRecord attempt(int index) {
+            return attempts.get(index);
         }
 
-        void completeNext(RequestTurnResult<String> result) {
-            active.remove().complete(result);
+        final class AttemptRecord implements Attempt<String> {
+            final AttemptInput<TestPrepared> input;
+            final CompletableFuture<TargetAttemptOutcome<String>> outcome =
+                new CompletableFuture<>();
+            final CompletableFuture<Void> abort = new CompletableFuture<>();
+            int abortCalls;
+            boolean firstWriteReported;
+            boolean finalWriteReported;
+
+            AttemptRecord(AttemptInput<TestPrepared> input) {
+                this.input = input;
+            }
+
+            @Override
+            public CompletionStage<TargetAttemptOutcome<String>> outcome() {
+                return outcome;
+            }
+
+            @Override
+            public CompletionStage<Void> abort(CancellationException cause) {
+                abortCalls++;
+                return abort;
+            }
+
+            void firstWrite() {
+                firstWriteReported = true;
+                input.writeMilestones().firstTargetWriteSubmitted(input.attemptNumber());
+            }
+
+            void finalWrite() {
+                finalWriteReported = true;
+                input.writeMilestones().finalTargetWriteSubmitted(input.attemptNumber());
+            }
+
+            void targetResponse(String response) {
+                if (!firstWriteReported) {
+                    firstWrite();
+                }
+                if (!finalWriteReported) {
+                    finalWrite();
+                }
+                outcome.complete(new TargetAttemptOutcome.TargetResponseObtained<>(response));
+            }
+
+            void noResponse() {
+                outcome.complete(new TargetAttemptOutcome.NoTargetResponseObtained<>(
+                    new TargetAttemptOutcome.NoTargetResponseDiagnostic(
+                        TargetAttemptOutcome.NoTargetResponseKind.TRANSPORT_FAILURE,
+                        "connection closed without a response"
+                    )
+                ));
+            }
+        }
+    }
+
+    static final class FakeTupleSink
+        implements TupleWriter.PhysicalTupleSink<String> {
+
+        final List<String> writes = new ArrayList<>();
+        final Queue<CompletableFuture<Void>> completions = new ArrayDeque<>();
+
+        @Override
+        public CompletionStage<Void> write(String tuple) {
+            writes.add(tuple);
+            var completion = new CompletableFuture<Void>();
+            completions.add(completion);
+            return completion;
+        }
+
+        void durableNext() {
+            completions.remove().complete(null);
+        }
+
+        void failNext() {
+            completions.remove().completeExceptionally(
+                new IllegalStateException("sink unavailable")
+            );
+        }
+    }
+
+    private record RecordingLifecycleSink(
+        List<String> events,
+        Map<String, CompletableFuture<Void>> acceptances
+    ) implements TargetConnectionOwner.LifecycleSink {
+
+        @Override
+        public CompletionStage<Void> connectionRequestFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId,
+            ReplayRequestId requestId
+        ) {
+            return record("turn:" + requestId.capturedRequestOrdinal());
+        }
+
+        @Override
+        public CompletionStage<Void> requestProcessingFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId,
+            ReplayRequestId requestId
+        ) {
+            return record("processing:" + requestId.capturedRequestOrdinal());
+        }
+
+        @Override
+        public CompletionStage<Void> connectionOwnerFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId
+        ) {
+            return record("owner-finished");
+        }
+
+        private CompletionStage<Void> record(String event) {
+            events.add(event);
+            return acceptances.computeIfAbsent(
+                event,
+                ignored -> CompletableFuture.completedFuture(null)
+            );
         }
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G10)

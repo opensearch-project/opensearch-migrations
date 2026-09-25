@@ -9,9 +9,9 @@ class ReplayOutcomesTest {
     @Test
     void requestPreparationHasExactlyReadyAndCancelledDomainResults() {
         var ready =
-            new ReplayOutcomes.RequestPreparationResult.RequestPreparationReady<>("prepared");
+            new ReplayOutcomes.RequestPreparationResult.Ready<>("prepared");
         var cancelled =
-            new ReplayOutcomes.RequestPreparationResult.RequestPreparationCancelled<String>(
+            new ReplayOutcomes.RequestPreparationResult.Cancelled<String>(
                 new CancellationException("cancelled")
             );
 
@@ -23,9 +23,9 @@ class ReplayOutcomesTest {
         ReplayOutcomes.RequestPreparationResult<String> result
     ) {
         return switch (result) {
-            case ReplayOutcomes.RequestPreparationResult.RequestPreparationReady<String> ready ->
+            case ReplayOutcomes.RequestPreparationResult.Ready<String> ready ->
                 "ready:" + ready.value();
-            case ReplayOutcomes.RequestPreparationResult.RequestPreparationCancelled<String> cancelled ->
+            case ReplayOutcomes.RequestPreparationResult.Cancelled<String> cancelled ->
                 "cancelled:" + cancelled.cause().getMessage();
         };
     }

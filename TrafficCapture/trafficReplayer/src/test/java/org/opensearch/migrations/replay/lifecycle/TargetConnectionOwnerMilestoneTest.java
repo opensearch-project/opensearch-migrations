@@ -1,302 +1,153 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Test carried byte-identical. Unresolved: TestEventLoop . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G10)
-/*
-
+import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestTurnResult;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.TestExchange;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.TestPrepared;
-import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.PARTITION_GENERATION;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.admit;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.owner;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.processing;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.request;
-
 class TargetConnectionOwnerMilestoneTest {
     @Test
     void connectionTurnAdvancesBeforeTupleDurabilityAndRegistryWaitsForProcessingAcceptance() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var lifecycleEvents = new ArrayList<String>();
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
         var processingAcceptance = new CompletableFuture<Void>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            new TargetConnectionOwner.RequestLifecycleSink() {
-                @Override
-                public CompletionStage<Void> connectionRequestFinished(
-                    PartitionGenerationId partitionGenerationId,
-                    ReplayRequestId requestId
-                ) {
-                    lifecycleEvents.add("turn:" + requestId.requestIndex());
-                    return CompletableFuture.completedFuture(null);
-                }
+        fixture.lifecycleAcceptances.put("processing:0", processingAcceptance);
+        fixture.admit(0, Instant.EPOCH);
+        fixture.admit(1, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(0);
+        fixture.preparer.ready(1);
+        fixture.eventLoop.runUntilIdle();
 
-                @Override
-                public CompletionStage<Void> requestProcessingFinished(
-                    PartitionGenerationId partitionGenerationId,
-                    ReplayRequestId requestId
-                ) {
-                    lifecycleEvents.add("processing:" + requestId.requestIndex());
-                    return processingAcceptance;
-                }
-            }
-        );
-        var tupleDurable =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var prepared = new TestPrepared("request");
-        var admission = admit(
-            owner,
-            request(0),
-            0,
-            CompletableFuture.completedFuture(
-                new PreparationOutcome.Prepared<>(prepared)
-            ),
-            processing(tupleDurable)
-        );
-        var close = owner.admitCloseWithAcceptance(
-            PARTITION_GENERATION,
-            1,
-            Instant.EPOCH
-        );
-        eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target-0");
+        fixture.eventLoop.runUntilIdle();
 
-        exchange.completeNext(new RequestTurnResult.Completed<>("response"));
-        eventLoop.runUntilIdle();
+        Assertions.assertEquals(List.of("turn:0"), fixture.lifecycleEvents);
+        Assertions.assertEquals(2, fixture.targetChannel.attempts.size());
+        Assertions.assertTrue(fixture.tupleSink.writes.isEmpty());
+        Assertions.assertEquals(2, registeredRequests(fixture));
 
-        Assertions.assertTrue(
-            admission.turnCompletion().toCompletableFuture().isDone()
+        fixture.completeSource(0, "source-response-0");
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(
+            List.of("source-0|target-0|source-response-0"),
+            fixture.tupleSink.writes
         );
-        Assertions.assertTrue(
-            close.closeCompletion().toCompletableFuture().isDone(),
-            "ordered close must not wait for tuple durability"
-        );
-        Assertions.assertEquals(1, exchange.closeCalls);
-        Assertions.assertFalse(owner.termination().toCompletableFuture().isDone());
-        Assertions.assertEquals(List.of("turn:0"), lifecycleEvents);
-        Assertions.assertEquals(1, prepared.connectionTurnFinishedCount);
-        Assertions.assertEquals(0, prepared.closeCount);
+        Assertions.assertEquals(List.of("turn:0"), fixture.lifecycleEvents);
 
-        tupleDurable.complete(
-            new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-        );
-        eventLoop.runUntilIdle();
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
 
-        Assertions.assertEquals(List.of("turn:0", "processing:0"), lifecycleEvents);
-        Assertions.assertEquals(1, prepared.closeCount);
-        Assertions.assertFalse(
-            owner.termination().toCompletableFuture().isDone(),
-            "the registry remains owned until the processing milestone is accepted"
+        Assertions.assertEquals(
+            List.of("turn:0", "processing:0"),
+            fixture.lifecycleEvents
+        );
+        Assertions.assertEquals(
+            2,
+            registeredRequests(fixture),
+            "D17: processing acceptance, not turn completion or tuple durability, removes the request"
         );
 
         processingAcceptance.complete(null);
-        eventLoop.runUntilIdle();
+        fixture.eventLoop.runUntilIdle();
 
-        Assertions.assertInstanceOf(
-            SessionOutcome.Closed.class,
-            owner.termination().toCompletableFuture().join()
-        );
-        Assertions.assertTrue(fatalFailures.isEmpty());
+        Assertions.assertEquals(1, registeredRequests(fixture));
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
-    void connectionMilestoneAcceptanceDoesNotSerializeTheNextTargetTurn() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var firstConnectionAcceptance = new CompletableFuture<Void>();
-        var lifecycleEvents = new ArrayList<String>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            new TargetConnectionOwner.RequestLifecycleSink() {
-                @Override
-                public CompletionStage<Void> connectionRequestFinished(
-                    PartitionGenerationId partitionGenerationId,
-                    ReplayRequestId requestId
-                ) {
-                    lifecycleEvents.add("turn:" + requestId.requestIndex());
-                    return requestId.requestIndex() == 0
-                        ? firstConnectionAcceptance
-                        : CompletableFuture.completedFuture(null);
-                }
+    void tupleAndProcessingWaitForBothTerminalTargetAndFinalSourceThenDurability() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(4, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(4);
+        fixture.eventLoop.runUntilIdle();
 
-                @Override
-                public CompletionStage<Void> requestProcessingFinished(
-                    PartitionGenerationId partitionGenerationId,
-                    ReplayRequestId requestId
-                ) {
-                    lifecycleEvents.add("processing:" + requestId.requestIndex());
-                    return CompletableFuture.completedFuture(null);
-                }
-            }
-        );
-        var firstProcessing =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var secondProcessing =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var first = admit(
-            owner,
-            request(0),
-            0,
-            CompletableFuture.completedFuture(
-                new PreparationOutcome.Prepared<>(new TestPrepared("first"))
-            ),
-            processing(firstProcessing)
-        );
-        admit(
-            owner,
-            request(1),
-            1,
-            CompletableFuture.completedFuture(
-                new PreparationOutcome.Prepared<>(new TestPrepared("second"))
-            ),
-            processing(secondProcessing)
-        );
-        eventLoop.runUntilIdle();
+        fixture.completeSource(4, "source-response");
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertTrue(fixture.tupleSink.writes.isEmpty());
 
-        exchange.completeNext(new RequestTurnResult.Completed<>("first-response"));
-        eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target-response");
+        fixture.eventLoop.runUntilIdle();
 
-        Assertions.assertEquals(List.of("turn:0"), lifecycleEvents);
-        Assertions.assertFalse(
-            first.turnCompletion().toCompletableFuture().isDone()
+        Assertions.assertEquals(List.of("turn:4"), fixture.lifecycleEvents);
+        Assertions.assertEquals(
+            List.of("source-4|target-response|source-response"),
+            fixture.tupleSink.writes
         );
-        Assertions.assertEquals(List.of("first", "second"), exchange.executed);
 
-        firstConnectionAcceptance.complete(null);
-        eventLoop.runUntilIdle();
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(List.of("turn:4"), fixture.lifecycleEvents);
 
-        Assertions.assertInstanceOf(
-            RequestTurnResult.Completed.class,
-            first.turnCompletion().toCompletableFuture().join()
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            List.of("turn:4", "processing:4"),
+            fixture.lifecycleEvents
         );
-        Assertions.assertTrue(fatalFailures.isEmpty());
+        Assertions.assertEquals(0, registeredRequests(fixture));
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
-    void processingMilestoneWaitsForConnectionMilestoneAcceptance() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var connectionAcceptance = new CompletableFuture<Void>();
-        var lifecycleEvents = new ArrayList<String>();
-        var processingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            new TargetConnectionOwner.RequestLifecycleSink() {
-                @Override
-                public CompletionStage<Void> connectionRequestFinished(
-                    PartitionGenerationId partitionGenerationId,
-                    ReplayRequestId requestId
-                ) {
-                    lifecycleEvents.add("turn");
-                    return connectionAcceptance;
-                }
-
-                @Override
-                public CompletionStage<Void> requestProcessingFinished(
-                    PartitionGenerationId partitionGenerationId,
-                    ReplayRequestId requestId
-                ) {
-                    lifecycleEvents.add("processing");
-                    return CompletableFuture.completedFuture(null);
-                }
-            }
+    void retrySourceWaitHoldsTurnWithoutPermitAndRetryReacquiresOne() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.retryPolicy.requiresSourceResponse = true;
+        fixture.retryPolicy.decisions.add(new RetryDecision.RetryRequired());
+        fixture.retryPolicy.decisions.add(
+            new RetryDecision.TargetServerAttemptsFinished()
         );
-        admit(
-            owner,
-            request(0),
-            0,
-            CompletableFuture.completedFuture(
-                new PreparationOutcome.Prepared<>(new TestPrepared("request"))
-            ),
-            processing(processingCompletion)
+        fixture.admit(9, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(9);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(1, fixture.activePermits.get());
+        fixture.targetChannel.attempt(0).targetResponse("first-target");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertEquals(1, fixture.targetChannel.attempts.size());
+        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
+
+        fixture.completeSource(9, "source-response");
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(0, fixture.activePermits.get());
+
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
+        Assertions.assertEquals(2, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(1, fixture.activePermits.get());
+
+        fixture.targetChannel.attempt(1).targetResponse("second-target");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertEquals(List.of("turn:9"), fixture.lifecycleEvents);
+        Assertions.assertEquals(
+            List.of("source-9|second-target|source-response"),
+            fixture.tupleSink.writes
         );
-        eventLoop.runUntilIdle();
-
-        exchange.completeNext(new RequestTurnResult.Completed<>("response"));
-        eventLoop.runUntilIdle();
-        processingCompletion.complete(
-            new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-        );
-        eventLoop.runUntilIdle();
-
-        Assertions.assertEquals(List.of("turn"), lifecycleEvents);
-
-        connectionAcceptance.complete(null);
-        eventLoop.runUntilIdle();
-
-        Assertions.assertEquals(List.of("turn", "processing"), lifecycleEvents);
-        Assertions.assertTrue(fatalFailures.isEmpty());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
-    @Test
-    void tupleDurabilityBeforeConnectionTurnIsProcessFatal() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var processingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            TargetConnectionOwnerTestSupport.acceptingLifecycleSink()
-        );
-        admit(
-            owner,
-            request(0),
-            0,
-            CompletableFuture.completedFuture(
-                new PreparationOutcome.Prepared<>(new TestPrepared("request"))
-            ),
-            processing(processingCompletion)
-        );
-        eventLoop.runUntilIdle();
-
-        processingCompletion.complete(
-            new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-        );
-        eventLoop.runUntilIdle();
-
-        Assertions.assertEquals(1, fatalFailures.size());
-        Assertions.assertTrue(
-            fatalFailures.get(0).getMessage().contains(
-                "request-processing completion before connection turn"
-            )
-        );
+    private static int registeredRequests(TargetConnectionOwnerTestSupport.Fixture fixture) {
+        var count = new AtomicInteger(-1);
+        fixture.eventLoop.execute(() -> count.set(fixture.owner.registeredRequestCount()));
+        fixture.eventLoop.runUntilIdle();
+        return count.get();
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G10)

@@ -8,481 +8,171 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CompletionException;
 
-// REBUILD-LIMBO-START(G11)
-/*
-
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
-
-import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class RequestReplayOwnerTest {
-    private static final PartitionGenerationId PARTITION_GENERATION =
-        new PartitionGenerationId(new TopicPartition("topic", 0), 1);
-    private static final ReplayRequestId REQUEST_ID = new ReplayRequestId(
-        new ConnectionSessionKey(new SourceConnectionKey("node", "connection"), 0, 1),
-        0
-    );
-
     @Test
-    void tupleDurableCannotFinishBeforeRequestProcessingFinishedMilestone() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        owner.registerProcessing(processingRegistration());
-        owner.recordProcessingCompletion(
-            new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
+    void completeSourceBeforeTargetIsFrozenForRetryAndFinalTupleInput() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.retryPolicy.requiresSourceResponse = true;
+        fixture.admit(0, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(0);
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.completeSource(0, "complete-source");
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target");
+        fixture.eventLoop.runUntilIdle();
+
+        var retryInput = Assertions.assertInstanceOf(
+            RequestReplayOwner.CompleteSourceResponseForRetry.class,
+            fixture.retryPolicy.observedSources.get(0)
+        );
+        Assertions.assertEquals("complete-source", retryInput.response());
+        Assertions.assertEquals(
+            List.of("source-0|target|complete-source"),
+            fixture.tupleSink.writes
         );
 
-        var thrown = Assertions.assertThrows(IllegalStateException.class, owner::finishProcessing);
-
-        Assertions.assertTrue(thrown.getMessage().contains("CompletionReceived"));
-        Assertions.assertFalse(owner.processingMilestoneSubmitted());
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(
+            List.of("turn:0", "processing:0"),
+            fixture.lifecycleEvents
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
-    void tupleDurableFinishesOnlyAfterConnectionMilestoneAndProcessingMilestone() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        owner.registerProcessing(processingRegistration());
-        owner.markTurnActive();
-        owner.recordProcessingCompletion(
-            new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-        );
+    void unavailableRetryInputDoesNotPreventLaterCompleteFinalResponse() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.retryPolicy.requiresSourceResponse = true;
+        fixture.admit(1, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(1);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target");
+        fixture.eventLoop.runUntilIdle();
 
-        owner.markConnectionTurnFinished();
-        Assertions.assertThrows(
-            IllegalStateException.class,
-            owner::markProcessingMilestoneSubmitted,
-            "intake must accept ConnectionRequestFinished first"
-        );
-        owner.markConnectionTurnAccepted();
-        owner.markProcessingMilestoneSubmitted();
-        Assertions.assertDoesNotThrow(owner::finishProcessing);
+        fixture.unavailableForRetry(1);
+        fixture.eventLoop.runUntilIdle();
 
-        Assertions.assertTrue(owner.processingMilestoneSubmitted());
-    }
-
-    @Test
-    void cancelledCompletionMayFinishWithoutNormalProcessingMilestone() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        var cause = new CancellationException("cancelled");
-        owner.registerProcessing(processingRegistration());
-        owner.markTurnActive();
-        owner.cancelConnectionTurn(cause);
-        owner.cancelProcessing(cause);
-        owner.beginProcessingCancellationAcknowledgement();
-        owner.acceptProcessingCancellationAcknowledgement(
-            new ReplayOutcomes.ProcessingCancellationResult.CancellationWon()
-        );
-        owner.recordProcessingCompletion(
-            new TargetConnectionOwner.RequestProcessingOutcome.RequestCleanupFinished(cause)
-        );
-
-        Assertions.assertFalse(owner.processingMilestoneSubmitted());
-        Assertions.assertDoesNotThrow(owner::finishProcessing);
-    }
-
-    @Test
-    void locallyCancelledUnregisteredProcessingMayFinishWithoutMilestone() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        var cause = new CancellationException("cancelled before registration");
-        owner.cancelConnectionTurn(cause);
-        owner.cancelProcessing(cause);
-
-        Assertions.assertFalse(owner.processingMilestoneSubmitted());
-        Assertions.assertDoesNotThrow(owner::finishProcessing);
-    }
-
-    @Test
-    void queuedRequestCannotEmitConnectionTurnFinished() {
-        var owner = ownerWith(new TestPrepared(null, null));
-
-        var thrown = Assertions.assertThrows(
-            IllegalStateException.class,
-            owner::markConnectionTurnFinished
-        );
-
-        Assertions.assertTrue(thrown.getMessage().contains("QUEUED"));
-        Assertions.assertFalse(owner.connectionTurnSettled());
-    }
-
-    @Test
-    void tupleDurableCannotArriveBeforeCancellationDecision() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        owner.registerProcessing(processingRegistration());
-        owner.cancelProcessing(new CancellationException("cancelled"));
-
-        var thrown = Assertions.assertThrows(
-            IllegalStateException.class,
-            () -> owner.recordProcessingCompletion(
-                new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-            )
-        );
-
-        Assertions.assertTrue(thrown.getMessage().contains("CancellationRequested"));
-    }
-
-    @Test
-    void tupleDurableIsAcceptedWhenProcessingCompletionWinsCancellationRace() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        owner.registerProcessing(processingRegistration());
-        owner.markTurnActive();
-        owner.markConnectionTurnFinished();
-        owner.markConnectionTurnAccepted();
-        owner.cancelProcessing(new CancellationException("cancelled"));
-        owner.beginProcessingCancellationAcknowledgement();
-        owner.acceptProcessingCancellationAcknowledgement(
-            new ReplayOutcomes.ProcessingCancellationResult.ProcessingCompletionWon()
-        );
-
-        Assertions.assertDoesNotThrow(
-            () -> owner.recordProcessingCompletion(
-                new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-            )
-        );
         Assertions.assertInstanceOf(
-            TargetConnectionOwner.RequestProcessingOutcome.TupleDurable.class,
-            owner.processingOutcome()
+            RequestReplayOwner.SourceResponseUnavailableForRetry.class,
+            fixture.retryPolicy.observedSources.get(0)
         );
-        Assertions.assertDoesNotThrow(owner::markProcessingMilestoneSubmitted);
-        Assertions.assertDoesNotThrow(owner::finishProcessing);
+        Assertions.assertEquals(List.of("turn:1"), fixture.lifecycleEvents);
+        Assertions.assertTrue(fixture.tupleSink.writes.isEmpty());
+
+        fixture.completeSource(1, "later-complete-source");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            List.of("source-1|target|later-complete-source"),
+            fixture.tupleSink.writes
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
-    void cancelledCompletionRequiresAnExplicitCancellationRequest() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        owner.registerProcessing(processingRegistration());
+    void incompleteFinalResponseCarriesNoPartialResponseValue() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(2, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(2);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target");
+        fixture.incompleteSource(2);
+        fixture.eventLoop.runUntilIdle();
 
-        var thrown = Assertions.assertThrows(
-            IllegalStateException.class,
-            () -> owner.recordProcessingCompletion(
-                new TargetConnectionOwner.RequestProcessingOutcome.RequestCleanupFinished(
-                    new CancellationException("unexpected")
+        var finalResponse = fixture.tupleInputs.get(0).finalSourceResponse();
+        var incomplete = Assertions.assertInstanceOf(
+            RequestReplayOwner.IncompleteFinalSourceResponse.class,
+            finalResponse
+        );
+        Assertions.assertEquals("expired", incomplete.reason());
+        Assertions.assertEquals(
+            List.of("source-2|target|incomplete:expired"),
+            fixture.tupleSink.writes
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void duplicateFinalSourceResponseIsAnImpossibleTransition() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(3, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(3);
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.completeSource(3, "first");
+        fixture.eventLoop.runUntilIdle();
+        fixture.completeSource(3, "second");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertFalse(fixture.fatalFailures.isEmpty());
+        Assertions.assertTrue(
+            fixture.fatalFailures.stream().anyMatch(error ->
+                error.getCause().getMessage().contains(
+                    "final source response was already supplied"
                 )
             )
         );
-
-        Assertions.assertTrue(thrown.getMessage().contains("Registered"));
     }
 
     @Test
-    void pendingPreparationCancellationBlocksCleanupCompletion() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        var cause = new CancellationException("cancelled");
-        owner.cancelConnectionTurn(cause);
-        owner.cancelProcessing(cause);
-        Assertions.assertTrue(owner.beginPreparationCancellation());
+    void unexpectedPreparationExceptionReachesFatalBoundary() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(4, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
 
-        Assertions.assertThrows(IllegalStateException.class, owner::finishProcessing);
-        owner.acceptPreparationCancellationAcknowledgement();
-        Assertions.assertDoesNotThrow(owner::finishProcessing);
+        var failure = new IllegalStateException("transform failed");
+        fixture.preparer.completions.get(
+            TargetConnectionOwnerTestSupport.request(4)
+        ).completeExceptionally(failure);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertTrue(
+            fixture.fatalFailures.stream().anyMatch(error ->
+                error.getCause() == failure
+                    && error.getMessage().contains(
+                        "request preparation exceptional completion"
+                    )
+            )
+        );
     }
 
     @Test
-    void unfinishedProcessingStatesCannotFinish() {
-        var unregistered = ownerWith(new TestPrepared(null, null));
-        var unregisteredFailure = Assertions.assertThrows(
-            IllegalStateException.class,
-            unregistered::finishProcessing
-        );
-        Assertions.assertTrue(unregisteredFailure.getMessage().contains("Unregistered"));
+    void sourceResponseRoutesOnlyToItsRegisteredRequestIdentity() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(5, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
 
-        var registered = ownerWith(new TestPrepared(null, null));
-        registered.registerProcessing(processingRegistration());
-        var registeredFailure = Assertions.assertThrows(
-            IllegalStateException.class,
-            registered::finishProcessing
+        var missing = fixture.owner.submit(
+            new TargetConnectionOwner.SourceResponseComplete<>(
+                TargetConnectionOwnerTestSupport.CONNECTION,
+                TargetConnectionOwnerTestSupport.GENERATION,
+                TargetConnectionOwnerTestSupport.request(6),
+                "wrong-request"
+            )
         );
-        Assertions.assertTrue(registeredFailure.getMessage().contains("Registered"));
+        fixture.eventLoop.runUntilIdle();
 
-        var cancellationPending = ownerWith(new TestPrepared(null, null));
-        cancellationPending.registerProcessing(processingRegistration());
-        cancellationPending.cancelProcessing(new CancellationException("pending"));
-        var cancellationFailure = Assertions.assertThrows(
-            IllegalStateException.class,
-            cancellationPending::finishProcessing
+        Assertions.assertThrows(
+            CompletionException.class,
+            () -> missing.toCompletableFuture().join()
         );
         Assertions.assertTrue(
-            cancellationFailure.getMessage().contains("CancellationRequested")
-        );
-
-        var failed = ownerWith(new TestPrepared(null, null));
-        failed.markProcessingFailed(new IllegalStateException("failed"));
-        var processingFailure = Assertions.assertThrows(
-            IllegalStateException.class,
-            failed::finishProcessing
-        );
-        Assertions.assertTrue(processingFailure.getMessage().contains("Failed"));
-    }
-
-    @Test
-    void connectionAndProcessingMilestonesAreOneShot() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        owner.registerProcessing(processingRegistration());
-        owner.markTurnActive();
-        owner.markConnectionTurnFinished();
-
-        Assertions.assertThrows(IllegalStateException.class, owner::markConnectionTurnFinished);
-        owner.markConnectionTurnAccepted();
-        Assertions.assertThrows(IllegalStateException.class, owner::markConnectionTurnAccepted);
-
-        owner.recordProcessingCompletion(
-            new TargetConnectionOwner.RequestProcessingOutcome.TupleDurable()
-        );
-        owner.markProcessingMilestoneSubmitted();
-        Assertions.assertThrows(
-            IllegalStateException.class,
-            owner::markProcessingMilestoneSubmitted
-        );
-        owner.finishProcessing();
-        Assertions.assertThrows(IllegalStateException.class, owner::finishProcessing);
-    }
-
-    @Test
-    void processingCompletionAndFirstTargetWriteAreOneShot() {
-        var owner = ownerWith(new TestPrepared(null, null));
-        var cause = new CancellationException("cancelled");
-        owner.registerProcessing(processingRegistration());
-        owner.markTurnActive();
-        owner.markFirstTargetWriteSubmitted();
-        Assertions.assertTrue(owner.firstTargetWriteSubmitted());
-        Assertions.assertThrows(
-            IllegalStateException.class,
-            owner::markFirstTargetWriteSubmitted
-        );
-        owner.cancelConnectionTurn(cause);
-        owner.cancelProcessing(cause);
-        owner.beginProcessingCancellationAcknowledgement();
-        owner.acceptProcessingCancellationAcknowledgement(
-            new ReplayOutcomes.ProcessingCancellationResult.CancellationWon()
-        );
-        owner.recordProcessingCompletion(
-            new TargetConnectionOwner.RequestProcessingOutcome.RequestCleanupFinished(cause)
-        );
-
-        Assertions.assertThrows(
-            IllegalStateException.class,
-            () -> owner.recordProcessingCompletion(
-                new TargetConnectionOwner.RequestProcessingOutcome.RequestCleanupFinished(cause)
+            fixture.fatalFailures.stream().anyMatch(error ->
+                error.getMessage().contains("source-response routing")
             )
         );
-    }
-
-    @Test
-    void mutableStateRejectsAccessFromASecondThread() throws InterruptedException {
-        var owner = ownerWith(new TestPrepared(null, null));
-        var failure = new AtomicReference<Throwable>();
-        var nonOwner = new Thread(
-            () -> {
-                try {
-                    owner.markTurnActive();
-                } catch (Throwable t) {
-                    failure.set(t);
-                }
-            },
-            "request-owner-violator"
-        );
-
-        nonOwner.start();
-        nonOwner.join();
-
-        Assertions.assertInstanceOf(IllegalStateException.class, failure.get());
-        Assertions.assertTrue(failure.get().getMessage().contains("non-owner thread"));
-        Assertions.assertDoesNotThrow(owner::markTurnActive);
-    }
-
-    @Test
-    void nonOwnerCallerCannotClaimOwnershipBeforeConfiguredOwner() throws InterruptedException {
-        var prepared = new TestPrepared(null, null);
-        var owner = newOwner(prepared);
-        var failure = new AtomicReference<Throwable>();
-        var nonOwner = new Thread(
-            () -> {
-                try {
-                    owner.recordPreparation(new PreparationOutcome.Prepared<>(prepared));
-                } catch (Throwable t) {
-                    failure.set(t);
-                }
-            },
-            "request-owner-first-violator"
-        );
-
-        nonOwner.start();
-        nonOwner.join();
-
-        Assertions.assertInstanceOf(IllegalStateException.class, failure.get());
-        Assertions.assertTrue(failure.get().getMessage().contains("non-owner thread"));
-        Assertions.assertDoesNotThrow(
-            () -> owner.recordPreparation(new PreparationOutcome.Prepared<>(prepared))
-        );
-    }
-
-    @Test
-    void ownerThreadCallOutsideMailboxTaskIsRejected() {
-        var prepared = new TestPrepared(null, null);
-        var inMailbox = new AtomicBoolean();
-        var owner = new RequestReplayOwner<TestPrepared, String>(
-            PARTITION_GENERATION,
-            REQUEST_ID,
-            new TargetConnectionOwner.RequestPreparation<>() {
-                @Override
-                public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                    return CompletableFuture.completedFuture(
-                        new PreparationOutcome.Prepared<>(prepared)
-                    );
-                }
-
-                @Override
-                public CompletionStage<Void> cancel(CancellationException cause) {
-                    return CompletableFuture.completedFuture(null);
-                }
-            },
-            inMailbox::get
-        );
-
-        var failure = Assertions.assertThrows(
-            IllegalStateException.class,
-            () -> owner.recordPreparation(new PreparationOutcome.Prepared<>(prepared))
-        );
-        Assertions.assertTrue(failure.getMessage().contains("non-owner thread"));
-
-        inMailbox.set(true);
-        Assertions.assertDoesNotThrow(
-            () -> owner.recordPreparation(new PreparationOutcome.Prepared<>(prepared))
-        );
-    }
-
-    @Test
-    void releasePreparedClosesAfterConnectionTurnReleaseFailsAndIsOneShot() {
-        var connectionFailure = new Exception("connection turn release failed");
-        var closeFailure = new Exception("prepared close failed");
-        var prepared = new TestPrepared(connectionFailure, closeFailure);
-        var owner = ownerWith(prepared);
-
-        var thrown = Assertions.assertThrows(Exception.class, owner::releasePrepared);
-
-        Assertions.assertSame(connectionFailure, thrown);
-        Assertions.assertArrayEquals(new Throwable[] {closeFailure}, thrown.getSuppressed());
-        Assertions.assertEquals(1, prepared.connectionTurnFinishedCount);
-        Assertions.assertEquals(1, prepared.closeCount);
-
-        Assertions.assertDoesNotThrow(owner::releasePrepared);
-        Assertions.assertEquals(1, prepared.connectionTurnFinishedCount);
-        Assertions.assertEquals(1, prepared.closeCount);
-    }
-
-    @Test
-    void releasePreparedPreservesCloseErrorWhenConnectionTurnReleaseThrowsException() {
-        var connectionFailure = new Exception("connection turn release failed");
-        var closeFailure = new AssertionError("prepared close failed");
-        var prepared = new TestPrepared(connectionFailure, closeFailure);
-        var owner = ownerWith(prepared);
-
-        var thrown = Assertions.assertThrows(AssertionError.class, owner::releasePrepared);
-
-        Assertions.assertSame(closeFailure, thrown);
-        Assertions.assertArrayEquals(new Throwable[] {connectionFailure}, thrown.getSuppressed());
-        Assertions.assertEquals(1, prepared.connectionTurnFinishedCount);
-        Assertions.assertEquals(1, prepared.closeCount);
-    }
-
-    @Test
-    void releasePreparedPreservesConnectionTurnErrorAndSuppressesCloseFailure() {
-        var connectionFailure = new AssertionError("connection turn release failed");
-        var closeFailure = new Exception("prepared close failed");
-        var prepared = new TestPrepared(connectionFailure, closeFailure);
-        var owner = ownerWith(prepared);
-
-        var thrown = Assertions.assertThrows(AssertionError.class, owner::releasePrepared);
-
-        Assertions.assertSame(connectionFailure, thrown);
-        Assertions.assertArrayEquals(new Throwable[] {closeFailure}, thrown.getSuppressed());
-        Assertions.assertEquals(1, prepared.connectionTurnFinishedCount);
-        Assertions.assertEquals(1, prepared.closeCount);
-    }
-
-    private static RequestReplayOwner<TestPrepared, String> ownerWith(TestPrepared prepared) {
-        var owner = newOwner(prepared);
-        owner.recordPreparation(new PreparationOutcome.Prepared<>(prepared));
-        return owner;
-    }
-
-    private static RequestReplayOwner<TestPrepared, String> newOwner(TestPrepared prepared) {
-        var ownerThread = Thread.currentThread();
-        return new RequestReplayOwner<TestPrepared, String>(
-            PARTITION_GENERATION,
-            REQUEST_ID,
-            new TargetConnectionOwner.RequestPreparation<>() {
-                @Override
-                public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                    return CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(prepared));
-                }
-
-                @Override
-                public CompletionStage<Void> cancel(CancellationException cause) {
-                    return CompletableFuture.completedFuture(null);
-                }
-            },
-            () -> Thread.currentThread() == ownerThread
-        );
-    }
-
-    private static TargetConnectionOwner.RequestProcessingRegistration processingRegistration() {
-        return new TargetConnectionOwner.RequestProcessingRegistration(
-            new CompletableFuture<>(),
-            ignored -> CompletableFuture.completedFuture(
-                new ReplayOutcomes.ProcessingCancellationResult.CancellationWon()
-            )
-        );
-    }
-
-    private static final class TestPrepared implements TargetConnectionOwner.PreparedRequest {
-        private final Throwable connectionTurnFailure;
-        private final Throwable closeFailure;
-        private int connectionTurnFinishedCount;
-        private int closeCount;
-
-        private TestPrepared(Throwable connectionTurnFailure, Throwable closeFailure) {
-            this.connectionTurnFailure = connectionTurnFailure;
-            this.closeFailure = closeFailure;
-        }
-
-        @Override
-        public void connectionTurnFinished() throws Exception {
-            connectionTurnFinishedCount++;
-            throwFailure(connectionTurnFailure);
-        }
-
-        @Override
-        public void close() throws Exception {
-            closeCount++;
-            throwFailure(closeFailure);
-        }
-
-        private static void throwFailure(Throwable failure) throws Exception {
-            if (failure instanceof Error error) {
-                throw error;
-            }
-            if (failure instanceof Exception exception) {
-                throw exception;
-            }
-        }
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G11)
