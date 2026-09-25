@@ -24,6 +24,7 @@ import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingCo
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.intake.PartitionIntakeState;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
@@ -126,6 +127,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull ManagedPhysicalTupleSinkFactory<T> tupleSinkFactory,
         @NonNull Consumer<T> tupleReleaser,
         @NonNull Duration tupleRetryDelay,
+        @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        int maximumResponseAttempts,
         int maximumTargetAttempts
     ) {
         public Configuration {
@@ -134,6 +137,9 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             }
             if (maximumTargetAttempts <= 0) {
                 throw new IllegalArgumentException("maximumTargetAttempts must be positive");
+            }
+            if (maximumResponseAttempts <= 0) {
+                throw new IllegalArgumentException("maximumResponseAttempts must be positive");
             }
         }
     }
@@ -182,7 +188,9 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             sourceInputs,
             connectionAssemblySink,
             fatalHandler::accept,
-            rootContext.getReplayIntakeMetrics()
+            rootContext.getReplayIntakeMetrics(),
+            ReplayIntakeOwner.RecordObserver.NOOP,
+            configuration.brokerTimeConfiguration()
         );
         this.sourceOwner = new KafkaSourceOwner(
             new KafkaConsumerSourcePort(consumer, kafkaPollTimeout),
@@ -539,6 +547,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             assemblySink.new IntakeLifecycleSink(connectionId),
             fatalHandler::accept,
             org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP,
+            configuration.maximumResponseAttempts(),
             () -> assemblySink.releaseTerminatedConnection(
                 connectionId,
                 Objects.requireNonNull(
@@ -735,7 +744,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         ) {
             var connectionId = requestId.connectionProcessingId();
             requireConnection(connectionId).owner.submit(
-                new TargetConnectionOwner.SourceResponseComplete<
+                new TargetConnectionOwner.FinalSourceResponseComplete<
                     HttpMessageAndTimestamp.Request,
                     HttpMessageAndTimestamp.Response
                 >(
@@ -749,16 +758,51 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         }
 
         @Override
+        public void onRetrySourceResponseComplete(
+            ReplayRequestId requestId,
+            HttpMessageAndTimestamp.Response response
+        ) {
+            var connectionId = requestId.connectionProcessingId();
+            requireConnection(connectionId).owner.submit(
+                new TargetConnectionOwner.RetrySourceResponseComplete<
+                    HttpMessageAndTimestamp.Request,
+                    HttpMessageAndTimestamp.Response
+                >(connectionId, connectionId.generation(), requestId, response)
+            );
+        }
+
+        @Override
+        public void onSourceResponseUnavailableForRetry(ReplayRequestId requestId) {
+            var connectionId = requestId.connectionProcessingId();
+            requireConnection(connectionId).owner.submit(
+                new TargetConnectionOwner.SourceResponseUnavailableForRetry<
+                    HttpMessageAndTimestamp.Request,
+                    HttpMessageAndTimestamp.Response
+                >(connectionId, connectionId.generation(), requestId)
+            );
+        }
+
+        @Override
         public void onSourceResponseIncomplete(
             ReplayRequestId requestId,
             IncompleteReason reason
         ) {
             var connectionId = requestId.connectionProcessingId();
             requireConnection(connectionId).owner.submit(
-                new TargetConnectionOwner.SourceResponseIncomplete<
+                new TargetConnectionOwner.FinalSourceResponseIncomplete<
                     HttpMessageAndTimestamp.Request,
                     HttpMessageAndTimestamp.Response
                 >(connectionId, connectionId.generation(), requestId, reason.name())
+            );
+        }
+
+        @Override
+        public void onCapturedConnectionExpired(ConnectionProcessingId connectionId) {
+            requireConnection(connectionId).owner.submit(
+                new TargetConnectionOwner.CapturedConnectionExpired<
+                    HttpMessageAndTimestamp.Request,
+                    HttpMessageAndTimestamp.Response
+                >(connectionId, connectionId.generation())
             );
         }
 

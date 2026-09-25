@@ -130,11 +130,17 @@ class TargetConnectionOwnerFirstWriteTest {
         Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
 
         fixture.eventLoop.advance(Duration.ofSeconds(1));
-        fixture.targetChannel.attempt(1).noResponse();
-        fixture.eventLoop.runUntilIdle();
-        fixture.eventLoop.advance(Duration.ofSeconds(1));
+        for (int attempt = 1; attempt < 5; attempt++) {
+            fixture.targetChannel.attempt(attempt).noResponse();
+            fixture.eventLoop.runUntilIdle();
+            fixture.eventLoop.advance(Duration.ofSeconds(1));
+        }
 
-        Assertions.assertEquals(3, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(
+            6,
+            fixture.targetChannel.attempts.size(),
+            "the response-only cap must not limit the no-response retry path"
+        );
         Assertions.assertEquals(1, fixture.activePermits.get());
         Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
 
@@ -145,11 +151,11 @@ class TargetConnectionOwnerFirstWriteTest {
             cancellation
         ));
         fixture.eventLoop.runUntilIdle();
-        fixture.targetChannel.attempt(2).abort.complete(null);
+        fixture.targetChannel.attempt(5).abort.complete(null);
         fixture.eventLoop.runUntilIdle();
         fixture.eventLoop.advance(Duration.ofSeconds(10));
 
-        Assertions.assertEquals(3, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(6, fixture.targetChannel.attempts.size());
         Assertions.assertEquals(0, fixture.activePermits.get());
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }

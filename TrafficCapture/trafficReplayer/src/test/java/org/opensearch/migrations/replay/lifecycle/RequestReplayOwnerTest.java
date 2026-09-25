@@ -70,7 +70,7 @@ class RequestReplayOwnerTest {
         Assertions.assertEquals(List.of("turn:1"), fixture.lifecycleEvents);
         Assertions.assertTrue(fixture.tupleSink.writes.isEmpty());
 
-        fixture.completeSource(1, "later-complete-source");
+        fixture.completeFinalSource(1, "later-complete-source");
         fixture.eventLoop.runUntilIdle();
 
         Assertions.assertEquals(
@@ -114,7 +114,7 @@ class RequestReplayOwnerTest {
 
         fixture.completeSource(3, "first");
         fixture.eventLoop.runUntilIdle();
-        fixture.completeSource(3, "second");
+        fixture.completeFinalSource(3, "second");
         fixture.eventLoop.runUntilIdle();
 
         Assertions.assertFalse(fixture.fatalFailures.isEmpty());
@@ -125,6 +125,39 @@ class RequestReplayOwnerTest {
                 )
             )
         );
+    }
+
+    @Test
+    void responsePathStopsAfterTheConfiguredFourAttempts() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.retryPolicy.decisions.addAll(List.of(
+            new ReplayOutcomes.RetryDecision.RetryRequired(),
+            new ReplayOutcomes.RetryDecision.RetryRequired(),
+            new ReplayOutcomes.RetryDecision.RetryRequired(),
+            new ReplayOutcomes.RetryDecision.RetryRequired()
+        ));
+        fixture.admit(6, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(6);
+        fixture.completeSource(6, "source");
+        fixture.eventLoop.runUntilIdle();
+
+        for (int attempt = 0; attempt < 4; attempt++) {
+            fixture.targetChannel.attempt(attempt).targetResponse("target-" + attempt);
+            fixture.eventLoop.runUntilIdle();
+            if (attempt < 3) {
+                fixture.eventLoop.advance(java.time.Duration.ofSeconds(1));
+            }
+        }
+
+        Assertions.assertEquals(4, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(4, fixture.retryPolicy.observedSources.size());
+        Assertions.assertEquals(List.of("turn:6"), fixture.lifecycleEvents);
+        Assertions.assertEquals(
+            List.of("source-6|target-3|source"),
+            fixture.tupleSink.writes
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
@@ -156,7 +189,7 @@ class RequestReplayOwnerTest {
         fixture.eventLoop.runUntilIdle();
 
         var missing = fixture.owner.submit(
-            new TargetConnectionOwner.SourceResponseComplete<>(
+            new TargetConnectionOwner.FinalSourceResponseComplete<>(
                 TargetConnectionOwnerTestSupport.CONNECTION,
                 TargetConnectionOwnerTestSupport.GENERATION,
                 TargetConnectionOwnerTestSupport.request(6),

@@ -83,6 +83,23 @@ public interface SourceAssemblySink {
     );
 
     /**
+     * The complete response frozen as the request's retry-policy input ({@code §11}).
+     *
+     * <p>This is deliberately distinct from {@link #onSourceResponseComplete}: the retry input may become
+     * unavailable before a later response completes for final tuple output. Each receiver therefore accepts
+     * its own one-shot input rather than inferring one lifetime from the other.</p>
+     */
+    default void onRetrySourceResponseComplete(
+        ReplayRequestId replayRequestId,
+        HttpMessageAndTimestamp.Response response
+    ) {}
+
+    /**
+     * The request's retry-policy input was irreversibly frozen as unavailable ({@code §11}).
+     */
+    default void onSourceResponseUnavailableForRetry(ReplayRequestId replayRequestId) {}
+
+    /**
      * Replay intake stopped assembling this response ({@code §9.2}).
      *
      * <p>This states something about the replayer, not about the captured bytes: {@code §9.2} reserves it for
@@ -108,6 +125,12 @@ public interface SourceAssemblySink {
         long capturedOrdinal,
         Instant closeTime
     );
+
+    /**
+     * Broker-time expiration ended this process-local lifetime while preserving its captured identity for
+     * possible fresh reconstruction ({@code §10.3}).
+     */
+    default void onCapturedConnectionExpired(ConnectionProcessingId connectionProcessingId) {}
 
     /**
      * Replay intake handled the matching owner's terminal completion and removed its source-side lifetime.

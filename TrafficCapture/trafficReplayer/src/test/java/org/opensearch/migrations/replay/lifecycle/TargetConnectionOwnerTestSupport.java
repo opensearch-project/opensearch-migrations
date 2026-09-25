@@ -192,7 +192,17 @@ final class TargetConnectionOwnerTestSupport {
         }
 
         void completeSource(long ordinal, String response) {
-            owner.submit(new TargetConnectionOwner.SourceResponseComplete<>(
+            owner.submit(new TargetConnectionOwner.RetrySourceResponseComplete<>(
+                CONNECTION,
+                GENERATION,
+                request(ordinal),
+                response
+            ));
+            completeFinalSource(ordinal, response);
+        }
+
+        void completeFinalSource(long ordinal, String response) {
+            owner.submit(new TargetConnectionOwner.FinalSourceResponseComplete<>(
                 CONNECTION,
                 GENERATION,
                 request(ordinal),
@@ -202,7 +212,8 @@ final class TargetConnectionOwnerTestSupport {
         }
 
         void incompleteSource(long ordinal) {
-            owner.submit(new TargetConnectionOwner.SourceResponseIncomplete<>(
+            unavailableForRetry(ordinal);
+            owner.submit(new TargetConnectionOwner.FinalSourceResponseIncomplete<>(
                 CONNECTION,
                 GENERATION,
                 request(ordinal),

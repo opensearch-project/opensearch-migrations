@@ -71,6 +71,12 @@ public final class ReplayIntakeOwner {
         default void requestReconstituted() {}
         default void responseCompleted(boolean keptAlive) {}
         default void responseIncomplete(SourceAssemblySink.IncompleteReason reason) {}
+        default void retrySourceResponseCompleted() {}
+        default void retrySourceResponseUnavailable() {}
+        default void writerTimeTransition(PartitionIntakeState.WriterTimeTransition transition) {}
+        default void sourceConnectionsExpired(int count) {}
+        default void targetConnectionExpirationSent() {}
+        default void brokerTimeViolation() {}
         default void capturedCloseAccepted() {}
         default void captureProtocolViolation() {}
         default void recordBatchRejectedAfterProtocolViolation() {}
@@ -94,6 +100,7 @@ public final class ReplayIntakeOwner {
     private final FatalHandler fatalHandler;
     private final Metrics metrics;
     private final RecordObserver recordObserver;
+    private final PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration;
     private final Thread ownerThread;
     private final OwnerThreadGuard ownerThreadGuard;
     private final CompletableFuture<Void> termination = new CompletableFuture<>();
@@ -110,6 +117,7 @@ public final class ReplayIntakeOwner {
         @NonNull FatalHandler fatalHandler
     ) {
         this(inputQueue, sourceInputs, assemblySink, fatalHandler, Metrics.NOOP, RecordObserver.NOOP,
+            new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
             runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
@@ -121,6 +129,7 @@ public final class ReplayIntakeOwner {
         @NonNull Metrics metrics
     ) {
         this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, RecordObserver.NOOP,
+            new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
             runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
@@ -133,7 +142,21 @@ public final class ReplayIntakeOwner {
         @NonNull RecordObserver recordObserver
     ) {
         this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, recordObserver,
+            new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
             runnable -> new Thread(runnable, "replay-intake-owner"));
+    }
+
+    public ReplayIntakeOwner(
+        @NonNull ReplayIntakeInputQueue inputQueue,
+        @NonNull KafkaSourceInputQueue sourceInputs,
+        @NonNull SourceAssemblySink assemblySink,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull Metrics metrics,
+        @NonNull RecordObserver recordObserver,
+        @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration
+    ) {
+        this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, recordObserver,
+            brokerTimeConfiguration, runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
     ReplayIntakeOwner(
@@ -143,12 +166,14 @@ public final class ReplayIntakeOwner {
         @NonNull FatalHandler fatalHandler,
         @NonNull Metrics metrics,
         @NonNull RecordObserver recordObserver,
+        @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
         @NonNull ThreadFactory threadFactory
     ) {
         this.inputQueue = inputQueue;
         this.sourceInputs = sourceInputs;
         this.metrics = metrics;
         this.recordObserver = recordObserver;
+        this.brokerTimeConfiguration = brokerTimeConfiguration;
         this.assemblySink = new ObservedSourceAssemblySink(assemblySink);
         this.fatalHandler = fatalHandler;
         this.ownerThread = Objects.requireNonNull(threadFactory.newThread(this::runLoop));
@@ -219,6 +244,8 @@ public final class ReplayIntakeOwner {
                             throw failure;
                         }
                     }
+                    case ReplayIntakeInputQueue.ProcessingFence fence ->
+                        fence.handled().complete(null);
                     case ReplayIntakeInputQueue.StopAfterDraining ignored -> {
                         metrics.ownerStoppedAfterDraining();
                         termination.complete(null);
@@ -255,12 +282,10 @@ public final class ReplayIntakeOwner {
             case ReplayIntakeInput.GracefulGenerationCancellation ignored -> unimplemented(input, "G8");
             case ReplayIntakeInput.ForceGenerationCancellation ignored -> unimplemented(input, "G8");
             case ReplayIntakeInput.ConnectionCleanupFinished ignored -> unimplemented(input, "G8");
-            // REBUILD-LIMBO-NOTE(G6): §14's finite-input expiration rules, which need §10's writer time state.
-            case ReplayIntakeInput.FinalizedArchivePartitionEnd ignored -> unimplemented(input, "G6");
-            // G7 adds the supply-count transition. G5 still accepts the typed milestone and validates its
-            // generation so the production completion chain has a real receiver.
+            case ReplayIntakeInput.FinalizedArchivePartitionEnd finalized ->
+                applyFinalizedArchivePartitionEnd(finalized);
             case ReplayIntakeInput.ConnectionRequestFinished finished ->
-                requireGeneration(finished.generation());
+                requireGeneration(finished.generation()).connectionRequestFinished(finished.requestId());
             case ReplayIntakeInput.ConnectionOwnerFinished finished ->
                 applyConnectionOwnerFinished(finished);
         }
@@ -318,7 +343,8 @@ public final class ReplayIntakeOwner {
             this::isOwnerThreadOrUnstarted,
             this::submitRecordProcessingFinished,
             metrics::activeRecordTrackersChanged,
-            metrics::recordTrackerRetired
+            metrics::recordTrackerRetired,
+            brokerTimeConfiguration
         );
     }
 
@@ -353,8 +379,18 @@ public final class ReplayIntakeOwner {
     private void applyRequestProcessingFinished(ReplayIntakeInput.RequestProcessingFinished finished) {
         // REBUILD-LIMBO-NOTE(G8): cancellation can make a late completion stale after generation cleanup.
         // G8 adds the cancellation/cleanup state that decides whether to consume or ignore that late input.
-        requireGeneration(finished.generation())
-            .associationFinished(new RecordAssociationId.Request(finished.requestId()));
+        var state = requireGeneration(finished.generation());
+        state.associationFinished(new RecordAssociationId.Request(finished.requestId()));
+        state.removeRequest(finished.requestId());
+    }
+
+    private void applyFinalizedArchivePartitionEnd(
+        ReplayIntakeInput.FinalizedArchivePartitionEnd finalized
+    ) {
+        requireGeneration(finalized.generation()).resolveAllRetryBoundaries().forEach(requestId -> {
+            assemblySink.onSourceResponseUnavailableForRetry(requestId);
+            metrics.retrySourceResponseUnavailable();
+        });
     }
 
     private void applyConnectionOwnerFinished(ReplayIntakeInput.ConnectionOwnerFinished finished) {
@@ -385,18 +421,32 @@ public final class ReplayIntakeOwner {
                 "record " + record.recordId() + " does not belong to generation " + state.generation()
             );
         }
-        recordObserver.beforeRecordApplied(record);
         // 2. Create its RecordWorkTracker.
         state.registerRecord(record.recordId());
         // 3. Validate partition LogAppendTime movement before using the record as time evidence.
-        state.observeLogAppendTime(record.logAppendTimeMillis());
+        try {
+            state.observeLogAppendTime(record.logAppendTimeMillis());
+        } catch (PartitionIntakeState.BrokerTimeViolation violation) {
+            metrics.brokerTimeViolation();
+            throw violation;
+        }
         // 4. Resolve retry-source-response boundaries crossed by this higher-offset record.
+        state.resolveRetryBoundaries(record.logAppendTimeMillis()).forEach(requestId -> {
+            assemblySink.onSourceResponseUnavailableForRetry(requestId);
+            metrics.retrySourceResponseUnavailable();
+        });
         // 5. Apply broker-time expiration that this record proves for existing writer state.
-        // REBUILD-LIMBO-NOTE(G6): steps 4 and 5. §11's boundary resolution must emit
-        // SourceResponseUnavailableForRetry *before* step 7 applies the crossing payload, and §10.3's
-        // expiration evaluation runs here so a later record can prove another writer's expiry.
+        state.writersExpiredAt(record.logAppendTimeMillis()).forEach(writerNodeId -> {
+            var expiration = state.expireConnectionsForWriter(writerNodeId);
+            metrics.sourceConnectionsExpired(expiration.expiredSourceConnections());
+            expiration.targetOwnersToExpire().forEach(connectionProcessingId -> {
+                assemblySink.onCapturedConnectionExpired(connectionProcessingId);
+                metrics.targetConnectionExpirationSent();
+            });
+        });
 
         // 6. Decode CaptureRecord.payload. 7. Apply the recognized payload.
+        recordObserver.beforeRecordApplied(record);
         if (!applyPayload(state, record)) {
             state.captureProtocolViolationAt(record.recordId());
             return false;
@@ -422,11 +472,18 @@ public final class ReplayIntakeOwner {
         var envelope = record.envelope();
         return switch (envelope.getPayloadCase()) {
             case TRAFFICSTREAM -> applyTrafficStream(state, record, envelope.getTrafficStream());
-            // REBUILD-LIMBO-NOTE(G6): §10.2's writer time state is what a heartbeat updates. Until then a
-            // heartbeat is correctly a record with no associations, which §17.1 requires to complete
-            // immediately -- so this branch is already right about record accounting and incomplete only
-            // about time.
-            case WRITERPARTITIONHEARTBEAT -> true;
+            case WRITERPARTITIONHEARTBEAT -> {
+                var heartbeat = envelope.getWriterPartitionHeartbeat();
+                metrics.writerTimeTransition(
+                    state.observeHeartbeat(
+                        heartbeat.getWriterNodeId(),
+                        record.logAppendTimeMillis(),
+                        heartbeat.getHeartbeatIntervalMillis(),
+                        heartbeat.hasEmittedAtMillis() ? heartbeat.getEmittedAtMillis() : null
+                    )
+                );
+                yield true;
+            }
             // §7.1: "CaptureCapabilityProbe creates no writer or connection state." Its timestamp may still
             // serve as time evidence, which step 3 has already recorded.
             case CAPTURECAPABILITYPROBE -> true;
@@ -453,6 +510,9 @@ public final class ReplayIntakeOwner {
         ApplicationKafkaRecord record,
         TrafficStream trafficStream
     ) {
+        metrics.writerTimeTransition(
+            state.observeTrafficWriter(trafficStream.getNodeId(), record.logAppendTimeMillis())
+        );
         var capturedConnectionId =
             new CapturedConnectionId(trafficStream.getNodeId(), trafficStream.getConnectionId());
         SourceConnectionState connection;
@@ -533,6 +593,8 @@ public final class ReplayIntakeOwner {
             Instant requestEndOfMessageSourceTime,
             long requestCompletingLogAppendTime
         ) {
+            requireGeneration(replayRequestId.connectionProcessingId().generation())
+                .registerRequest(replayRequestId, requestCompletingLogAppendTime);
             metrics.requestReconstituted();
             delegate.onRequestReconstituted(
                 replayRequestId,
@@ -551,6 +613,9 @@ public final class ReplayIntakeOwner {
             long requestCompletingLogAppendTime,
             org.opensearch.migrations.replay.tracing.IReplayContexts.IRequestContext replayContext
         ) {
+            var requestId = replayContext.getRequestId();
+            requireGeneration(requestId.connectionProcessingId().generation())
+                .registerRequest(requestId, requestCompletingLogAppendTime);
             delegate.onRequestReconstituted(
                 request,
                 requestEndOfMessageSourceTime,
@@ -565,6 +630,11 @@ public final class ReplayIntakeOwner {
             HttpMessageAndTimestamp.Response response,
             boolean keptAlive
         ) {
+            var state = requireGeneration(replayRequestId.connectionProcessingId().generation());
+            if (state.sourceResponseCompleted(replayRequestId)) {
+                delegate.onRetrySourceResponseComplete(replayRequestId, response);
+                metrics.retrySourceResponseCompleted();
+            }
             delegate.onSourceResponseComplete(replayRequestId, response, keptAlive);
             metrics.responseCompleted(keptAlive);
         }
@@ -578,6 +648,11 @@ public final class ReplayIntakeOwner {
             ReplayRequestId replayRequestId,
             IncompleteReason reason
         ) {
+            var state = requireGeneration(replayRequestId.connectionProcessingId().generation());
+            if (state.sourceResponseIncomplete(replayRequestId)) {
+                delegate.onSourceResponseUnavailableForRetry(replayRequestId);
+                metrics.retrySourceResponseUnavailable();
+            }
             delegate.onSourceResponseIncomplete(replayRequestId, reason);
             metrics.responseIncomplete(reason);
         }
@@ -599,6 +674,24 @@ public final class ReplayIntakeOwner {
         @Override
         public void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId) {
             delegate.onConnectionOwnerFinished(connectionProcessingId);
+        }
+
+        @Override
+        public void onRetrySourceResponseComplete(
+            ReplayRequestId replayRequestId,
+            HttpMessageAndTimestamp.Response response
+        ) {
+            delegate.onRetrySourceResponseComplete(replayRequestId, response);
+        }
+
+        @Override
+        public void onSourceResponseUnavailableForRetry(ReplayRequestId replayRequestId) {
+            delegate.onSourceResponseUnavailableForRetry(replayRequestId);
+        }
+
+        @Override
+        public void onCapturedConnectionExpired(ConnectionProcessingId connectionProcessingId) {
+            delegate.onCapturedConnectionExpired(connectionProcessingId);
         }
     }
 

@@ -26,12 +26,14 @@ import lombok.NonNull;
  */
 public final class ReplayIntakeInputQueue {
 
-    sealed interface Entry permits SubmittedInput, StopAfterDraining {}
+    sealed interface Entry permits SubmittedInput, ProcessingFence, StopAfterDraining {}
 
     record SubmittedInput(
         @NonNull ReplayIntakeInput input,
         CompletableFuture<Void> handled
     ) implements Entry {}
+
+    record ProcessingFence(@NonNull CompletableFuture<Void> handled) implements Entry {}
 
     enum StopAfterDraining implements Entry {
         INSTANCE
@@ -63,6 +65,21 @@ public final class ReplayIntakeInputQueue {
         if (!entries.offer(new SubmittedInput(input, handled))) {
             handled.completeExceptionally(
                 new IllegalStateException("Replay-intake input queue refused " + input)
+            );
+        }
+        return handled.minimalCompletionStage();
+    }
+
+    /** Completes after the owner has applied every input accepted before this FIFO fence. */
+    public synchronized CompletionStage<Void> awaitPriorInputsHandled() {
+        var handled = new CompletableFuture<Void>();
+        if (!accepting) {
+            handled.completeExceptionally(
+                new IllegalStateException("Replay-intake input queue is closed; refusing processing fence")
+            );
+        } else if (!entries.offer(new ProcessingFence(handled))) {
+            handled.completeExceptionally(
+                new IllegalStateException("Replay-intake input queue refused processing fence")
             );
         }
         return handled.minimalCompletionStage();
@@ -111,6 +128,10 @@ public final class ReplayIntakeInputQueue {
             if (entry instanceof SubmittedInput submitted && submitted.handled() != null) {
                 submitted.handled().completeExceptionally(
                     new IllegalStateException("Replay-intake owner closed before applying input")
+                );
+            } else if (entry instanceof ProcessingFence fence) {
+                fence.handled().completeExceptionally(
+                    new IllegalStateException("Replay-intake owner closed before reaching processing fence")
                 );
             }
         }

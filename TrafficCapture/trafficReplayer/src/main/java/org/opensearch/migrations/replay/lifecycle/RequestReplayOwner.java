@@ -324,6 +324,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private final LongSupplier nanoTime;
     private final RequestPreparer<S, P> preparer;
     private final RetryPolicy<R, F> retryPolicy;
+    private final int maximumResponseAttempts;
     private final TargetChannelPort<P, R> targetChannel;
     private final TupleFactory<S, P, R, F, T> tupleFactory;
     private final TupleWriter<T> tupleWriter;
@@ -369,8 +370,12 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull ResourceReleaser<S, P, R, F> resourceReleaser,
         @NonNull ConnectionCallbacks callbacks,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook
+        @NonNull OutstandingOperationRegistry.CountHook countHook,
+        int maximumResponseAttempts
     ) {
+        if (maximumResponseAttempts <= 0) {
+            throw new IllegalArgumentException("maximumResponseAttempts must be positive");
+        }
         this.nominalTargetTime = nominalTargetTime;
         this.sourceRequest = sourceRequest;
         this.replayContext = replayContext;
@@ -379,6 +384,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         this.nanoTime = nanoTime;
         this.preparer = preparer;
         this.retryPolicy = retryPolicy;
+        this.maximumResponseAttempts = maximumResponseAttempts;
         this.targetChannel = targetChannel;
         this.tupleFactory = tupleFactory;
         this.tupleWriter = tupleWriter;
@@ -535,20 +541,16 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         tryStartTuple();
     }
 
-    void sourceResponseComplete(F response, boolean keptAlive) {
+    void retrySourceResponseComplete(F response) {
         requireOwnerThread();
-        if (finalSourceState instanceof FinalSourceState.Unresolved<F>) {
-            finalSourceState = new FinalSourceState.Complete<>(response, keptAlive);
-        } else {
+        if (!(retrySourceState instanceof RetrySourceState.Unresolved<F>)) {
             impossible(
-                "complete final source response",
-                new IllegalStateException("final source response was already supplied")
+                "complete retry source response",
+                new IllegalStateException("retry source response was already supplied")
             );
             return;
         }
-        if (retrySourceState instanceof RetrySourceState.Unresolved<F>) {
-            retrySourceState = new RetrySourceState.Complete<>(response);
-        }
+        retrySourceState = new RetrySourceState.Complete<>(response);
         sourceResponseChanged();
     }
 
@@ -565,20 +567,30 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         sourceResponseChanged();
     }
 
-    void sourceResponseIncomplete(String reason) {
+    void finalSourceResponseComplete(F response, boolean keptAlive) {
         requireOwnerThread();
         if (finalSourceState instanceof FinalSourceState.Unresolved<F>) {
-            finalSourceState = new FinalSourceState.Incomplete<>(reason);
+            finalSourceState = new FinalSourceState.Complete<>(response, keptAlive);
         } else {
+            impossible(
+                "complete final source response",
+                new IllegalStateException("final source response was already supplied")
+            );
+            return;
+        }
+        sourceResponseChanged();
+    }
+
+    void finalSourceResponseIncomplete(String reason) {
+        requireOwnerThread();
+        if (!(finalSourceState instanceof FinalSourceState.Unresolved<F>)) {
             impossible(
                 "incomplete final source response",
                 new IllegalStateException("final source response was already supplied")
             );
             return;
         }
-        if (retrySourceState instanceof RetrySourceState.Unresolved<F>) {
-            retrySourceState = new RetrySourceState.Unavailable<>();
-        }
+        finalSourceState = new FinalSourceState.Incomplete<>(reason);
         sourceResponseChanged();
     }
 
@@ -1041,7 +1053,17 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         switch (decision) {
-            case RetryDecision.RetryRequired ignored -> scheduleRetry();
+            case RetryDecision.RetryRequired ignored -> {
+                if (responseAttemptCount() >= maximumResponseAttempts) {
+                    targetServerState = new TargetServerState.Finished<>(response);
+                    emitConnectionTurnFinished(
+                        ConnectionTurnCompletion.TARGET_WORK_FINISHED
+                    );
+                    tryStartTuple();
+                } else {
+                    scheduleRetry();
+                }
+            }
             case RetryDecision.TargetServerAttemptsFinished ignored -> {
                 targetServerState = new TargetServerState.Finished<>(response);
                 emitConnectionTurnFinished(
@@ -1050,6 +1072,12 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 tryStartTuple();
             }
         }
+    }
+
+    private long responseAttemptCount() {
+        return attemptHistory.stream()
+            .filter(TargetAttemptOutcome.TargetResponseObtained.class::isInstance)
+            .count();
     }
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
