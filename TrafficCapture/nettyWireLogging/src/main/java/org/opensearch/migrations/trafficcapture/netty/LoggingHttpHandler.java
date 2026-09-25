@@ -225,6 +225,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     private ScheduledFuture<?> requestAssemblyDeadline;
     private final ByteArrayOutputStream pendingSourceResponseBytes = new ByteArrayOutputStream();
     private boolean contextsClosed;
+    private int bytesWrittenAwaitingResponseContext;
 
     private record ClassifiedResponseBytes(boolean interim, byte[] data) {}
 
@@ -302,10 +303,15 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             if (ctx.channel().isOpen()) {
                 ctx.close();
             }
-            closeContextsOnce();
         } finally {
-            closeCaptureOnce(Instant.now());
-            super.handlerRemoved(ctx);
+            try {
+                // Capture finalization reports the connection's last written bytes through the
+                // message context, so the instrumentation scopes have to outlive it.
+                closeCaptureOnce(Instant.now());
+            } finally {
+                closeContextsOnce();
+                super.handlerRemoved(ctx);
+            }
         }
     }
 
@@ -315,6 +321,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
         cancelConnectionDeadline();
         cancelRequestAssemblyDeadline();
+        reportRemainingBytesWrittenToClient();
         if (!captureProcessState.shouldCapture()) {
             pendingSourceResponseBytes.reset();
             captureCloseFuture = CompletableFuture.completedFuture(null);
@@ -414,14 +421,18 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             return;
         }
 
+        var timestamp = Instant.now();
         IWireCaptureContexts.IRequestContext requestContext;
         if (!(messageContext instanceof IWireCaptureContexts.IRequestContext)) {
+            if (!finishResponseBeforeNextRequest(ctx, timestamp)) {
+                rejectSourceTraffic(ctx, msg);
+                return;
+            }
             messageContext = requestContext = messageContext.createNextRequestContext();
         } else {
             requestContext = (IWireCaptureContexts.IRequestContext) messageContext;
         }
 
-        var timestamp = Instant.now();
         var requestParsingHandler = getHandlerThatHoldsParsedHttpRequest();
         var requestDecoder = (SimpleHttpRequestDecoder) httpDecoderChannel.pipeline().first();
         var bb = ((ByteBuf) msg);
@@ -575,7 +586,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         var bb = (ByteBuf) msg;
         var timestamp = Instant.now();
-        if (messageContext instanceof IWireCaptureContexts.IResponseContext responseContext) {
+        var bytesReachingTheClient = bb.readableBytes();
+        if (messageContext instanceof IWireCaptureContexts.IResponseContext) {
             if (captureProcessState.shouldCapture()
                 && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()
                 && !runRequiredCaptureOperation(ctx, () -> trafficOffloader.addWriteEvent(timestamp, bb))) {
@@ -583,15 +595,14 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                 promise.tryFailure(new IOException("Required response capture failed"));
                 return;
             }
-            responseContext.onBytesWritten(bb.readableBytes());
+            reportBytesWrittenToClient(bytesReachingTheClient);
             super.write(ctx, msg, promise);
             return;
         }
 
         var classifiedBytes = classifySourceResponseBytes(bb);
-        IWireCaptureContexts.IResponseContext responseContext = null;
         if (classifiedBytes.stream().anyMatch(classified -> !classified.interim())) {
-            messageContext = responseContext = messageContext.createResponseContext();
+            messageContext = messageContext.createResponseContext();
         }
 
         if (captureProcessState.shouldCapture()
@@ -618,16 +629,24 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                 return;
             }
         }
-        if (responseContext != null) {
-            responseContext.onBytesWritten(
-                classifiedBytes.stream()
-                    .filter(classified -> !classified.interim())
-                    .mapToInt(classified -> classified.data().length)
-                    .sum()
-            );
-        }
+        reportBytesWrittenToClient(bytesReachingTheClient);
 
         super.write(ctx, msg, promise);
+    }
+
+    private boolean finishResponseBeforeNextRequest(ChannelHandlerContext ctx, Instant timestamp) {
+        if (pendingSourceResponseBytes.size() > 0) {
+            if (!captureProcessState.shouldCapture()) {
+                pendingSourceResponseBytes.reset();
+            } else if (!runRequiredCaptureOperation(
+                ctx,
+                () -> flushUnclassifiedSourceResponseBytes(timestamp)
+            )) {
+                return false;
+            }
+        }
+        reportRemainingBytesWrittenToClient();
+        return true;
     }
 
     private List<ClassifiedResponseBytes> classifySourceResponseBytes(ByteBuf buffer) {
@@ -671,6 +690,34 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         } finally {
             unclassified.release();
         }
+    }
+
+    /**
+     * Counts every byte handed to the client against the source transaction's response context exactly
+     * once. Interim-response bytes, and bytes still held because their header has not ended, reach the
+     * client before any final response is recognized, so their count waits here for the context that
+     * owns it rather than being attributed to whichever later write completes a header.
+     */
+    private void reportBytesWrittenToClient(int size) {
+        bytesWrittenAwaitingResponseContext += size;
+        if (messageContext instanceof IWireCaptureContexts.IResponseContext responseContext) {
+            responseContext.onBytesWritten(bytesWrittenAwaitingResponseContext);
+            bytesWrittenAwaitingResponseContext = 0;
+        }
+    }
+
+    /**
+     * A response that ends after only interim or unclassified bytes still needs the response context
+     * that owns its byte count.
+     */
+    private void reportRemainingBytesWrittenToClient() {
+        if (bytesWrittenAwaitingResponseContext == 0) {
+            return;
+        }
+        var responseContext = messageContext.createResponseContext();
+        messageContext = responseContext;
+        responseContext.onBytesWritten(bytesWrittenAwaitingResponseContext);
+        bytesWrittenAwaitingResponseContext = 0;
     }
 
     private static boolean isNonSwitchingInformationalResponse(byte[] bytes) {
@@ -730,9 +777,13 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        var timestamp = Instant.now();
         try {
             if (captureProcessState.shouldCapture()) {
-                trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
+                // Bytes held because their interim-response header never ended are an ordinary final
+                // response. Replay intake keeps them only if they precede the diagnostic exception.
+                flushUnclassifiedSourceResponseBytes(timestamp);
+                trafficOffloader.addExceptionCaughtEvent(timestamp, cause);
             }
             messageContext.addCaughtException(cause);
             httpDecoderChannel.close();
