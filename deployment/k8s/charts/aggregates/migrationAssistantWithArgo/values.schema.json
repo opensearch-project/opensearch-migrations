@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "workloadsNodePool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "architectures": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "amd64",
+              "arm64"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "capacityTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "on-demand",
+              "spot"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "instanceCategories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*$"
+          },
+          "uniqueItems": true
+        },
+        "minInstanceGeneration": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "instanceSizes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(nano|micro|small|medium|large|xlarge|[1-9][0-9]*xlarge|metal)$"
+          },
+          "uniqueItems": true
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "pattern": "^[0-9]+m?$"
+            },
+            "memory": {
+              "type": "string",
+              "pattern": "^[0-9]+(?:Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$"
+            }
+          }
+        },
+        "disruption": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "consolidationPolicy": {
+              "type": "string",
+              "enum": [
+                "WhenEmpty",
+                "WhenEmptyOrUnderutilized",
+                "Balanced"
+              ]
+            },
+            "consolidateAfter": {
+              "type": "string",
+              "pattern": "^(Never|(?:[0-9]+(?:ms|s|m|h))+)$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

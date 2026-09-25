@@ -112,6 +112,39 @@ script resolves the correct CloudFormation exports. `--build` and `--version`
 are mutually exclusive. Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for
 the existing-VPC and other deployment options.
 
+## Configuring the general workload NodePool
+
+The EKS deployment's main workload pool, `general-work-pool`, can be tuned by
+passing a Helm values override file through `--helm-values`:
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --skip-cfn-deploy \
+  --stage dev \
+  --region us-east-2 \
+  --helm-values ./deployment/k8s/aws/examples/nodepool-overrides.yaml
+```
+
+The sample file at
+[`examples/nodepool-overrides.yaml`](./examples/nodepool-overrides.yaml)
+contains the current defaults for:
+
+- `workloadsNodePool.architectures`
+- `workloadsNodePool.capacityTypes`
+- `workloadsNodePool.instanceCategories`
+- `workloadsNodePool.minInstanceGeneration`
+- `workloadsNodePool.instanceSizes`
+- `workloadsNodePool.limits.cpu`
+- `workloadsNodePool.limits.memory`
+- `workloadsNodePool.disruption.consolidationPolicy`
+- `workloadsNodePool.disruption.consolidateAfter`
+
+Values files follow normal Helm merge behavior: map fields merge by key, scalar
+conflicts are resolved by the later source, and list fields replace the full
+default list. For example, overriding `workloadsNodePool.limits.cpu` alone
+keeps the default memory limit, while overriding `instanceSizes` requires
+supplying the full desired size list.
+
 ## Common subcommands
 
 ```bash

@@ -669,6 +669,57 @@ resolve_mirror_manifest_file() {
   echo "${manifest_tmp_dir}/migration-assistant/infra/mirror/private-ecr-manifest.yaml"
 }
 
+preflight_validate_helm_values() {
+  [[ -z "$extra_helm_values" ]] && return 0
+
+  resolve_chart_source
+
+  local chart_ref validation_region validation_stage validation_account
+  local extracted_values_dir=""
+  local -a chart_values_flags extra_values_flags validation_files
+
+  chart_ref="$ma_chart_dir"
+  validation_region="${region:-${AWS_CFN_REGION:-$(aws configure get region 2>/dev/null || true)}}"
+  validation_stage="${stage_filter:-${MA_STAGE:-dev}}"
+  validation_account="${AWS_ACCOUNT:-$(aws sts get-caller-identity --query Account --output text)}"
+
+  if [[ -z "$validation_region" ]]; then
+    echo "Error: unable to pre-validate Helm values because no AWS region is set." >&2
+    echo "  Pass --region <region>, set AWS_CFN_REGION, or run 'aws configure'." >&2
+    exit 1
+  fi
+
+  if [[ -f "$chart_ref" ]]; then
+    extracted_values_dir=$(mktemp -d)
+    tar xzf "$chart_ref" -C "$extracted_values_dir" migration-assistant/values.yaml migration-assistant/valuesEks.yaml \
+      || { echo "Error: failed to extract values files from chart archive for validation." >&2; rm -rf "$extracted_values_dir"; exit 1; }
+    chart_values_flags=(-f "$extracted_values_dir/migration-assistant/values.yaml" -f "$extracted_values_dir/migration-assistant/valuesEks.yaml")
+  else
+    chart_values_flags=(-f "$chart_ref/values.yaml" -f "$chart_ref/valuesEks.yaml")
+  fi
+
+  IFS=',' read -ra validation_files <<< "$extra_helm_values"
+  for f in "${validation_files[@]}"; do
+    extra_values_flags+=(-f "$f")
+  done
+
+  echo "Pre-validating Helm values overrides..."
+  if ! helm lint "$chart_ref" \
+    --kube-version 1.35.0 \
+    "${chart_values_flags[@]}" \
+    "${extra_values_flags[@]}" \
+    --set stageName="$validation_stage" \
+    --set aws.region="$validation_region" \
+    --set aws.account="$validation_account"; then
+    rm -rf "$extracted_values_dir"
+    echo "Error: Helm values preflight validation failed." >&2
+    echo "  Fix the values passed via --helm-values before retrying bootstrap." >&2
+    exit 1
+  fi
+
+  rm -rf "$extracted_values_dir"
+}
+
 install_helm() {
   echo "Installing Helm ${HELM_VERSION} for ${OS}/${TOOLS_ARCH}..."
 
@@ -790,6 +841,8 @@ fi
 
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
+
+preflight_validate_helm_values
 
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
