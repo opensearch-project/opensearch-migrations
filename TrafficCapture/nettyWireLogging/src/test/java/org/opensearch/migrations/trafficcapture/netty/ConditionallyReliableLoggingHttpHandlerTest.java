@@ -502,9 +502,10 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
-    void diagnosticCaptureFailureStillClosesTheChannelExactlyOnce() throws Exception {
+    void diagnosticCaptureFailureEntersPassThroughAndClosesTheChannel() throws Exception {
         try (var rootContext = new TestRootContext()) {
             var offloader = new DiagnosticFailureOffloader();
+            var captureProcessState = failOpenCaptureState();
             var channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(
                     rootContext,
@@ -513,7 +514,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     ctx -> offloader,
                     new RequestCapturePredicate(),
                     request -> false,
-                    failOpenCaptureState()
+                    captureProcessState
                 ),
                 new ExceptionConsumingHandler()
             );
@@ -522,14 +523,15 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             channel.runPendingTasks();
 
             Assertions.assertFalse(channel.isOpen());
+            Assertions.assertEquals(CaptureProcessState.State.PASS_THROUGH, captureProcessState.state());
             Assertions.assertEquals(1, offloader.diagnosticAttempts.get());
-            Assertions.assertEquals(1, offloader.closeObservations.get());
-            Assertions.assertEquals(1, offloader.finalFlushes.get());
+            Assertions.assertEquals(0, offloader.closeObservations.get());
+            Assertions.assertEquals(0, offloader.finalFlushes.get());
 
             channel.close();
             channel.runPendingTasks();
-            Assertions.assertEquals(1, offloader.closeObservations.get());
-            Assertions.assertEquals(1, offloader.finalFlushes.get());
+            Assertions.assertEquals(0, offloader.closeObservations.get());
+            Assertions.assertEquals(0, offloader.finalFlushes.get());
             channel.finishAndReleaseAll();
         }
     }
