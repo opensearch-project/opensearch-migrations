@@ -35,9 +35,10 @@ Plan A and Plan B.
 | G4 | proved | Commit authority complete through `49dd4cea0`: ordered observed-record head, one operation-level resolution latch, monotonic recommit, rejected/unknown distinction, revocation conservation, fixed-cardinality telemetry, 65-test focused validation, exact-revision falsification, and resumed Claude conformance review |
 | G5 | proved | Production implementation is complete through `19c05162d`; the 60-test focused milestone set passed in `/private/tmp/gradle-evidence.95607.20320.log`, the final transformation-fallback correction passed its reopened two-test evidence in `/private/tmp/gradle-evidence.94140.3082.log`, and exact-revision falsification caught every applied production-property removal, including the separately owned tuple-writer force-before-durability cleanup inversion in `/private/tmp/gradle-evidence.80172.31070.log`. Claude session `fc13e47d-fbea-4f74-859a-efb46d729d0f` resumed through the exact final production diff and returned `NO_ACTIONABLE_FINDINGS`. The exact-method trace audit completed in `4905d409f` with 147 balanced mappings across 16 files, unchanged and branch-only claims removed, retained sources preserved for the final sweep, and the pre-carry RequestSender source gap recorded |
 | G6 | proved | Production implementation is complete through `45cfa95a5`; four exact inherited-responsibility trace pairs were added in `cc44f427b`. Exact-commit `compileJava` passed in `/private/tmp/gradle-evidence.38094.13160.log`, and the six-class focused set passed 56 tests with zero failures or skips in `/private/tmp/gradle-evidence.38541.15964.log`. One batched direct Codex worker caught all 18 valid timing, ordering, waiting, cap, and fatal-boundary mutations and restored clean at `45cfa95a5`. Claude session `replayer-G6-20260925T170810Z-a882` resumed through the implementation fix and confirmed trace commit and returned `NO_ACTIONABLE_FINDINGS` |
-| Production compile | proved | G6 exact committed source `cc44f427b` passed with the required Gradle Spotless exclusions in `/private/tmp/gradle-evidence.38094.13160.log` |
-| Compiled test set | proved | G6 focused set: 56 tests, 0 failures, 0 errors, 0 skipped in `/private/tmp/gradle-evidence.38541.15964.log`; last broader recorded set remains 108 tests, 0 failures; inherited unresolved tests remain marked and owned below |
-| Limbo regions | open | Measured 2026-09-25: 176 files with `REBUILD-LIMBO-START`; historical counts drift and the START grep is authoritative |
+| G7 | proved | Milestone implementation is complete through `9c9716214`, with production complete through `07633ed70`: the carried `RequestLifecycleInput` predecessor is promoted into the sole live intake model; `N=P*T_threads`, exact retry-ready supply, bootstrap plus explicit entitlement state, complete ordered batches, after-every-input demand, bounded overshoot, and no hard evidence cap are wired through the real top-level chain. Exact `compileJava` passed in `/private/tmp/gradle-evidence.60791.13649.log`; the seven-class focused set passed 111 tests in `/private/tmp/gradle-evidence.60944.21710.log`, and the strengthened owner-level empty-poll evidence passed in `/private/tmp/gradle-evidence.70235.14797.log`. Batched direct-CLI falsification caught every assigned timing, ordering, waiting, cap, empty-poll, all-generation, and construction inversion after strengthening two initially passing evidence cases; the exact-revision rerun at `07633ed70` finished clean. Claude session `replayer-G7-20260925T200446Z-4f663` resumed through the register/handoff and empty-poll evidence corrections and returned `NO_ACTIONABLE_FINDINGS` |
+| Production compile | proved | G7 exact committed source `07633ed70` passed with the required Gradle Spotless exclusions in `/private/tmp/gradle-evidence.60791.13649.log` |
+| Compiled test set | proved | G7 focused set: 111 tests, 0 failures, 0 errors, 0 skipped in `/private/tmp/gradle-evidence.60944.21710.log`; the inherited full historical suite remains outside the progress oracle |
+| Limbo regions | open | Measured 2026-09-25: 175 files with `REBUILD-LIMBO-START`; historical counts drift and the START grep is authoritative |
 | Limbo integrity | proved | `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh`; rerun after every marking change |
 | PR strategy | decided | Keep draft PR #3394 and the same branch through the red-CI stretch; repair CI at the swing |
 | DCO debt | `deferred(post-G12)` | Seven inherited PR commits lack sign-off: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`; preserve history during the eventual rewrite |
@@ -48,11 +49,11 @@ Plan A and Plan B.
 |---|---|---|---|---|---|---|
 | R1 | One named owner per mutable value | G9 | procCommit §3.1; replayerLLD §2; async §2 | connLLD §19.6; procCommit §13.1 | open | |
 | R2 | At most one turn + one processing completion; normal has both | G5 | procCommit §3.2; connLLD §10, §13 | connLLD §19.2 | proved | Deterministic milestone and cancellation tests prove one-shot turn/processing/cleanup emission and normal turn-before-processing order |
-| R3 | At most one intake-issued batch request per generation, plus one assignment bootstrap entitlement | G2, G7 | kafkaLLD §4.2, §13; replayerLLD §2 | kafkaLLD §17.4 | open | G2 proved explicit-request rejection; G7 adds and proves the independent bootstrap slot |
-| R4 | Delivered batch matches bootstrap or explicit entitlement and is applied in delivery order | G7 | kafkaLLD §5.3, §13 | kafkaLLD §17.4 | open | |
-| R5 | Demand open while retry-ready supply below N | G7 | procCommit §8.1; kafkaLLD §13 | kafkaLLD §17.4 | open | |
-| R6 | Fast responses satisfy supply before B+W | G6 | procCommit §8.2; kafkaLLD §11 | kafkaLLD §17.3, §17.4 | open | G6 proves complete-before-boundary and unavailable-at-boundary inputs are irreversible and delivered exactly once; G7 still owns their supply-count integration |
-| R7 | Finished/cancelled cannot re-enter supply | G6, G7 | kafkaLLD §12, §13; procCommit §8.1 | kafkaLLD §17.4 | open | G6 proves a finished request cannot satisfy the retry-ready predicate after its boundary resolves; G7 still owns remove-once demand bookkeeping and late-input idempotence |
+| R3 | At most one intake-issued batch request per generation, plus one assignment bootstrap entitlement | G2, G7 | kafkaLLD §4.2, §13; replayerLLD §2 | kafkaLLD §17.4 | proved | Source and intake independently enforce one explicit request while assignment's bootstrap remains separately pending and first in delivery order |
+| R4 | Delivered batch matches bootstrap or explicit entitlement and is applied in delivery order | G7 | kafkaLLD §5.3, §13 | kafkaLLD §17.4 | proved | Wrong or repeated entitlement identity fails; bootstrap and explicit batches apply fully and in record order |
+| R5 | Demand open while retry-ready supply below N | G7 | procCommit §8.1; kafkaLLD §13 | kafkaLLD §17.4 | proved | Exact supply count drives fixed-cardinality `OPEN`/`SATISFIED` evaluations after every input over every active generation |
+| R6 | Fast responses satisfy supply before B+W | G6, G7 | procCommit §8.2; kafkaLLD §11 | kafkaLLD §17.3, §17.4 | proved | G6 freezes the retry input exactly once; G7 counts a fast complete response immediately and an unavailable response only at the inclusive boundary |
+| R7 | Finished/cancelled cannot re-enter supply | G6, G7, G8 | kafkaLLD §12, §13; procCommit §8.1 | kafkaLLD §17.4 | open(G8 wiring) | G7 proves the shared `finishedOrCancelled` transition removes counted supply once and blocks late retry re-addition; G8 receives only the typed cancellation producer invocation |
 | R8 | Target-write start stays local cancellation state | G5 | connLLD §8; procCommit §3.2 | connLLD §19.2 | proved | First/final-write milestones remain owner-local, are emitted once, and drive channel reuse/abort and graceful-cancellation decisions |
 | R9 | Queued input wakes long poll without interrupting protected work | G2 | kafkaLLD §5.4; replayerLLD §2 | kafkaLLD §17.4 | proved | Protected work, coalescing, RUNNING-window entry, owner absorption, and revoke/assign interleaving proved |
 | R10 | No processing completion before tuple durability | G5 | connLLD §12, §13; replayerLLD §5 | connLLD §19.2, §19.3 | proved | Normal, filtered, intentional-drop, fallback, retry, and force-race tests gate processing completion on `TupleDurable` |
@@ -63,7 +64,7 @@ Plan A and Plan B.
 | R15 | Cancellation cleanup cannot produce a commit request | G8 | replayerLLD §6; kafkaLLD §15.3; connLLD §17.2 | connLLD §19.5; kafkaLLD §17.5 | open | |
 | R16 | Successor generation waits for prior cleanup | G8 | kafkaLLD §15.3; procCommit §9.3 | kafkaLLD §17.5 | open | Must have fast deterministic evidence, not load-only evidence |
 | R17 | Unrelated partitions continue | G8 | kafkaLLD §5.1; procCommit §8 | kafkaLLD §17.4, §17.5 | open | Must have fast deterministic evidence, not load-only evidence |
-| R18 | No hard cap blocks retry or heartbeat evidence | G7 | kafkaLLD §5.1; procCommit §8.3 | kafkaLLD §17.4 | open | |
+| R18 | No hard cap blocks retry or heartbeat evidence | G7 | kafkaLLD §5.1; procCommit §8.3 | kafkaLLD §17.4 | proved | Overshooting request supply and a large byte-bearing batch retain every record and trailing heartbeat |
 | R19 | Every unexpected owner failure reaches the supervisor | G9 | replayerLLD §8, §4; async §2 | connLLD §19.6; procCommit §13.5 | open | |
 
 ## Defects D1–D18
@@ -87,7 +88,7 @@ refuted. Full measurements remain in the archived status.
 | D12 | Poll failures become empty successes | G2 | open proof obligation | Final acceptance must prove fatal/typed handling in the rebuilt source |
 | D13 | Fatal path halts instead of supervisor ladder | G9 | open | Supervisor still owes failing owner/operation capture and input stop |
 | D14 | Termination waits for orderly recovery | G9 | open | Three inherited wait sites remain assigned to G9 |
-| D15 | Hard ownership caps deadlock | G7 | open | No hard count/byte cap may block evidence |
+| D15 | Hard ownership caps deadlock | G7 | proved | No count, record, byte, or ownership cap gates reads or truncates a delivered batch |
 | D16 | Assignment is not paused per partition | G2 | open proof obligation | Final per-partition read-gating proof remains |
 | D17 | Connection owner forgets request at turn end | G5 | proved | Turn completion advances the execution head but request removal waits for accepted processing completion and an empty owner-operation registry |
 | D18 | Work admitted under fabricated partition identity | G3 | open | |
@@ -186,6 +187,23 @@ refuted. Full measurements remain in the archived status.
 | G6 falsification | test fidelity | proved | One exact-revision direct Codex worker caught 18/18 valid mutations: both inclusive expiration thresholds, fallback replacement, timely/late heartbeat handling, fatal skew and pre-payload ordering, retry equality/order/irreversibility, finished-request exclusion, retained baseline, response/no-response limits, FIFO fence, and final-response waiting |
 | G6 conformance review | conformance | proved | Fresh Claude session `replayer-G6-20260925T170810Z-a882` resumed through the retained-baseline fix and the confirmed trace commit; both final passes returned `NO_ACTIONABLE_FINDINGS` |
 
+## G7 latest dispositions
+
+| Finding / decision | Class | State | Required disposition |
+|---|---|---|---|
+| Carried request lifecycle input and parallel correctness models | conformance | proved | `RequestLifecycleInput` was promoted by move/refactor into the one live `intake.ReplayIntakeInput` family; the same-named lifecycle predecessor remains inert G11 limbo, never a live caller |
+| Assignment bootstrap and intake-issued explicit request shared one slot | conformance / R3 | proved | Source and intake each hold independent bootstrap and explicit state; bootstrap resolves first and an empty poll resolves neither |
+| Batch application could issue the next request early | conformance / R4 | proved | The explicit entitlement stays `APPLYING` through every record and returns to `IDLE` only before the one after-input demand pass |
+| Case 12 did not initially prove overshoot through a batch | test fidelity | fixed | Wired owner evidence reaches supply above `N`, retains a trailing record after the crossing, preserves request/response order, closes demand, and issues no later request |
+| Assignment demand pass did not prove iteration over every active generation | test fidelity | fixed | Fixed-cardinality evaluation counts prove one assignment evaluates one generation and the next assignment evaluates both |
+| Configured default `P=2` and `N=P*T_threads` assertions were tautological | test fidelity | fixed | Production `Configuration` supplies the default and the construction test uses three target threads, so collapsing `N` from six to two fails |
+| Batch metric name implied records were applied after a protocol cutoff | observability | fixed | `replayIntakeBatchEntitlementsResolved{batchEntitlement}` explicitly counts bootstrap/explicit entitlement resolution; rejected-record batches remain separately counted |
+| Typed cancellation producer is G8-owned adjacent work | deferral | deferred(G8) | G7 owns and proves the shared `finishedOrCancelled` supply transition; Plan A G8 scope/Exit and the deferral ledger require cancellation to invoke it exactly once before cleanup |
+| G7 responsibility placement | conformance | proved | Source entitlement/read gate: `PartitionSourceState` and `KafkaSourceOwner`; per-generation demand/supply and request state: `PartitionIntakeState`; all-generation pass and ordered application: `ReplayIntakeOwner`; construction and `N`: `TrafficReplayerTopLevel.Configuration`; metrics: `ReplayIntakeMetrics` |
+| G7 exact responsibility trace audit | navigation | proved | No G7 trace edit: request arrival remains the inherited G5 slice already mapped to `ReplayIntakeOwner.applyRecord`; demand, supply, entitlement, and counters are branch-new; legacy hard caps and time-frontier reads are not equivalent targets |
+| G7 falsification | test fidelity | proved | Sixteen assigned production properties were inverted through direct CLI worktrees. Initial passing cap and `N` mutations exposed and repaired two test gaps; the valid empty-map mutation replaced an unreachable empty-list attempt. Exact-revision reruns at `07633ed70` caught all three and finished clean |
+| G7 conformance review | conformance | proved | Claude session `replayer-G7-20260925T200446Z-4f663` found no production-chain defect, verified the six initial register/handoff/metric/construction/evidence dispositions, identified one owner-level empty-poll assertion gap, and returned `NO_ACTIONABLE_FINDINGS` after that correction at `9c9716214` |
+
 ## Standing implementation decisions
 
 | Key | Decision | Owner / state | Milestone |
@@ -247,7 +265,7 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | Finding | Owner | State / required result |
 |---|---|---|
 | Permit conservation failure currently lacks a supervisor boundary | G5 | proved — replacement atomic counter checks before mutation, latches the first fatal condition, and invokes the injected fatal callback |
-| Legacy `ReplayIntakeInput` family includes permit/progress/tracker inputs beyond kafkaLLD §4.1 | G5/G7 | G5 permit/progress vocabulary removed from live intake; G7 still owns final promotion of the carried `RequestLifecycleInput` predecessor |
+| Legacy `ReplayIntakeInput` family includes permit/progress/tracker inputs beyond kafkaLLD §4.1 | G5/G7 | proved — G5 removed permit/progress vocabulary and G7 promoted carried `RequestLifecycleInput` into the sole live intake family without restoring the predecessor's extra variants |
 | Duplicate/pending permit acquisition invariant failures become ordinary failed futures | G5 | proved — impossible transitions settle affected acquisitions and reach process-fatal handling |
 | Dropped permit-delivery post can leave `pendingAttemptPermit` non-null forever | G5/G8 | G5 proved release-on-rejected-post and fatal handling; G8 retains only generation-cleanup integration |
 | Permit cleanup failure is suppressed onto a shared normal cancellation object | G5 | proved — infrastructure failure remains exceptional/fatal and typed cancellation remains a domain result |
@@ -259,7 +277,7 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | Broad G5 `REBUILD-TRACE` prose predates the exact-method convention | G5 | proved — 147 unique exact mappings balance source and target records across 16 files; unchanged and branch-only claims were removed. Retained eligible source members remain in limbo through the final sweep, including the deliberate `TrafficReplayerTopLevel.getCurrentAccumulator -> RETIRED` source. The baseline `RequestSenderOrchestrator` constructors and named scheduling, cancellation, retry, and packet-send methods were already absent before Plan A's carry baseline; their source records are anchored to `2fe4538a` at the surviving replacement seam rather than restoring deleted bodies. In-place `ChannelContextManager`, `ReplayContexts`, and `ParsedHttpMessagesAsDicts` rewrites colocate paired records; the history-preserving `ThreadLocalTupleWriter` → `TupleWriter` rename colocates predecessor and target records |
 | Mainline `SigV4AuthTransformerFactory` is unchanged but not independently promotable | G5 | proved unchanged and intentionally retained in limbo through the final sweep; G9's configured construction decides its live consuming path. Add no trace unless its responsibility later moves, splits, merges, substantially rewrites, or retires |
 | `SourceConnectionState.expire()` has no production caller | G6 | proved — broker-time expiration calls the source lifetime, settles its record associations, retires its captured identity, and routes the target command by `ConnectionProcessingId` |
-| Live and marked predecessor files both use the name `ReplayIntakeInput` | G5/G7 owner promotion | Resolve when promoting `RequestLifecycleInput`; do not create an undesigned business-input variant |
+| Live and marked predecessor files both use the name `ReplayIntakeInput` | G5/G7 owner promotion | proved — only `intake.ReplayIntakeInput` is live; the same-named lifecycle predecessor is inert G11 limbo and no second business-input model was created |
 | Existing deprecated-option “parse-and-warn” adapter set does not exist | G9 | Build the exact compatibility behavior required by focused authority §7; do not claim preservation |
 | Five of the 33 preserved names are pinned in three `capture-replay-dashboard.json` copies, not the k6 dashboard | G9 | Apply D-4 semantic-preservation decision to the complete 33-name set |
 
@@ -277,17 +295,18 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | Active-record-tracker gauge cleanup balance | G3 | G8 | Only G8 can remove unfinished trackers during generation cancellation; decrement once per removal and prove return to the pre-generation value | open |
 | Interrupted source teardown still reaches application close | G3 | G11 | Process-teardown member belongs to the final supervisor/application chain | open |
 | Real replay construction from Kafka owner through connection/request consumer | G2 | G5 | Real consumer does not exist before G5 | proved — production queues connect Kafka source, replay intake, connection/request owners, target channel, tuple writer, and typed completions |
-| §17.4 case 1: demand below `N` | G2 | G7 | Requires G7 supply count | open |
-| §17.4 case 2: unresolved retry input not supply | G2 | G7 | Requires G3 reconstitution and G7 bookkeeping | open |
-| §17.4 case 3: fast response before `B + W` | G2 | G7 | Requires G6 boundary and G7 count | open |
-| §17.4 case 4: slow/missing keeps demand open | G2 | G7 | Requires G6 unavailable state | open |
-| §17.4 case 5: finished/cancelled removed once | G2 | G7 | Requires G5 completion input | open |
-| §17.4 case 6: late retry input cannot re-add supply | G2 | G7 | Requires G7 idempotence state | open |
-| §17.4 case 7 intake half: one explicit request | G2 | G7 | G7 owns bootstrap plus explicit request state | open |
-| §17.4 case 11: next request waits for full batch application | G2 | G7 | Requires G7 applying/idle state | open |
-| §17.4 case 12: one batch may overshoot `N` | G2 | G7 | Requires supply count | open |
-| §17.4 case 14: no cap blocks evidence | G2 | G7 | Requires G6/G7 evidence types; also R18 | open |
-| §17.4 cases 25–27: bootstrap, ordinary demand, bounded two-batch delivery | G2 | G7 | Source/bootstrap and intake demand land together | open |
+| §17.4 case 1: demand below `N` | G2 | G7 | Requires G7 supply count | proved — below-target assignment and lifecycle inputs keep demand `OPEN` and request one explicit batch |
+| §17.4 case 2: unresolved retry input not supply | G2 | G7 | Requires G3 reconstitution and G7 bookkeeping | proved — registration alone leaves supply at zero |
+| §17.4 case 3: fast response before `B + W` | G2 | G7 | Requires G6 boundary and G7 count | proved — complete response adds supply immediately before boundary evidence |
+| §17.4 case 4: slow/missing keeps demand open | G2 | G7 | Requires G6 unavailable state | proved — unresolved input remains outside supply until G6's inclusive unavailable transition |
+| §17.4 case 5: finished/cancelled removed once | G2 | G7 | Requires G5 completion input | proved for G7 demand state — finished and direct cancelled transitions remove counted supply exactly once; typed cancellation invocation is the explicit G8 handoff below |
+| §17.4 case 6: late retry input cannot re-add supply | G2 | G7 | Requires G7 idempotence state | proved — `finishedOrCancelled` permanently blocks later complete or unavailable input from supply |
+| §17.4 case 7 intake half: one explicit request | G2 | G7 | G7 owns bootstrap plus explicit request state | proved — at most one intake-issued request overlaps the independent bootstrap entitlement |
+| §17.4 case 11: next request waits for full batch application | G2 | G7 | Requires G7 applying/idle state | proved — request allocation while `APPLYING` is rejected and falsified |
+| §17.4 case 12: one batch may overshoot `N` | G2 | G7 | Requires supply count | proved — wired batch crosses `N`, applies a trailing record, preserves order, and closes demand without truncation |
+| §17.4 case 14: no cap blocks evidence | G2 | G7 | Requires G6/G7 evidence types; also R18 | proved — large payload-bearing records cannot block the trailing heartbeat |
+| §17.4 cases 25–27: bootstrap, ordinary demand, bounded two-batch delivery | G2 | G7 | Source/bootstrap and intake demand land together | proved — assignment bootstrap and one explicit request coexist, deliver in order, and can produce only the designed two-batch overshoot |
+| Cancellation invokes the G7 retry-ready supply exit | G7 | G8 | G8 owns typed cancellation and cleanup; G7 owns the shared count transition | open — Plan A G8 scope and Exit require exactly-once invocation before cleanup and permanent late-input exclusion |
 | §17.4 case 28: bootstrap waits behind prior cleanup | G2 | G8 | G8 owns generation cleanup gate | open |
 | `ConnectionAdmissionEntry`, `TargetChannelPort`, `RequestPreparationResult`, `RetryDecision` shells | G0 | G5 | Land with first real consumer | proved — live G5 types have production consumers and exact outcome vocabularies |
 | `TupleWriter`, `TupleWriteResult` shells | G0 | G5 | Land with tuple path and threading contract; G9 changes only deployed worker placement | proved — live logical transform/drop/retry/durability link |
@@ -350,6 +369,9 @@ Fixed-cardinality counters are pre-authorized; identity-cardinality attributes r
 | `replayIntakeWriterTimeTransitions{writerTimeTransition}` | Fixed-cardinality exact/fallback heartbeat-state transitions | G6 |
 | `replayIntakeSourceConnectionsExpired` / `replayIntakeTargetConnectionExpirationsSent` | Source-lifetime expiration and routed target-owner command conservation | G6 |
 | `replayIntakeBrokerTimeViolations` | Fatal higher-offset backward-skew violations | G6 |
+| `replayIntakeBatchRequestsSubmitted` / `replayIntakeBatchEntitlementsResolved{batchEntitlement}` | Explicit-request and bootstrap/explicit entitlement conservation | G7 |
+| `replayIntakeRetryReadyRequestSupply` / `replayIntakeRetryReadySupplyAdditions` / `replayIntakeRetryReadySupplyRemovals` | Exact resolved-input plus unfinished-target supply balance | G7 |
+| `replayIntakeDemandEvaluations{demandState}` | Fixed-cardinality `OPEN`/`SATISFIED` after-input evaluations over active generations | G7 |
 
 Conservation is per partition and generation and counts read **instances** `(generation, offset)`, including
 rereads in later generations.

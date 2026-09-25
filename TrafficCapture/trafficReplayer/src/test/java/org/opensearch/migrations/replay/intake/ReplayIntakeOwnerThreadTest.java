@@ -35,6 +35,7 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -145,19 +146,187 @@ class ReplayIntakeOwnerThreadTest {
             );
             Assertions.assertEquals(
                 2,
-                sumMetricPoints(metrics, ReplayIntakeMetrics.MetricNames.BATCHES_APPLIED)
+                sumMetricPoints(
+                    metrics,
+                    ReplayIntakeMetrics.MetricNames.BATCH_ENTITLEMENTS_RESOLVED
+                )
             );
             Assertions.assertEquals(
                 Set.of("BOOTSTRAP", "EXPLICIT"),
                 metricAttributeValues(
                     metrics,
-                    ReplayIntakeMetrics.MetricNames.BATCHES_APPLIED,
+                    ReplayIntakeMetrics.MetricNames.BATCH_ENTITLEMENTS_RESOLVED,
                     ReplayIntakeMetrics.BATCH_ENTITLEMENT_ATTRIBUTE
                 )
             );
             Assertions.assertEquals(
                 3,
                 sumMetricPoints(metrics, ReplayIntakeMetrics.MetricNames.DEMAND_EVALUATIONS)
+            );
+        }
+    }
+
+    @Test
+    void assignmentRecomputesDemandOverEveryAssignedGeneration() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var sourceInputs = new KafkaSourceInputQueue(new WakeupController(() -> {}, rootContext));
+            var owner = new ReplayIntakeOwner(
+                new ReplayIntakeInputQueue(),
+                sourceInputs,
+                new RecordingSink(() -> true, new CountDownLatch(0), new CountDownLatch(0)),
+                failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
+                rootContext.replayIntakeMetrics,
+                ReplayIntakeOwner.RecordObserver.NOOP,
+                new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
+                2
+            );
+            var script = new RecordScript("traffic");
+            var generation0 = script.generation(0);
+            var generation1 = script.generation(1);
+
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation0));
+            var firstAssignment = sourceInputs.drain();
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation1));
+            var secondAssignment = sourceInputs.drain();
+
+            Assertions.assertEquals(
+                Set.of(generation0),
+                firstAssignment.stream()
+                    .map(KafkaSourceInput.RequestNextPartitionBatch.class::cast)
+                    .map(KafkaSourceInput.RequestNextPartitionBatch::generation)
+                    .collect(java.util.stream.Collectors.toSet())
+            );
+            Assertions.assertEquals(
+                Set.of(generation1),
+                secondAssignment.stream()
+                    .map(KafkaSourceInput.RequestNextPartitionBatch.class::cast)
+                    .map(KafkaSourceInput.RequestNextPartitionBatch::generation)
+                    .collect(java.util.stream.Collectors.toSet())
+            );
+            Assertions.assertEquals(
+                3,
+                sumMetricPoints(
+                    telemetry.getFinishedMetrics(),
+                    ReplayIntakeMetrics.MetricNames.DEMAND_EVALUATIONS
+                ),
+                "the first assignment evaluates one generation and the second evaluates both"
+            );
+        }
+    }
+
+    @Test
+    void oneBatchMayOvershootDemandAndClosesItWithoutLossOrReordering() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var sourceInputs = new KafkaSourceInputQueue(new WakeupController(() -> {}, rootContext));
+            var observedOffsets = new ArrayList<Long>();
+            var sink = new RecordingSink(() -> true, new CountDownLatch(0), new CountDownLatch(0));
+            var owner = new ReplayIntakeOwner(
+                new ReplayIntakeInputQueue(),
+                sourceInputs,
+                sink,
+                failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
+                rootContext.replayIntakeMetrics,
+                record -> observedOffsets.add(record.recordId().offset()),
+                new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
+                2
+            );
+            var response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+            var script = new RecordScript("traffic")
+                .addTraffic(
+                    0,
+                    0,
+                    Instant.ofEpochMilli(1_000),
+                    "writer",
+                    stream(
+                        0,
+                        read(1, "GET /0 HTTP/1.1\r\n\r\n"),
+                        endOfMessage(2),
+                        write(3, response)
+                    )
+                )
+                .addTraffic(
+                    0,
+                    1,
+                    Instant.ofEpochMilli(1_001),
+                    "writer",
+                    stream(
+                        1,
+                        read(4, "GET /1 HTTP/1.1\r\n\r\n"),
+                        endOfMessage(5),
+                        write(6, response)
+                    )
+                )
+                .addTraffic(
+                    0,
+                    2,
+                    Instant.ofEpochMilli(1_002),
+                    "writer",
+                    stream(
+                        2,
+                        read(7, "GET /2 HTTP/1.1\r\n\r\n"),
+                        endOfMessage(8),
+                        write(9, response),
+                        close(10)
+                    )
+                )
+                .addHeartbeat(0, 3, Instant.ofEpochMilli(1_003), "writer", 100)
+                .addHeartbeat(0, 4, Instant.ofEpochMilli(1_004), "writer", 100);
+            var generation = script.generation(0);
+
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+            var explicitOne = sourceInputs.drain().stream()
+                .map(KafkaSourceInput.RequestNextPartitionBatch.class::cast)
+                .map(KafkaSourceInput.RequestNextPartitionBatch::requestId)
+                .findFirst()
+                .orElseThrow();
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+                new PartitionBatchRequestId(generation, 0),
+                script.records().subList(0, 4)
+            ));
+
+            var state = owner.partitionState(generation).orElseThrow();
+            Assertions.assertEquals(3, state.retryReadyRequestSupplyCount());
+            Assertions.assertFalse(state.demandOpen(2), "one complete batch may overshoot N");
+            Assertions.assertEquals(
+                List.of(0L, 1L, 2L, 3L),
+                observedOffsets,
+                "satisfying demand inside a batch must not truncate its trailing record"
+            );
+            Assertions.assertEquals(
+                List.of(0L, 1L, 2L),
+                sink.requests.stream().map(ReplayRequestId::capturedRequestOrdinal).toList()
+            );
+            Assertions.assertEquals(
+                sink.requests,
+                sink.completeResponses,
+                "every request and complete response must survive in delivery order"
+            );
+            Assertions.assertTrue(
+                sourceInputs.drain().stream()
+                    .noneMatch(KafkaSourceInput.RequestNextPartitionBatch.class::isInstance),
+                "the overlapping explicit entitlement remains the only intake-issued request"
+            );
+
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+                explicitOne,
+                List.of(script.records().get(4))
+            ));
+
+            Assertions.assertEquals(List.of(0L, 1L, 2L, 3L, 4L), observedOffsets);
+            Assertions.assertTrue(
+                sourceInputs.drain().stream()
+                    .noneMatch(KafkaSourceInput.RequestNextPartitionBatch.class::isInstance),
+                "after the overlapping batch is fully applied, satisfied demand issues no next request"
+            );
+            Assertions.assertEquals(
+                Set.of("OPEN", "SATISFIED"),
+                metricAttributeValues(
+                    telemetry.getFinishedMetrics(),
+                    ReplayIntakeMetrics.MetricNames.DEMAND_EVALUATIONS,
+                    ReplayIntakeMetrics.DEMAND_STATE_ATTRIBUTE
+                )
             );
         }
     }
@@ -407,6 +576,7 @@ class ReplayIntakeOwnerThreadTest {
         private final CountDownLatch callbackEntered;
         private final CountDownLatch releaseCallback;
         private final List<ReplayRequestId> requests = new ArrayList<>();
+        private final List<ReplayRequestId> completeResponses = new ArrayList<>();
         private final List<ConnectionProcessingId> closes = new ArrayList<>();
         private boolean everyCallbackUsedOwnerThread = true;
 
@@ -455,6 +625,7 @@ class ReplayIntakeOwnerThreadTest {
             boolean keptAlive
         ) {
             everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
+            completeResponses.add(replayRequestId);
         }
 
         @Override
@@ -479,10 +650,14 @@ class ReplayIntakeOwnerThreadTest {
     }
 
     private static TrafficStream stream(TrafficObservation... observations) {
+        return stream(0, observations);
+    }
+
+    private static TrafficStream stream(int number, TrafficObservation... observations) {
         return TrafficStream.newBuilder()
             .setNodeId("writer")
             .setConnectionId("connection")
-            .setNumber(0)
+            .setNumber(number)
             .addAllSubStream(List.of(observations))
             .build();
     }
@@ -490,6 +665,12 @@ class ReplayIntakeOwnerThreadTest {
     private static TrafficObservation read(long sequence, String data) {
         return observation(sequence)
             .setRead(ReadObservation.newBuilder().setData(ByteString.copyFromUtf8(data)))
+            .build();
+    }
+
+    private static TrafficObservation write(long sequence, String data) {
+        return observation(sequence)
+            .setWrite(WriteObservation.newBuilder().setData(ByteString.copyFromUtf8(data)))
             .build();
     }
 

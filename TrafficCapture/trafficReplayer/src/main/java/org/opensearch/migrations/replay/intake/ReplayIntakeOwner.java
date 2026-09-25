@@ -79,7 +79,7 @@ public final class ReplayIntakeOwner {
         default void targetConnectionExpirationSent() {}
         default void brokerTimeViolation() {}
         default void batchRequested() {}
-        default void batchApplied(PartitionIntakeState.BatchEntitlement entitlement) {}
+        default void batchEntitlementResolved(PartitionIntakeState.BatchEntitlement entitlement) {}
         default void retryReadySupplyChanged(int delta) {}
         default void demandEvaluated(boolean open) {}
         default void capturedCloseAccepted() {}
@@ -389,7 +389,7 @@ public final class ReplayIntakeOwner {
         if (captureProtocolViolationRecord != null) {
             metrics.recordBatchRejectedAfterProtocolViolation();
             state.finishApplyingBatch(batch.requestId(), entitlement);
-            metrics.batchApplied(entitlement);
+            metrics.batchEntitlementResolved(entitlement);
             return;
         }
         try {
@@ -400,7 +400,7 @@ public final class ReplayIntakeOwner {
             }
         } finally {
             state.finishApplyingBatch(batch.requestId(), entitlement);
-            metrics.batchApplied(entitlement);
+            metrics.batchEntitlementResolved(entitlement);
         }
     }
 

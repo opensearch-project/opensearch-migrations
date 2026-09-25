@@ -184,8 +184,7 @@ class TrafficReplayerTopLevelConstructionTest {
                     1_000,
                     5_000
                 ),
-                2,
-                1,
+                3,
                 4,
                 1
             );
@@ -193,7 +192,7 @@ class TrafficReplayerTopLevelConstructionTest {
                 TrafficReplayerTopLevel.DEFAULT_RETRY_READY_REQUEST_SUPPLY_PER_TARGET_THREAD,
                 configuration.retryReadyRequestSupplyPerTargetThread()
             );
-            Assertions.assertEquals(2, configuration.retryReadyRequestSupplyTarget(), "N = P * T_threads");
+            Assertions.assertEquals(6, configuration.retryReadyRequestSupplyTarget(), "N = P * T_threads");
             var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
             var replayer = new TrafficReplayerTopLevel<>(
                 consumer,
