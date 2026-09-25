@@ -127,6 +127,7 @@ refuted. Full measurements remain in the archived status.
 | Generation observability | Generation identity belongs in logs/exceptions/spans, never as a metric dimension | owner decided | G3+ |
 | Carried lifecycle evidence | Preserve inherited assertions until replacement behavior is proved; split members by responsibility | owner decided | G5/G8/G11 |
 | Async commit uncertainty | Stage monotonic recommit and never backpedal; land the owner/callback one-shot chain together | owner decided; implementation open | G4 |
+| Late protocol violation after generation cleanup | Preserve the existing `CaptureProtocolViolation` path; when its generation is already gone, do not mutate commit state or conservation metrics. Do not reopen protocol crash-style refinements before the working component chains are complete | owner decided | G4+ |
 | Tuple writer | Transform off Netty loops on a bounded executor; one non-concurrently invoked transformer and sink per writer worker; explicit per-worker close; parallelism becomes a setting | reversible default, vetoable through G10 | G9 |
 | Image | `traffic_replayer` may remain broken during construction | reversible through G10 | G0 |
 | Branch/PR | Same branch and draft PR #3394 through red CI | owner decided | through swing |
