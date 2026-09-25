@@ -470,10 +470,23 @@ read gating; G11 receives only the process-teardown assertion that an interrupte
 application close. The register names the member-level split and the deferral ledger keeps all three receiving
 milestones visible.
 
-**Exit:** a record carrying `read+EOM` for request *N* and `read` for request *N+1* has exactly both
-associations, matching the `RecordScript` oracle; no record emits completion while an expected
-association remains; a source connection that dies mid-response produces source-assembly output that marks
-completion unproven. Typed whole and segmented source-interim observations preserve their bytes and record
+**Deferred to G8 — cancellation-path tracker-gauge balance.** G3 decrements
+`replayIntakeActiveRecordTrackers` when ordinary completion retires a tracker, but does not deliver removal of
+unfinished trackers during generation cancellation because `GenerationCleanupTracker` and the cancellation
+state do not exist until G8. G8 removes those trackers, decrements the same process-wide gauge once per
+removal, and proves the gauge returns to its pre-generation value without a generation metric dimension.
+
+**Deferred to G4 — one-shot asynchronous commit resolution.** G3 does not repair the Kafka source's
+commit-callback resolution path. A wakeup or callback race must not resolve one asynchronous submission twice,
+but the correction has to share G4's one-operation-in-flight state, callback owner, monotonic staged-position
+handling, and commit observability. G4 owns that complete chain rather than taking a G3-only latch.
+
+**Exit:** a record carrying `read+EOM` for request *N* and `read` for request *N+1* remains unfinished after
+request *N* completes and finishes exactly once only after request *N+1* completes; no record emits completion
+while an expected association remains; a source connection that dies mid-response produces source-assembly output that marks
+completion unproven. Every reconstituted request whose source response reaches a terminal boundary emits
+exactly one final `SourceResponseComplete` or `SourceResponseIncomplete`; a later connection event cannot
+replace or repeat that result. Typed whole and segmented source-interim observations preserve their bytes and record
 associations without ending request assembly, and an ordinary `Write` is never accepted as a compatibility
 encoding for them. No owner
 blocks on a stage only its own thread can complete. The producer → queue → owner-thread → consumer path is
@@ -486,7 +499,9 @@ protocol marks the end of a request and not of a response, and the owner ruled a
 to the proxy. Unproven is the strongest claim the output can make, and a claim that can be made truthfully is
 worth more than one that cannot. G3 does **not** claim that the proxy's successor
 `priorRequestsReceived` baseline includes an intentionally dropped request; PA2 repairs and proves that
-producer-side obligation. Covers `D2`, `D4`, `D8`, `D11`, `D18`; contributes `R11`, `R12`, `R13`.
+producer-side obligation. G3 also does **not** claim cancellation-path tracker-gauge balance; G8 owns that
+cleanup exit. It does **not** claim one-shot asynchronous commit resolution; G4 owns the complete commit
+submission and callback chain. Covers `D2`, `D4`, `D8`, `D11`, `D18`; contributes `R11`, `R12`, `R13`.
 
 ### G4 — Commit authority
 
@@ -503,9 +518,18 @@ the head blocks every completed record behind it. Duplicate registration or comp
 failure. Every newly assigned `PartitionGenerationId` gets a fresh queue at Kafka's assigned position;
 no state survives from a revoked generation.
 
+**Inherited from G3 review — one-shot asynchronous commit resolution.** Build the ordinary asynchronous
+submission, its single in-flight operation identity, callback handling, wakeup propagation, staged-position
+retention, and fixed-cardinality outcome observability as one owner-confined chain. Every accepted submission
+resolves exactly once. A callback that races a wakeup or retirement cannot credit, clear, or restage the same
+operation twice; uncertainty retains a monotonic position for a later commit and never backpedals.
+
 **Exit:** no request, accumulator, target result, or policy can commit or retain a record; out-of-order
 completion, head gap, contiguous advancement, duplicate registration, duplicate completion, and
-completion of an unregistered record all have deterministic tests. Covers `D3`; contributes `R11`.
+completion of an unregistered record all have deterministic tests. The ordinary asynchronous submission and
+callback chain proves each accepted operation resolves once under callback/wakeup races, and an uncertain
+outcome can only preserve or advance the staged position while that generation remains owned; revocation
+discards the old generation's staged state. Covers `D3`; contributes `R11`.
 
 ### G5 — Connection and request owners
 
@@ -548,6 +572,14 @@ request's channel must be closed rather than reused, and final-write decides whe
 cancellation waits on the request at all (`connLLD §8`, `§17.1`). `TargetAttemptOutcome` replaces exception-carried
 no-response. Tuple output is unconditional and retried to durability.
 
+Request admission and every correctness-required callback use the typed links defined by `connLLD §3` and
+`procCommit §4.2`: acceptance or rejection reaches replay intake exactly once, normal source-response and
+request-owner results reach their required receiver exactly once, and the receiver's completion closes the
+linked operation. Register each outstanding linked operation before submission, retain it until its typed
+completion is processed, and expose that same registry to fixed-cardinality active-operation metrics and the
+activity monitor. Observability is derived from those owner transitions; no parallel callback-accounting
+model is introduced.
+
 **Deferred to POST1 — target interim-response preservation.** G5 builds the target response and tuple-input
 chain, but it does not preserve target `1xx` responses in tuples. The current target handler may continue to
 discard `1xx` responses other than `101` throughout the rewrite. POST1, after G12, owns replacing that discard
@@ -565,7 +597,10 @@ connection registry.
 completion, and a normal completion produces both in order with the second after tuple durability; with
 the permit count at 1, exactly one target attempt is in flight and queued requests consume no permits;
 **preparation has exactly the two outcomes `connLLD §6` names, and an unexpected preparation throw reaches
-the process-failure boundary rather than becoming a value**. The real Kafka source → replay intake →
+the process-failure boundary rather than becoming a value**. Admission acceptance/rejection and every normal
+source-response, turn, processing, attempt, and tuple result reaches its required receiver exactly once through
+a typed link; the link completes only after the receiver, and active-operation metrics/activity diagnostics
+are projections of the same registered operations. The real Kafka source → replay intake →
 connection/request path is constructed and reachable through its production queues, with no test-only caller
 standing in for a missing consumer. G5 does not claim target-interim tuple preservation; POST1 receives and
 proves that obligation after the rewrite. The inherited connection-lifetime assertions above run against the

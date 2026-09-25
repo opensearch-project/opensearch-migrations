@@ -67,11 +67,6 @@ public final class ReplayIntakeOwner {
         default void recordApplied() {}
         default void activeRecordTrackersChanged(int delta) {}
         default void recordTrackerRetired() {}
-        default void recordAssociationChanged(
-            KafkaRecordId recordId,
-            RecordAssociationId association,
-            boolean added
-        ) {}
         default void requestReconstituted() {}
         default void responseCompleted(boolean keptAlive) {}
         default void responseIncomplete(SourceAssemblySink.IncompleteReason reason) {}
@@ -308,8 +303,7 @@ public final class ReplayIntakeOwner {
             this::isOwnerThreadOrUnstarted,
             this::submitRecordProcessingFinished,
             metrics::activeRecordTrackersChanged,
-            metrics::recordTrackerRetired,
-            metrics::recordAssociationChanged
+            metrics::recordTrackerRetired
         );
     }
 

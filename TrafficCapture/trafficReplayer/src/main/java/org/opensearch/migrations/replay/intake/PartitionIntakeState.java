@@ -49,11 +49,6 @@ import lombok.NonNull;
  */
 public final class PartitionIntakeState {
 
-    @FunctionalInterface
-    public interface RecordAssociationObserver {
-        void changed(KafkaRecordId recordId, RecordAssociationId association, boolean added);
-    }
-
     private final PartitionGenerationId generation;
     private final OwnerThreadGuard ownerThreadGuard;
     /** Emits {@code RecordProcessingFinished} for a record whose work is done ({@code §7} step 9). */
@@ -64,7 +59,6 @@ public final class PartitionIntakeState {
      */
     private final IntConsumer activeRecordTrackersChanged;
     private final Runnable recordTrackerRetired;
-    private final RecordAssociationObserver recordAssociationObserver;
 
     private final Map<KafkaRecordId, RecordWorkTracker> recordTrackersByKafkaRecordId =
         new LinkedHashMap<>();
@@ -83,12 +77,21 @@ public final class PartitionIntakeState {
     /**
      * {@code §6}: this "points only to the current source-assembly lifetime". A fresh lifetime for the same
      * captured connection replaces the value here and does not touch the lifetime it replaced.
+     *
+     * <p>An explicitly closed lifetime keeps its entry, because that entry is the terminal cutoff
+     * {@code §9.3} needs: {@link #connectionFor} rejects a later {@code TrafficStream} for the same captured
+     * identity instead of opening a successor. The cutoff therefore lasts exactly as long as the lifetime
+     * state it points at and is never a separate or durable identity tombstone.
+     *
+     * <p>REBUILD-LIMBO-NOTE(G5): {@code ConnectionOwnerFinished} drops a closed lifetime's entry here together
+     * with its {@link #activeConnectionProcessingById} entry, which is where post-close rejection for that
+     * captured identity stops.
      */
     private final Map<CapturedConnectionId, SourceConnectionState>
         activeSourceConnectionsByCapturedConnectionId = new LinkedHashMap<>();
     /**
      * {@code §6}: "Older expired {@code ConnectionProcessingId} values may remain here while their target and
-     * tuple work finishes." An entry therefore outlives its captured-identity mapping.
+     * tuple work finishes." An expired lifetime's entry therefore outlives its captured-identity mapping.
      *
      * <p>REBUILD-LIMBO-NOTE(G5): removed on {@code ConnectionOwnerFinished} ({@code §4.1}), which is the event
      * that reports the owner has nothing left. Until G5 sends it, an ended lifetime stays here for the
@@ -106,15 +109,13 @@ public final class PartitionIntakeState {
         @NonNull BooleanSupplier currentThreadIsOwner,
         @NonNull Consumer<KafkaRecordId> recordCompletionSink,
         @NonNull IntConsumer activeRecordTrackersChanged,
-        @NonNull Runnable recordTrackerRetired,
-        @NonNull RecordAssociationObserver recordAssociationObserver
+        @NonNull Runnable recordTrackerRetired
     ) {
         this.generation = generation;
         this.ownerThreadGuard = new OwnerThreadGuard("replay intake " + generation, currentThreadIsOwner);
         this.recordCompletionSink = recordCompletionSink;
         this.activeRecordTrackersChanged = activeRecordTrackersChanged;
         this.recordTrackerRetired = recordTrackerRetired;
-        this.recordAssociationObserver = recordAssociationObserver;
     }
 
     public PartitionGenerationId generation() {
@@ -141,7 +142,6 @@ public final class PartitionIntakeState {
         var tracker = requireTracker(recordId);
         if (tracker.associate(association)) {
             addReverseAssociation(association, recordId);
-            recordAssociationObserver.changed(recordId, association, true);
         }
     }
 
@@ -170,11 +170,9 @@ public final class PartitionIntakeState {
             var tracker = requireTracker(recordId);
             if (tracker.adoptRelabelled(newAssociation)) {
                 addReverseAssociation(newAssociation, recordId);
-                recordAssociationObserver.changed(recordId, newAssociation, true);
             }
             tracker.removeAssociation(oldAssociation);
             removeReverseAssociation(oldAssociation, recordId);
-            recordAssociationObserver.changed(recordId, oldAssociation, false);
         }
     }
 
@@ -200,7 +198,6 @@ public final class PartitionIntakeState {
         var tracker = requireTracker(recordId);
         tracker.removeAssociation(association);
         removeReverseAssociation(association, recordId);
-        recordAssociationObserver.changed(recordId, association, false);
         emitCompletionIfEligible(tracker);
     }
 
@@ -220,9 +217,13 @@ public final class PartitionIntakeState {
      *
      * <p>{@code §2}: {@code ConnectionProcessingId.localSequence} "is allocated whenever replay intake begins
      * fresh process-local source assembly for a captured connection. It distinguishes a later fresh lifetime
-     * from an expired lifetime whose target or tuple work is still finishing." So a captured connection whose
-     * lifetime has ended gets a new sequence rather than rejoining the old one — {@code §17.2} requires the two
+     * from an expired lifetime whose target or tuple work is still finishing." So an expired captured
+     * connection gets a new sequence rather than rejoining the old one — {@code §17.2} requires the two
      * to "coexist without sharing state or messages", and sharing an identity is the one way they could not.
+     *
+     * <p>An explicit close admits no successor while its existing process-local lifetime remains retained:
+     * a later {@code TrafficStream} for the same captured identity is a protocol violation rather than fresh
+     * reconstruction.
      */
     public SourceConnectionState connectionFor(
         @NonNull CapturedConnectionId capturedConnectionId,
@@ -230,17 +231,16 @@ public final class PartitionIntakeState {
         @NonNull SourceAssemblySink sink
     ) {
         ownerThreadGuard.requireOwnerThread();
-        for (var lifetime : activeConnectionProcessingById.values()) {
-            if (lifetime.lifetime() == SourceConnectionState.Lifetime.EXPLICITLY_CLOSED
-                && lifetime.connectionProcessingId().capturedConnectionId().equals(capturedConnectionId)) {
+        var existing = activeSourceConnectionsByCapturedConnectionId.get(capturedConnectionId);
+        if (existing != null) {
+            if (existing.lifetime() == SourceConnectionState.Lifetime.EXPLICITLY_CLOSED) {
                 throw new SourceConnectionState.CaptureProtocolViolation(
                     "TrafficStream for " + capturedConnectionId + " arrived after CloseObservation"
                 );
             }
-        }
-        var existing = activeSourceConnectionsByCapturedConnectionId.get(capturedConnectionId);
-        if (existing != null && existing.lifetime() == SourceConnectionState.Lifetime.OPEN) {
-            return existing;
+            if (existing.lifetime() == SourceConnectionState.Lifetime.OPEN) {
+                return existing;
+            }
         }
         var lifetime = new SourceConnectionState(
             new ConnectionProcessingId(generation, capturedConnectionId, nextConnectionLocalSequence++),
@@ -253,14 +253,21 @@ public final class PartitionIntakeState {
     }
 
     /**
-     * Stops routing new observations for a captured connection to a lifetime that has ended.
+     * Frees a captured connection for fresh reconstruction once its lifetime expired.
      *
      * <p>Only if the mapping still points at that lifetime: a fresh lifetime may already have replaced it, and
      * {@code §6} says replacing "does not mutate the old lifetime" — the converse holds too, so an old
      * lifetime ending must not unmap its successor.
+     *
+     * <p>An explicitly closed lifetime keeps its mapping, which carries {@code §9.3}'s process-local terminal
+     * cutoff past the record that held the close. G5 removes both retained references when the connection
+     * owner reports it has no remaining work.
      */
     public void retireLifetime(@NonNull SourceConnectionState endedLifetime) {
         ownerThreadGuard.requireOwnerThread();
+        if (endedLifetime.lifetime() == SourceConnectionState.Lifetime.EXPLICITLY_CLOSED) {
+            return;
+        }
         var capturedConnectionId = endedLifetime.connectionProcessingId().capturedConnectionId();
         activeSourceConnectionsByCapturedConnectionId.remove(capturedConnectionId, endedLifetime);
     }
