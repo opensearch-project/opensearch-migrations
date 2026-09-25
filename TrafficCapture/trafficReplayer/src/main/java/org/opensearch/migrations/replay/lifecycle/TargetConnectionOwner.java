@@ -1,2148 +1,1361 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: ActorMailbox . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G5)
-/*
-
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.ProcessingCancellationResult;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
+import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.WaitReason;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
+import org.opensearch.migrations.replay.sink.TupleWriter;
 
+import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
-public final class TargetConnectionOwner<P extends TargetConnectionOwner.PreparedRequest, R> {
-    public sealed interface RequestAdmissionResult permits
-        RequestAdmissionAccepted,
-        RequestAdmissionRejected {}
+/**
+ * Event-loop-confined owner of one process-local target connection and its request registry.
+ */
+public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
+    private static final Duration PREPARATION_LEAD = Duration.ofSeconds(1);
 
-    public record RequestAdmissionAccepted() implements RequestAdmissionResult {}
+    public sealed interface ConnectionInput<S, F>
+        permits AdmitReconstitutedRequest,
+            AdmitCapturedClose,
+            SourceResponseComplete,
+            SourceResponseUnavailableForRetry,
+            SourceResponseIncomplete,
+            CapturedConnectionExpired,
+            GracefulConnectionCancellation,
+            ForceConnectionCancellation {
+
+        ConnectionProcessingId connectionProcessingId();
+
+        PartitionGenerationId partitionGenerationId();
+    }
+
+    public record AdmitReconstitutedRequest<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ReplayRequestId requestId,
+        long capturedRequestOrdinal,
+        @NonNull Instant requestFirstByteSourceTime,
+        @NonNull S sourceRequest,
+        @NonNull String activityIdentity
+    ) implements ConnectionInput<S, F> {}
+
+    public record AdmitCapturedClose<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        long capturedOrdinal,
+        @NonNull Instant replayTime
+    ) implements ConnectionInput<S, F> {}
+
+    public record SourceResponseComplete<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ReplayRequestId requestId,
+        @NonNull F response
+    ) implements ConnectionInput<S, F> {}
+
+    public record SourceResponseUnavailableForRetry<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ReplayRequestId requestId
+    ) implements ConnectionInput<S, F> {}
+
+    public record SourceResponseIncomplete<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ReplayRequestId requestId,
+        @NonNull String reason
+    ) implements ConnectionInput<S, F> {}
+
+    public record CapturedConnectionExpired<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId
+    ) implements ConnectionInput<S, F> {}
+
+    public record GracefulConnectionCancellation<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull CancellationDeadline deadline,
+        @NonNull CancellationException cause
+    ) implements ConnectionInput<S, F> {}
+
+    public record ForceConnectionCancellation<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull CancellationException cause
+    ) implements ConnectionInput<S, F> {}
+
+    public sealed interface InputResult
+        permits RequestAdmissionAccepted, RequestAdmissionRejected, InputApplied {}
+
+    public record RequestAdmissionAccepted() implements InputResult {}
 
     public record RequestAdmissionRejected(
         @NonNull CancellationException cause
-    ) implements RequestAdmissionResult {}
+    ) implements InputResult {}
 
-    public record RequestAdmission<R>(
-        @NonNull CompletionStage<RequestAdmissionResult> admissionResult,
-        @NonNull CompletionStage<RequestTurnResult<R>> turnCompletion
-    ) {}
+    public record InputApplied() implements InputResult {}
 
-    public record CloseAdmission(
-        @NonNull CompletionStage<Void> admissionAccepted,
-        @NonNull CompletionStage<SessionOutcome> closeCompletion
-    ) {}
+    public interface LifecycleSink {
+        CompletionStage<Void> connectionRequestFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId,
+            ReplayRequestId requestId
+        );
+
+        CompletionStage<Void> requestProcessingFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId,
+            ReplayRequestId requestId
+        );
+
+        CompletionStage<Void> connectionOwnerFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId
+        );
+    }
 
     @FunctionalInterface
     public interface FatalHandler {
         void onFatal(Error failure);
     }
 
-    public interface PreparedRequest extends AutoCloseable {
-        void connectionTurnFinished() throws Exception;
-    }
-
-    public enum HeadWaitReason {
-        SCHEDULED_START("scheduled_start"),
-        PREPARATION("preparation"),
-        ACTIVE_EXCHANGE("active_exchange"),
-        ORDERED_CLOSE("ordered_close");
-
-        private final String metricLabel;
-
-        HeadWaitReason(String metricLabel) {
-            this.metricLabel = metricLabel;
-        }
-
-        public String metricLabel() {
-            return metricLabel;
-        }
-    }
-
-    public enum AbortChild {
-        TARGET_EXCHANGE("target_exchange");
-
-        private final String metricLabel;
-
-        AbortChild(String metricLabel) {
-            this.metricLabel = metricLabel;
-        }
-
-        public String metricLabel() {
-            return metricLabel;
-        }
-    }
-
-    public interface Metrics {
-        Metrics NOOP = new Metrics() {
-            @Override
-            public void queuedCommandsChanged(int delta) {
-                // Metrics are optional for non-production actor instances.
-            }
-
-            @Override
-            public void headWaitChanged(HeadWaitReason reason, int delta) {
-                // Metrics are optional for non-production actor instances.
-            }
-
-            @Override
-            public void activeDuration(Duration duration) {
-                // Metrics are optional for non-production actor instances.
-            }
-
-            @Override
-            public void abortDuration(Duration duration) {
-                // Metrics are optional for non-production actor instances.
-            }
-
-            @Override
-            public void pendingAbortChildChanged(AbortChild child, int delta) {
-                // Metrics are optional for non-production actor instances.
-            }
-
-        };
-
-        void queuedCommandsChanged(int delta);
-
-        void headWaitChanged(HeadWaitReason reason, int delta);
-
-        void activeDuration(Duration duration);
-
-        void abortDuration(Duration duration);
-
-        void pendingAbortChildChanged(AbortChild child, int delta);
-
-    }
-
-    public interface TargetExchange<P, R> {
-        CompletionStage<RequestTurnResult<R>> execute(
-            ReplayRequestId requestId,
-            P preparedRequest,
-            TargetAttemptPermitProvider.Permit firstAttemptPermit,
-            AttemptPermitRequester retryPermitRequester
-        );
-
-        CompletionStage<Void> close();
-
-        CompletionStage<Void> abort(CancellationException cause);
-    }
-
-    @FunctionalInterface
-    public interface AttemptPermitRequester {
-        CompletionStage<TargetAttemptPermitProvider.Permit> request();
-    }
-
-    public sealed interface RequestTurnResult<T>
-        permits RequestTurnResult.Completed,
-            RequestTurnResult.PreparationFiltered,
-            RequestTurnResult.Cancelled {
-
-        record Completed<T>(@NonNull T value) implements RequestTurnResult<T> {}
-
-        record PreparationFiltered<T>(@NonNull String reason) implements RequestTurnResult<T> {}
-
-        record Cancelled<T>(@NonNull CancellationException cause) implements RequestTurnResult<T> {}
-    }
-
-    public interface RequestPreparation<P> {
-        CompletionStage<PreparationOutcome<P>> completion();
-
-        default void begin() {}
-
-        CompletionStage<Void> cancel(CancellationException cause);
-    }
-
-    public interface RequestLifecycleSink {
-        CompletionStage<Void> connectionRequestFinished(
-            PartitionGenerationId partitionGenerationId,
-            ReplayRequestId requestId
-        );
-
-        CompletionStage<Void> requestProcessingFinished(
-            PartitionGenerationId partitionGenerationId,
-            ReplayRequestId requestId
-        );
-    }
-
-    public sealed interface RequestProcessingOutcome permits
-        RequestProcessingOutcome.TupleDurable,
-        RequestProcessingOutcome.RequestCleanupFinished {
-
-        record TupleDurable() implements RequestProcessingOutcome {}
-
-        record RequestCleanupFinished(
-            @NonNull CancellationException cause
-        ) implements RequestProcessingOutcome {}
-    }
-
-    public static final class RequestProcessingRegistration {
-        @FunctionalInterface
-        public interface ProcessingCanceller {
-            CompletionStage<ProcessingCancellationResult> apply(
-                CancellationException cause
-            );
-        }
-
-        private final CompletionStage<RequestProcessingOutcome> completion;
-        private final ProcessingCanceller cancel;
-        private final CompletableFuture<Void> lifecycleHandled;
-        private final AtomicBoolean admissionRejectionCleanupStarted = new AtomicBoolean();
-        private final CompletableFuture<Void> admissionRejectionCleanup = new CompletableFuture<>();
-
-        public RequestProcessingRegistration(
-            @NonNull CompletionStage<RequestProcessingOutcome> completion,
-            @NonNull ProcessingCanceller cancel
-        ) {
-            this(completion, cancel, new CompletableFuture<>());
-        }
-
-        public RequestProcessingRegistration(
-            @NonNull CompletionStage<RequestProcessingOutcome> completion,
-            @NonNull ProcessingCanceller cancel,
-            @NonNull CompletableFuture<Void> lifecycleHandled
-        ) {
-            this.completion = completion;
-            this.cancel = cancel;
-            this.lifecycleHandled = lifecycleHandled;
-        }
-
-        public static RequestProcessingRegistration withTypedCancellation(
-            @NonNull CompletionStage<RequestProcessingOutcome> completion,
-            @NonNull ProcessingCanceller cancel
-        ) {
-            return new RequestProcessingRegistration(
-                completion,
-                cancel
-            );
-        }
-
-        public CompletionStage<RequestProcessingOutcome> completion() {
-            return completion;
-        }
-
-        public ProcessingCanceller cancel() {
-            return cancel;
-        }
-
-        public CompletionStage<Void> lifecycleHandled() {
-            return lifecycleHandled.minimalCompletionStage();
-        }
-
-        public CompletionStage<Void> rejectAdmission(CancellationException cause) {
-            if (!admissionRejectionCleanupStarted.compareAndSet(false, true)) {
-                return admissionRejectionCleanup.minimalCompletionStage();
-            }
-            final CompletionStage<ProcessingCancellationResult> cancellation;
-            try {
-                cancellation = java.util.Objects.requireNonNull(
-                    cancel.apply(cause),
-                    "rejected request processing cancellation returned no acknowledgement"
-                );
-            } catch (Throwable failure) {
-                failAdmissionRejectionCleanup(failure);
-                return admissionRejectionCleanup.minimalCompletionStage();
-            }
-            cancellation.thenCombine(completion, (decision, outcome) -> {
-                if (!(decision instanceof ProcessingCancellationResult.CancellationWon)) {
-                    throw new CompletionException(new IllegalStateException(
-                        "request processing completed before rejected admission cancellation"
-                    ));
-                }
-                if (!(outcome instanceof RequestProcessingOutcome.RequestCleanupFinished)) {
-                    throw new CompletionException(new IllegalStateException(
-                        "rejected request processing did not report typed cancellation"
-                    ));
-                }
-                return null;
-            }).whenComplete((ignored, failure) -> {
-                if (failure == null) {
-                    completeLifecycleHandling();
-                    admissionRejectionCleanup.complete(null);
-                } else {
-                    failAdmissionRejectionCleanup(unwrap(failure));
-                }
-            });
-            return admissionRejectionCleanup.minimalCompletionStage();
-        }
-
-        private void failAdmissionRejectionCleanup(Throwable failure) {
-            failLifecycleHandling(failure);
-            admissionRejectionCleanup.completeExceptionally(failure);
-        }
-
-        private void completeLifecycleHandling() {
-            lifecycleHandled.complete(null);
-        }
-
-        private void failLifecycleHandling(Throwable failure) {
-            lifecycleHandled.completeExceptionally(failure);
-        }
-    }
-
-    private enum State {
+    private enum SourceLifetime {
         OPEN,
-        ACTIVE,
-        ABORTING,
-        TERMINATED
+        CAPTURED_CLOSE_ADMITTED,
+        EXPIRED,
+        CANCELLING,
+        CLOSED
     }
 
-    private sealed interface Command<P, R> permits RequestCommand, CloseCommand {
-        PartitionGenerationId partitionGenerationId();
-
-        Long capturedOrdinal();
-
-        Instant admissionStart();
-
-        Instant scheduledStart();
-
-        boolean due();
-
-        void markDue();
+    private enum PreparationReadiness {
+        WAITING,
+        READY,
+        CANCELLED
     }
 
-    private static final class RequestCommand<P extends PreparedRequest, R> implements Command<P, R> {
-        private final RequestReplayOwner<P, R> owner;
-        private final RequestProcessingRegistration processingRegistration;
-        private final Long capturedOrdinal;
-        private final Instant admissionStart;
-        private final Instant scheduledStart;
-        private final CompletionGate<RequestAdmissionResult> admissionResult =
-            new CompletionGate<>();
-        private final AtomicBoolean emergencyCleanupStarted = new AtomicBoolean();
-        private final AtomicBoolean emergencyPreparedReleaseStarted = new AtomicBoolean();
-        private boolean due;
+    private sealed interface AdmissionEntry
+        permits RequestEntry, CloseEntry {
 
-        private RequestCommand(
-            PartitionGenerationId partitionGenerationId,
+        long capturedOrdinal();
+
+        Instant admissionTime();
+    }
+
+    private sealed interface ExecutionEntry
+        permits RequestExecutionEntry, CloseEntry {
+
+        long capturedOrdinal();
+
+        Instant executionTime();
+    }
+
+    private static final class RequestEntry<S, P extends AutoCloseable, R, F, T>
+        implements AdmissionEntry {
+        private final ReplayRequestId requestId;
+        private final long capturedOrdinal;
+        private final Instant nominalTargetTime;
+        private final RequestReplayOwner<S, P, R, F, T> owner;
+        private boolean firstTargetWriteSubmitted;
+        private boolean finalTargetWriteSubmitted;
+        private boolean connectionTurnFinished;
+
+        private RequestEntry(
             ReplayRequestId requestId,
-            Long capturedOrdinal,
-            Instant admissionStart,
-            Instant scheduledStart,
-            RequestPreparation<P> preparationController,
-            RequestProcessingRegistration processingRegistration,
-            java.util.function.BooleanSupplier inOwnerThread
+            long capturedOrdinal,
+            Instant nominalTargetTime,
+            RequestReplayOwner<S, P, R, F, T> owner
         ) {
-            this.owner = new RequestReplayOwner<>(
-                partitionGenerationId,
-                requestId,
-                preparationController,
-                inOwnerThread
-            );
-            this.processingRegistration = java.util.Objects.requireNonNull(processingRegistration);
+            this.requestId = requestId;
             this.capturedOrdinal = capturedOrdinal;
-            this.admissionStart = admissionStart;
-            this.scheduledStart = scheduledStart;
+            this.nominalTargetTime = nominalTargetTime;
+            this.owner = owner;
         }
 
         @Override
-        public PartitionGenerationId partitionGenerationId() {
-            return owner.partitionGenerationId;
-        }
-
-        @Override
-        public Long capturedOrdinal() {
+        public long capturedOrdinal() {
             return capturedOrdinal;
         }
 
         @Override
-        public Instant admissionStart() {
-            return admissionStart;
-        }
-
-        @Override
-        public Instant scheduledStart() {
-            return scheduledStart;
-        }
-
-        @Override
-        public boolean due() {
-            return due;
-        }
-
-        @Override
-        public void markDue() {
-            due = true;
+        public Instant admissionTime() {
+            return nominalTargetTime.minus(PREPARATION_LEAD);
         }
     }
 
-    private static final class CloseCommand<P, R> implements Command<P, R> {
-        private final PartitionGenerationId partitionGenerationId;
-        private final Long capturedOrdinal;
-        private final Instant scheduledStart;
-        private final CompletionGate<Void> admissionAccepted = new CompletionGate<>();
-        private final CompletionGate<SessionOutcome> completion = new CompletionGate<>();
-        private boolean due;
+    private static final class RequestExecutionEntry<S, P extends AutoCloseable, R, F, T>
+        implements ExecutionEntry {
+        private final RequestEntry<S, P, R, F, T> request;
+        private PreparationReadiness readiness = PreparationReadiness.WAITING;
 
-        private CloseCommand(
-            PartitionGenerationId partitionGenerationId,
-            Long capturedOrdinal,
-            Instant scheduledStart
-        ) {
-            this.partitionGenerationId = java.util.Objects.requireNonNull(partitionGenerationId);
-            this.capturedOrdinal = capturedOrdinal;
-            this.scheduledStart = scheduledStart;
-        }
-
-        @Override
-        public PartitionGenerationId partitionGenerationId() {
-            return partitionGenerationId;
-        }
-
-        @Override
-        public Long capturedOrdinal() {
-            return capturedOrdinal;
-        }
-
-        @Override
-        public Instant admissionStart() {
-            return scheduledStart;
-        }
-
-        @Override
-        public Instant scheduledStart() {
-            return scheduledStart;
-        }
-
-        @Override
-        public boolean due() {
-            return due;
-        }
-
-        @Override
-        public void markDue() {
-            due = true;
-        }
-    }
-
-    private final ConnectionSessionKey sessionKey;
-    private final ActorMailbox mailbox;
-    private final OwnerTransitionRunner transitions;
-    private final TargetExchange<P, R> targetExchange;
-    private final TargetAttemptPermitProvider permitProvider;
-    private final Metrics metrics;
-    private final LongSupplier nanoTime;
-    private final RequestLifecycleSink lifecycleSink;
-    private final PartitionGenerationId partitionGenerationId;
-    private final Deque<Command<P, R>> admissionCommands = new ArrayDeque<>();
-    private final Deque<Command<P, R>> executionCommands = new ArrayDeque<>();
-    private final Set<Command<P, R>> obligations = new LinkedHashSet<>();
-    private final Map<ReplayRequestId, RequestReplayOwner<P, R>> requestOwners = new LinkedHashMap<>();
-    private final Set<RequestReplayOwner<P, R>> tupleDurablePendingConnectionAcceptance =
-        new LinkedHashSet<>();
-    private final Map<RequestReplayOwner<P, R>, PendingProcessingCompletion>
-        processingCompletionsPendingCancellationDecision = new LinkedHashMap<>();
-    private final CompletionGate<SessionOutcome> termination = new CompletionGate<>();
-    private ActorMailbox.ScheduledTask admissionTimer;
-    private ActorMailbox.ScheduledTask executionTimer;
-    private RequestCommand<P, R> activeRequest;
-    private PendingAttemptPermit pendingAttemptPermit;
-    private HeadWaitReason headWaitReason;
-    private long activeStartedNanos;
-    private long abortStartedNanos;
-    private boolean orderedCloseActive;
-    private boolean sourceCloseAdmitted;
-    private boolean targetAbortPending;
-    private Throwable abortCleanupFailure;
-    private CancellationException abortCause;
-    private SessionOutcome pendingTerminationOutcome;
-    private Long lastAdmittedCapturedOrdinal;
-
-    private record PendingProcessingCompletion(
-        RequestProcessingOutcome outcome,
-        Throwable failure
-    ) {}
-
-    private final class PendingAttemptPermit {
-        private final RequestCommand<P, R> request;
-        private final CompletableFuture<TargetAttemptPermitProvider.Permit> completion =
-            new CompletableFuture<>();
-        private final AtomicReference<TargetAttemptPermitProvider.Permit> undeliveredPermit =
-            new AtomicReference<>();
-
-        private PendingAttemptPermit(RequestCommand<P, R> request) {
+        private RequestExecutionEntry(RequestEntry<S, P, R, F, T> request) {
             this.request = request;
         }
+
+        @Override
+        public long capturedOrdinal() {
+            return request.capturedOrdinal;
+        }
+
+        @Override
+        public Instant executionTime() {
+            return request.nominalTargetTime;
+        }
     }
 
-    private State state = State.OPEN;
+    private static final class CloseEntry implements AdmissionEntry, ExecutionEntry {
+        private final long capturedOrdinal;
+        private final Instant replayTime;
+
+        private CloseEntry(long capturedOrdinal, Instant replayTime) {
+            this.capturedOrdinal = capturedOrdinal;
+            this.replayTime = replayTime;
+        }
+
+        @Override
+        public long capturedOrdinal() {
+            return capturedOrdinal;
+        }
+
+        @Override
+        public Instant admissionTime() {
+            return replayTime;
+        }
+
+        @Override
+        public Instant executionTime() {
+            return replayTime;
+        }
+    }
+
+    private record PendingPermit<S, P extends AutoCloseable, R, F, T>(
+        RequestEntry<S, P, R, F, T> request,
+        TargetAttemptPermitProvider.Acquisition acquisition,
+        OutstandingOperationRegistry.Registration registration,
+        CompletableFuture<Void> retryDelivery
+    ) {}
+
+    private final ConnectionProcessingId connectionProcessingId;
+    private final PartitionGenerationId partitionGenerationId;
+    private final EventLoop eventLoop;
+    private final Clock clock;
+    private final LongSupplier nanoTime;
+    private final Function<Instant, Instant> replayTimeMapper;
+    private final RequestReplayOwner.RequestPreparer<S, P> preparer;
+    private final RequestReplayOwner.RetryPolicy<R, F> retryPolicy;
+    private final TargetChannelPort<P, R> targetChannel;
+    private final TupleWriter<T> tupleWriter;
+    private final RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory;
+    private final RequestReplayOwner.ResourceReleaser<S, P, R, F> resourceReleaser;
+    private final TargetAttemptPermitProvider permitProvider;
+    private final LifecycleSink lifecycleSink;
+    private final FatalHandler fatalHandler;
+    private final OutstandingOperationRegistry.CountHook countHook;
+    private final OutstandingOperationRegistry operations;
+    private final Deque<AdmissionEntry> admissionQueue = new ArrayDeque<>();
+    private final Deque<ExecutionEntry> executionQueue = new ArrayDeque<>();
+    private final Map<ReplayRequestId, RequestEntry<S, P, R, F, T>> requestRegistry =
+        new LinkedHashMap<>();
+    private volatile List<RequestReplayOwner<S, P, R, F, T>> publishedRequestOwners =
+        List.of();
+
+    private SourceLifetime sourceLifetime = SourceLifetime.OPEN;
+    private ScheduledFuture<?> admissionTimer;
+    private ScheduledFuture<?> executionTimer;
+    private RequestEntry<S, P, R, F, T> activeTurn;
+    private PendingPermit<S, P, R, F, T> pendingPermit;
+    private long lastCapturedOrdinal = Long.MIN_VALUE;
+    private boolean targetChannelClosed;
+    private boolean targetChannelClosePending;
+    private boolean ownerFinishedSubmitted;
 
     public TargetConnectionOwner(
-        @NonNull ConnectionSessionKey sessionKey,
-        @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull ActorMailbox mailbox,
-        @NonNull TargetExchange<P, R> targetExchange,
-        @NonNull TargetAttemptPermitProvider permitProvider,
-        @NonNull Metrics metrics,
-        @NonNull FatalHandler fatalHandler,
-        @NonNull RequestLifecycleSink lifecycleSink
-    ) {
-        this(
-            sessionKey,
-            partitionGenerationId,
-            mailbox,
-            targetExchange,
-            permitProvider,
-            metrics,
-            System::nanoTime,
-            fatalHandler,
-            lifecycleSink
-        );
-    }
-
-    TargetConnectionOwner(
-        @NonNull ConnectionSessionKey sessionKey,
-        @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull ActorMailbox mailbox,
-        @NonNull TargetExchange<P, R> targetExchange,
-        @NonNull TargetAttemptPermitProvider permitProvider,
-        @NonNull Metrics metrics,
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
         @NonNull LongSupplier nanoTime,
+        @NonNull Function<Instant, Instant> replayTimeMapper,
+        @NonNull RequestReplayOwner.RequestPreparer<S, P> preparer,
+        @NonNull RequestReplayOwner.RetryPolicy<R, F> retryPolicy,
+        @NonNull TargetChannelPort<P, R> targetChannel,
+        @NonNull TupleWriter<T> tupleWriter,
+        @NonNull RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory,
+        @NonNull RequestReplayOwner.ResourceReleaser<S, P, R, F> resourceReleaser,
+        @NonNull TargetAttemptPermitProvider permitProvider,
+        @NonNull LifecycleSink lifecycleSink,
         @NonNull FatalHandler fatalHandler,
-        @NonNull RequestLifecycleSink lifecycleSink
+        @NonNull OutstandingOperationRegistry.CountHook countHook
     ) {
-        this.sessionKey = sessionKey;
-        this.partitionGenerationId = partitionGenerationId;
-        this.mailbox = mailbox;
-        this.transitions = new OwnerTransitionRunner(
-            mailbox,
-            sessionKey.toString(),
-            fatalHandler::onFatal
-        );
-        this.targetExchange = targetExchange;
-        this.permitProvider = permitProvider;
-        this.metrics = metrics;
+        this.connectionProcessingId = connectionProcessingId;
+        this.partitionGenerationId = connectionProcessingId.generation();
+        this.eventLoop = eventLoop;
+        this.clock = clock;
         this.nanoTime = nanoTime;
+        this.replayTimeMapper = replayTimeMapper;
+        this.preparer = preparer;
+        this.retryPolicy = retryPolicy;
+        this.targetChannel = targetChannel;
+        this.tupleWriter = tupleWriter;
+        this.tupleFactory = tupleFactory;
+        this.resourceReleaser = resourceReleaser;
+        this.permitProvider = permitProvider;
         this.lifecycleSink = lifecycleSink;
-    }
-
-    public RequestAdmission<R> admitRequestWithAcceptance(
-        @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull ReplayRequestId requestId,
-        long capturedOrdinal,
-        @NonNull Instant preparationStart,
-        @NonNull Instant scheduledStart,
-        @NonNull RequestPreparation<P> preparation,
-        @NonNull RequestProcessingRegistration processingRegistration
-    ) {
-        if (!requestId.session().equals(sessionKey)) {
-            throw new IllegalArgumentException("request belongs to a different session");
-        }
-        if (capturedOrdinal < 0) {
-            throw new IllegalArgumentException("capturedOrdinal must not be negative");
-        }
-        var command = new RequestCommand<P, R>(
-            partitionGenerationId,
-            requestId,
-            capturedOrdinal,
-            preparationStart,
-            scheduledStart,
-            preparation,
-            processingRegistration,
-            mailbox::inMailbox
-        );
-        transitions.post(
-            "request admission " + requestId,
-            () -> admit(command),
-            failure -> handleRequestAdmissionTransitionFailure(command, failure)
-        );
-        return new RequestAdmission<>(
-            command.admissionResult.stage(),
-            command.owner.completion.stage()
+        this.fatalHandler = fatalHandler;
+        this.countHook = countHook;
+        this.operations = new OutstandingOperationRegistry(
+            "connection " + connectionProcessingId,
+            eventLoop,
+            clock,
+            fatalHandler::onFatal,
+            countHook
         );
     }
 
-    private CancellationException cancellationForRejectedAdmission(
-        String reason,
-        RequestCommand<P, R> command,
-        Throwable failure
-    ) {
-        var cancellation = new CancellationException(
-            reason + ": " + command.owner.requestId
-        );
-        if (failure != null) {
-            cancellation.initCause(failure);
-        }
-        return cancellation;
-    }
-
-    private void rejectUnadmittedRequest(
-        RequestCommand<P, R> command,
-        CancellationException cause
-    ) {
-        if (mailbox.inMailbox()) {
-            if (obligations.contains(command)) {
-                untrackObligation(command);
+    public CompletionStage<InputResult> submit(@NonNull ConnectionInput<S, F> input) {
+        var completion = new CompletableFuture<InputResult>();
+        try {
+            eventLoop.execute(() -> {
+                try {
+                    requireOwnerThread();
+                    completion.complete(applyInput(input));
+                } catch (Throwable failure) {
+                    completion.completeExceptionally(failure);
+                    impossible(
+                        "connection input " + input.getClass().getSimpleName(),
+                        failure
+                    );
+                }
+            });
+        } catch (Throwable failure) {
+            if (input instanceof AdmitReconstitutedRequest<S, F>) {
+                completion.complete(new RequestAdmissionRejected(rejectionCause(failure)));
+            } else {
+                completion.completeExceptionally(failure);
             }
-            requestOwners.remove(command.owner.requestId, command.owner);
+            reportFatal("required connection-input submission", failure);
         }
-        command.admissionResult.complete(new RequestAdmissionRejected(cause));
-        command.owner.completion.complete(new RequestTurnResult.Cancelled<>(cause));
+        return completion.minimalCompletionStage();
     }
 
-    private void handleRequestAdmissionTransitionFailure(
-        RequestCommand<P, R> command,
-        Throwable failure
-    ) {
-        if (command.admissionResult.isDone()) {
-            command.owner.completion.completeExceptionally(failure);
-            command.processingRegistration.failLifecycleHandling(failure);
-            return;
-        }
-        rejectUnadmittedRequest(
-            command,
-            cancellationForRejectedAdmission(
-                "request admission could not reach its connection owner",
-                command,
-                failure
-            )
-        );
+    public OutstandingOperationRegistry operations() {
+        return operations;
     }
 
-    @SuppressWarnings("java:S1181") // Emergency cleanup runs only when the owner mailbox is unavailable.
-    private void failRequestSubmission(
-        RequestCommand<P, R> command,
-        Throwable failure,
-        PreparationOutcome<P> settledPreparation
-    ) {
-        Throwable cleanupFailure = failure;
-        if (settledPreparation instanceof PreparationOutcome.Prepared<P> prepared
-            && command.emergencyPreparedReleaseStarted.compareAndSet(false, true)) {
-            try {
-                prepared.value().close();
-            } catch (Throwable releaseFailure) {
-                cleanupFailure = combineFailures(cleanupFailure, releaseFailure);
+    public List<OutstandingOperationRegistry.Snapshot> activitySnapshot() {
+        var snapshot = new ArrayList<>(operations.snapshots());
+        for (var requestOwner : publishedRequestOwners) {
+            snapshot.addAll(requestOwner.operations().snapshots());
+        }
+        return List.copyOf(snapshot);
+    }
+
+    int registeredRequestCount() {
+        requireOwnerThread();
+        return requestRegistry.size();
+    }
+
+    private InputResult applyInput(ConnectionInput<S, F> input) {
+        requireOwnerThread();
+        return switch (input) {
+            case AdmitReconstitutedRequest<S, F> admission ->
+                applyRequestAdmission(admission);
+            case AdmitCapturedClose<S, F> close -> {
+                applyCapturedClose(close);
+                yield new InputApplied();
             }
-        }
-        if (command.emergencyCleanupStarted.compareAndSet(false, true)) {
-            var cancellation = new CancellationException(
-                "request submission failed because its connection owner is unavailable: "
-                    + command.owner.requestId
-            );
-            cancellation.initCause(failure);
-            try {
-                var acknowledgement = java.util.Objects.requireNonNull(
-                    command.owner.preparationController.cancel(cancellation),
-                    "rejected request preparation cancellation returned no acknowledgement"
-                );
-                acknowledgement.whenComplete((ignored, acknowledgementFailure) -> {
-                    if (acknowledgementFailure != null) {
-                        transitions.reportCleanupFailure(
-                            "rejected request preparation cleanup "
-                                + command.owner.requestId,
-                            unwrap(acknowledgementFailure)
-                        );
-                    }
-                });
-            } catch (Throwable cancellationFailure) {
-                cleanupFailure = combineFailures(cleanupFailure, cancellationFailure);
+            case SourceResponseComplete<S, F> complete -> {
+                validateIdentity(complete);
+                var request = routeRequest(complete.requestId());
+                if (request != null) {
+                    request.sourceResponseComplete(complete.response());
+                }
+                yield new InputApplied();
             }
-            try {
-                var acknowledgement = java.util.Objects.requireNonNull(
-                    command.processingRegistration.cancel().apply(cancellation),
-                    "rejected request processing cancellation returned no acknowledgement"
-                );
-                acknowledgement.whenComplete((ignored, acknowledgementFailure) -> {
-                    if (acknowledgementFailure != null) {
-                        transitions.reportCleanupFailure(
-                            "rejected request processing cleanup "
-                                + command.owner.requestId,
-                            unwrap(acknowledgementFailure)
-                        );
-                    }
-                });
-            } catch (Throwable cancellationFailure) {
-                cleanupFailure = combineFailures(cleanupFailure, cancellationFailure);
+            case SourceResponseUnavailableForRetry<S, F> unavailable -> {
+                validateIdentity(unavailable);
+                var request = routeRequest(unavailable.requestId());
+                if (request != null) {
+                    request.sourceResponseUnavailableForRetry();
+                }
+                yield new InputApplied();
             }
-        }
-        command.owner.completion.completeExceptionally(cleanupFailure);
-        command.processingRegistration.failLifecycleHandling(cleanupFailure);
+            case SourceResponseIncomplete<S, F> incomplete -> {
+                validateIdentity(incomplete);
+                var request = routeRequest(incomplete.requestId());
+                if (request != null) {
+                    request.sourceResponseIncomplete(incomplete.reason());
+                }
+                yield new InputApplied();
+            }
+            case CapturedConnectionExpired<S, F> expired -> {
+                validateIdentity(expired);
+                expireConnection();
+                yield new InputApplied();
+            }
+            case GracefulConnectionCancellation<S, F> graceful -> {
+                validateIdentity(graceful);
+                gracefulCancel(graceful.deadline(), graceful.cause());
+                yield new InputApplied();
+            }
+            case ForceConnectionCancellation<S, F> forced -> {
+                validateIdentity(forced);
+                forceCancel(forced.cause());
+                yield new InputApplied();
+            }
+        };
     }
 
-    public CompletionStage<SessionOutcome> admitClose(
-        @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull Instant scheduledStart
-    ) {
-        return admitCloseWithAcceptance(
-            partitionGenerationId,
-            null,
-            scheduledStart
-        ).closeCompletion();
-    }
-
-    public CloseAdmission admitCloseWithAcceptance(
-        @NonNull PartitionGenerationId partitionGenerationId,
-        @NonNull Instant scheduledStart
-    ) {
-        return admitCloseWithAcceptance(partitionGenerationId, null, scheduledStart);
-    }
-
-    public CloseAdmission admitCloseWithAcceptance(
-        @NonNull PartitionGenerationId partitionGenerationId,
-        long capturedOrdinal,
-        @NonNull Instant scheduledStart
-    ) {
-        if (capturedOrdinal < 0) {
-            throw new IllegalArgumentException("capturedOrdinal must not be negative");
-        }
-        return admitCloseWithAcceptance(
-            partitionGenerationId,
-            Long.valueOf(capturedOrdinal),
-            scheduledStart
-        );
-    }
-
-    private CloseAdmission admitCloseWithAcceptance(
-        PartitionGenerationId partitionGenerationId,
-        Long capturedOrdinal,
-        Instant scheduledStart
-    ) {
-        var command = new CloseCommand<P, R>(
-            partitionGenerationId,
-            capturedOrdinal,
-            scheduledStart
-        );
-        transitions.post(
-            "ordered close admission",
-            () -> admit(command),
-            failure -> failCloseAdmission(command, failure)
-        );
-        return new CloseAdmission(
-            command.admissionAccepted.stage(),
-            command.completion.stage()
-        );
-    }
-
-    private void failCloseAdmission(CloseCommand<P, R> command, Throwable failure) {
-        command.admissionAccepted.completeExceptionally(failure);
-        command.completion.complete(new SessionOutcome.Failed(failure));
-    }
-
-    private void installProcessingRegistration(
-        RequestReplayOwner<P, R> request,
-        RequestProcessingRegistration registration
-    ) {
-        assertInMailbox();
-        request.registerProcessing(registration);
-        registration.completion().whenComplete((outcome, failure) ->
-            stageRequestProcessingCompletion(request, outcome, failure)
-        );
-        if (state == State.ABORTING || state == State.TERMINATED) {
-            cancelRequestProcessing(
-                request,
-                new CancellationException("connection is terminating: " + sessionKey)
+    private InputResult applyRequestAdmission(AdmitReconstitutedRequest<S, F> admission) {
+        if (!matchesIdentity(admission)
+            || sourceLifetime != SourceLifetime.OPEN) {
+            return new RequestAdmissionRejected(
+                rejectionCause(new IllegalStateException(
+                    "connection is not accepting request admissions"
+                ))
             );
         }
-    }
-
-    public void firstTargetWriteSubmitted(@NonNull ReplayRequestId requestId) {
-        if (!requestId.session().equals(sessionKey)) {
-            throw new IllegalArgumentException("request belongs to a different session");
-        }
-        transitions.applyNowOrPost("first target write " + requestId, () -> {
-            var request = requestOwners.get(requestId);
-            if (request == null) {
-                throw new IllegalStateException(
-                    "first target write arrived for an unknown request: " + requestId
-                );
-            }
-            if (activeRequest == null || activeRequest.owner != request) {
-                throw new IllegalStateException(
-                    "first target write arrived while the request did not own the connection turn: "
-                        + requestId
-                );
-            }
-            request.markFirstTargetWriteSubmitted();
-        });
-    }
-
-    public CompletionStage<SessionOutcome> abort(
-        @NonNull AbortReason reason,
-        @NonNull CancellationException cause
-    ) {
-        transitions.post("connection abort " + reason, () -> beginAbort(reason, cause));
-        return termination.stage();
-    }
-
-    public CompletionStage<SessionOutcome> termination() {
-        return termination.stage();
-    }
-
-    private void trackObligation(Command<P, R> command) {
-        assertInMailbox();
-        if (!obligations.add(command)) {
-            throw new IllegalStateException("command obligation was already tracked");
-        }
-        metrics.queuedCommandsChanged(1);
-    }
-
-    private void admit(Command<P, R> command) {
-        assertInMailbox();
-        trackObligation(command);
-        if (!validatePartitionGeneration(command)) {
-            return;
-        }
-        if (state == State.ABORTING || state == State.TERMINATED || sourceCloseAdmitted) {
-            rejectLateCommand(command);
-            return;
-        }
-        validateCapturedOrdinal(command);
-        if (command instanceof RequestCommand<P, R> request
-            && requestOwners.putIfAbsent(request.owner.requestId, request.owner) != null) {
-            throw new IllegalStateException("request was admitted twice: " + request.owner.requestId);
-        }
-        if (command instanceof CloseCommand<P, R>) {
-            sourceCloseAdmitted = true;
-        } else if (command instanceof RequestCommand<P, R> request) {
-            installProcessingRegistration(request.owner, request.processingRegistration);
-            request.owner.preparationController.completion().whenComplete((outcome, failure) ->
-                stagePreparation(request, outcome, failure)
+        if (!admission.requestId().connectionProcessingId().equals(connectionProcessingId)) {
+            return new RequestAdmissionRejected(
+                rejectionCause(new IllegalArgumentException(
+                    "request belongs to " + admission.requestId().connectionProcessingId()
+                ))
             );
         }
-        admissionCommands.addLast(command);
-        if (command instanceof CloseCommand<P, R> close) {
-            close.admissionAccepted.complete(null);
-        } else if (command instanceof RequestCommand<P, R> request) {
-            request.admissionResult.complete(new RequestAdmissionAccepted());
+        if (admission.requestId().capturedRequestOrdinal()
+            != admission.capturedRequestOrdinal()) {
+            var failure = new IllegalArgumentException(
+                "request identity ordinal "
+                    + admission.requestId().capturedRequestOrdinal()
+                    + " does not match admitted ordinal "
+                    + admission.capturedRequestOrdinal()
+            );
+            impossible("request admission identity", failure);
+            return new RequestAdmissionRejected(rejectionCause(failure));
         }
-        if (admissionCommands.peekFirst() == command) {
-            startAdmissionHead();
+        if (requestRegistry.containsKey(admission.requestId())) {
+            var failure = new IllegalStateException(
+                "request is already registered: " + admission.requestId()
+            );
+            impossible("duplicate request admission", failure);
+            return new RequestAdmissionRejected(rejectionCause(failure));
         }
-    }
-
-    private void validateCapturedOrdinal(Command<P, R> command) {
-        var suppliedOrdinal = command.capturedOrdinal();
-        var capturedOrdinal = suppliedOrdinal == null
-            ? lastAdmittedCapturedOrdinal == null ? 0L : lastAdmittedCapturedOrdinal + 1
-            : suppliedOrdinal;
-        if (lastAdmittedCapturedOrdinal != null
-            && capturedOrdinal <= lastAdmittedCapturedOrdinal) {
-            throw new IllegalStateException(
+        if (!acceptCapturedOrdinal(admission.capturedRequestOrdinal())) {
+            var failure = new IllegalStateException(
                 "captured ordinal "
-                    + capturedOrdinal
+                    + admission.capturedRequestOrdinal()
                     + " did not follow "
-                    + lastAdmittedCapturedOrdinal
-                    + " for "
-                    + sessionKey
+                    + lastCapturedOrdinal
             );
+            impossible("request admission ordering", failure);
+            return new RequestAdmissionRejected(rejectionCause(failure));
         }
-        lastAdmittedCapturedOrdinal = capturedOrdinal;
+        var nominalTargetTime = Objects.requireNonNull(
+            replayTimeMapper.apply(admission.requestFirstByteSourceTime()),
+            "replay-time mapping returned no nominal target time"
+        );
+        var requestOwner = new RequestReplayOwner<>(
+            partitionGenerationId,
+            connectionProcessingId,
+            admission.requestId(),
+            nominalTargetTime,
+            admission.sourceRequest(),
+            eventLoop,
+            clock,
+            nanoTime,
+            preparer,
+            retryPolicy,
+            targetChannel,
+            tupleFactory,
+            tupleWriter,
+            resourceReleaser,
+            new RequestCallbacks(),
+            fatalHandler::onFatal,
+            countHook
+        );
+        var entry = new RequestEntry<S, P, R, F, T>(
+            admission.requestId(),
+            admission.capturedRequestOrdinal(),
+            nominalTargetTime,
+            requestOwner
+        );
+        requestRegistry.put(admission.requestId(), entry);
+        publishRequestOwners();
+        admissionQueue.addLast(entry);
+        scheduleAdmissionHead();
+        return new RequestAdmissionAccepted();
     }
 
-    private boolean validatePartitionGeneration(Command<P, R> command) {
-        if (partitionGenerationId.equals(command.partitionGenerationId())) {
-            return true;
+    private void applyCapturedClose(AdmitCapturedClose<S, F> close) {
+        validateIdentity(close);
+        if (sourceLifetime != SourceLifetime.OPEN) {
+            impossible(
+                "captured close admission",
+                new IllegalStateException("source lifetime is " + sourceLifetime)
+            );
+            return;
         }
-        var failure = new IllegalStateException(
-            "connection owner "
-                + sessionKey
-                + " is bound to "
-                + partitionGenerationId
-                + " but received "
-                + command.partitionGenerationId()
-        );
-        if (command instanceof RequestCommand<P, R> request) {
-            rejectUnadmittedRequest(
-                request,
-                cancellationForRejectedAdmission(
-                    "request rejected because it belongs to another partition generation",
-                    request,
-                    failure
+        if (!acceptCapturedOrdinal(close.capturedOrdinal())) {
+            impossible(
+                "captured close ordering",
+                new IllegalStateException(
+                    "captured ordinal "
+                        + close.capturedOrdinal()
+                        + " did not follow "
+                        + lastCapturedOrdinal
                 )
             );
-        } else if (command instanceof CloseCommand<P, R> close) {
-            close.admissionAccepted.completeExceptionally(failure);
-            close.completion.complete(new SessionOutcome.Failed(failure));
-            untrackObligation(command);
-            transitions.reportImpossibleTransition(
-                "partition-generation admission " + command,
-                failure
-            );
-        }
-        return false;
-    }
-
-    private void rejectLateCommand(Command<P, R> command) {
-        var cause = new CancellationException("session is no longer accepting work: " + sessionKey);
-        if (command instanceof RequestCommand<P, R> request) {
-            rejectUnadmittedRequest(request, cause);
-        } else if (command instanceof CloseCommand<P, R> close) {
-            close.admissionAccepted.completeExceptionally(cause);
-            close.completion.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
-            untrackObligation(command);
-        }
-    }
-
-    private void stagePreparation(
-        RequestCommand<P, R> command,
-        PreparationOutcome<P> outcome,
-        Throwable failure
-    ) {
-        var normalized = failure == null
-            ? outcome
-            : new PreparationOutcome.Failed<P>(unwrap(failure));
-        if (normalized == null) {
-            normalized = new PreparationOutcome.Failed<>(
-                new NullPointerException("preparation completed without an outcome")
-            );
-        }
-        var settledPreparation = normalized;
-        transitions.post(
-            "request preparation completion " + command.owner.requestId,
-            () -> onPreparationSettled(command, settledPreparation),
-            deliveryFailure -> failRequestSubmission(
-                command,
-                deliveryFailure,
-                settledPreparation
-            )
-        );
-    }
-
-    private void onPreparationSettled(
-        RequestCommand<P, R> command,
-        PreparationOutcome<P> preparation
-    ) {
-        assertInMailbox();
-        if (command.owner.connectionTurnSettled()
-            || state == State.TERMINATED
-            || state == State.ABORTING) {
-            releaseLatePreparation(preparation);
             return;
         }
-        command.owner.recordPreparation(preparation);
-        if (executionCommands.peekFirst() == command) {
-            tryRunExecutionHead();
-        }
+        sourceLifetime = SourceLifetime.CAPTURED_CLOSE_ADMITTED;
+        admissionQueue.addLast(new CloseEntry(close.capturedOrdinal(), close.replayTime()));
+        scheduleAdmissionHead();
     }
 
-    private void startAdmissionHead() {
-        assertInMailbox();
+    private boolean acceptCapturedOrdinal(long candidate) {
+        if (candidate < 0 || candidate <= lastCapturedOrdinal) {
+            return false;
+        }
+        lastCapturedOrdinal = candidate;
+        return true;
+    }
+
+    private void scheduleAdmissionHead() {
+        requireOwnerThread();
         cancelAdmissionTimer();
-        if (transitions.fatalTransitionActive()) {
-            setHeadWaitReason(null);
+        if (sourceLifetime == SourceLifetime.CANCELLING || admissionQueue.isEmpty()) {
             return;
         }
-        var head = admissionCommands.peekFirst();
-        if (head == null) {
+        var head = admissionQueue.peekFirst();
+        var delay = nonNegativeDelay(clock.instant(), head.admissionTime());
+        if (delay.isZero()) {
+            promoteDueAdmissions();
             return;
         }
-        var delay = Duration.between(mailbox.now(), head.admissionStart());
-        if (delay.isNegative() || delay.isZero()) {
-            promoteAdmissionHead(head);
-        } else {
-            if (executionCommands.isEmpty() && activeRequest == null && !orderedCloseActive) {
-                setHeadWaitReason(HeadWaitReason.SCHEDULED_START);
-            }
-            try {
-                admissionTimer = mailbox.schedule(
-                    () -> transitions.runTransition("scheduled preparation start", () -> {
-                        assertInMailbox();
-                        if (admissionCommands.peekFirst() == head) {
-                            admissionTimer = null;
-                            promoteAdmissionHead(head);
-                        }
-                    }),
-                    delay
-                );
-            } catch (RejectedExecutionException e) {
-                transitions.reportRejectedSubmission("scheduled preparation start", e);
-            }
-        }
-    }
-
-    private void promoteAdmissionHead(Command<P, R> head) {
-        assertInMailbox();
-        if (admissionCommands.removeFirst() != head) {
-            throw new IllegalStateException("admission queue head changed during promotion");
-        }
-        executionCommands.addLast(head);
-        if (head instanceof RequestCommand<P, R> request) {
-            request.owner.beginPreparation();
-        }
-        startAdmissionHead();
-        if (executionCommands.peekFirst() == head) {
-            startExecutionHead();
-        }
-    }
-
-    private void startExecutionHead() {
-        assertInMailbox();
-        cancelExecutionTimer();
-        if (transitions.fatalTransitionActive()) {
-            setHeadWaitReason(null);
-            return;
-        }
-        var head = executionCommands.peekFirst();
-        if (head == null) {
-            setHeadWaitReason(null);
-            return;
-        }
-        var delay = Duration.between(mailbox.now(), head.scheduledStart());
-        if (delay.isNegative() || delay.isZero()) {
-            head.markDue();
-            tryRunExecutionHead();
-        } else {
-            setHeadWaitReason(HeadWaitReason.SCHEDULED_START);
-            try {
-                executionTimer = mailbox.schedule(
-                    () -> transitions.runTransition("scheduled execution start", () -> {
-                        assertInMailbox();
-                        if (executionCommands.peekFirst() == head) {
-                            head.markDue();
-                            executionTimer = null;
-                            tryRunExecutionHead();
-                        }
-                    }),
-                    delay
-                );
-            } catch (RejectedExecutionException e) {
-                transitions.reportRejectedSubmission("scheduled execution start", e);
-            }
-        }
-    }
-
-    private void tryRunExecutionHead() {
-        assertInMailbox();
-        if (transitions.fatalTransitionActive()
-            || state == State.ABORTING
-            || state == State.TERMINATED) {
-            setHeadWaitReason(null);
-            return;
-        }
-        if (activeRequest != null) {
-            setHeadWaitReason(HeadWaitReason.ACTIVE_EXCHANGE);
-            return;
-        }
-        if (orderedCloseActive) {
-            setHeadWaitReason(HeadWaitReason.ORDERED_CLOSE);
-            return;
-        }
-        var head = executionCommands.peekFirst();
-        if (head == null) {
-            setHeadWaitReason(null);
-            return;
-        }
-        if (!head.due()) {
-            setHeadWaitReason(HeadWaitReason.SCHEDULED_START);
-            return;
-        }
-        if (head instanceof RequestCommand<P, R> request) {
-            if (request.owner.preparationOutcome() == null) {
-                setHeadWaitReason(HeadWaitReason.PREPARATION);
-                return;
-            }
-            setHeadWaitReason(null);
-            handlePreparedRequest(request);
-        } else if (head instanceof CloseCommand<P, R> close) {
-            setHeadWaitReason(null);
-            runOrderedClose(close);
-        }
-    }
-
-    private void handlePreparedRequest(RequestCommand<P, R> request) {
-        request.owner.preparationOutcome().visit(new PreparationOutcome.Visitor<>() {
-            @Override
-            public Void onPrepared(PreparationOutcome.Prepared<P> outcome) {
-                runTargetExchange(request, outcome.value());
-                return null;
-            }
-
-            @Override
-            public Void onFiltered(PreparationOutcome.Filtered<P> outcome) {
-                request.owner.markTurnActive();
-                settleRequest(request, new RequestTurnResult.PreparationFiltered<>(outcome.reason()));
-                return null;
-            }
-
-            @Override
-            public Void onFailed(PreparationOutcome.Failed<P> outcome) {
-                request.owner.completion.completeExceptionally(outcome.cause());
-                transitions.reportImpossibleTransition(
-                    "request preparation " + request.owner.requestId,
-                    outcome.cause()
-                );
-                return null;
-            }
-
-            @Override
-            public Void onCancelled(PreparationOutcome.Cancelled<P> outcome) {
-                failRequestWithoutNormalMilestone(
-                    request,
-                    "unexpected preparation cancellation " + request.owner.requestId,
-                    outcome.cause()
-                );
-                return null;
-            }
-        });
-    }
-
-    private void runTargetExchange(RequestCommand<P, R> request, P preparedRequest) {
-        request.owner.markTurnActive();
-        state = State.ACTIVE;
-        activeRequest = request;
-        activeStartedNanos = nanoTime.getAsLong();
-        setHeadWaitReason(HeadWaitReason.ACTIVE_EXCHANGE);
-        requestAttemptPermit(request).whenComplete((permit, failure) ->
-            transitions.applyNowOrPost(
-                "initial target-attempt permit " + request.owner.requestId,
-                () -> beginTargetExchange(request, preparedRequest, permit, failure)
-            )
-        );
-    }
-
-    private void beginTargetExchange(
-        RequestCommand<P, R> request,
-        P preparedRequest,
-        TargetAttemptPermitProvider.Permit permit,
-        Throwable permitFailure
-    ) {
-        assertInMailbox();
-        if (state == State.ABORTING || state == State.TERMINATED) {
-            closePermit(permit);
-            return;
-        }
-        if (activeRequest != request || request.owner.connectionTurnSettled()) {
-            var ownershipFailure = new IllegalStateException(
-                "target-attempt permit completed for a request that no longer owns the turn: "
-                    + request.owner.requestId
-            );
-            addCleanupFailure(ownershipFailure, closePermit(permit));
-            failRequestWithoutNormalMilestone(
-                request,
-                "initial target-attempt permit ownership " + request.owner.requestId,
-                ownershipFailure
-            );
-            return;
-        }
-        if (permitFailure != null) {
-            failRequestWithoutNormalMilestone(
-                request,
-                "initial target-attempt permit acquisition " + request.owner.requestId,
-                unwrap(permitFailure)
-            );
-            return;
-        }
-        if (permit == null) {
-            failRequestWithoutNormalMilestone(
-                request,
-                "initial target-attempt permit acquisition " + request.owner.requestId,
-                new NullPointerException("permit acquisition completed without a permit")
-            );
-            return;
-        }
-        CompletionStage<RequestTurnResult<R>> exchange;
         try {
-            exchange = java.util.Objects.requireNonNull(
-                targetExchange.execute(
-                    request.owner.requestId,
-                    preparedRequest,
-                    permit,
-                    () -> requestAttemptPermit(request)
-                ),
-                "target exchange returned no completion stage"
-            );
-        } catch (Throwable t) {
-            addCleanupFailure(t, closePermit(permit));
-            failRequestWithoutNormalMilestone(
-                request,
-                "target exchange startup " + request.owner.requestId,
-                unwrap(t)
-            );
-            return;
-        }
-        exchange.whenComplete((outcome, failure) ->
-            transitions.post("target exchange completion " + request.owner.requestId, () -> {
-                if (state == State.ABORTING || state == State.TERMINATED) {
-                    return;
-                }
-                if (request.owner.connectionTurnSettled()) {
-                    releasePreparedAfterSettledTurn(request);
-                    return;
-                }
-                if (failure != null) {
-                    var cause = unwrap(failure);
-                    failRequestWithoutNormalMilestone(
-                        request,
-                        "target exchange completion " + request.owner.requestId,
-                        cause
-                    );
-                    return;
-                }
-                if (outcome == null) {
-                    failRequestWithoutNormalMilestone(
-                        request,
-                        "target exchange completion " + request.owner.requestId,
-                        new NullPointerException("target exchange completed without an outcome")
-                    );
-                    return;
-                }
-                if (outcome instanceof RequestTurnResult.Cancelled<R> cancelled) {
-                    failRequestWithoutNormalMilestone(
-                        request,
-                        "unexpected target cancellation " + request.owner.requestId,
-                        cancelled.cause()
-                    );
-                } else {
-                    releaseConnectionTurnResourcesAndSettle(request, outcome);
-                }
-            })
-        );
-    }
-
-    private CompletionStage<TargetAttemptPermitProvider.Permit> requestAttemptPermit(
-        RequestCommand<P, R> request
-    ) {
-        assertInMailbox();
-        if (activeRequest != request || state != State.ACTIVE) {
-            return CompletableFuture.failedFuture(new IllegalStateException(
-                "only the active connection-turn request may acquire a target-attempt permit"
-            ));
-        }
-        if (pendingAttemptPermit != null) {
-            return CompletableFuture.failedFuture(new IllegalStateException(
-                "a target-attempt permit acquisition is already pending for "
-                    + pendingAttemptPermit.request.owner.requestId
-            ));
-        }
-        var pending = new PendingAttemptPermit(request);
-        pendingAttemptPermit = pending;
-        final CompletionStage<TargetAttemptPermitProvider.Permit> acquisition;
-        try {
-            acquisition = java.util.Objects.requireNonNull(
-                permitProvider.acquire(request.owner.requestId, 1),
-                "target-attempt permit provider returned no completion stage"
+            admissionTimer = eventLoop.schedule(
+                () -> runTransition("admission timer", this::promoteDueAdmissions),
+                delay.toNanos(),
+                TimeUnit.NANOSECONDS
             );
         } catch (Throwable failure) {
-            pendingAttemptPermit = null;
-            pending.completion.completeExceptionally(failure);
-            return pending.completion.minimalCompletionStage();
+            impossible("admission timer submission", failure);
         }
-        acquisition.whenComplete((permit, failure) ->
-            deliverAttemptPermit(pending, permit, failure)
-        );
-        return pending.completion.minimalCompletionStage();
     }
 
-    private void deliverAttemptPermit(
-        PendingAttemptPermit pending,
-        TargetAttemptPermitProvider.Permit permit,
-        Throwable failure
-    ) {
-        if (permit != null) {
-            pending.undeliveredPermit.set(permit);
-        }
-        transitions.post(
-            "target-attempt permit delivery " + pending.request.owner.requestId,
-            () -> settleAttemptPermit(pending, permit, failure),
-            deliveryFailure -> {
-                var combined = combineFailures(
-                    deliveryFailure,
-                    releaseUndeliveredPermit(pending, permit)
-                );
-                pending.completion.completeExceptionally(combined);
+    private void promoteDueAdmissions() {
+        requireOwnerThread();
+        admissionTimer = null;
+        while (!admissionQueue.isEmpty()
+            && !admissionQueue.peekFirst().admissionTime().isAfter(clock.instant())) {
+            var entry = admissionQueue.removeFirst();
+            switch (entry) {
+                case RequestEntry<?, ?, ?, ?, ?> request -> {
+                    @SuppressWarnings("unchecked")
+                    var typed = (RequestEntry<S, P, R, F, T>) request;
+                    executionQueue.addLast(
+                        new RequestExecutionEntry<S, P, R, F, T>(typed)
+                    );
+                    typed.owner.beginPreparation();
+                }
+                case CloseEntry close -> executionQueue.addLast(close);
             }
-        );
+        }
+        scheduleAdmissionHead();
+        evaluateExecutionHead();
     }
 
-    private void settleAttemptPermit(
-        PendingAttemptPermit pending,
-        TargetAttemptPermitProvider.Permit permit,
-        Throwable failure
-    ) {
-        assertInMailbox();
-        if (pendingAttemptPermit != pending) {
-            var staleFailure = new IllegalStateException(
-                "target-attempt permit completed after its owner state was replaced"
-            );
-            addCleanupFailure(staleFailure, releaseUndeliveredPermit(pending, permit));
-            pending.completion.completeExceptionally(staleFailure);
+    private void scheduleExecutionHead() {
+        cancelExecutionTimer();
+        if (executionQueue.isEmpty()
+            || activeTurn != null
+            || pendingPermit != null
+            || sourceLifetime == SourceLifetime.CANCELLING) {
             return;
         }
-        pendingAttemptPermit = null;
-        var deliveredPermit = permit == null
-            ? null
-            : pending.undeliveredPermit.compareAndSet(permit, null) ? permit : null;
+        var head = executionQueue.peekFirst();
+        var delay = nonNegativeDelay(clock.instant(), head.executionTime());
+        if (delay.isZero()) {
+            evaluateExecutionHead();
+            return;
+        }
+        try {
+            executionTimer = eventLoop.schedule(
+                () -> runTransition("execution timer", this::evaluateExecutionHead),
+                delay.toNanos(),
+                TimeUnit.NANOSECONDS
+            );
+        } catch (Throwable failure) {
+            impossible("execution timer submission", failure);
+        }
+    }
+
+    private void evaluateExecutionHead() {
+        requireOwnerThread();
+        executionTimer = null;
+        if (executionQueue.isEmpty()
+            || activeTurn != null
+            || pendingPermit != null
+            || sourceLifetime == SourceLifetime.CANCELLING) {
+            maybeCloseAfterSourceEnd();
+            return;
+        }
+        var head = executionQueue.peekFirst();
+        if (head.executionTime().isAfter(clock.instant())) {
+            scheduleExecutionHead();
+            return;
+        }
+        switch (head) {
+            case RequestExecutionEntry<?, ?, ?, ?, ?> request -> {
+                @SuppressWarnings("unchecked")
+                var typed = (RequestExecutionEntry<S, P, R, F, T>) request;
+                switch (typed.readiness) {
+                    case WAITING -> {}
+                    case READY -> {
+                        activeTurn = typed.request;
+                        acquirePermit(typed.request, null);
+                    }
+                    case CANCELLED -> {
+                        executionQueue.removeFirst();
+                        evaluateExecutionHead();
+                    }
+                }
+            }
+            case CloseEntry ignored ->
+                closeTargetChannel();
+        }
+    }
+
+    private void acquirePermit(
+        RequestEntry<S, P, R, F, T> request,
+        CompletableFuture<Void> retryDelivery
+    ) {
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            request.requestId,
+            OperationType.PERMIT_ACQUISITION,
+            request.nominalTargetTime,
+            WaitReason.WAITING_FOR_PERMIT
+        );
+        final TargetAttemptPermitProvider.Acquisition acquisition;
+        try {
+            acquisition = Objects.requireNonNull(
+                permitProvider.acquire(request.requestId),
+                "permit provider returned no acquisition"
+            );
+        } catch (Throwable failure) {
+            impossible("permit acquisition submission", failure);
+            return;
+        }
+        pendingPermit = new PendingPermit<>(
+            request,
+            acquisition,
+            registration,
+            retryDelivery
+        );
+        acquisition.completion().whenComplete((result, failure) ->
+            postPermitResult(pendingPermit, result, unwrap(failure))
+        );
+    }
+
+    private void postPermitResult(
+        PendingPermit<S, P, R, F, T> expected,
+        TargetAttemptPermitProvider.AcquisitionResult result,
+        Throwable failure
+    ) {
+        if (eventLoop.inEventLoop()) {
+            applyPermitResult(expected, result, failure);
+            return;
+        }
+        try {
+            eventLoop.execute(() -> runTransition(
+                "permit result",
+                () -> applyPermitResult(expected, result, failure)
+            ));
+        } catch (Throwable submissionFailure) {
+            if (result instanceof TargetAttemptPermitProvider.PermitAcquired acquired) {
+                acquired.permit().close();
+            }
+            if (expected.retryDelivery() != null) {
+                expected.retryDelivery().completeExceptionally(submissionFailure);
+            }
+            reportFatal("required permit delivery submission", submissionFailure);
+        }
+    }
+
+    private void applyPermitResult(
+        PendingPermit<S, P, R, F, T> expected,
+        TargetAttemptPermitProvider.AcquisitionResult result,
+        Throwable failure
+    ) {
+        requireOwnerThread();
+        if (pendingPermit != expected) {
+            if (result instanceof TargetAttemptPermitProvider.PermitAcquired acquired) {
+                acquired.permit().close();
+            }
+            impossible(
+                "permit result",
+                new IllegalStateException("permit result did not match pending acquisition")
+            );
+            return;
+        }
+        pendingPermit = null;
         if (failure != null) {
-            var cause = unwrap(failure);
-            addCleanupFailure(cause, closePermit(deliveredPermit));
-            pending.completion.completeExceptionally(cause);
-        } else if (deliveredPermit == null) {
-            pending.completion.completeExceptionally(
-                new NullPointerException("target-attempt permit delivery contained no permit")
-            );
-        } else if (state != State.ACTIVE || activeRequest != pending.request) {
-            var cancellation = abortCause != null
-                ? abortCause
-                : new CancellationException(
-                    "request no longer owns the connection turn: "
-                        + pending.request.owner.requestId
-                );
-            addCleanupFailure(cancellation, closePermit(deliveredPermit));
-            pending.completion.completeExceptionally(cancellation);
-        } else {
-            pending.completion.complete(deliveredPermit);
+            if (expected.retryDelivery() != null) {
+                expected.retryDelivery().completeExceptionally(failure);
+            }
+            impossible("permit acquisition exceptional completion", failure);
+            return;
         }
-        tryFinishTermination();
+        if (result == null) {
+            var missing = new NullPointerException("permit acquisition returned no result");
+            if (expected.retryDelivery() != null) {
+                expected.retryDelivery().completeExceptionally(missing);
+            }
+            impossible("permit acquisition completion", missing);
+            return;
+        }
+        switch (result) {
+            case TargetAttemptPermitProvider.PermitAcquired acquired -> {
+                if (sourceLifetime == SourceLifetime.CANCELLING
+                    && !expected.request.finalTargetWriteSubmitted) {
+                    acquired.permit().close();
+                } else {
+                    expected.request.owner.acceptAttemptPermit(acquired.permit());
+                }
+                operations.complete(expected.registration());
+                if (expected.retryDelivery() != null) {
+                    expected.retryDelivery().complete(null);
+                }
+            }
+            case TargetAttemptPermitProvider.AcquisitionCancelled cancelled -> {
+                if (expected.retryDelivery() != null) {
+                    expected.retryDelivery().complete(null);
+                }
+                expected.request.owner.forceCancel(cancelled.cause());
+                operations.complete(expected.registration());
+            }
+        }
     }
 
-    private Throwable releaseUndeliveredPermit(
-        PendingAttemptPermit pending,
-        TargetAttemptPermitProvider.Permit permit
-    ) {
-        if (permit == null || !pending.undeliveredPermit.compareAndSet(permit, null)) {
-            return null;
+    private void closeTargetChannel() {
+        if (targetChannelClosed || targetChannelClosePending) {
+            return;
         }
-        return closePermit(permit);
-    }
-
-    private Throwable closePermit(TargetAttemptPermitProvider.Permit permit) {
-        if (permit == null) {
-            return null;
-        }
+        targetChannelClosePending = true;
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            null,
+            OperationType.TARGET_CHANNEL_CLOSE,
+            null,
+            WaitReason.WAITING_FOR_CHANNEL_CLOSE
+        );
+        final CompletionStage<Void> close;
         try {
-            permit.close();
-            return null;
+            close = Objects.requireNonNull(
+                targetChannel.close(connectionProcessingId),
+                "target channel returned no close completion"
+            );
         } catch (Throwable failure) {
-            return failure;
-        }
-    }
-
-    private void addCleanupFailure(Throwable failure, Throwable cleanupFailure) {
-        if (cleanupFailure != null && cleanupFailure != failure) {
-            failure.addSuppressed(cleanupFailure);
-        }
-    }
-
-    private void releaseConnectionTurnResourcesAndSettle(
-        RequestCommand<P, R> request,
-        RequestTurnResult<R> outcome
-    ) {
-        try {
-            request.owner.releaseConnectionTurnResources();
-        } catch (Throwable t) {
-            failRequestWithoutNormalMilestone(
-                request,
-                "connection-turn resource release " + request.owner.requestId,
-                t
-            );
+            impossible("target channel close submission", failure);
             return;
         }
-        settleRequest(request, outcome);
-    }
-
-    private void failRequestWithoutNormalMilestone(
-        RequestCommand<P, R> request,
-        String operation,
-        Throwable cause
-    ) {
-        var failure = combineFailures(cause, releasePreparedFailure(request));
-        request.owner.completion.completeExceptionally(failure);
-        transitions.reportImpossibleTransition(operation, failure);
-    }
-
-    private void settleRequest(RequestCommand<P, R> request, RequestTurnResult<R> outcome) {
-        assertInMailbox();
-        if (request.owner.connectionTurnSettled()) {
-            transitions.reportImpossibleTransition(
-                "duplicate connection-turn completion " + request.owner.requestId,
-                new IllegalStateException("request connection turn was already settled")
-            );
-            return;
-        }
-        request.owner.markConnectionTurnFinished();
-        if (activeRequest == request) {
-            recordActiveDuration();
-        }
-        activeRequest = null;
-        if (executionCommands.peekFirst() != request) {
-            throw new IllegalStateException("settled request was not the actor head");
-        }
-        executionCommands.removeFirst();
-        untrackObligation(request);
-        if (state == State.ACTIVE) {
-            state = State.OPEN;
-        }
-        final CompletionStage<Void> acceptance;
-        try {
-            acceptance = java.util.Objects.requireNonNull(
-                lifecycleSink.connectionRequestFinished(
-                    request.owner.partitionGenerationId,
-                    request.owner.requestId
-                ),
-                "request lifecycle sink returned no connection-turn acceptance"
-            );
-        } catch (Throwable t) {
-            request.owner.processingRegistration().failLifecycleHandling(t);
-            transitions.reportImpossibleTransition(
-                "connection-turn completion " + request.owner.requestId,
-                t
-            );
-            startExecutionHead();
-            return;
-        }
-        startExecutionHead();
-        acceptance.whenComplete((ignored, failure) ->
-            transitions.applyNowOrPost("connection-turn milestone acceptance " + request.owner.requestId, () -> {
-                if (failure != null) {
-                    request.owner.processingRegistration().failLifecycleHandling(unwrap(failure));
-                    transitions.reportImpossibleTransition(
-                        "connection-turn milestone acceptance " + request.owner.requestId,
-                        unwrap(failure)
-                    );
-                    return;
+        close.whenComplete((ignored, failure) ->
+            postRequired(
+                "target channel close completion",
+                () -> {
+                    if (failure != null) {
+                        impossible("target channel close", unwrap(failure));
+                        return;
+                    }
+                    targetChannelClosePending = false;
+                    targetChannelClosed = true;
+                    if (!executionQueue.isEmpty()
+                        && executionQueue.peekFirst() instanceof CloseEntry) {
+                        executionQueue.removeFirst();
+                    }
+                    if (sourceLifetime == SourceLifetime.CAPTURED_CLOSE_ADMITTED
+                        || sourceLifetime == SourceLifetime.EXPIRED) {
+                        sourceLifetime = SourceLifetime.CLOSED;
+                    }
+                    operations.complete(registration);
+                    evaluateExecutionHead();
+                    tryFinishOwner();
                 }
-                request.owner.markConnectionTurnAccepted();
-                request.owner.completion.complete(outcome);
-                if (tupleDurablePendingConnectionAcceptance.remove(request.owner)) {
-                    request.owner.recordProcessingCompletion(
-                        new RequestProcessingOutcome.TupleDurable()
-                    );
-                }
-                if (request.owner.processingCompletionReceived()) {
-                    applyRequestProcessingCompletion(request.owner);
-                }
-            })
+            )
         );
     }
 
-    private void runOrderedClose(CloseCommand<P, R> close) {
-        assertInMailbox();
-        orderedCloseActive = true;
-        setHeadWaitReason(HeadWaitReason.ORDERED_CLOSE);
-        CompletionStage<Void> closeStage;
-        try {
-            closeStage = java.util.Objects.requireNonNull(
-                targetExchange.close(),
-                "target close returned no completion stage"
+    private void expireConnection() {
+        if (sourceLifetime != SourceLifetime.OPEN) {
+            impossible(
+                "captured connection expiration",
+                new IllegalStateException("source lifetime is " + sourceLifetime)
             );
-        } catch (Throwable t) {
-            closeStage = CompletableFuture.failedFuture(t);
-        }
-        closeStage.whenComplete((ignored, failure) ->
-            transitions.post("ordered close completion", () -> {
-                if (state == State.ABORTING || state == State.TERMINATED) {
-                    return;
-                }
-                orderedCloseActive = false;
-                var closeFailure = failure == null ? null : unwrap(failure);
-                var outcome = closeFailure == null
-                    ? new SessionOutcome.Closed()
-                    : new SessionOutcome.Failed(closeFailure);
-                close.completion.complete(outcome);
-                executionCommands.removeFirst();
-                untrackObligation(close);
-                pendingTerminationOutcome = outcome;
-                if (closeFailure != null) {
-                    transitions.reportImpossibleTransition("ordered close completion", closeFailure);
-                    return;
-                }
-                tryFinishTermination();
-            })
-        );
-    }
-
-    private void beginAbort(AbortReason reason, CancellationException cause) {
-        assertInMailbox();
-        if (state == State.TERMINATED || state == State.ABORTING) {
             return;
         }
-        state = State.ABORTING;
-        abortCause = cause;
-        abortStartedNanos = nanoTime.getAsLong();
-        setHeadWaitReason(null);
-        cancelAdmissionTimer();
-        cancelExecutionTimer();
-        Throwable queuedCleanupFailure = null;
-        for (var command : new ArrayList<>(obligations)) {
-            if (command instanceof RequestCommand<P, R> request && request != activeRequest) {
-                queuedCleanupFailure = combineFailures(
-                    queuedCleanupFailure,
-                    cancelQueuedRequest(request, cause)
-                );
-                cancelRequestProcessing(request.owner, cause);
-            } else if (command instanceof CloseCommand<P, R> close) {
-                close.completion.complete(new SessionOutcome.Aborted(reason, cause));
-            }
-        }
-        for (var request : new ArrayList<>(requestOwners.values())) {
-            var stillOwnsConnectionWork = obligations.stream().anyMatch(command ->
-                command instanceof RequestCommand<P, R> requestCommand
-                    && requestCommand.owner == request
-            );
-            if (!stillOwnsConnectionWork) {
-                cancelRequestProcessing(request, cause);
-            }
-        }
-        abortCleanupFailure = combineFailures(abortCleanupFailure, queuedCleanupFailure);
-
-        CompletionStage<Void> abortStage;
-        targetAbortPending = true;
-        metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, 1);
-        try {
-            abortStage = java.util.Objects.requireNonNull(
-                targetExchange.abort(cause),
-                "target abort returned no completion stage"
-            );
-        } catch (Throwable t) {
-            abortStage = CompletableFuture.failedFuture(t);
-        }
-        var activeRequestId = activeRequest == null
-            ? null
-            : activeRequest.owner.requestId;
-        var permitCancellation = cancelPendingAttemptPermit(activeRequestId, cause);
-        abortStage = abortStage.handle((ignored, failure) -> failure)
-            .thenCombine(
-                permitCancellation.handle((ignored, failure) -> failure),
-                (targetFailure, permitFailure) -> {
-                    var combined = targetFailure == null ? null : unwrap(targetFailure);
-                    if (permitFailure != null) {
-                        combined = combineFailures(combined, unwrap(permitFailure));
-                    }
-                    if (combined != null) {
-                        throw new CompletionException(combined);
-                    }
-                    return null;
-                }
-            );
-        abortStage.whenComplete((ignored, failure) ->
-            transitions.post("target abort completion", () -> {
-                if (targetAbortPending) {
-                    targetAbortPending = false;
-                    metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
-                }
-                orderedCloseActive = false;
-                var terminationFailure = failure == null ? null : unwrap(failure);
-                if (activeRequest != null) {
-                    recordActiveDuration();
-                }
-                for (var command : new ArrayList<>(obligations)) {
-                    if (command instanceof RequestCommand<P, R> request) {
-                        request.owner.cancelConnectionTurn(cause);
-                        terminationFailure = combineFailures(
-                            terminationFailure,
-                            cancelPreparationFailure(request)
-                        );
-                        terminationFailure = combineFailures(
-                            terminationFailure,
-                            releasePreparedFailure(request)
-                        );
-                        request.owner.completion.complete(new RequestTurnResult.Cancelled<>(cause));
-                        cancelRequestProcessing(request.owner, cause);
-                    } else if (command instanceof CloseCommand<P, R> close) {
-                        close.completion.complete(new SessionOutcome.Aborted(reason, cause));
-                    }
-                    untrackObligation(command);
-                }
-                activeRequest = null;
-                terminationFailure = combineFailures(
-                    terminationFailure,
-                    abortCleanupFailure
-                );
-                abortCleanupFailure = null;
-                admissionCommands.clear();
-                executionCommands.clear();
-                metrics.abortDuration(elapsedSince(abortStartedNanos));
-                pendingTerminationOutcome =
-                    terminationFailure == null
-                        ? new SessionOutcome.Aborted(reason, cause)
-                        : new SessionOutcome.Failed(terminationFailure);
-                tryFinishTermination();
-            })
-        );
+        sourceLifetime = SourceLifetime.EXPIRED;
+        maybeCloseAfterSourceEnd();
     }
 
-    private CompletionStage<Integer> cancelPendingAttemptPermit(
-        ReplayRequestId activeRequestId,
+    private void gracefulCancel(
+        CancellationDeadline deadline,
         CancellationException cause
     ) {
-        try {
-            return java.util.Objects.requireNonNull(
-                permitProvider.cancel(
-                    requestId -> activeRequestId != null && activeRequestId.equals(requestId),
-                    cause
-                ),
-                "target-attempt permit cancellation returned no completion stage"
+        if (sourceLifetime == SourceLifetime.CLOSED) {
+            return;
+        }
+        sourceLifetime = SourceLifetime.CANCELLING;
+        cancelAdmissionTimer();
+        cancelExecutionTimer();
+        discardCloseEntries();
+        for (var entry : List.copyOf(requestRegistry.values())) {
+            entry.owner.gracefulCancel(deadline, cause);
+        }
+        if (pendingPermit != null
+            && !pendingPermit.request().finalTargetWriteSubmitted) {
+            pendingPermit.acquisition().cancel(cause);
+        }
+        maybeCloseAfterSourceEnd();
+    }
+
+    private void forceCancel(CancellationException cause) {
+        sourceLifetime = SourceLifetime.CANCELLING;
+        cancelAdmissionTimer();
+        cancelExecutionTimer();
+        discardCloseEntries();
+        if (pendingPermit != null) {
+            pendingPermit.acquisition().cancel(cause);
+        }
+        for (var entry : List.copyOf(requestRegistry.values())) {
+            entry.owner.forceCancel(cause);
+        }
+        maybeCloseAfterSourceEnd();
+    }
+
+    private void discardCloseEntries() {
+        admissionQueue.removeIf(CloseEntry.class::isInstance);
+        executionQueue.removeIf(CloseEntry.class::isInstance);
+    }
+
+    private void maybeCloseAfterSourceEnd() {
+        if ((sourceLifetime == SourceLifetime.CAPTURED_CLOSE_ADMITTED
+            || sourceLifetime == SourceLifetime.EXPIRED
+            || sourceLifetime == SourceLifetime.CANCELLING)
+            && admissionQueue.isEmpty()
+            && executionQueue.isEmpty()
+            && activeTurn == null
+            && pendingPermit == null) {
+            closeTargetChannel();
+        }
+    }
+
+    private void tryFinishOwner() {
+        if (ownerFinishedSubmitted
+            || sourceLifetime == SourceLifetime.OPEN
+            || !targetChannelClosed
+            || targetChannelClosePending
+            || !admissionQueue.isEmpty()
+            || !executionQueue.isEmpty()
+            || activeTurn != null
+            || pendingPermit != null
+            || !requestRegistry.isEmpty()
+            || admissionTimer != null
+            || executionTimer != null) {
+            return;
+        }
+        ownerFinishedSubmitted = true;
+        requiredLifecycleDelivery(
+            null,
+            "connection-owner completion",
+            () -> lifecycleSink.connectionOwnerFinished(
+                partitionGenerationId,
+                connectionProcessingId
+            ),
+            () -> {}
+        );
+    }
+
+    private RequestReplayOwner<S, P, R, F, T> routeRequest(ReplayRequestId requestId) {
+        if (!requestId.connectionProcessingId().equals(connectionProcessingId)) {
+            var failure = new IllegalArgumentException(
+                "request belongs to " + requestId.connectionProcessingId()
             );
-        } catch (Throwable failure) {
+            impossible("source-response routing", failure);
+            throw failure;
+        }
+        var request = requestRegistry.get(requestId);
+        if (request == null) {
+            var failure = new IllegalStateException(
+                "no registered request for source-response input " + requestId
+            );
+            if (sourceLifetime == SourceLifetime.CANCELLING) {
+                return null;
+            }
+            impossible("source-response routing", failure);
+            throw failure;
+        }
+        return request.owner;
+    }
+
+    private void validateIdentity(ConnectionInput<S, F> input) {
+        if (!matchesIdentity(input)) {
+            var failure = new IllegalArgumentException(
+                "input identity "
+                    + input.connectionProcessingId()
+                    + " / "
+                    + input.partitionGenerationId()
+                    + " does not match "
+                    + connectionProcessingId
+            );
+            impossible("connection input identity", failure);
+            throw failure;
+        }
+    }
+
+    private boolean matchesIdentity(ConnectionInput<S, F> input) {
+        return input.connectionProcessingId().equals(connectionProcessingId)
+            && input.partitionGenerationId().equals(partitionGenerationId);
+    }
+
+    private void preparationFinished(
+        ReplayRequestId requestId,
+        RequestPreparationResult<?> result
+    ) {
+        var execution = findExecution(requestId);
+        if (execution == null) {
+            impossible(
+                "preparation readiness",
+                new IllegalStateException(
+                    "request has no execution entry: " + requestId
+                )
+            );
+            return;
+        }
+        if (execution.readiness != PreparationReadiness.WAITING) {
+            impossible(
+                "preparation readiness",
+                new IllegalStateException(
+                    "preparation readiness is " + execution.readiness
+                )
+            );
+            return;
+        }
+        switch (result) {
+            case RequestPreparationResult.Ready<?> ignored ->
+                execution.readiness = PreparationReadiness.READY;
+            case RequestPreparationResult.Cancelled<?> ignored ->
+                execution.readiness = PreparationReadiness.CANCELLED;
+        }
+        evaluateExecutionHead();
+    }
+
+    private RequestExecutionEntry<S, P, R, F, T> findExecution(
+        ReplayRequestId requestId
+    ) {
+        for (var entry : executionQueue) {
+            if (entry instanceof RequestExecutionEntry<?, ?, ?, ?, ?> request
+                && request.request.requestId.equals(requestId)) {
+                @SuppressWarnings("unchecked")
+                var typed = (RequestExecutionEntry<S, P, R, F, T>) request;
+                return typed;
+            }
+        }
+        return null;
+    }
+
+    private void firstTargetWriteSubmitted(ReplayRequestId requestId) {
+        var request = requireRegistered(requestId);
+        if (request.firstTargetWriteSubmitted) {
+            impossible(
+                "first target write",
+                new IllegalStateException(
+                    "first target write was submitted more than once"
+                )
+            );
+            return;
+        }
+        request.firstTargetWriteSubmitted = true;
+    }
+
+    private void finalTargetWriteSubmitted(ReplayRequestId requestId) {
+        var request = requireRegistered(requestId);
+        if (!request.firstTargetWriteSubmitted) {
+            impossible(
+                "final target write",
+                new IllegalStateException(
+                    "final target write arrived before first target write"
+                )
+            );
+            return;
+        }
+        if (request.finalTargetWriteSubmitted) {
+            impossible(
+                "final target write",
+                new IllegalStateException(
+                    "final target write was submitted more than once"
+                )
+            );
+            return;
+        }
+        request.finalTargetWriteSubmitted = true;
+    }
+
+    private CompletionStage<Void> connectionTurnFinished(ReplayRequestId requestId) {
+        var request = requireRegistered(requestId);
+        if (activeTurn != request
+            || executionQueue.isEmpty()
+            || !(executionQueue.peekFirst()
+                instanceof RequestExecutionEntry<?, ?, ?, ?, ?> execution)
+            || execution.request != request) {
+            var failure = new IllegalStateException(
+                "request does not own the active connection turn: " + requestId
+            );
+            impossible("connection-turn completion", failure);
             return CompletableFuture.failedFuture(failure);
         }
+        if (request.connectionTurnFinished) {
+            var failure = new IllegalStateException(
+                "connection-turn completion arrived twice for " + requestId
+            );
+            impossible("connection-turn completion", failure);
+            return CompletableFuture.failedFuture(failure);
+        }
+        request.connectionTurnFinished = true;
+        activeTurn = null;
+        executionQueue.removeFirst();
+        evaluateExecutionHead();
+        return requiredLifecycleDelivery(
+            requestId,
+            "connection-request completion",
+            () -> lifecycleSink.connectionRequestFinished(
+                partitionGenerationId,
+                connectionProcessingId,
+                requestId
+            ),
+            () -> {}
+        );
     }
 
-    private void stageRequestProcessingCompletion(
-        RequestReplayOwner<P, R> request,
-        RequestProcessingOutcome outcome,
-        Throwable failure
-    ) {
-        var settledOutcome = outcome;
-        var settledFailure = failure == null ? null : unwrap(failure);
-        transitions.applyNowOrPost(
-            "request-processing completion " + request.requestId,
+    private CompletionStage<Void> requestProcessingFinished(ReplayRequestId requestId) {
+        var request = requireRegistered(requestId);
+        if (!request.connectionTurnFinished) {
+            var failure = new IllegalStateException(
+                "request processing completed before connection turn: " + requestId
+            );
+            impossible("request-processing completion", failure);
+            return CompletableFuture.failedFuture(failure);
+        }
+        return requiredLifecycleDelivery(
+            requestId,
+            "request-processing completion",
+            () -> lifecycleSink.requestProcessingFinished(
+                partitionGenerationId,
+                connectionProcessingId,
+                requestId
+            ),
             () -> {
-                if (requestOwners.get(request.requestId) != request) {
-                    return;
-                }
-                if (state == State.ABORTING && !request.processingCancellationRequested()) {
-                    cancelRequestProcessing(
-                        request,
-                        java.util.Objects.requireNonNull(
-                            abortCause,
-                            "aborting connection had no cancellation cause"
+                if (!requestRegistry.remove(requestId, request)) {
+                    impossible(
+                        "request registry removal",
+                        new IllegalStateException(
+                            "request disappeared before processing acceptance: " + requestId
                         )
                     );
-                }
-                if (request.processingCancellationRequested()
-                    && request.processingCancellationResult() == null) {
-                    var previous = processingCompletionsPendingCancellationDecision.putIfAbsent(
-                        request,
-                        new PendingProcessingCompletion(settledOutcome, settledFailure)
-                    );
-                    if (previous != null) {
-                        transitions.reportImpossibleTransition(
-                            "duplicate request-processing completion " + request.requestId,
-                            new IllegalStateException(
-                                "request-processing completion arrived twice while cancellation "
-                                    + "ownership was pending"
-                            )
-                        );
-                    }
                     return;
                 }
-                applyRequestProcessingCompletionValue(request, settledOutcome, settledFailure);
+                publishRequestOwners();
+                maybeCloseAfterSourceEnd();
+                tryFinishOwner();
             }
         );
     }
 
-    private void applyRequestProcessingCompletionValue(
-        RequestReplayOwner<P, R> request,
-        RequestProcessingOutcome settledOutcome,
-        Throwable settledFailure
+    private CompletionStage<Void> requestCleanupFinished(
+        ReplayRequestId requestId,
+        CancellationException cause
     ) {
-        assertInMailbox();
-        var cancellationResult = request.processingCancellationResult();
-        var cancellationWon =
-            cancellationResult instanceof ProcessingCancellationResult.CancellationWon;
-        var processingCompletionWon =
-            cancellationResult instanceof ProcessingCancellationResult.ProcessingCompletionWon;
-        if (request.processingCompletionReceived()) {
-            transitions.reportImpossibleTransition(
-                "duplicate request-processing completion " + request.requestId,
-                new IllegalStateException("request-processing completion arrived twice")
-            );
-            return;
+        var request = requireRegistered(requestId);
+        admissionQueue.remove(request);
+        executionQueue.removeIf(entry ->
+            entry instanceof RequestExecutionEntry<?, ?, ?, ?, ?> execution
+                && execution.request == request
+        );
+        if (activeTurn == request) {
+            activeTurn = null;
         }
-        if (tupleDurablePendingConnectionAcceptance.contains(request)) {
-            transitions.reportImpossibleTransition(
-                "duplicate request-processing completion " + request.requestId,
-                new IllegalStateException(
-                    "request-processing completion arrived while tuple durability "
-                        + "was pending connection-turn acceptance"
-                )
+        if (!requestRegistry.remove(requestId, request)) {
+            var failure = new IllegalStateException(
+                "request disappeared before cleanup: " + requestId
             );
-            return;
+            impossible("request cleanup", failure);
+            return CompletableFuture.failedFuture(failure);
         }
-        if (settledFailure != null) {
-            request.markProcessingFailed(settledFailure);
-            request.processingRegistration().failLifecycleHandling(settledFailure);
-            pendingTerminationOutcome = new SessionOutcome.Failed(settledFailure);
-            transitions.reportImpossibleTransition(
-                "request-processing failure " + request.requestId,
-                settledFailure
-            );
-            return;
-        }
-        if (settledOutcome == null) {
-            var missingOutcome = new NullPointerException(
-                "request processing completed without an outcome"
-            );
-            request.markProcessingFailed(missingOutcome);
-            request.processingRegistration().failLifecycleHandling(missingOutcome);
-            pendingTerminationOutcome = new SessionOutcome.Failed(missingOutcome);
-            transitions.reportImpossibleTransition(
-                "request-processing completion " + request.requestId,
-                missingOutcome
-            );
-            return;
-        }
-        if (settledOutcome instanceof RequestProcessingOutcome.RequestCleanupFinished cleanup
-            && !cancellationWon) {
-            request.markProcessingFailed(cleanup.cause());
-            request.processingRegistration().failLifecycleHandling(cleanup.cause());
-            pendingTerminationOutcome = new SessionOutcome.Failed(cleanup.cause());
-            transitions.reportImpossibleTransition(
-                processingCompletionWon
-                    ? "request processing reported cancellation after processing won "
-                        + request.requestId
-                    : "unexpected request-processing cancellation " + request.requestId,
-                cleanup.cause()
-            );
-            return;
-        }
-        if (!(settledOutcome instanceof RequestProcessingOutcome.RequestCleanupFinished)
-            && cancellationWon) {
-            var contradictoryCompletion = new IllegalStateException(
-                "request processing completed with "
-                    + settledOutcome.getClass().getSimpleName()
-                    + " after cancellation won for "
-                    + request.requestId
-            );
-            request.markProcessingFailed(contradictoryCompletion);
-            request.processingRegistration().failLifecycleHandling(
-                contradictoryCompletion
-            );
-            pendingTerminationOutcome = new SessionOutcome.Failed(
-                contradictoryCompletion
-            );
-            transitions.reportImpossibleTransition(
-                "request-processing completion after cancellation "
-                    + request.requestId,
-                contradictoryCompletion
-            );
-            return;
-        }
-        if (settledOutcome instanceof RequestProcessingOutcome.TupleDurable
-            && request.connectionTurnSettled()
-            && !request.connectionTurnFinished()) {
-            tupleDurablePendingConnectionAcceptance.add(request);
-            return;
-        }
-        request.recordProcessingCompletion(settledOutcome);
-        applyRequestProcessingCompletion(request);
+        publishRequestOwners();
+        evaluateExecutionHead();
+        maybeCloseAfterSourceEnd();
+        tryFinishOwner();
+        return CompletableFuture.completedFuture(null);
     }
 
-    private void applyRequestProcessingCompletion(RequestReplayOwner<P, R> request) {
-        assertInMailbox();
-        if (requestOwners.get(request.requestId) != request || request.processingMilestoneSubmitted()) {
-            return;
-        }
-        var outcome = request.processingOutcome();
-        if (outcome == null) {
-            return;
-        }
-        switch (outcome) {
-            case RequestProcessingOutcome.RequestCleanupFinished ignored -> {
-                finishProcessingWithoutNormalMilestone(request, "cancelled");
-                return;
-            }
-            case RequestProcessingOutcome.TupleDurable ignored -> {
-                // Continue below after the connection-turn milestone is accepted.
-            }
-        }
-        if (!request.connectionTurnFinished()) {
-            if (request.connectionTurnSettled()) {
-                return;
-            }
-            var orderingFailure = new IllegalStateException(
-                "normal request processing completed before ConnectionTurnFinished"
+    private CompletionStage<Void> requestAttemptPermit(ReplayRequestId requestId) {
+        var request = requireRegistered(requestId);
+        if (activeTurn != request || pendingPermit != null) {
+            var failure = new IllegalStateException(
+                "retry permit requested without sole active turn: " + requestId
             );
-            request.markProcessingFailed(orderingFailure);
-            request.processingRegistration().failLifecycleHandling(orderingFailure);
-            transitions.reportImpossibleTransition(
-                "request-processing completion before connection turn " + request.requestId,
-                orderingFailure
-            );
-            return;
+            impossible("retry permit request", failure);
+            return CompletableFuture.failedFuture(failure);
         }
+        var delivery = new CompletableFuture<Void>();
+        acquirePermit(request, delivery);
+        return delivery.minimalCompletionStage();
+    }
 
-        try {
-            request.releasePrepared();
-        } catch (Throwable releaseFailure) {
-            request.markProcessingFailed(releaseFailure);
-            request.processingRegistration().failLifecycleHandling(releaseFailure);
-            pendingTerminationOutcome = new SessionOutcome.Failed(releaseFailure);
-            transitions.reportImpossibleTransition(
-                "final prepared-request release " + request.requestId,
-                releaseFailure
-            );
-            return;
+    private void cancelAttemptPermit(
+        ReplayRequestId requestId,
+        CancellationException cause
+    ) {
+        if (pendingPermit != null
+            && pendingPermit.request().requestId.equals(requestId)) {
+            pendingPermit.acquisition().cancel(cause);
         }
-        request.markProcessingMilestoneSubmitted();
+    }
+
+    private RequestEntry<S, P, R, F, T> requireRegistered(
+        ReplayRequestId requestId
+    ) {
+        var request = requestRegistry.get(requestId);
+        if (request == null) {
+            var failure = new IllegalStateException(
+                "request is not registered: " + requestId
+            );
+            impossible("request registry lookup", failure);
+            throw failure;
+        }
+        return request;
+    }
+
+    private void publishRequestOwners() {
+        publishedRequestOwners = requestRegistry.values()
+            .stream()
+            .map(entry -> entry.owner)
+            .toList();
+    }
+
+    private CompletionStage<Void> requiredLifecycleDelivery(
+        ReplayRequestId requestId,
+        String operation,
+        RequiredSubmission submission,
+        Runnable afterAcceptance
+    ) {
+        var completion = new CompletableFuture<Void>();
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.REQUIRED_DELIVERY,
+            null,
+            WaitReason.WAITING_FOR_RECEIVER
+        );
         final CompletionStage<Void> acceptance;
         try {
-            acceptance = java.util.Objects.requireNonNull(
-                lifecycleSink.requestProcessingFinished(
-                    request.partitionGenerationId,
-                    request.requestId
-                ),
-                "request lifecycle sink returned no processing acceptance"
+            acceptance = Objects.requireNonNull(
+                submission.submit(),
+                operation + " returned no acceptance stage"
             );
-        } catch (Throwable t) {
-            request.processingRegistration().failLifecycleHandling(t);
-            transitions.reportImpossibleTransition(
-                "request-processing milestone submission " + request.requestId,
-                t
-            );
-            return;
+        } catch (Throwable failure) {
+            completion.completeExceptionally(failure);
+            impossible(operation + " submission", failure);
+            return completion.minimalCompletionStage();
         }
         acceptance.whenComplete((ignored, failure) ->
-            transitions.applyNowOrPost("request-processing milestone acceptance " + request.requestId, () -> {
-                if (failure != null) {
-                    request.processingRegistration().failLifecycleHandling(unwrap(failure));
-                    transitions.reportImpossibleTransition(
-                        "request-processing milestone acceptance " + request.requestId,
-                        unwrap(failure)
-                    );
-                    return;
+            postRequired(
+                operation + " acceptance",
+                () -> {
+                    if (failure != null) {
+                        var cause = unwrap(failure);
+                        completion.completeExceptionally(cause);
+                        impossible(operation + " acceptance", cause);
+                        return;
+                    }
+                    afterAcceptance.run();
+                    operations.complete(registration);
+                    completion.complete(null);
                 }
-                request.finishProcessing();
-                request.processingRegistration().completeLifecycleHandling();
-                removeRequestOwner(request);
-            })
+            )
         );
+        return completion.minimalCompletionStage();
     }
 
-    private void finishProcessingWithoutNormalMilestone(
-        RequestReplayOwner<P, R> request,
-        String outcomeDescription
-    ) {
-        if (!request.connectionTurnCleanupComplete()
-            || !request.preparationCancellationAcknowledgementSatisfied()
-            || !request.processingCancellationAcknowledgementSatisfied()) {
+    private void postRequired(String operation, Runnable transition) {
+        if (eventLoop.inEventLoop()) {
+            runTransition(operation, transition);
             return;
         }
         try {
-            request.releasePrepared();
-        } catch (Throwable releaseFailure) {
-            request.markProcessingFailed(releaseFailure);
-            request.processingRegistration().failLifecycleHandling(releaseFailure);
-            pendingTerminationOutcome = new SessionOutcome.Failed(releaseFailure);
-            transitions.reportImpossibleTransition(
-                outcomeDescription + " prepared-request release " + request.requestId,
-                releaseFailure
-            );
-            return;
+            eventLoop.execute(() -> runTransition(operation, transition));
+        } catch (Throwable failure) {
+            reportFatal("required event-loop submission " + operation, failure);
         }
-        request.finishProcessing();
-        request.processingRegistration().completeLifecycleHandling();
-        removeRequestOwner(request);
     }
 
-    private void cancelRequestProcessing(
-        RequestReplayOwner<P, R> request,
-        CancellationException cause
-    ) {
-        if (request.processingMilestoneSubmitted()) {
-            applyRequestProcessingCompletion(request);
-            return;
-        }
-        if (tupleDurablePendingConnectionAcceptance.contains(request)) {
-            applyRequestProcessingCompletion(request);
-            return;
-        }
-        if (request.processingCompletionReceived()) {
-            applyRequestProcessingCompletion(request);
-            return;
-        }
-        if (request.processingCancellationRequested()) {
-            return;
-        }
-        var registration = request.processingRegistration();
-        request.cancelProcessing(cause);
-        if (registration == null) {
-            removeRequestOwner(request);
-            return;
-        }
-        request.beginProcessingCancellationAcknowledgement();
+    private void runTransition(String operation, Runnable transition) {
         try {
-            observeProcessingCancellationAcceptance(
-                request,
-                java.util.Objects.requireNonNull(
-                    registration.cancel().apply(cause),
-                    "request processing cancellation returned no acknowledgement"
-                )
-            );
-        } catch (Throwable t) {
-            request.failProcessingCancellationAcknowledgement();
-            registration.failLifecycleHandling(t);
-            recordAbortCleanupFailure(t);
-            transitions.reportImpossibleTransition(
-                "request-processing cancellation " + request.requestId,
-                t
-            );
+            requireOwnerThread();
+            transition.run();
+        } catch (Throwable failure) {
+            impossible(operation, failure);
         }
-    }
-
-    private void observeProcessingCancellationAcceptance(
-        RequestReplayOwner<P, R> request,
-        CompletionStage<ProcessingCancellationResult> acknowledgement
-    ) {
-        acknowledgement.whenComplete((result, failure) -> {
-            transitions.applyNowOrPost("request-processing cancellation acceptance " + request.requestId, () -> {
-                if (requestOwners.get(request.requestId) != request) {
-                    throw new IllegalStateException(
-                        "request-processing cancellation acceptance arrived for an unowned request: "
-                            + request.requestId
-                    );
-                }
-                if (failure == null) {
-                    if (result == null) {
-                        throw new IllegalStateException(
-                            "request-processing cancellation completed without a result for "
-                                + request.requestId
-                        );
-                    }
-                    request.acceptProcessingCancellationAcknowledgement(result);
-                    var pendingCompletion =
-                        processingCompletionsPendingCancellationDecision.remove(request);
-                    if (pendingCompletion != null) {
-                        applyRequestProcessingCompletionValue(
-                            request,
-                            pendingCompletion.outcome(),
-                            pendingCompletion.failure()
-                        );
-                    } else if (request.processingCompletionReceived()) {
-                        applyRequestProcessingCompletion(request);
-                    }
-                    return;
-                }
-                var cause = unwrap(failure);
-                request.failProcessingCancellationAcknowledgement();
-                request.processingRegistration().failLifecycleHandling(cause);
-                recordAbortCleanupFailure(cause);
-                transitions.reportImpossibleTransition(
-                    "request-processing cancellation acceptance " + request.requestId,
-                    cause
-                );
-            });
-        });
-    }
-
-    private void recordAbortCleanupFailure(Throwable failure) {
-        if (pendingTerminationOutcome == null) {
-            abortCleanupFailure = combineFailures(abortCleanupFailure, failure);
-            return;
-        }
-        if (pendingTerminationOutcome instanceof SessionOutcome.Failed failed) {
-            pendingTerminationOutcome = new SessionOutcome.Failed(
-                combineFailures(failed.cause(), failure)
-            );
-        } else {
-            pendingTerminationOutcome = new SessionOutcome.Failed(failure);
-        }
-    }
-
-    private void removeRequestOwner(RequestReplayOwner<P, R> request) {
-        assertInMailbox();
-        tupleDurablePendingConnectionAcceptance.remove(request);
-        processingCompletionsPendingCancellationDecision.remove(request);
-        if (requestOwners.remove(request.requestId, request)) {
-            tryFinishTermination();
-        }
-    }
-
-    private void tryFinishTermination() {
-        assertInMailbox();
-        if (transitions.fatalTransitionActive()
-            || pendingTerminationOutcome == null
-            || !requestOwners.isEmpty()
-            || !admissionCommands.isEmpty()
-            || !executionCommands.isEmpty()
-            || activeRequest != null
-            || pendingAttemptPermit != null
-            || orderedCloseActive
-            || targetAbortPending) {
-            return;
-        }
-        finishTermination(pendingTerminationOutcome);
-    }
-
-    private Throwable cancelQueuedRequest(
-        RequestCommand<P, R> request,
-        CancellationException cause
-    ) {
-        request.owner.cancelConnectionTurn(cause);
-        var cleanupFailure = cancelPreparationFailure(request);
-        cleanupFailure = combineFailures(cleanupFailure, releasePreparedFailure(request));
-        request.owner.completion.complete(new RequestTurnResult.Cancelled<>(cause));
-        return cleanupFailure;
-    }
-
-    private Throwable cancelPreparationFailure(RequestCommand<P, R> request) {
-        if (!request.owner.beginPreparationCancellation()) {
-            return null;
-        }
-        try {
-            observePreparationCancellationAcceptance(
-                request.owner,
-                java.util.Objects.requireNonNull(
-                    request.owner.preparationController.cancel(
-                        new CancellationException(
-                            "request preparation cancelled for " + request.owner.requestId
-                        )
-                    ),
-                    "request preparation cancellation returned no acknowledgement"
-                )
-            );
-            return null;
-        } catch (Throwable t) {
-            request.owner.failPreparationCancellationAcknowledgement(t);
-            return t;
-        }
-    }
-
-    private void observePreparationCancellationAcceptance(
-        RequestReplayOwner<P, R> request,
-        CompletionStage<Void> acknowledgement
-    ) {
-        acknowledgement.whenComplete((ignored, failure) ->
-            transitions.applyNowOrPost("preparation cancellation acceptance " + request.requestId, () -> {
-                if (failure != null) {
-                    var cause = unwrap(failure);
-                    request.failPreparationCancellationAcknowledgement(cause);
-                    if (request.processingRegistration() != null) {
-                        request.processingRegistration().failLifecycleHandling(cause);
-                    }
-                    recordAbortCleanupFailure(cause);
-                    transitions.reportImpossibleTransition(
-                        "preparation cancellation acceptance " + request.requestId,
-                        cause
-                    );
-                    return;
-                }
-                request.acceptPreparationCancellationAcknowledgement();
-                if (requestOwners.get(request.requestId) == request
-                    && request.processingCompletionReceived()) {
-                    applyRequestProcessingCompletion(request);
-                }
-            })
-        );
-    }
-
-    private void untrackObligation(Command<P, R> command) {
-        if (obligations.remove(command)) {
-            metrics.queuedCommandsChanged(-1);
-        }
-    }
-
-    private void finishTermination(SessionOutcome outcome) {
-        assertInMailbox();
-        state = State.TERMINATED;
-        setHeadWaitReason(null);
-        cancelAdmissionTimer();
-        cancelExecutionTimer();
-        termination.complete(outcome);
-    }
-
-    private void releasePrepared(RequestCommand<P, R> request) throws Exception {
-        request.owner.releasePrepared();
-    }
-
-    private void releasePreparedAfterSettledTurn(RequestCommand<P, R> request) {
-        var failure = releasePreparedFailure(request);
-        if (failure != null) {
-            transitions.reportImpossibleTransition(
-                "settled target-exchange prepared-request release " + request.owner.requestId,
-                failure
-            );
-        }
-    }
-
-    private Throwable releasePreparedFailure(RequestCommand<P, R> request) {
-        try {
-            releasePrepared(request);
-            return null;
-        } catch (Throwable t) {
-            return t;
-        }
-    }
-
-    private void releaseLatePreparation(PreparationOutcome<P> preparation) {
-        if (preparation instanceof PreparationOutcome.Prepared<P> prepared) {
-            try {
-                prepared.value().close();
-            } catch (Throwable failure) {
-                transitions.reportImpossibleTransition("late prepared-request release", failure);
-            }
-        }
-    }
-
-    private static Throwable combineFailures(Throwable first, Throwable additional) {
-        if (first == null) {
-            return additional;
-        }
-        if (additional != null && additional != first) {
-            first.addSuppressed(additional);
-        }
-        return first;
     }
 
     private void cancelAdmissionTimer() {
         if (admissionTimer != null) {
-            var timer = admissionTimer;
+            admissionTimer.cancel(false);
             admissionTimer = null;
-            timer.cancel();
         }
     }
 
     private void cancelExecutionTimer() {
         if (executionTimer != null) {
-            var timer = executionTimer;
+            executionTimer.cancel(false);
             executionTimer = null;
-            timer.cancel();
         }
     }
 
-    private void setHeadWaitReason(HeadWaitReason reason) {
-        if (headWaitReason == reason) {
-            return;
-        }
-        if (headWaitReason != null) {
-            metrics.headWaitChanged(headWaitReason, -1);
-        }
-        headWaitReason = reason;
-        if (reason != null) {
-            metrics.headWaitChanged(reason, 1);
+    private void requireOwnerThread() {
+        if (!eventLoop.inEventLoop()) {
+            throw new IllegalStateException(
+                "connection owner for "
+                    + connectionProcessingId
+                    + " accessed outside its event loop"
+            );
         }
     }
 
-    private void recordActiveDuration() {
-        metrics.activeDuration(elapsedSince(activeStartedNanos));
+    private void impossible(String operation, Throwable cause) {
+        reportFatal("impossible transition during " + operation, cause);
     }
 
-    private Duration elapsedSince(long startNanos) {
-        return Duration.ofNanos(Math.max(0, nanoTime.getAsLong() - startNanos));
+    private void reportFatal(String operation, Throwable cause) {
+        fatalHandler.onFatal(new Error(
+            "Connection-owner failure for "
+                + connectionProcessingId
+                + ": "
+                + operation,
+            cause
+        ));
     }
 
-    private void assertInMailbox() {
-        transitions.requireOwnerThread();
+    private static Duration nonNegativeDelay(Instant now, Instant target) {
+        return target.isAfter(now) ? Duration.between(now, target) : Duration.ZERO;
     }
 
-    private static Throwable unwrap(Throwable throwable) {
-        var current = throwable;
-        while ((current instanceof java.util.concurrent.CompletionException
-            || current instanceof java.util.concurrent.ExecutionException)
-            && current.getCause() != null)
-        {
+    private static CancellationException rejectionCause(Throwable failure) {
+        var cancellation = new CancellationException(
+            "connection input was rejected: " + failure.getMessage()
+        );
+        cancellation.initCause(failure);
+        return cancellation;
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        var current = failure;
+        while (current != null
+            && (current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+            && current.getCause() != null) {
             current = current.getCause();
         }
         return current;
     }
-}
 
-*/
-// REBUILD-LIMBO-END(G5)
+    private final class RequestCallbacks implements RequestReplayOwner.ConnectionCallbacks {
+        @Override
+        public CompletionStage<Void> preparationFinished(
+            ReplayRequestId requestId,
+            RequestPreparationResult<?> result
+        ) {
+            TargetConnectionOwner.this.preparationFinished(requestId, result);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> requestAttemptPermit(ReplayRequestId requestId) {
+            return TargetConnectionOwner.this.requestAttemptPermit(requestId);
+        }
+
+        @Override
+        public void cancelAttemptPermit(
+            ReplayRequestId requestId,
+            CancellationException cause
+        ) {
+            TargetConnectionOwner.this.cancelAttemptPermit(requestId, cause);
+        }
+
+        @Override
+        public CompletionStage<Void> firstTargetWriteSubmitted(ReplayRequestId requestId) {
+            TargetConnectionOwner.this.firstTargetWriteSubmitted(requestId);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> finalTargetWriteSubmitted(ReplayRequestId requestId) {
+            TargetConnectionOwner.this.finalTargetWriteSubmitted(requestId);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> connectionTurnFinished(ReplayRequestId requestId) {
+            return TargetConnectionOwner.this.connectionTurnFinished(requestId);
+        }
+
+        @Override
+        public CompletionStage<Void> requestProcessingFinished(ReplayRequestId requestId) {
+            return TargetConnectionOwner.this.requestProcessingFinished(requestId);
+        }
+
+        @Override
+        public CompletionStage<Void> requestCleanupFinished(
+            ReplayRequestId requestId,
+            CancellationException cause
+        ) {
+            return TargetConnectionOwner.this.requestCleanupFinished(requestId, cause);
+        }
+    }
+
+    @FunctionalInterface
+    private interface RequiredSubmission {
+        CompletionStage<Void> submit();
+    }
+}

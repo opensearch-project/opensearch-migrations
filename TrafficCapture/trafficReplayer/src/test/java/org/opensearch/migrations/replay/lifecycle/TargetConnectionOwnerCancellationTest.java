@@ -1,166 +1,152 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Test carried byte-identical. Unresolved: TargetConnectionOwnerTestSupport TestEventLoop . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G10)
-/*
-
-import java.util.ArrayList;
-import java.util.List;
+import java.time.Instant;
+import java.time.Duration;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.ProcessingCancellationResult;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestTurnResult;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.TestExchange;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.TestPrepared;
-import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.PARTITION_GENERATION;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.admit;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.owner;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.processing;
+import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.CONNECTION;
+import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.GENERATION;
 import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.request;
 
 class TargetConnectionOwnerCancellationTest {
     @Test
-    void cancellationBeforeSendEmitsCleanupAndNoNormalMilestones() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var lifecycleEvents = new ArrayList<String>();
-        var owner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            new TargetConnectionOwner.RequestLifecycleSink() {
-                @Override
-                public CompletionStage<Void> connectionRequestFinished(
-                    PartitionGenerationId partitionGenerationId,
-                    ReplayRequestId requestId
-                ) {
-                    lifecycleEvents.add("turn:" + requestId.requestIndex());
-                    return CompletableFuture.completedFuture(null);
-                }
+    void cancellationBeforeSendingProducesCleanupWithoutNormalRequestMilestones() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(7, Instant.EPOCH.plusSeconds(10));
+        fixture.eventLoop.runUntilIdle();
 
-                @Override
-                public CompletionStage<Void> requestProcessingFinished(
-                    PartitionGenerationId partitionGenerationId,
-                    ReplayRequestId requestId
-                ) {
-                    lifecycleEvents.add("processing:" + requestId.requestIndex());
-                    return CompletableFuture.completedFuture(null);
-                }
-            }
-        );
-        var activeProcessing =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        admit(
-            owner,
-            request(0),
-            0,
-            CompletableFuture.completedFuture(
-                new PreparationOutcome.Prepared<>(new TestPrepared("active"))
-            ),
-            processing(activeProcessing)
-        );
-        var queuedPrepared = new TestPrepared("queued");
-        var preparationCancellations = new AtomicInteger();
-        var queuedPreparation =
-            new TargetConnectionOwner.RequestPreparation<TestPrepared>() {
-                @Override
-                public CompletionStage<PreparationOutcome<TestPrepared>> completion() {
-                    return CompletableFuture.completedFuture(
-                        new PreparationOutcome.Prepared<>(queuedPrepared)
-                    );
-                }
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new CancellationException("cancel before preparation")
+        ));
+        fixture.eventLoop.runUntilIdle();
+        fixture.eventLoop.advance(Duration.ofSeconds(20));
 
-                @Override
-                public CompletionStage<Void> cancel(CancellationException cause) {
-                    preparationCancellations.incrementAndGet();
-                    return CompletableFuture.completedFuture(null);
-                }
-            };
-        var processingCancellations = new AtomicInteger();
-        var queuedProcessingCompletion =
-            new CompletableFuture<TargetConnectionOwner.RequestProcessingOutcome>();
-        var queuedProcessingAcceptance =
-            new CompletableFuture<ProcessingCancellationResult>();
-        var queuedProcessing = new TargetConnectionOwner.RequestProcessingRegistration(
-            queuedProcessingCompletion,
-            cause -> {
-                processingCancellations.incrementAndGet();
-                queuedProcessingCompletion.complete(
-                    new TargetConnectionOwner.RequestProcessingOutcome
-                        .RequestCleanupFinished(cause)
-                );
-                return queuedProcessingAcceptance;
-            }
+        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertEquals(
+            java.util.List.of("owner-finished"),
+            fixture.lifecycleEvents
         );
-        var queued = owner.admitRequestWithAcceptance(
-            PARTITION_GENERATION,
-            request(1),
-            1,
-            java.time.Instant.EPOCH,
-            java.time.Instant.EPOCH,
-            queuedPreparation,
-            queuedProcessing
-        );
-        eventLoop.runUntilIdle();
-        Assertions.assertEquals(List.of("active"), exchange.executed);
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void abortedChannelTeardownCompletesBeforePermitReleaseOrReplacementAttempt() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(0, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(0);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.eventLoop.runUntilIdle();
 
         var cancellation = new CancellationException("generation cancelled");
-        var termination = owner.abort(
-            AbortReason.SOURCE_REASSIGNMENT,
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
             cancellation
-        ).toCompletableFuture();
-        eventLoop.runUntilIdle();
+        ));
+        fixture.eventLoop.runUntilIdle();
 
-        var cancelled = Assertions.assertInstanceOf(
-            RequestTurnResult.Cancelled.class,
-            queued.turnCompletion().toCompletableFuture().join()
+        Assertions.assertEquals(1, fixture.targetChannel.attempt(0).abortCalls);
+        Assertions.assertEquals(
+            1,
+            fixture.activePermits.get(),
+            "the in-flight permit remains held while channel teardown is asynchronous"
         );
-        Assertions.assertSame(cancellation, cancelled.cause());
-        Assertions.assertEquals(1, preparationCancellations.get());
-        Assertions.assertEquals(1, processingCancellations.get());
-        Assertions.assertEquals(1, queuedPrepared.closeCount);
-        Assertions.assertEquals(List.of("active"), exchange.executed);
-        Assertions.assertTrue(lifecycleEvents.isEmpty());
-        Assertions.assertFalse(termination.isDone());
 
-        exchange.abortCompletion.complete(null);
-        eventLoop.runUntilIdle();
+        var replacement = fixture.permitProvider.acquire(request(1));
+        Assertions.assertFalse(replacement.completion().toCompletableFuture().isDone());
+
+        fixture.targetChannel.attempt(0).abort.complete(null);
+        fixture.eventLoop.runUntilIdle();
+
+        var acquired = Assertions.assertInstanceOf(
+            TargetAttemptPermitProvider.PermitAcquired.class,
+            replacement.completion().toCompletableFuture().join()
+        );
+        Assertions.assertEquals(1, fixture.activePermits.get());
+        acquired.permit().close();
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertEquals(
+            java.util.List.of("owner-finished"),
+            fixture.lifecycleEvents,
+            "cancellation emits no normal request milestone"
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void rejectedOutcomePostingReleasesUndeliveredPermitAndReportsFatal() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(2, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(2);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.targetChannel.attempt(0).finalWrite();
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(1, fixture.activePermits.get());
+
+        fixture.eventLoop.rejectNewTasks();
+        fixture.targetChannel.attempt(0).targetResponse("response");
+
+        Assertions.assertEquals(
+            0,
+            fixture.activePermits.get(),
+            "a typed outcome that cannot reach its owner must not leak its attempt permit"
+        );
+        Assertions.assertEquals(1, fixture.fatalFailures.size());
+        Assertions.assertTrue(
+            fixture.fatalFailures.get(0).getMessage().contains(
+                "required event-loop submission target attempt outcome"
+            )
+        );
+    }
+
+    @Test
+    void requiredReceiverCompletionRejectedByEventLoopRemainsRegisteredAndIsFatal() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        var turnAcceptance = new java.util.concurrent.CompletableFuture<Void>();
+        fixture.lifecycleAcceptances.put("turn:3", turnAcceptance);
+        fixture.admit(3, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(3);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("response");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        fixture.eventLoop.rejectNewTasks();
+        turnAcceptance.complete(null);
+
         Assertions.assertFalse(
-            termination.isDone(),
-            "registry ownership must remain until typed processing cancellation is accepted"
+            fixture.owner.operations().snapshots().stream()
+                .filter(snapshot -> snapshot.operationType() == OperationType.REQUIRED_DELIVERY)
+                .toList()
+                .isEmpty(),
+            "the link is retained because its receiver completion was never applied"
         );
-
-        queuedProcessingAcceptance.complete(
-            new ProcessingCancellationResult.CancellationWon()
+        Assertions.assertFalse(fixture.fatalFailures.isEmpty());
+        Assertions.assertTrue(
+            fixture.fatalFailures.stream().anyMatch(error ->
+                error.getMessage().contains("required event-loop submission")
+            )
         );
-        eventLoop.runUntilIdle();
-
-        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, termination.join());
-        Assertions.assertTrue(lifecycleEvents.isEmpty());
-        Assertions.assertTrue(fatalFailures.isEmpty());
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G10)

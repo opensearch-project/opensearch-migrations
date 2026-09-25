@@ -1,405 +1,290 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
-// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
-// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
-
-// REBUILD-LIMBO-START(G11)
-/*
-
-import java.util.Collections;
-import java.util.IdentityHashMap;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
 
+import io.netty.channel.EventLoop;
 import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
 
-@Slf4j
-public final class ReplayTransactionRegistry {
-    static final String SESSION_TERMINATED = "session terminated before the transaction settled: ";
+/**
+ * Event-loop-confined registry for correctness-linked asynchronous operations.
+ *
+ * <p>Registration precedes submission. An entry remains registered until the owning event loop
+ * applies the typed completion, including any required receiver handling. Immutable snapshots are
+ * published for activity diagnostics without exposing mutable owner state.</p>
+ */
+public final class OutstandingOperationRegistry {
+    public enum OperationType {
+        REQUEST_PREPARATION,
+        PERMIT_ACQUISITION,
+        TARGET_ATTEMPT,
+        TARGET_WRITE_MILESTONE,
+        RETRY_SOURCE_RESPONSE_WAIT,
+        RETRY_TIMER,
+        FINAL_SOURCE_RESPONSE_WAIT,
+        TUPLE_DURABILITY,
+        PHYSICAL_TUPLE_WRITE,
+        CANCELLATION_CLEANUP,
+        REQUIRED_DELIVERY,
+        TARGET_CHANNEL_CLOSE
+    }
 
-    private static final class Entry {
-        private final ReplayTransaction<?> transaction;
-        private Throwable completionFailure;
-        private boolean completionReady;
+    public enum WaitReason {
+        SUBMITTING,
+        PREPARING,
+        WAITING_FOR_PERMIT,
+        WAITING_FOR_TARGET,
+        WAITING_FOR_RETRY_SOURCE_RESPONSE,
+        WAITING_FOR_RETRY_TIME,
+        WAITING_FOR_FINAL_SOURCE_RESPONSE,
+        WAITING_FOR_TUPLE_DURABILITY,
+        WAITING_FOR_RECEIVER,
+        WAITING_FOR_CHANNEL_TEARDOWN,
+        WAITING_FOR_CHANNEL_CLOSE
+    }
 
-        private Entry(ReplayTransaction<?> transaction) {
-            this.transaction = transaction;
+    @FunctionalInterface
+    public interface FatalHandler {
+        void onFatal(Error failure);
+    }
+
+    public interface CountHook {
+        CountHook NOOP = new CountHook() {
+            @Override
+            public void operationCountChanged(OperationType type, int typeCount, int totalCount) {}
+        };
+
+        void operationCountChanged(OperationType type, int typeCount, int totalCount);
+    }
+
+    public record Snapshot(
+        long operationId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        ReplayRequestId replayRequestId,
+        @NonNull OperationType operationType,
+        @NonNull Instant startTime,
+        Instant scheduledTargetTime,
+        @NonNull WaitReason waitReason
+    ) {}
+
+    public static final class Registration {
+        private final OutstandingOperationRegistry registry;
+        private final long operationId;
+
+        private Registration(OutstandingOperationRegistry registry, long operationId) {
+            this.registry = registry;
+            this.operationId = operationId;
+        }
+
+        public long operationId() {
+            return operationId;
         }
     }
 
-    private static final class PendingRegistration {
-        private final ReplayRequestId requestId;
-        private final CompletionStage<?> transactionCompletion;
-        private final ReplayTransaction<?> transaction;
-        private final CompletableFuture<Void> acknowledgement = new CompletableFuture<>();
-
-        private PendingRegistration(
-            ReplayRequestId requestId,
-            CompletionStage<?> transactionCompletion,
-            ReplayTransaction<?> transaction
-        ) {
-            this.requestId = requestId;
-            this.transactionCompletion = transactionCompletion;
-            this.transaction = transaction;
-        }
-    }
-
-    private static final class RegistryCommand {
-        private final Runnable transition;
-        private final CompletableFuture<Void> acknowledgement;
-        private final boolean completeAfterTransition;
-
-        private RegistryCommand(
-            Runnable transition,
-            CompletableFuture<Void> acknowledgement,
-            boolean completeAfterTransition
-        ) {
-            this.transition = transition;
-            this.acknowledgement = acknowledgement;
-            this.completeAfterTransition = completeAfterTransition;
-        }
-    }
-
-    private final Object stateLock = new Object();
-    private final ConnectionSessionKey sessionKey;
-    private final ActorMailbox mailbox;
-    private final OwnerThreadGuard ownerThreadGuard;
-    private final Map<ReplayRequestId, Entry> active = new LinkedHashMap<>();
-    private final Set<PendingRegistration> pendingRegistrations =
-        Collections.newSetFromMap(new IdentityHashMap<>());
-    private final Set<RegistryCommand> pendingCommands =
-        Collections.newSetFromMap(new IdentityHashMap<>());
-    private final CompletionGate<Void> termination = new CompletionGate<>();
-    private boolean terminating;
-    private CancellationException cancellationCause;
-    private ReplayTransaction.RunwayLossReason runwayLossReason;
-    private Throwable firstFailure;
-
-    public ReplayTransactionRegistry(
-        @NonNull ConnectionSessionKey sessionKey,
-        @NonNull ActorMailbox mailbox
+    private record Entry(
+        PartitionGenerationId partitionGenerationId,
+        ConnectionProcessingId connectionProcessingId,
+        ReplayRequestId replayRequestId,
+        OperationType operationType,
+        Instant startTime,
+        Instant scheduledTargetTime,
+        WaitReason waitReason
     ) {
-        this.sessionKey = sessionKey;
-        this.mailbox = mailbox;
-        this.ownerThreadGuard = new OwnerThreadGuard(
-            "replay transaction registry for " + sessionKey,
-            mailbox::inMailbox
-        );
-    }
-
-    public CompletionStage<Void> register(
-        @NonNull ReplayRequestId requestId,
-        @NonNull CompletionStage<?> transactionCompletion
-    ) {
-        return register(requestId, transactionCompletion, null);
-    }
-
-    public CompletionStage<Void> register(
-        @NonNull ReplayRequestId requestId,
-        @NonNull ReplayTransaction<?> transaction
-    ) {
-        return register(requestId, transaction.completion(), transaction);
-    }
-
-    private CompletionStage<Void> register(
-        ReplayRequestId requestId,
-        CompletionStage<?> transactionCompletion,
-        ReplayTransaction<?> transaction
-    ) {
-        if (!requestId.session().equals(sessionKey)) {
-            throw new IllegalArgumentException("transaction belongs to a different session");
-        }
-        var pending = new PendingRegistration(requestId, transactionCompletion, transaction);
-        synchronized (stateLock) {
-            pendingRegistrations.add(pending);
-        }
-        try {
-            mailbox.execute(() -> runRegistration(pending));
-        } catch (RuntimeException | Error failure) {
-            pending.acknowledgement.completeExceptionally(failure);
-        }
-        return pending.acknowledgement.minimalCompletionStage();
-    }
-
-    private void runRegistration(PendingRegistration pending) {
-        synchronized (stateLock) {
-            if (!pendingRegistrations.remove(pending)) {
-                return;
-            }
-            assertInMailbox();
-            try {
-                if (terminating) {
-                    var failure = new IllegalStateException(
-                        "session is already terminating: " + sessionKey
-                    );
-                    pending.acknowledgement.completeExceptionally(failure);
-                    failRejectedTransaction(pending.transaction, failure);
-                    return;
-                }
-                var existing = active.get(pending.requestId);
-                if (existing != null) {
-                    var failure = new IllegalStateException(
-                        "transaction is already registered: " + pending.requestId
-                    );
-                    pending.acknowledgement.completeExceptionally(failure);
-                    if (pending.transaction != existing.transaction) {
-                        failRejectedTransaction(pending.transaction, failure);
-                    }
-                    return;
-                }
-                var entry = new Entry(pending.transaction);
-                active.put(pending.requestId, entry);
-                pending.transactionCompletion.whenComplete((ignored, failure) ->
-                    stageTransactionCompletion(pending.requestId, entry, failure)
-                );
-                if (pending.transaction != null && runwayLossReason != null) {
-                    pending.transaction.observeRunwayLost(runwayLossReason);
-                }
-                if (cancellationCause != null) {
-                    cancel(pending.requestId, pending.transaction);
-                }
-                pending.acknowledgement.complete(null);
-            } catch (RuntimeException | Error failure) {
-                pending.acknowledgement.completeExceptionally(failure);
-                throw failure;
-            }
-        }
-    }
-
-    private void stageTransactionCompletion(
-        ReplayRequestId requestId,
-        Entry entry,
-        Throwable failure
-    ) {
-        synchronized (stateLock) {
-            if (active.get(requestId) != entry) {
-                return;
-            }
-            entry.completionFailure = failure == null ? null : unwrap(failure);
-            entry.completionReady = true;
-        }
-        mailbox.execute(() -> settleFromMailbox(requestId, entry));
-    }
-
-    private void settleFromMailbox(ReplayRequestId requestId, Entry entry) {
-        synchronized (stateLock) {
-            if (active.get(requestId) != entry || !entry.completionReady) {
-                return;
-            }
-            assertInMailbox();
-            settleLocked(requestId, entry.completionFailure);
-        }
-    }
-
-    public CompletionStage<Void> observeRunwayLost(
-        @NonNull ReplayTransaction.RunwayLossReason reason
-    ) {
-        var acknowledgement = new CompletableFuture<Void>();
-        enqueueCommand(new RegistryCommand(
-            () -> {
-                if (runwayLossReason != null) {
-                    acknowledgement.complete(null);
-                    return;
-                }
-                runwayLossReason = reason;
-                var acknowledgements = active.values()
-                    .stream()
-                    .filter(entry -> entry.transaction != null)
-                    .map(entry -> entry.transaction.observeRunwayLost(reason).toCompletableFuture())
-                    .toArray(CompletableFuture[]::new);
-                CompletableFuture.allOf(acknowledgements)
-                    .whenComplete((ignored, failure) -> {
-                        if (failure == null) {
-                            acknowledgement.complete(null);
-                        } else {
-                            acknowledgement.completeExceptionally(unwrap(failure));
-                        }
-                    });
-            },
-            acknowledgement,
-            false
-        ));
-        return acknowledgement.minimalCompletionStage();
-    }
-
-    public CompletionStage<Void> beginTermination() {
-        enqueueCommand(new RegistryCommand(
-            () -> {
-                terminating = true;
-                log.atDebug()
-                    .setMessage("Beginning transaction-registry termination for {}; active={}")
-                    .addArgument(sessionKey)
-                    .addArgument(active::size)
-                    .log();
-                tryCompleteTerminationLocked();
-            },
-            null,
-            true
-        ));
-        return termination.stage();
-    }
-
-    public CompletionStage<Void> cancelOutstanding(@NonNull CancellationException cause) {
-        var acknowledgement = new CompletableFuture<Void>();
-        enqueueCommand(new RegistryCommand(
-            () -> {
-                if (cancellationCause == null) {
-                    cancellationCause = cause;
-                }
-                if (!active.isEmpty()) {
-                    log.atInfo()
-                        .setMessage("Cancelling {} unsettled transaction(s) for {}: {}")
-                        .addArgument(active::size)
-                        .addArgument(sessionKey)
-                        .addArgument(cause::getMessage)
-                        .log();
-                }
-                for (var entry : List.copyOf(active.entrySet())) {
-                    cancel(entry.getKey(), entry.getValue().transaction);
-                }
-            },
-            acknowledgement,
-            true
-        ));
-        return acknowledgement.minimalCompletionStage();
-    }
-
-    public CompletionStage<Map<ReplayRequestId, String>> unresolvedTransactions() {
-        synchronized (stateLock) {
-            var snapshot = new LinkedHashMap<ReplayRequestId, String>();
-            active.forEach((requestId, ignored) ->
-                snapshot.put(requestId, "awaiting transaction completion")
+        Entry withWaitReason(WaitReason replacement) {
+            return new Entry(
+                partitionGenerationId,
+                connectionProcessingId,
+                replayRequestId,
+                operationType,
+                startTime,
+                scheduledTargetTime,
+                replacement
             );
-            pendingRegistrations.forEach(pending ->
-                snapshot.put(pending.requestId, "awaiting registry admission")
+        }
+
+        Snapshot snapshot(long operationId) {
+            return new Snapshot(
+                operationId,
+                partitionGenerationId,
+                connectionProcessingId,
+                replayRequestId,
+                operationType,
+                startTime,
+                scheduledTargetTime,
+                waitReason
             );
-            return CompletableFuture.completedFuture(Map.copyOf(snapshot));
         }
     }
 
-    private void enqueueCommand(RegistryCommand command) {
-        synchronized (stateLock) {
-            pendingCommands.add(command);
-        }
-        try {
-            mailbox.execute(() -> runCommand(command));
-        } catch (RuntimeException | Error failure) {
-            if (command.acknowledgement != null) {
-                command.acknowledgement.completeExceptionally(failure);
-            }
-        }
+    private final String ownerIdentity;
+    private final EventLoop eventLoop;
+    private final Clock clock;
+    private final FatalHandler fatalHandler;
+    private final CountHook countHook;
+    private final Map<Long, Entry> active = new LinkedHashMap<>();
+    private volatile List<Snapshot> publishedSnapshots = List.of();
+    private long nextOperationId = 1;
+    private boolean failed;
+
+    public OutstandingOperationRegistry(
+        @NonNull String ownerIdentity,
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull CountHook countHook
+    ) {
+        this.ownerIdentity = ownerIdentity;
+        this.eventLoop = eventLoop;
+        this.clock = clock;
+        this.fatalHandler = fatalHandler;
+        this.countHook = countHook;
     }
 
-    private void runCommand(RegistryCommand command) {
-        synchronized (stateLock) {
-            if (!pendingCommands.remove(command)) {
-                return;
-            }
-            assertInMailbox();
-            try {
-                command.transition.run();
-                if (command.completeAfterTransition && command.acknowledgement != null) {
-                    command.acknowledgement.complete(null);
-                }
-            } catch (RuntimeException | Error failure) {
-                if (command.acknowledgement != null) {
-                    command.acknowledgement.completeExceptionally(failure);
-                }
-                throw failure;
-            }
+    public Registration register(
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        ReplayRequestId replayRequestId,
+        @NonNull OperationType operationType,
+        Instant scheduledTargetTime,
+        @NonNull WaitReason waitReason
+    ) {
+        requireOwnerThread();
+        if (failed) {
+            var failure = new IllegalStateException(
+                "operation registry is failed for " + ownerIdentity
+            );
+            reportFatal("registration after fatal transition", failure);
+            throw failure;
         }
-    }
-
-    private void cancel(ReplayRequestId requestId, ReplayTransaction<?> transaction) {
-        assertInMailbox();
-        if (transaction == null) {
-            return;
-        }
-        transaction.fail(
-            new CancellationException(
-                SESSION_TERMINATED + requestId + ": " + cancellationCause.getMessage()
+        var operationId = nextOperationId++;
+        active.put(
+            operationId,
+            new Entry(
+                partitionGenerationId,
+                connectionProcessingId,
+                replayRequestId,
+                operationType,
+                clock.instant(),
+                scheduledTargetTime,
+                waitReason
             )
         );
+        publish(operationType);
+        return new Registration(this, operationId);
     }
 
-    private void settleLocked(ReplayRequestId requestId, Throwable failure) {
-        if (active.remove(requestId) == null) {
-            return;
-        }
-        log.atDebug()
-            .setMessage("Transaction settled during session lifecycle for {}; failure={}; remaining={}")
-            .addArgument(requestId)
-            .addArgument(failure)
-            .addArgument(active::size)
-            .log();
-        recordFailureLocked(failure);
-        tryCompleteTerminationLocked();
-    }
-
-    private void recordFailureLocked(Throwable failure) {
-        if (failure != null
-            && firstFailure == null
-            && !(unwrap(failure) instanceof CancellationException)) {
-            firstFailure = unwrap(failure);
-        }
-    }
-
-    private void tryCompleteTerminationLocked() {
-        if (!terminating
-            || !active.isEmpty()
-            || !pendingRegistrations.isEmpty()
-            || termination.isDone()) {
-            return;
-        }
-        if (firstFailure == null) {
-            termination.complete(null);
-        } else {
-            termination.completeExceptionally(firstFailure);
-        }
-    }
-
-    private void failRejectedTransaction(
-        ReplayTransaction<?> transaction,
-        Throwable registrationFailure
+    public void updateWaitReason(
+        @NonNull Registration registration,
+        @NonNull WaitReason waitReason
     ) {
-        if (transaction == null) {
+        requireOwnerThread();
+        var entry = requireEntry(registration, "update wait reason");
+        if (entry == null) {
             return;
         }
-        var cancellation = new CancellationException(
-            "transaction registration was rejected: " + registrationFailure.getMessage()
-        );
-        cancellation.initCause(registrationFailure);
-        transaction.fail(cancellation);
+        active.put(registration.operationId, entry.withWaitReason(waitReason));
+        publish(null);
     }
 
-    private void assertInMailbox() {
-        ownerThreadGuard.requireOwnerThread();
-    }
-
-    private static Throwable unwrap(Throwable throwable) {
-        var current = throwable;
-        while ((current instanceof java.util.concurrent.CompletionException
-            || current instanceof java.util.concurrent.ExecutionException)
-            && current.getCause() != null) {
-            current = current.getCause();
+    public void complete(@NonNull Registration registration) {
+        requireOwnerThread();
+        var entry = requireEntry(registration, "apply typed completion");
+        if (entry == null) {
+            return;
         }
-        return current;
+        active.remove(registration.operationId);
+        publish(entry.operationType);
+    }
+
+    public List<Snapshot> snapshots() {
+        return publishedSnapshots;
+    }
+
+    public int activeCount() {
+        return publishedSnapshots.size();
+    }
+
+    private Entry requireEntry(Registration registration, String operation) {
+        if (registration.registry != this) {
+            reportFatal(
+                operation,
+                new IllegalArgumentException(
+                    "operation registration belongs to a different owner registry"
+                )
+            );
+            return null;
+        }
+        var entry = active.get(registration.operationId);
+        if (entry == null) {
+            reportFatal(
+                operation,
+                new IllegalStateException(
+                    "missing or duplicate completion for operation "
+                        + registration.operationId
+                )
+            );
+        }
+        return entry;
+    }
+
+    private void publish(OperationType changedType) {
+        var snapshots = new ArrayList<Snapshot>(active.size());
+        active.forEach((operationId, entry) -> snapshots.add(entry.snapshot(operationId)));
+        publishedSnapshots = List.copyOf(snapshots);
+        if (changedType != null) {
+            var typeCount = 0;
+            for (var entry : active.values()) {
+                if (entry.operationType == changedType) {
+                    typeCount++;
+                }
+            }
+            try {
+                countHook.operationCountChanged(changedType, typeCount, active.size());
+            } catch (Throwable failure) {
+                reportFatal("fixed-cardinality operation count hook", failure);
+            }
+        }
+    }
+
+    private void requireOwnerThread() {
+        if (!eventLoop.inEventLoop()) {
+            var failure = new IllegalStateException(
+                "operation registry for "
+                    + ownerIdentity
+                    + " accessed outside its event loop"
+            );
+            reportFatal("event-loop confinement", failure);
+            throw failure;
+        }
+    }
+
+    private void reportFatal(String operation, Throwable cause) {
+        if (eventLoop.inEventLoop()) {
+            failed = true;
+        }
+        fatalHandler.onFatal(new Error(
+            "Outstanding-operation registry failure during "
+                + operation
+                + " for "
+                + ownerIdentity,
+            cause
+        ));
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G11)

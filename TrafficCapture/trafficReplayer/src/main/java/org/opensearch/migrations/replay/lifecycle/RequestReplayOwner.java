@@ -1,40 +1,143 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: (unresolved reference into the left-behind set; see build log). Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G5)
-/*
-
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CancellationException;
-import java.util.function.BooleanSupplier;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.ProcessingCancellationResult;
+import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.WaitReason;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.sink.TupleWriter.TupleWriteCancelled;
+import org.opensearch.migrations.replay.sink.TupleWriter.TupleWriteResult;
 
+import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
-*/
-// REBUILD-LIMBO-END(G5)
 /**
- * Event-loop-confined state for one admitted replay request.
- *
- * <p>The owning {@link TargetConnectionOwner} invokes every transition on their shared Netty
- * event loop.  The connection owner retains this object in its registry after the target turn
- * finishes and removes it only after replay intake accepts normal processing completion or after
- * cancellation cleanup.</p>
+ * Exhaustive event-loop-confined lifecycle owner for one replay request.
  */
-// REBUILD-LIMBO-START(G5)
-/*
-public final class RequestReplayOwner<P extends TargetConnectionOwner.PreparedRequest, R> {
-    sealed interface PreparationState<P>
+public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
+    public sealed interface RetrySourceResponse<F>
+        permits CompleteSourceResponseForRetry, SourceResponseUnavailableForRetry {}
+
+    public record CompleteSourceResponseForRetry<F>(
+        @NonNull F response
+    ) implements RetrySourceResponse<F> {}
+
+    public record SourceResponseUnavailableForRetry<F>()
+        implements RetrySourceResponse<F> {}
+
+    public sealed interface FinalSourceResponse<F>
+        permits CompleteFinalSourceResponse, IncompleteFinalSourceResponse {}
+
+    public record CompleteFinalSourceResponse<F>(
+        @NonNull F response
+    ) implements FinalSourceResponse<F> {}
+
+    public record IncompleteFinalSourceResponse<F>(
+        @NonNull String reason
+    ) implements FinalSourceResponse<F> {}
+
+    public record RequestResult<S, P, R, F>(
+        @NonNull S sourceRequest,
+        @NonNull P preparedRequest,
+        @NonNull List<TargetAttemptOutcome<R>> targetAttemptHistory,
+        @NonNull TargetAttemptOutcome.TargetResponseObtained<R> terminalTargetResponse,
+        @NonNull FinalSourceResponse<F> finalSourceResponse
+    ) {
+        public RequestResult {
+            targetAttemptHistory = List.copyOf(targetAttemptHistory);
+        }
+    }
+
+    public interface PreparationOperation<P> {
+        CompletionStage<RequestPreparationResult<P>> completion();
+
+        void cancel(CancellationException cause);
+    }
+
+    @FunctionalInterface
+    public interface RequestPreparer<S, P> {
+        PreparationOperation<P> begin(ReplayRequestId requestId, S sourceRequest);
+    }
+
+    public interface RetryPolicy<R, F> {
+        boolean requiresSourceResponse(R targetResponse);
+
+        RetryDecision decide(R targetResponse, RetrySourceResponse<F> sourceResponse);
+
+        Duration retryDelay(int completedAttemptCount);
+    }
+
+    @FunctionalInterface
+    public interface TupleFactory<S, P, R, F, T> {
+        T create(RequestResult<S, P, R, F> result);
+    }
+
+    public interface ResourceReleaser<S, P, R, F> {
+        void releaseSourceRequest(S sourceRequest);
+
+        void releasePreparedRequest(P preparedRequest) throws Exception;
+
+        void releaseTargetResponse(R targetResponse);
+
+        void releaseSourceResponse(F sourceResponse);
+    }
+
+    public interface ConnectionCallbacks {
+        CompletionStage<Void> preparationFinished(
+            ReplayRequestId requestId,
+            RequestPreparationResult<?> result
+        );
+
+        CompletionStage<Void> requestAttemptPermit(ReplayRequestId requestId);
+
+        void cancelAttemptPermit(ReplayRequestId requestId, CancellationException cause);
+
+        CompletionStage<Void> firstTargetWriteSubmitted(ReplayRequestId requestId);
+
+        CompletionStage<Void> finalTargetWriteSubmitted(ReplayRequestId requestId);
+
+        CompletionStage<Void> connectionTurnFinished(ReplayRequestId requestId);
+
+        CompletionStage<Void> requestProcessingFinished(ReplayRequestId requestId);
+
+        CompletionStage<Void> requestCleanupFinished(
+            ReplayRequestId requestId,
+            CancellationException cause
+        );
+    }
+
+    @FunctionalInterface
+    public interface FatalHandler {
+        void onFatal(Error failure);
+    }
+
+    private sealed interface PreparationState<P>
         permits PreparationState.Admitted,
             PreparationState.Preparing,
             PreparationState.Ready,
@@ -42,533 +145,1351 @@ public final class RequestReplayOwner<P extends TargetConnectionOwner.PreparedRe
 
         record Admitted<P>() implements PreparationState<P> {}
 
-        record Preparing<P>() implements PreparationState<P> {}
+        record Preparing<P>(
+            PreparationOperation<P> operation,
+            OutstandingOperationRegistry.Registration registration
+        ) implements PreparationState<P> {}
 
-        record Ready<P>(@NonNull PreparationOutcome<P> outcome) implements PreparationState<P> {}
+        record Ready<P>(P preparedRequest) implements PreparationState<P> {}
 
-        record Cancelled<P>(@NonNull CancellationException cause) implements PreparationState<P> {}
+        record Cancelled<P>(CancellationException cause) implements PreparationState<P> {}
     }
 
-    enum ConnectionTurnState {
-        QUEUED,
-        ACTIVE,
-        FINISHED_PENDING_INTAKE,
-        FINISHED,
-        CANCELLED
+    private sealed interface TargetServerState<R>
+        permits TargetServerState.NotStarted,
+            TargetServerState.WaitingForPermit,
+            TargetServerState.StartingAttempt,
+            TargetServerState.AttemptInProgress,
+            TargetServerState.AbortingAttempt,
+            TargetServerState.WaitingForRetrySourceResponse,
+            TargetServerState.WaitingForRetryTime,
+            TargetServerState.Finished,
+            TargetServerState.Cancelled {
+
+        record NotStarted<R>() implements TargetServerState<R> {}
+
+        record WaitingForPermit<R>() implements TargetServerState<R> {}
+
+        record StartingAttempt<R>(
+            int attemptNumber,
+            TargetAttemptPermitProvider.Permit permit,
+            OutstandingOperationRegistry.Registration registration
+        ) implements TargetServerState<R> {}
+
+        record AttemptInProgress<R>(
+            int attemptNumber,
+            TargetAttemptPermitProvider.Permit permit,
+            TargetChannelPort.Attempt<R> attempt,
+            OutstandingOperationRegistry.Registration registration
+        ) implements TargetServerState<R> {}
+
+        record AbortingAttempt<R>(
+            int attemptNumber,
+            TargetAttemptPermitProvider.Permit permit,
+            TargetChannelPort.Attempt<R> attempt,
+            OutstandingOperationRegistry.Registration attemptRegistration,
+            OutstandingOperationRegistry.Registration abortRegistration
+        ) implements TargetServerState<R> {}
+
+        record WaitingForRetrySourceResponse<R>(
+            TargetAttemptOutcome.TargetResponseObtained<R> response,
+            OutstandingOperationRegistry.Registration registration
+        ) implements TargetServerState<R> {}
+
+        record WaitingForRetryTime<R>(
+            ScheduledFuture<?> timer,
+            OutstandingOperationRegistry.Registration registration
+        ) implements TargetServerState<R> {}
+
+        record Finished<R>(
+            TargetAttemptOutcome.TargetResponseObtained<R> response
+        ) implements TargetServerState<R> {}
+
+        record Cancelled<R>(CancellationException cause) implements TargetServerState<R> {}
     }
 
-    enum FirstTargetWriteState {
+    private sealed interface RetrySourceState<F>
+        permits RetrySourceState.Unresolved,
+            RetrySourceState.Complete,
+            RetrySourceState.Unavailable {
+
+        record Unresolved<F>() implements RetrySourceState<F> {}
+
+        record Complete<F>(F response) implements RetrySourceState<F> {}
+
+        record Unavailable<F>() implements RetrySourceState<F> {}
+    }
+
+    private sealed interface FinalSourceState<F>
+        permits FinalSourceState.Unresolved,
+            FinalSourceState.Complete,
+            FinalSourceState.Incomplete {
+
+        record Unresolved<F>() implements FinalSourceState<F> {}
+
+        record Complete<F>(F response) implements FinalSourceState<F> {}
+
+        record Incomplete<F>(String reason) implements FinalSourceState<F> {}
+    }
+
+    private sealed interface TupleState
+        permits TupleState.NotReady,
+            TupleState.Writing,
+            TupleState.Durable,
+            TupleState.Cancelled {
+
+        record NotReady() implements TupleState {}
+
+        record Writing(
+            TupleWriter.LogicalWrite write,
+            OutstandingOperationRegistry.Registration registration
+        ) implements TupleState {}
+
+        record Durable() implements TupleState {}
+
+        record Cancelled(CancellationException cause) implements TupleState {}
+    }
+
+    private sealed interface CancellationState
+        permits CancellationState.Active,
+            CancellationState.Graceful,
+            CancellationState.Forced {
+
+        record Active() implements CancellationState {}
+
+        record Graceful(CancellationDeadline deadline) implements CancellationState {}
+
+        record Forced(CancellationException cause) implements CancellationState {}
+    }
+
+    private enum MilestoneState {
         NOT_SUBMITTED,
-        SUBMITTED
+        SUBMITTED,
+        ACCEPTED
     }
 
-    enum ProcessingCancellationAcknowledgementState {
-        NOT_REQUESTED,
-        PENDING,
-        ACCEPTED,
-        FAILED
-    }
-
-    enum PreparationCancellationAcknowledgementState {
-        NOT_REQUESTED,
-        PENDING,
-        ACCEPTED,
-        FAILED
-    }
-
-    sealed interface ProcessingState
-        permits ProcessingState.Unregistered,
-            ProcessingState.Registered,
-            ProcessingState.CancellationRequested,
-            ProcessingState.CompletionReceived,
-            ProcessingState.MilestoneSubmitted,
-            ProcessingState.Finished,
-            ProcessingState.Failed,
-            ProcessingState.Cancelled {
-
-        record Unregistered() implements ProcessingState {}
-
-        record Registered(
-            @NonNull TargetConnectionOwner.RequestProcessingRegistration registration
-        ) implements ProcessingState {}
-
-        record CancellationRequested(
-            @NonNull TargetConnectionOwner.RequestProcessingRegistration registration,
-            @NonNull CancellationException cause
-        ) implements ProcessingState {}
-
-        record CompletionReceived(
-            @NonNull TargetConnectionOwner.RequestProcessingOutcome outcome
-        ) implements ProcessingState {}
-
-        record MilestoneSubmitted() implements ProcessingState {}
-
-        record Finished() implements ProcessingState {}
-
-        record Failed(@NonNull Throwable cause) implements ProcessingState {}
-
-        record Cancelled(@NonNull CancellationException cause) implements ProcessingState {}
-    }
-
-    final PartitionGenerationId partitionGenerationId;
-    final ReplayRequestId requestId;
-    final TargetConnectionOwner.RequestPreparation<P> preparationController;
-    final CompletionGate<TargetConnectionOwner.RequestTurnResult<R>> completion = new CompletionGate<>();
+    private final PartitionGenerationId partitionGenerationId;
+    private final ConnectionProcessingId connectionProcessingId;
+    private final ReplayRequestId requestId;
+    private final Instant nominalTargetTime;
+    private final S sourceRequest;
+    private final EventLoop eventLoop;
+    private final Clock clock;
+    private final LongSupplier nanoTime;
+    private final RequestPreparer<S, P> preparer;
+    private final RetryPolicy<R, F> retryPolicy;
+    private final TargetChannelPort<P, R> targetChannel;
+    private final TupleFactory<S, P, R, F, T> tupleFactory;
+    private final TupleWriter<T> tupleWriter;
+    private final ResourceReleaser<S, P, R, F> resourceReleaser;
+    private final ConnectionCallbacks callbacks;
+    private final FatalHandler fatalHandler;
+    private final OutstandingOperationRegistry operations;
+    private final List<TargetAttemptOutcome<R>> attemptHistory = new ArrayList<>();
 
     private PreparationState<P> preparationState = new PreparationState.Admitted<>();
-    private final BooleanSupplier inOwnerThread;
-    private ConnectionTurnState connectionTurnState = ConnectionTurnState.QUEUED;
-    private ProcessingState processingState = new ProcessingState.Unregistered();
-    private TargetConnectionOwner.RequestProcessingRegistration processingRegistration;
-    private boolean connectionTurnResourcesReleased;
-    private boolean preparedReleased;
-    private PreparationCancellationAcknowledgementState preparationCancellationAcknowledgementState =
-        PreparationCancellationAcknowledgementState.NOT_REQUESTED;
-    private final java.util.concurrent.CompletableFuture<Void> preparationCancellationAcknowledgement =
-        new java.util.concurrent.CompletableFuture<>();
-    private FirstTargetWriteState firstTargetWriteState = FirstTargetWriteState.NOT_SUBMITTED;
-    private ProcessingCancellationAcknowledgementState processingCancellationAcknowledgementState =
-        ProcessingCancellationAcknowledgementState.NOT_REQUESTED;
-    private ProcessingCancellationResult processingCancellationResult;
+    private TargetServerState<R> targetServerState = new TargetServerState.NotStarted<>();
+    private RetrySourceState<F> retrySourceState = new RetrySourceState.Unresolved<>();
+    private FinalSourceState<F> finalSourceState = new FinalSourceState.Unresolved<>();
+    private TupleState tupleState = new TupleState.NotReady();
+    private CancellationState cancellationState = new CancellationState.Active();
+    private MilestoneState turnMilestone = MilestoneState.NOT_SUBMITTED;
+    private MilestoneState processingMilestone = MilestoneState.NOT_SUBMITTED;
+    private MilestoneState cleanupMilestone = MilestoneState.NOT_SUBMITTED;
+    private ScheduledFuture<?> gracefulDeadlineTimer;
+    private OutstandingOperationRegistry.Registration retryPermitRegistration;
+    private OutstandingOperationRegistry.Registration finalSourceWaitRegistration;
+    private int nextAttemptNumber = 1;
+    private int firstWriteAttempt;
+    private int finalWriteAttempt;
+    private boolean resourcesReleased;
 
     RequestReplayOwner(
         @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ConnectionProcessingId connectionProcessingId,
         @NonNull ReplayRequestId requestId,
-        @NonNull TargetConnectionOwner.RequestPreparation<P> preparationController,
-        @NonNull BooleanSupplier inOwnerThread
+        @NonNull Instant nominalTargetTime,
+        @NonNull S sourceRequest,
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull LongSupplier nanoTime,
+        @NonNull RequestPreparer<S, P> preparer,
+        @NonNull RetryPolicy<R, F> retryPolicy,
+        @NonNull TargetChannelPort<P, R> targetChannel,
+        @NonNull TupleFactory<S, P, R, F, T> tupleFactory,
+        @NonNull TupleWriter<T> tupleWriter,
+        @NonNull ResourceReleaser<S, P, R, F> resourceReleaser,
+        @NonNull ConnectionCallbacks callbacks,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull OutstandingOperationRegistry.CountHook countHook
     ) {
         this.partitionGenerationId = partitionGenerationId;
+        this.connectionProcessingId = connectionProcessingId;
         this.requestId = requestId;
-        this.preparationController = preparationController;
-        this.inOwnerThread = inOwnerThread;
+        this.nominalTargetTime = nominalTargetTime;
+        this.sourceRequest = sourceRequest;
+        this.eventLoop = eventLoop;
+        this.clock = clock;
+        this.nanoTime = nanoTime;
+        this.preparer = preparer;
+        this.retryPolicy = retryPolicy;
+        this.targetChannel = targetChannel;
+        this.tupleFactory = tupleFactory;
+        this.tupleWriter = tupleWriter;
+        this.resourceReleaser = resourceReleaser;
+        this.callbacks = callbacks;
+        this.fatalHandler = fatalHandler;
+        this.operations = new OutstandingOperationRegistry(
+            "request " + requestId,
+            eventLoop,
+            clock,
+            fatalHandler::onFatal,
+            countHook
+        );
+    }
+
+    ReplayRequestId requestId() {
+        return requestId;
+    }
+
+    OutstandingOperationRegistry operations() {
+        return operations;
+    }
+
+    boolean firstTargetWriteWasSubmitted() {
+        requireOwnerThread();
+        return firstWriteAttempt != 0;
+    }
+
+    boolean finalTargetWriteWasSubmitted() {
+        requireOwnerThread();
+        return finalWriteAttempt != 0;
     }
 
     void beginPreparation() {
         requireOwnerThread();
-        if (preparationState instanceof PreparationState.Admitted<P>) {
-            preparationState = new PreparationState.Preparing<>();
-        } else if (!(preparationState instanceof PreparationState.Ready<P>)) {
-            throw new IllegalStateException(
-                "cannot begin request preparation from " + preparationState.getClass().getSimpleName()
-            );
-        }
-        preparationController.begin();
-    }
-
-    void recordPreparation(@NonNull PreparationOutcome<P> outcome) {
-        requireOwnerThread();
-        if (!(preparationState instanceof PreparationState.Admitted<P>)
-            && !(preparationState instanceof PreparationState.Preparing<P>)) {
-            throw new IllegalStateException(
-                "request preparation completed from " + preparationState.getClass().getSimpleName()
-            );
-        }
-        preparationState = new PreparationState.Ready<>(outcome);
-    }
-
-    PreparationOutcome<P> preparationOutcome() {
-        requireOwnerThread();
-        return preparationState instanceof PreparationState.Ready<P> ready
-            ? ready.outcome()
-            : null;
-    }
-
-    void markTurnActive() {
-        requireOwnerThread();
-        if (connectionTurnState != ConnectionTurnState.QUEUED) {
-            throw new IllegalStateException(
-                "cannot begin target turn from " + connectionTurnState
-            );
-        }
-        connectionTurnState = ConnectionTurnState.ACTIVE;
-    }
-
-    void markConnectionTurnFinished() {
-        requireOwnerThread();
-        if (connectionTurnState != ConnectionTurnState.ACTIVE) {
-            throw new IllegalStateException(
-                "cannot finish connection turn from " + connectionTurnState
-            );
-        }
-        connectionTurnState = ConnectionTurnState.FINISHED_PENDING_INTAKE;
-    }
-
-    void markConnectionTurnAccepted() {
-        requireOwnerThread();
-        if (connectionTurnState != ConnectionTurnState.FINISHED_PENDING_INTAKE) {
-            throw new IllegalStateException(
-                "cannot accept connection-turn completion from " + connectionTurnState
-            );
-        }
-        connectionTurnState = ConnectionTurnState.FINISHED;
-    }
-
-    boolean connectionTurnFinished() {
-        requireOwnerThread();
-        return connectionTurnState == ConnectionTurnState.FINISHED;
-    }
-
-    boolean connectionTurnSettled() {
-        requireOwnerThread();
-        return connectionTurnState == ConnectionTurnState.FINISHED_PENDING_INTAKE
-            || connectionTurnState == ConnectionTurnState.FINISHED
-            || connectionTurnState == ConnectionTurnState.CANCELLED;
-    }
-
-    boolean connectionTurnCleanupComplete() {
-        requireOwnerThread();
-        return connectionTurnState == ConnectionTurnState.FINISHED
-            || connectionTurnState == ConnectionTurnState.CANCELLED;
-    }
-
-    void cancelConnectionTurn(@NonNull CancellationException cause) {
-        requireOwnerThread();
-        if (!connectionTurnSettled()) {
-            connectionTurnState = ConnectionTurnState.CANCELLED;
-        }
-        if (preparationState instanceof PreparationState.Admitted<P>
-            || preparationState instanceof PreparationState.Preparing<P>) {
-            preparationState = new PreparationState.Cancelled<>(cause);
-        }
-    }
-
-    boolean beginPreparationCancellation() {
-        requireOwnerThread();
-        if (preparationCancellationAcknowledgementState
-            != PreparationCancellationAcknowledgementState.NOT_REQUESTED) {
-            return false;
-        }
-        preparationCancellationAcknowledgementState =
-            PreparationCancellationAcknowledgementState.PENDING;
-        return true;
-    }
-
-    void acceptPreparationCancellationAcknowledgement() {
-        requireOwnerThread();
-        if (preparationCancellationAcknowledgementState
-            != PreparationCancellationAcknowledgementState.PENDING) {
-            throw new IllegalStateException(
-                "cannot accept preparation cancellation acknowledgement from "
-                    + preparationCancellationAcknowledgementState
-            );
-        }
-        preparationCancellationAcknowledgementState =
-            PreparationCancellationAcknowledgementState.ACCEPTED;
-        preparationCancellationAcknowledgement.complete(null);
-    }
-
-    void failPreparationCancellationAcknowledgement(@NonNull Throwable failure) {
-        requireOwnerThread();
-        if (preparationCancellationAcknowledgementState
-            == PreparationCancellationAcknowledgementState.PENDING) {
-            preparationCancellationAcknowledgementState =
-                PreparationCancellationAcknowledgementState.FAILED;
-            preparationCancellationAcknowledgement.completeExceptionally(failure);
-        }
-    }
-
-    boolean preparationCancellationAcknowledgementSatisfied() {
-        requireOwnerThread();
-        return preparationCancellationAcknowledgementState
-            == PreparationCancellationAcknowledgementState.NOT_REQUESTED
-            || preparationCancellationAcknowledgementState
-                == PreparationCancellationAcknowledgementState.ACCEPTED;
-    }
-
-    java.util.concurrent.CompletionStage<Void> preparationCancellationAcknowledgement() {
-        return preparationCancellationAcknowledgement.minimalCompletionStage();
-    }
-
-    void registerProcessing(
-        @NonNull TargetConnectionOwner.RequestProcessingRegistration registration
-    ) {
-        requireOwnerThread();
-        if (!(processingState instanceof ProcessingState.Unregistered)) {
-            throw new IllegalStateException(
-                "request processing registered from " + processingState.getClass().getSimpleName()
-            );
-        }
-        this.processingRegistration = registration;
-        processingState = new ProcessingState.Registered(registration);
-    }
-
-    TargetConnectionOwner.RequestProcessingRegistration processingRegistration() {
-        requireOwnerThread();
-        return processingRegistration;
-    }
-
-    void recordProcessingCompletion(
-        @NonNull TargetConnectionOwner.RequestProcessingOutcome outcome
-    ) {
-        requireOwnerThread();
-        var accepted = switch (processingState) {
-            case ProcessingState.Registered ignored ->
-                !(outcome instanceof
-                    TargetConnectionOwner.RequestProcessingOutcome.RequestCleanupFinished);
-            case ProcessingState.CancellationRequested ignored ->
-                processingCancellationResult
-                    instanceof ProcessingCancellationResult.CancellationWon
-                        ? outcome instanceof
-                            TargetConnectionOwner.RequestProcessingOutcome.RequestCleanupFinished
-                        : processingCancellationResult
-                            instanceof ProcessingCancellationResult.ProcessingCompletionWon
-                                && !(outcome
-                                    instanceof TargetConnectionOwner.RequestProcessingOutcome
-                                        .RequestCleanupFinished);
-            default -> false;
-        };
-        if (!accepted) {
-            throw new IllegalStateException(
-                "request-processing "
-                    + outcome.getClass().getSimpleName()
-                    + " completion arrived from "
-                    + processingState.getClass().getSimpleName()
-            );
-        }
-        processingState = new ProcessingState.CompletionReceived(outcome);
-    }
-
-    boolean processingCompletionReceived() {
-        requireOwnerThread();
-        return processingState instanceof ProcessingState.CompletionReceived;
-    }
-
-    boolean processingCancellationRequested() {
-        requireOwnerThread();
-        return processingState instanceof ProcessingState.CancellationRequested
-            || processingState instanceof ProcessingState.Cancelled;
-    }
-
-    CancellationException processingCancellationCause() {
-        requireOwnerThread();
-        if (processingState instanceof ProcessingState.CancellationRequested requested) {
-            return requested.cause();
-        }
-        if (processingState instanceof ProcessingState.Cancelled cancelled) {
-            return cancelled.cause();
-        }
-        return null;
-    }
-
-    void beginProcessingCancellationAcknowledgement() {
-        requireOwnerThread();
-        if (processingCancellationAcknowledgementState
-            != ProcessingCancellationAcknowledgementState.NOT_REQUESTED) {
-            throw new IllegalStateException(
-                "cannot begin request-processing cancellation acknowledgement from "
-                    + processingCancellationAcknowledgementState
-            );
-        }
-        processingCancellationAcknowledgementState =
-            ProcessingCancellationAcknowledgementState.PENDING;
-    }
-
-    void acceptProcessingCancellationAcknowledgement(
-        @NonNull ProcessingCancellationResult result
-    ) {
-        requireOwnerThread();
-        if (processingCancellationAcknowledgementState
-            != ProcessingCancellationAcknowledgementState.PENDING) {
-            throw new IllegalStateException(
-                "cannot accept request-processing cancellation acknowledgement from "
-                    + processingCancellationAcknowledgementState
-            );
-        }
-        processingCancellationAcknowledgementState =
-            ProcessingCancellationAcknowledgementState.ACCEPTED;
-        processingCancellationResult = result;
-    }
-
-    void failProcessingCancellationAcknowledgement() {
-        requireOwnerThread();
-        if (processingCancellationAcknowledgementState
-            == ProcessingCancellationAcknowledgementState.PENDING) {
-            processingCancellationAcknowledgementState =
-                ProcessingCancellationAcknowledgementState.FAILED;
-        }
-    }
-
-    boolean processingCancellationAcknowledgementSatisfied() {
-        requireOwnerThread();
-        return processingCancellationAcknowledgementState
-            == ProcessingCancellationAcknowledgementState.NOT_REQUESTED
-            || processingCancellationAcknowledgementState
-                == ProcessingCancellationAcknowledgementState.ACCEPTED;
-    }
-
-    ProcessingCancellationResult processingCancellationResult() {
-        requireOwnerThread();
-        return processingCancellationResult;
-    }
-
-    TargetConnectionOwner.RequestProcessingOutcome processingOutcome() {
-        requireOwnerThread();
-        return processingState instanceof ProcessingState.CompletionReceived received
-            ? received.outcome()
-            : null;
-    }
-
-    boolean processingMilestoneSubmitted() {
-        requireOwnerThread();
-        return processingState instanceof ProcessingState.MilestoneSubmitted
-            || processingState instanceof ProcessingState.Finished;
-    }
-
-    void markProcessingMilestoneSubmitted() {
-        requireOwnerThread();
-        if (!(processingState instanceof ProcessingState.CompletionReceived received)
-            || !(received.outcome() instanceof TargetConnectionOwner.RequestProcessingOutcome.TupleDurable)
-            || !connectionTurnFinished()) {
-            throw new IllegalStateException(
-                "cannot submit RequestProcessingFinished from "
-                    + processingState.getClass().getSimpleName()
-                    + " with turn "
-                    + connectionTurnState
-            );
-        }
-        processingState = new ProcessingState.MilestoneSubmitted();
-    }
-
-    void markProcessingFailed(@NonNull Throwable cause) {
-        requireOwnerThread();
-        processingState = new ProcessingState.Failed(cause);
-    }
-
-    void finishProcessing() {
-        requireOwnerThread();
-        var allowed = switch (processingState) {
-            case ProcessingState.MilestoneSubmitted ignored -> connectionTurnCleanupComplete();
-            case ProcessingState.CompletionReceived received -> switch (received.outcome()) {
-                case TargetConnectionOwner.RequestProcessingOutcome.RequestCleanupFinished ignored ->
-                    cancellationCleanupComplete();
-                case TargetConnectionOwner.RequestProcessingOutcome.TupleDurable ignored -> false;
-            };
-            case ProcessingState.Cancelled ignored -> cancellationCleanupComplete();
-            default -> false;
-        };
-        if (!allowed) {
-            throw new IllegalStateException(
-                "cannot finish request processing from "
-                    + processingState.getClass().getSimpleName()
-                    + " with turn "
-                    + connectionTurnState
-                    + ", preparation cancellation "
-                    + preparationCancellationAcknowledgementState
-                    + ", and processing cancellation "
-                    + processingCancellationAcknowledgementState
-            );
-        }
-        processingState = new ProcessingState.Finished();
-    }
-
-    void cancelProcessing(@NonNull CancellationException cause) {
-        requireOwnerThread();
-        if (processingState instanceof ProcessingState.Unregistered) {
-            processingState = new ProcessingState.Cancelled(cause);
-            return;
-        }
-        if (processingState instanceof ProcessingState.Registered registered) {
-            processingState = new ProcessingState.CancellationRequested(
-                registered.registration(),
-                cause
+        if (!(preparationState instanceof PreparationState.Admitted<P>)) {
+            impossible(
+                "begin preparation",
+                new IllegalStateException(
+                    "preparation is " + preparationState.getClass().getSimpleName()
+                )
             );
             return;
         }
-        if (processingState instanceof ProcessingState.CancellationRequested
-            || processingState instanceof ProcessingState.Cancelled
-            || processingState instanceof ProcessingState.CompletionReceived
-            || processingState instanceof ProcessingState.MilestoneSubmitted
-            || processingState instanceof ProcessingState.Finished) {
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.REQUEST_PREPARATION,
+            nominalTargetTime,
+            WaitReason.PREPARING
+        );
+        final PreparationOperation<P> operation;
+        try {
+            operation = Objects.requireNonNull(
+                preparer.begin(requestId, sourceRequest),
+                "request preparer returned no operation"
+            );
+            preparationState = new PreparationState.Preparing<>(operation, registration);
+        } catch (Throwable failure) {
+            impossible("request preparation submission", failure);
             return;
         }
-        throw new IllegalStateException(
-            "cannot cancel request processing from " + processingState.getClass().getSimpleName()
+        final CompletionStage<RequestPreparationResult<P>> completion;
+        try {
+            completion = Objects.requireNonNull(
+                operation.completion(),
+                "request preparation returned no completion stage"
+            );
+        } catch (Throwable failure) {
+            impossible("request preparation completion", failure);
+            return;
+        }
+        completion.whenComplete((result, failure) ->
+            postRequired(
+                "request preparation result",
+                () -> applyPreparationResult(registration, result, unwrap(failure)),
+                rejection -> releaseLatePreparation(result)
+            )
         );
     }
 
-    boolean firstTargetWriteSubmitted() {
+    void acceptAttemptPermit(TargetAttemptPermitProvider.Permit permit) {
         requireOwnerThread();
-        return firstTargetWriteState == FirstTargetWriteState.SUBMITTED;
-    }
-
-    void markFirstTargetWriteSubmitted() {
-        requireOwnerThread();
-        if (firstTargetWriteState == FirstTargetWriteState.SUBMITTED) {
-            throw new IllegalStateException("first target write was submitted more than once");
+        if (!permit.requestId().equals(requestId)) {
+            permit.close();
+            impossible(
+                "attempt permit delivery",
+                new IllegalArgumentException("permit belongs to " + permit.requestId())
+            );
+            return;
         }
-        firstTargetWriteState = FirstTargetWriteState.SUBMITTED;
+        if (cancellationState instanceof CancellationState.Forced forced) {
+            permit.close();
+            targetServerState = new TargetServerState.Cancelled<>(forced.cause());
+            tryEmitCleanup();
+            return;
+        }
+        if (!(targetServerState instanceof TargetServerState.NotStarted<R>)
+            && !(targetServerState instanceof TargetServerState.WaitingForPermit<R>)) {
+            permit.close();
+            impossible(
+                "attempt permit delivery",
+                new IllegalStateException(
+                    "target server state is "
+                        + targetServerState.getClass().getSimpleName()
+                )
+            );
+            return;
+        }
+        startAttempt(permit);
     }
 
-    void releaseConnectionTurnResources() throws Exception {
+    void sourceResponseComplete(F response) {
         requireOwnerThread();
-        if (!connectionTurnResourcesReleased
-            && preparationOutcome() instanceof PreparationOutcome.Prepared<P> prepared) {
-            connectionTurnResourcesReleased = true;
-            prepared.value().connectionTurnFinished();
+        if (finalSourceState instanceof FinalSourceState.Unresolved<F>) {
+            finalSourceState = new FinalSourceState.Complete<>(response);
+        } else {
+            impossible(
+                "complete final source response",
+                new IllegalStateException("final source response was already supplied")
+            );
+            return;
+        }
+        if (retrySourceState instanceof RetrySourceState.Unresolved<F>) {
+            retrySourceState = new RetrySourceState.Complete<>(response);
+        }
+        sourceResponseChanged();
+    }
+
+    void sourceResponseUnavailableForRetry() {
+        requireOwnerThread();
+        if (!(retrySourceState instanceof RetrySourceState.Unresolved<F>)) {
+            impossible(
+                "source response unavailable for retry",
+                new IllegalStateException("retry source response was already supplied")
+            );
+            return;
+        }
+        retrySourceState = new RetrySourceState.Unavailable<>();
+        sourceResponseChanged();
+    }
+
+    void sourceResponseIncomplete(String reason) {
+        requireOwnerThread();
+        if (finalSourceState instanceof FinalSourceState.Unresolved<F>) {
+            finalSourceState = new FinalSourceState.Incomplete<>(reason);
+        } else {
+            impossible(
+                "incomplete final source response",
+                new IllegalStateException("final source response was already supplied")
+            );
+            return;
+        }
+        if (retrySourceState instanceof RetrySourceState.Unresolved<F>) {
+            retrySourceState = new RetrySourceState.Unavailable<>();
+        }
+        sourceResponseChanged();
+    }
+
+    void gracefulCancel(CancellationDeadline deadline, CancellationException cause) {
+        requireOwnerThread();
+        switch (cancellationState) {
+            case CancellationState.Active ignored ->
+                cancellationState = new CancellationState.Graceful(deadline);
+            case CancellationState.Graceful graceful -> {
+                if (graceful.deadline().remainingNanos(nanoTime.getAsLong())
+                    <= deadline.remainingNanos(nanoTime.getAsLong())) {
+                    return;
+                }
+                cancellationState = new CancellationState.Graceful(deadline);
+            }
+            case CancellationState.Forced ignored -> {
+                return;
+            }
+        }
+        if (!finalTargetWriteWasSubmitted()) {
+            forceCancel(cause);
+            return;
+        }
+        scheduleGracefulDeadline(deadline, cause);
+    }
+
+    void forceCancel(CancellationException cause) {
+        requireOwnerThread();
+        if (cancellationState instanceof CancellationState.Forced) {
+            return;
+        }
+        cancellationState = new CancellationState.Forced(cause);
+        cancelGracefulDeadline();
+        cancelPreparation(cause);
+        cancelTargetWork(cause);
+        cancelTuple(cause);
+        tryEmitCleanup();
+    }
+
+    private void applyPreparationResult(
+        OutstandingOperationRegistry.Registration registration,
+        RequestPreparationResult<P> result,
+        Throwable failure
+    ) {
+        requireOwnerThread();
+        if (failure != null) {
+            impossible("request preparation exceptional completion", failure);
+            return;
+        }
+        if (result == null) {
+            impossible(
+                "request preparation completion",
+                new NullPointerException("request preparation completed without a result")
+            );
+            return;
+        }
+        if (!(preparationState instanceof PreparationState.Preparing<P> preparing)
+            || preparing.registration() != registration) {
+            releaseLatePreparation(result);
+            if (!(preparationState instanceof PreparationState.Cancelled<P>)) {
+                impossible(
+                    "request preparation completion",
+                    new IllegalStateException(
+                        "preparation is " + preparationState.getClass().getSimpleName()
+                    )
+                );
+            }
+            return;
+        }
+        switch (result) {
+            case RequestPreparationResult.Ready<P> ready -> {
+                if (cancellationState instanceof CancellationState.Forced forced) {
+                    preparationState = new PreparationState.Ready<>(ready.value());
+                    operations.complete(registration);
+                    closePreparedOnly();
+                    preparationState = new PreparationState.Cancelled<>(forced.cause());
+                    tryEmitCleanup();
+                    return;
+                }
+                preparationState = new PreparationState.Ready<>(ready.value());
+                deliverRequired(
+                    registration,
+                    "preparation readiness",
+                    () -> callbacks.preparationFinished(requestId, result),
+                    this::tryStartTuple
+                );
+            }
+            case RequestPreparationResult.Cancelled<P> cancelled -> {
+                preparationState = new PreparationState.Cancelled<>(cancelled.cause());
+                operations.complete(registration);
+                if (!(cancellationState instanceof CancellationState.Forced)) {
+                    impossible(
+                        "unexpected preparation cancellation",
+                        cancelled.cause()
+                    );
+                    return;
+                }
+                tryEmitCleanup();
+            }
         }
     }
 
-    void releasePrepared() throws Exception {
+    private void startAttempt(TargetAttemptPermitProvider.Permit permit) {
+        if (!(preparationState instanceof PreparationState.Ready<P> ready)) {
+            permit.close();
+            impossible(
+                "target attempt start",
+                new IllegalStateException(
+                    "preparation is " + preparationState.getClass().getSimpleName()
+                )
+            );
+            return;
+        }
+        var attemptNumber = nextAttemptNumber++;
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.TARGET_ATTEMPT,
+            nominalTargetTime,
+            WaitReason.WAITING_FOR_TARGET
+        );
+        targetServerState = new TargetServerState.StartingAttempt<>(
+            attemptNumber,
+            permit,
+            registration
+        );
+        final TargetChannelPort.Attempt<R> attempt;
+        try {
+            attempt = Objects.requireNonNull(
+                targetChannel.startAttempt(
+                    new TargetChannelPort.AttemptInput<>(
+                        partitionGenerationId,
+                        connectionProcessingId,
+                        requestId,
+                        attemptNumber,
+                        ready.preparedRequest(),
+                        new TargetChannelPort.WriteMilestoneListener() {
+                            @Override
+                            public void firstTargetWriteSubmitted(int reportedAttempt) {
+                                observeFirstWrite(reportedAttempt);
+                            }
+
+                            @Override
+                            public void finalTargetWriteSubmitted(int reportedAttempt) {
+                                observeFinalWrite(reportedAttempt);
+                            }
+                        }
+                    )
+                ),
+                "target channel returned no attempt"
+            );
+        } catch (Throwable failure) {
+            permit.close();
+            impossible("target attempt submission", failure);
+            return;
+        }
+        targetServerState = new TargetServerState.AttemptInProgress<>(
+            attemptNumber,
+            permit,
+            attempt,
+            registration
+        );
+        final CompletionStage<TargetAttemptOutcome<R>> outcome;
+        try {
+            outcome = Objects.requireNonNull(
+                attempt.outcome(),
+                "target attempt returned no outcome stage"
+            );
+        } catch (Throwable failure) {
+            permit.close();
+            impossible("target attempt outcome registration", failure);
+            return;
+        }
+        outcome.whenComplete((result, failure) ->
+            postRequired(
+                "target attempt outcome",
+                () -> applyTargetAttemptOutcome(
+                    attemptNumber,
+                    registration,
+                    result,
+                    unwrap(failure)
+                ),
+                rejection -> permit.close()
+            )
+        );
+    }
+
+    private void observeFirstWrite(int attemptNumber) {
+        postRequired(
+            "first target write",
+            () -> {
+                validateAttemptMilestone(attemptNumber, "first target write");
+                if (firstWriteAttempt == 0) {
+                    firstWriteAttempt = attemptNumber;
+                    var registration = operations.register(
+                        partitionGenerationId,
+                        connectionProcessingId,
+                        requestId,
+                        OperationType.TARGET_WRITE_MILESTONE,
+                        nominalTargetTime,
+                        WaitReason.WAITING_FOR_RECEIVER
+                    );
+                    deliverRequired(
+                        registration,
+                        "first target write",
+                        () -> callbacks.firstTargetWriteSubmitted(requestId),
+                        () -> {}
+                    );
+                } else if (firstWriteAttempt == attemptNumber) {
+                    impossible(
+                        "first target write",
+                        new IllegalStateException(
+                            "first target write was submitted more than once"
+                        )
+                    );
+                }
+            },
+            ignored -> {}
+        );
+    }
+
+    private void observeFinalWrite(int attemptNumber) {
+        postRequired(
+            "final target write",
+            () -> {
+                validateAttemptMilestone(attemptNumber, "final target write");
+                if (firstWriteAttempt == 0) {
+                    impossible(
+                        "final target write",
+                        new IllegalStateException(
+                            "final target write arrived before first target write"
+                        )
+                    );
+                    return;
+                }
+                if (finalWriteAttempt == 0) {
+                    finalWriteAttempt = attemptNumber;
+                    var registration = operations.register(
+                        partitionGenerationId,
+                        connectionProcessingId,
+                        requestId,
+                        OperationType.TARGET_WRITE_MILESTONE,
+                        nominalTargetTime,
+                        WaitReason.WAITING_FOR_RECEIVER
+                    );
+                    deliverRequired(
+                        registration,
+                        "final target write",
+                        () -> callbacks.finalTargetWriteSubmitted(requestId),
+                        () -> {}
+                    );
+                } else if (finalWriteAttempt == attemptNumber) {
+                    impossible(
+                        "final target write",
+                        new IllegalStateException(
+                            "final target write was submitted more than once"
+                        )
+                    );
+                }
+            },
+            ignored -> {}
+        );
+    }
+
+    private void validateAttemptMilestone(int attemptNumber, String operation) {
+        var activeAttempt = switch (targetServerState) {
+            case TargetServerState.StartingAttempt<R> starting -> starting.attemptNumber();
+            case TargetServerState.AttemptInProgress<R> active -> active.attemptNumber();
+            case TargetServerState.AbortingAttempt<R> aborting -> aborting.attemptNumber();
+            default -> -1;
+        };
+        if (activeAttempt != attemptNumber) {
+            impossible(
+                operation,
+                new IllegalStateException(
+                    "write milestone for attempt "
+                        + attemptNumber
+                        + " while active attempt is "
+                        + activeAttempt
+                )
+            );
+        }
+    }
+
+    private void applyTargetAttemptOutcome(
+        int attemptNumber,
+        OutstandingOperationRegistry.Registration registration,
+        TargetAttemptOutcome<R> outcome,
+        Throwable failure
+    ) {
         requireOwnerThread();
-        if (!preparedReleased && preparationOutcome() instanceof PreparationOutcome.Prepared<P> prepared) {
-            preparedReleased = true;
-            Throwable failure = null;
-            try {
-                releaseConnectionTurnResources();
-            } catch (Throwable t) {
-                failure = t;
+        if (targetServerState instanceof TargetServerState.AbortingAttempt<R> aborting
+            && aborting.attemptNumber() == attemptNumber) {
+            return;
+        }
+        if (!(targetServerState instanceof TargetServerState.AttemptInProgress<R> active)
+            || active.attemptNumber() != attemptNumber
+            || active.registration() != registration) {
+            if (targetServerState instanceof TargetServerState.Cancelled<R>) {
+                return;
             }
-            try {
-                prepared.value().close();
-            } catch (Throwable t) {
-                failure = combineReleaseFailures(failure, t);
+            impossible(
+                "target attempt outcome",
+                new IllegalStateException("target attempt outcome has no active attempt")
+            );
+            return;
+        }
+        if (failure != null) {
+            active.permit().close();
+            impossible("target attempt exceptional completion", failure);
+            return;
+        }
+        if (outcome == null) {
+            active.permit().close();
+            impossible(
+                "target attempt completion",
+                new NullPointerException("target attempt completed without an outcome")
+            );
+            return;
+        }
+        if (outcome instanceof TargetAttemptOutcome.TargetResponseObtained<R>
+            && finalWriteAttempt == 0) {
+            active.permit().close();
+            impossible(
+                "target response before final write",
+                new IllegalStateException(
+                    "target response arrived before FinalTargetWriteSubmitted"
+                )
+            );
+            return;
+        }
+        attemptHistory.add(outcome);
+        active.permit().close();
+        switch (outcome) {
+            case TargetAttemptOutcome.NoTargetResponseObtained<R> ignored ->
+                scheduleRetry();
+            case TargetAttemptOutcome.TargetResponseObtained<R> obtained ->
+                evaluateTargetResponse(obtained);
+        }
+        operations.complete(registration);
+    }
+
+    private void evaluateTargetResponse(
+        TargetAttemptOutcome.TargetResponseObtained<R> response
+    ) {
+        final boolean needsSource;
+        try {
+            needsSource = retryPolicy.requiresSourceResponse(response.response());
+        } catch (Throwable failure) {
+            impossible("retry source-response requirement", failure);
+            return;
+        }
+        if (needsSource && retrySourceState instanceof RetrySourceState.Unresolved<F>) {
+            var registration = operations.register(
+                partitionGenerationId,
+                connectionProcessingId,
+                requestId,
+                OperationType.RETRY_SOURCE_RESPONSE_WAIT,
+                nominalTargetTime,
+                WaitReason.WAITING_FOR_RETRY_SOURCE_RESPONSE
+            );
+            targetServerState = new TargetServerState.WaitingForRetrySourceResponse<>(
+                response,
+                registration
+            );
+            return;
+        }
+        applyRetryDecision(response);
+    }
+
+    private void applyRetryDecision(
+        TargetAttemptOutcome.TargetResponseObtained<R> response
+    ) {
+        var source = switch (retrySourceState) {
+            case RetrySourceState.Complete<F> complete ->
+                new CompleteSourceResponseForRetry<>(complete.response());
+            case RetrySourceState.Unavailable<F> ignored ->
+                new SourceResponseUnavailableForRetry<F>();
+            case RetrySourceState.Unresolved<F> ignored ->
+                new SourceResponseUnavailableForRetry<F>();
+        };
+        final RetryDecision decision;
+        try {
+            decision = Objects.requireNonNull(
+                retryPolicy.decide(response.response(), source),
+                "retry policy returned no decision"
+            );
+        } catch (Throwable failure) {
+            impossible("retry decision", failure);
+            return;
+        }
+        switch (decision) {
+            case RetryDecision.RetryRequired ignored -> scheduleRetry();
+            case RetryDecision.TargetServerAttemptsFinished ignored -> {
+                targetServerState = new TargetServerState.Finished<>(response);
+                emitConnectionTurnFinished();
+                tryStartTuple();
             }
-            rethrowReleaseFailure(failure);
+        }
+    }
+
+    private void scheduleRetry() {
+        if (cancellationState instanceof CancellationState.Forced forced) {
+            targetServerState = new TargetServerState.Cancelled<>(forced.cause());
+            tryEmitCleanup();
+            return;
+        }
+        final Duration delay;
+        try {
+            delay = Objects.requireNonNull(
+                retryPolicy.retryDelay(attemptHistory.size()),
+                "retry policy returned no delay"
+            );
+            if (delay.isNegative()) {
+                throw new IllegalArgumentException("retry delay must not be negative");
+            }
+        } catch (Throwable failure) {
+            impossible("retry delay", failure);
+            return;
+        }
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.RETRY_TIMER,
+            nominalTargetTime,
+            WaitReason.WAITING_FOR_RETRY_TIME
+        );
+        try {
+            var timer = eventLoop.schedule(
+                () -> retryTimerFired(registration),
+                delay.toNanos(),
+                TimeUnit.NANOSECONDS
+            );
+            targetServerState = new TargetServerState.WaitingForRetryTime<>(
+                timer,
+                registration
+            );
+        } catch (Throwable failure) {
+            impossible("retry timer submission", failure);
+        }
+    }
+
+    private void retryTimerFired(OutstandingOperationRegistry.Registration registration) {
+        requireOwnerThread();
+        if (!(targetServerState instanceof TargetServerState.WaitingForRetryTime<R> waiting)
+            || waiting.registration() != registration) {
+            impossible(
+                "retry timer",
+                new IllegalStateException("retry timer fired from a non-waiting state")
+            );
+            return;
+        }
+        if (cancellationState instanceof CancellationState.Forced forced) {
+            targetServerState = new TargetServerState.Cancelled<>(forced.cause());
+            operations.complete(registration);
+            tryEmitCleanup();
+            return;
+        }
+        targetServerState = new TargetServerState.WaitingForPermit<>();
+        operations.complete(registration);
+        retryPermitRegistration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.PERMIT_ACQUISITION,
+            nominalTargetTime,
+            WaitReason.WAITING_FOR_PERMIT
+        );
+        final CompletionStage<Void> delivery;
+        try {
+            delivery = Objects.requireNonNull(
+                callbacks.requestAttemptPermit(requestId),
+                "connection owner returned no retry-permit delivery"
+            );
+        } catch (Throwable failure) {
+            impossible("retry permit request", failure);
+            return;
+        }
+        delivery.whenComplete((ignored, failure) ->
+            postRequired(
+                "retry permit delivery",
+                () -> {
+                    if (failure != null) {
+                        impossible("retry permit delivery", unwrap(failure));
+                        return;
+                    }
+                    if (retryPermitRegistration != null) {
+                        operations.complete(retryPermitRegistration);
+                        retryPermitRegistration = null;
+                    }
+                },
+                ignoredFailure -> {}
+            )
+        );
+    }
+
+    private void sourceResponseChanged() {
+        if (targetServerState
+            instanceof TargetServerState.WaitingForRetrySourceResponse<R> waiting) {
+            applyRetryDecision(waiting.response());
+            operations.complete(waiting.registration());
+        }
+        if (finalSourceWaitRegistration != null
+            && !(finalSourceState instanceof FinalSourceState.Unresolved<F>)) {
+            operations.complete(finalSourceWaitRegistration);
+            finalSourceWaitRegistration = null;
+        }
+        tryStartTuple();
+    }
+
+    private void emitConnectionTurnFinished() {
+        if (turnMilestone != MilestoneState.NOT_SUBMITTED) {
+            impossible(
+                "connection-turn completion",
+                new IllegalStateException("connection-turn completion was emitted twice")
+            );
+            return;
+        }
+        turnMilestone = MilestoneState.SUBMITTED;
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.REQUIRED_DELIVERY,
+            nominalTargetTime,
+            WaitReason.WAITING_FOR_RECEIVER
+        );
+        deliverRequired(
+            registration,
+            "connection-turn completion",
+            () -> callbacks.connectionTurnFinished(requestId),
+            () -> {
+                turnMilestone = MilestoneState.ACCEPTED;
+                tryEmitProcessingFinished();
+                tryEmitCleanup();
+            }
+        );
+    }
+
+    private void tryStartTuple() {
+        if (!(tupleState instanceof TupleState.NotReady)
+            || !(preparationState instanceof PreparationState.Ready<P> ready)
+            || !(targetServerState instanceof TargetServerState.Finished<R> finished)) {
+            return;
+        }
+        final FinalSourceResponse<F> finalResponse;
+        switch (finalSourceState) {
+            case FinalSourceState.Unresolved<F> ignored -> {
+                if (finalSourceWaitRegistration == null) {
+                    finalSourceWaitRegistration = operations.register(
+                        partitionGenerationId,
+                        connectionProcessingId,
+                        requestId,
+                        OperationType.FINAL_SOURCE_RESPONSE_WAIT,
+                        nominalTargetTime,
+                        WaitReason.WAITING_FOR_FINAL_SOURCE_RESPONSE
+                    );
+                }
+                return;
+            }
+            case FinalSourceState.Complete<F> complete ->
+                finalResponse = new CompleteFinalSourceResponse<>(complete.response());
+            case FinalSourceState.Incomplete<F> incomplete ->
+                finalResponse = new IncompleteFinalSourceResponse<>(incomplete.reason());
+        }
+        final T tuple;
+        try {
+            tuple = Objects.requireNonNull(
+                tupleFactory.create(
+                    new RequestResult<>(
+                        sourceRequest,
+                        ready.preparedRequest(),
+                        attemptHistory,
+                        finished.response(),
+                        finalResponse
+                    )
+                ),
+                "tuple factory returned no tuple"
+            );
+        } catch (Throwable failure) {
+            impossible("tuple construction", failure);
+            return;
+        }
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.TUPLE_DURABILITY,
+            nominalTargetTime,
+            WaitReason.WAITING_FOR_TUPLE_DURABILITY
+        );
+        final TupleWriter.LogicalWrite write;
+        try {
+            write = Objects.requireNonNull(
+                tupleWriter.write(new TupleWriter.WriteTuple<>(requestId, tuple)),
+                "tuple writer returned no logical write"
+            );
+        } catch (Throwable failure) {
+            impossible("logical tuple write", failure);
+            return;
+        }
+        tupleState = new TupleState.Writing(write, registration);
+        write.completion().whenComplete((result, failure) ->
+            postRequired(
+                "tuple write result",
+                () -> applyTupleResult(registration, result, unwrap(failure)),
+                ignored -> {}
+            )
+        );
+    }
+
+    private void applyTupleResult(
+        OutstandingOperationRegistry.Registration registration,
+        TupleWriteResult result,
+        Throwable failure
+    ) {
+        requireOwnerThread();
+        if (!(tupleState instanceof TupleState.Writing writing)
+            || writing.registration() != registration) {
+            impossible(
+                "tuple write completion",
+                new IllegalStateException("tuple completion arrived before tuple writing")
+            );
+            return;
+        }
+        if (failure != null) {
+            impossible("tuple write exceptional completion", failure);
+            return;
+        }
+        if (result == null) {
+            impossible(
+                "tuple write completion",
+                new NullPointerException("tuple writer completed without a typed result")
+            );
+            return;
+        }
+        switch (result) {
+            case TupleWriter.TupleDurable ignored -> {
+                tupleState = new TupleState.Durable();
+                releaseRequestResources();
+                operations.complete(registration);
+                tryEmitProcessingFinished();
+            }
+            case TupleWriteCancelled cancelled -> {
+                tupleState = new TupleState.Cancelled(cancelled.cause());
+                if (!(cancellationState instanceof CancellationState.Forced)) {
+                    impossible("unexpected tuple cancellation", cancelled.cause());
+                    return;
+                }
+                releaseRequestResources();
+                operations.complete(registration);
+                tryEmitCleanup();
+            }
+        }
+    }
+
+    private void tryEmitProcessingFinished() {
+        if (!(tupleState instanceof TupleState.Durable)
+            || turnMilestone != MilestoneState.ACCEPTED
+            || processingMilestone != MilestoneState.NOT_SUBMITTED
+            || cancellationState instanceof CancellationState.Forced) {
+            return;
+        }
+        processingMilestone = MilestoneState.SUBMITTED;
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.REQUIRED_DELIVERY,
+            nominalTargetTime,
+            WaitReason.WAITING_FOR_RECEIVER
+        );
+        deliverRequired(
+            registration,
+            "request-processing completion",
+            () -> callbacks.requestProcessingFinished(requestId),
+            () -> {
+                processingMilestone = MilestoneState.ACCEPTED;
+                cancelGracefulDeadline();
+            }
+        );
+    }
+
+    private void cancelPreparation(CancellationException cause) {
+        switch (preparationState) {
+            case PreparationState.Admitted<P> ignored ->
+                preparationState = new PreparationState.Cancelled<>(cause);
+            case PreparationState.Preparing<P> preparing -> {
+                try {
+                    preparing.operation().cancel(cause);
+                } catch (Throwable failure) {
+                    impossible("request preparation cancellation", failure);
+                }
+            }
+            case PreparationState.Ready<P> ignored -> {}
+            case PreparationState.Cancelled<P> ignored -> {}
+        }
+    }
+
+    private void cancelTargetWork(CancellationException cause) {
+        switch (targetServerState) {
+            case TargetServerState.NotStarted<R> ignored ->
+                targetServerState = new TargetServerState.Cancelled<>(cause);
+            case TargetServerState.WaitingForPermit<R> ignored -> {
+                callbacks.cancelAttemptPermit(requestId, cause);
+                targetServerState = new TargetServerState.Cancelled<>(cause);
+                if (retryPermitRegistration != null) {
+                    operations.complete(retryPermitRegistration);
+                    retryPermitRegistration = null;
+                }
+            }
+            case TargetServerState.StartingAttempt<R> starting -> {
+                starting.permit().close();
+                operations.complete(starting.registration());
+                targetServerState = new TargetServerState.Cancelled<>(cause);
+            }
+            case TargetServerState.AttemptInProgress<R> active ->
+                abortAttempt(active, cause);
+            case TargetServerState.AbortingAttempt<R> ignored -> {}
+            case TargetServerState.WaitingForRetrySourceResponse<R> waiting -> {
+                operations.complete(waiting.registration());
+                targetServerState = new TargetServerState.Cancelled<>(cause);
+            }
+            case TargetServerState.WaitingForRetryTime<R> waiting -> {
+                waiting.timer().cancel(false);
+                operations.complete(waiting.registration());
+                targetServerState = new TargetServerState.Cancelled<>(cause);
+            }
+            case TargetServerState.Finished<R> ignored -> {}
+            case TargetServerState.Cancelled<R> ignored -> {}
+        }
+    }
+
+    private void abortAttempt(
+        TargetServerState.AttemptInProgress<R> active,
+        CancellationException cause
+    ) {
+        var abortRegistration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.CANCELLATION_CLEANUP,
+            nominalTargetTime,
+            WaitReason.WAITING_FOR_CHANNEL_TEARDOWN
+        );
+        targetServerState = new TargetServerState.AbortingAttempt<>(
+            active.attemptNumber(),
+            active.permit(),
+            active.attempt(),
+            active.registration(),
+            abortRegistration
+        );
+        final CompletionStage<Void> abort;
+        try {
+            abort = Objects.requireNonNull(
+                active.attempt().abort(cause),
+                "target attempt abort returned no completion stage"
+            );
+        } catch (Throwable failure) {
+            impossible("target attempt abort", failure);
+            return;
+        }
+        abort.whenComplete((ignored, failure) ->
+            postRequired(
+                "target attempt abort completion",
+                () -> finishAbortedAttempt(active.attemptNumber(), cause, unwrap(failure)),
+                rejection -> active.permit().close()
+            )
+        );
+    }
+
+    private void finishAbortedAttempt(
+        int attemptNumber,
+        CancellationException cause,
+        Throwable failure
+    ) {
+        if (!(targetServerState instanceof TargetServerState.AbortingAttempt<R> aborting)
+            || aborting.attemptNumber() != attemptNumber) {
+            impossible(
+                "target attempt abort completion",
+                new IllegalStateException("abort completion has no active aborted attempt")
+            );
+            return;
+        }
+        if (failure != null) {
+            impossible("target channel teardown", failure);
+            return;
+        }
+        aborting.permit().close();
+        targetServerState = new TargetServerState.Cancelled<>(cause);
+        operations.complete(aborting.attemptRegistration());
+        operations.complete(aborting.abortRegistration());
+        tryEmitCleanup();
+    }
+
+    private void cancelTuple(CancellationException cause) {
+        switch (tupleState) {
+            case TupleState.NotReady ignored ->
+                tupleState = new TupleState.Cancelled(cause);
+            case TupleState.Writing writing -> writing.write().cancel(cause);
+            case TupleState.Durable ignored -> {}
+            case TupleState.Cancelled ignored -> {}
+        }
+    }
+
+    private void tryEmitCleanup() {
+        if (!(cancellationState instanceof CancellationState.Forced forced)
+            || cleanupMilestone != MilestoneState.NOT_SUBMITTED
+            || preparationState instanceof PreparationState.Preparing<P>
+            || targetServerState instanceof TargetServerState.StartingAttempt<R>
+            || targetServerState instanceof TargetServerState.AttemptInProgress<R>
+            || targetServerState instanceof TargetServerState.AbortingAttempt<R>
+            || targetServerState instanceof TargetServerState.WaitingForPermit<R>
+            || targetServerState instanceof TargetServerState.WaitingForRetrySourceResponse<R>
+            || targetServerState instanceof TargetServerState.WaitingForRetryTime<R>
+            || tupleState instanceof TupleState.Writing
+            || turnMilestone == MilestoneState.SUBMITTED) {
+            return;
+        }
+        releaseRequestResources();
+        cleanupMilestone = MilestoneState.SUBMITTED;
+        var registration = operations.register(
+            partitionGenerationId,
+            connectionProcessingId,
+            requestId,
+            OperationType.REQUIRED_DELIVERY,
+            nominalTargetTime,
+            WaitReason.WAITING_FOR_RECEIVER
+        );
+        deliverRequired(
+            registration,
+            "request cleanup",
+            () -> callbacks.requestCleanupFinished(requestId, forced.cause()),
+            () -> cleanupMilestone = MilestoneState.ACCEPTED
+        );
+    }
+
+    private void scheduleGracefulDeadline(
+        CancellationDeadline deadline,
+        CancellationException cause
+    ) {
+        cancelGracefulDeadline();
+        try {
+            gracefulDeadlineTimer = eventLoop.schedule(
+                () -> forceCancel(cause),
+                deadline.remainingNanos(nanoTime.getAsLong()),
+                TimeUnit.NANOSECONDS
+            );
+        } catch (Throwable failure) {
+            impossible("graceful cancellation deadline", failure);
+        }
+    }
+
+    private void cancelGracefulDeadline() {
+        if (gracefulDeadlineTimer != null) {
+            gracefulDeadlineTimer.cancel(false);
+            gracefulDeadlineTimer = null;
+        }
+    }
+
+    private void deliverRequired(
+        OutstandingOperationRegistry.Registration registration,
+        String operation,
+        RequiredSubmission submission,
+        Runnable afterAcceptance
+    ) {
+        final CompletionStage<Void> acceptance;
+        try {
+            acceptance = Objects.requireNonNull(
+                submission.submit(),
+                operation + " returned no receiver completion"
+            );
+        } catch (Throwable failure) {
+            impossible(operation + " submission", failure);
+            return;
+        }
+        acceptance.whenComplete((ignored, failure) ->
+            postRequired(
+                operation + " receiver completion",
+                () -> {
+                    if (failure != null) {
+                        impossible(operation + " receiver completion", unwrap(failure));
+                        return;
+                    }
+                    afterAcceptance.run();
+                    operations.complete(registration);
+                },
+                ignoredFailure -> {}
+            )
+        );
+    }
+
+    private void releaseLatePreparation(RequestPreparationResult<P> result) {
+        if (result instanceof RequestPreparationResult.Ready<P> ready) {
+            try {
+                resourceReleaser.releasePreparedRequest(ready.value());
+            } catch (Throwable failure) {
+                reportFatal("late prepared-request release", failure);
+            }
+        }
+    }
+
+    private void closePreparedOnly() {
+        if (preparationState instanceof PreparationState.Ready<P> ready) {
+            try {
+                resourceReleaser.releasePreparedRequest(ready.preparedRequest());
+            } catch (Throwable failure) {
+                reportFatal("prepared-request release", failure);
+            }
+        }
+    }
+
+    private void releaseRequestResources() {
+        if (resourcesReleased) {
+            return;
+        }
+        resourcesReleased = true;
+        try {
+            resourceReleaser.releaseSourceRequest(sourceRequest);
+            if (preparationState instanceof PreparationState.Ready<P> ready) {
+                resourceReleaser.releasePreparedRequest(ready.preparedRequest());
+            }
+            for (var outcome : attemptHistory) {
+                if (outcome
+                    instanceof TargetAttemptOutcome.TargetResponseObtained<R> obtained) {
+                    resourceReleaser.releaseTargetResponse(obtained.response());
+                }
+            }
+            if (finalSourceState instanceof FinalSourceState.Complete<F> complete) {
+                resourceReleaser.releaseSourceResponse(complete.response());
+            }
+        } catch (Throwable failure) {
+            reportFatal("request resource release", failure);
+        }
+    }
+
+    private void postRequired(
+        String operation,
+        Runnable transition,
+        Consumer<Throwable> rejectionCleanup
+    ) {
+        if (eventLoop.inEventLoop()) {
+            runTransition(operation, transition);
+            return;
+        }
+        try {
+            eventLoop.execute(() -> runTransition(operation, transition));
+        } catch (Throwable failure) {
+            try {
+                rejectionCleanup.accept(failure);
+            } catch (Throwable cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            reportFatal("required event-loop submission " + operation, failure);
+        }
+    }
+
+    private void runTransition(String operation, Runnable transition) {
+        try {
+            requireOwnerThread();
+            transition.run();
+        } catch (Throwable failure) {
+            impossible(operation, failure);
         }
     }
 
     private void requireOwnerThread() {
-        if (!inOwnerThread.getAsBoolean()) {
+        if (!eventLoop.inEventLoop()) {
             throw new IllegalStateException(
-                "request replay owner for " + requestId + " accessed from non-owner thread "
-                    + Thread.currentThread().getName()
+                "request owner for " + requestId + " accessed outside its event loop"
             );
         }
     }
 
-    private boolean cancellationCleanupComplete() {
-        return connectionTurnCleanupComplete()
-            && preparationCancellationAcknowledgementSatisfied()
-            && processingCancellationAcknowledgementSatisfied();
+    private void impossible(String operation, Throwable cause) {
+        reportFatal("impossible transition during " + operation, cause);
     }
 
-    private static Throwable combineReleaseFailures(Throwable first, Throwable additional) {
-        if (first == null) {
-            return additional;
-        }
-        if (additional == first) {
-            return first;
-        }
-        if (additional instanceof Error && !(first instanceof Error)) {
-            additional.addSuppressed(first);
-            return additional;
-        }
-        first.addSuppressed(additional);
-        return first;
+    private void reportFatal(String operation, Throwable cause) {
+        fatalHandler.onFatal(new Error(
+            "Request-owner failure for " + requestId + ": " + operation,
+            cause
+        ));
     }
 
-    private static void rethrowReleaseFailure(Throwable failure) throws Exception {
-        if (failure instanceof Error error) {
-            throw error;
+    private static Throwable unwrap(Throwable failure) {
+        var current = failure;
+        while (current != null
+            && (current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+            && current.getCause() != null) {
+            current = current.getCause();
         }
-        if (failure instanceof Exception exception) {
-            throw exception;
-        }
-        if (failure != null) {
-            throw new RuntimeException(failure);
-        }
+        return current;
+    }
+
+    @FunctionalInterface
+    private interface RequiredSubmission {
+        CompletionStage<Void> submit();
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G5)

@@ -8,14 +8,23 @@ public final class ReplayOutcomes {
     private ReplayOutcomes() {}
 
     public sealed interface RequestPreparationResult<T>
-        permits RequestPreparationResult.RequestPreparationReady,
-            RequestPreparationResult.RequestPreparationCancelled {
+        permits RequestPreparationResult.Ready,
+            RequestPreparationResult.Cancelled {
 
-        record RequestPreparationReady<T>(@NonNull T value) implements RequestPreparationResult<T> {}
+        record Ready<T>(@NonNull T value) implements RequestPreparationResult<T> {}
 
-        record RequestPreparationCancelled<T>(
+        record Cancelled<T>(
             @NonNull CancellationException cause
         ) implements RequestPreparationResult<T> {}
+    }
+
+    public sealed interface RetryDecision
+        permits RetryDecision.RetryRequired,
+            RetryDecision.TargetServerAttemptsFinished {
+
+        record RetryRequired() implements RetryDecision {}
+
+        record TargetServerAttemptsFinished() implements RetryDecision {}
     }
 
     public sealed interface TargetAttemptOutcome<T>

@@ -1,162 +1,156 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Test carried byte-identical. Unresolved: TargetConnectionOwnerTestSupport TestEventLoop . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G10)
-/*
-
-import java.util.ArrayList;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.TestExchange;
-import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.TestPrepared;
-import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.admit;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.owner;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.processing;
-import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTestSupport.request;
-
 class TargetConnectionOwnerFirstWriteTest {
     @Test
-    void firstTargetWriteIsConnectionLocalAndExactlyOnce() {
-        var eventLoop = new TestEventLoop();
-        var fatalFailures = new ArrayList<Error>();
-        var lifecycleEvents = new ArrayList<String>();
-        var connectionOwner = owner(
-            eventLoop,
-            new TestExchange(),
-            fatalFailures,
-            recordingLifecycleSink(lifecycleEvents)
+    void firstAndFinalWriteMilestonesStayLocalAndRetriesDoNotRepeatThem() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.retryPolicy.decisions.add(new RetryDecision.RetryRequired());
+        fixture.retryPolicy.decisions.add(
+            new RetryDecision.TargetServerAttemptsFinished()
         );
-        admit(
-            connectionOwner,
-            request(0),
-            0,
-            CompletableFuture.completedFuture(
-                new PreparationOutcome.Prepared<>(new TestPrepared("request"))
-            ),
-            processing(new CompletableFuture<>())
-        );
-        eventLoop.runUntilIdle();
+        fixture.admit(0, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(0);
+        fixture.eventLoop.runUntilIdle();
 
-        connectionOwner.firstTargetWriteSubmitted(request(0));
-        eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.targetChannel.attempt(0).finalWrite();
+        fixture.eventLoop.runUntilIdle();
 
-        Assertions.assertTrue(fatalFailures.isEmpty());
         Assertions.assertTrue(
-            lifecycleEvents.isEmpty(),
-            "FirstTargetWriteSubmitted must never cross into replay intake"
+            fixture.lifecycleEvents.isEmpty(),
+            "write milestones are connection-local cancellation state"
         );
 
-        connectionOwner.firstTargetWriteSubmitted(request(0));
-        eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("retryable");
+        fixture.eventLoop.runUntilIdle();
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
 
-        Assertions.assertEquals(1, fatalFailures.size());
-        Assertions.assertTrue(
-            fatalFailures.get(0).getMessage().contains("first target write")
+        fixture.targetChannel.attempt(1).firstWrite();
+        fixture.targetChannel.attempt(1).finalWrite();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+
+        fixture.targetChannel.attempt(1).targetResponse("terminal");
+        fixture.completeSource(0, "source");
+        fixture.eventLoop.runUntilIdle();
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            List.of("turn:0", "processing:0"),
+            fixture.lifecycleEvents
         );
-        Assertions.assertTrue(lifecycleEvents.isEmpty());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
     @Test
-    void ownerThreadFirstWriteTransitionIsImmediate() {
-        var eventLoop = new TestEventLoop();
-        var exchange = new TestExchange();
-        var fatalFailures = new ArrayList<Error>();
-        var connectionOwner = owner(
-            eventLoop,
-            exchange,
-            fatalFailures,
-            TargetConnectionOwnerTestSupport.acceptingLifecycleSink()
-        );
-        var executeCallbacks = new AtomicInteger();
-        var pendingTasksBeforeFirstWrite = new AtomicInteger(-1);
-        var pendingTasksAfterFirstWrite = new AtomicInteger(-1);
-        var fatalFailuresAfterFirstWrite = new AtomicInteger(-1);
-        var fatalFailuresAfterDuplicate = new AtomicInteger(-1);
-        exchange.onExecute = requestId -> {
-            pendingTasksBeforeFirstWrite.set(eventLoop.pendingTasks());
-            connectionOwner.firstTargetWriteSubmitted(requestId);
-            pendingTasksAfterFirstWrite.set(eventLoop.pendingTasks());
-            fatalFailuresAfterFirstWrite.set(fatalFailures.size());
-            connectionOwner.firstTargetWriteSubmitted(requestId);
-            fatalFailuresAfterDuplicate.set(fatalFailures.size());
-            executeCallbacks.incrementAndGet();
-        };
-        admit(
-            connectionOwner,
-            request(0),
-            0,
-            CompletableFuture.completedFuture(
-                new PreparationOutcome.Prepared<>(new TestPrepared("request"))
-            ),
-            processing(new CompletableFuture<>())
-        );
+    void duplicateMilestoneFromSameAttemptIsFatal() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(1, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(1);
+        fixture.eventLoop.runUntilIdle();
 
-        eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.eventLoop.runUntilIdle();
 
-        Assertions.assertEquals(1, executeCallbacks.get());
-        Assertions.assertEquals(
-            pendingTasksBeforeFirstWrite.get(),
-            pendingTasksAfterFirstWrite.get(),
-            "an owner-thread observation must not enqueue another mailbox turn"
-        );
-        Assertions.assertEquals(
-            0,
-            fatalFailuresAfterFirstWrite.get(),
-            "the first observation must succeed before the duplicate is attempted"
-        );
-        Assertions.assertEquals(
-            1,
-            fatalFailuresAfterDuplicate.get(),
-            "the duplicate must observe the first transition before execute returns"
-        );
-        Assertions.assertEquals(
-            "first target write was submitted more than once",
-            fatalFailures.get(0).getCause().getMessage()
+        Assertions.assertEquals(1, fixture.fatalFailures.size());
+        Assertions.assertTrue(
+            fixture.fatalFailures.get(0).getCause().getMessage().contains(
+                "first target write was submitted more than once"
+            )
         );
     }
 
-    private static TargetConnectionOwner.RequestLifecycleSink recordingLifecycleSink(
-        List<String> lifecycleEvents
-    ) {
-        return new TargetConnectionOwner.RequestLifecycleSink() {
-            @Override
-            public CompletionStage<Void> connectionRequestFinished(
-                PartitionGenerationId partitionGenerationId,
-                ReplayRequestId requestId
-            ) {
-                lifecycleEvents.add("turn");
-                return CompletableFuture.completedFuture(null);
-            }
+    @Test
+    void targetResponseBeforeFinalWriteIsImpossible() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(11, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(11);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.eventLoop.runUntilIdle();
 
-            @Override
-            public CompletionStage<Void> requestProcessingFinished(
-                PartitionGenerationId partitionGenerationId,
-                ReplayRequestId requestId
-            ) {
-                lifecycleEvents.add("processing");
-                return CompletableFuture.completedFuture(null);
-            }
-        };
+        fixture.targetChannel.attempt(0).outcome.complete(
+            new TargetAttemptOutcome.TargetResponseObtained<>("response")
+        );
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertTrue(
+            fixture.fatalFailures.stream().anyMatch(error ->
+                error.getCause().getMessage().contains(
+                    "FinalTargetWriteSubmitted"
+                )
+            )
+        );
+    }
+
+    @Test
+    void noResponseIsTypedAtChannelBoundaryAndRetriesWithoutExceptionalControlFlow() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(2, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(2);
+        fixture.eventLoop.runUntilIdle();
+
+        var firstAttempt = fixture.targetChannel.attempt(0);
+        firstAttempt.noResponse();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertInstanceOf(
+            TargetAttemptOutcome.NoTargetResponseObtained.class,
+            firstAttempt.outcome.toCompletableFuture().join()
+        );
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
+
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
+        fixture.targetChannel.attempt(1).noResponse();
+        fixture.eventLoop.runUntilIdle();
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
+
+        Assertions.assertEquals(3, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(1, fixture.activePermits.get());
+        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
+
+        var cancellation = new java.util.concurrent.CancellationException("cancel retry loop");
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            TargetConnectionOwnerTestSupport.CONNECTION,
+            TargetConnectionOwnerTestSupport.GENERATION,
+            cancellation
+        ));
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(2).abort.complete(null);
+        fixture.eventLoop.runUntilIdle();
+        fixture.eventLoop.advance(Duration.ofSeconds(10));
+
+        Assertions.assertEquals(3, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G10)
