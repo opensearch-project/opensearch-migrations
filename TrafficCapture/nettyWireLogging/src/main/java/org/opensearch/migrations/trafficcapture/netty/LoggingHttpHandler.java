@@ -575,19 +575,23 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         var bb = (ByteBuf) msg;
         var timestamp = Instant.now();
-        var classifiedBytes = messageContext instanceof IWireCaptureContexts.IResponseContext
-            ? List.of(new ClassifiedResponseBytes(
-                false,
-                ByteBufUtil.getBytes(bb, bb.readerIndex(), bb.readableBytes(), false)
-            ))
-            : classifySourceResponseBytes(bb);
+        if (messageContext instanceof IWireCaptureContexts.IResponseContext responseContext) {
+            if (captureProcessState.shouldCapture()
+                && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()
+                && !runRequiredCaptureOperation(ctx, () -> trafficOffloader.addWriteEvent(timestamp, bb))) {
+                ReferenceCountUtil.release(msg);
+                promise.tryFailure(new IOException("Required response capture failed"));
+                return;
+            }
+            responseContext.onBytesWritten(bb.readableBytes());
+            super.write(ctx, msg, promise);
+            return;
+        }
+
+        var classifiedBytes = classifySourceResponseBytes(bb);
         IWireCaptureContexts.IResponseContext responseContext = null;
         if (classifiedBytes.stream().anyMatch(classified -> !classified.interim())) {
-            if (!(messageContext instanceof IWireCaptureContexts.IResponseContext)) {
-                messageContext = responseContext = messageContext.createResponseContext();
-            } else {
-                responseContext = (IWireCaptureContexts.IResponseContext) messageContext;
-            }
+            messageContext = responseContext = messageContext.createResponseContext();
         }
 
         if (captureProcessState.shouldCapture()

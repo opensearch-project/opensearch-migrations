@@ -449,6 +449,79 @@ class SourceReconstructionTest {
     }
 
     @Test
+    void typedInterimsAfterRequestEndRemainAssociatedAndSeparateFromTheFinalResponse() {
+        var interim102 = "HTTP/1.1 102 Processing\r\n\r\n";
+        var interim103 = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n";
+        var finalResponse = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                interim(3, interim102),
+                interimSegment(4, "HTTP/1.1 103 Early Hints\r\n"),
+                interimSegment(5, "Link: </style.css>\r\n\r\n"),
+                segmentEnd(6),
+                write(7, finalResponse),
+                close(8)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(
+            List.of(interim102, interim103),
+            sink.interimResponses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(
+            List.of(sink.requestIds.get(0), sink.requestIds.get(0)),
+            sink.interimResponseRequestIds
+        );
+        Assertions.assertEquals(
+            List.of(finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+    }
+
+    @Test
+    void segmentedInterimCanStraddleRequestEndWithoutLosingBytes() {
+        var interimResponse = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n";
+        var finalResponse = "HTTP/1.1 204 No Content\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                interimSegment(2, "HTTP/1.1 103 Early Hints\r\n"),
+                endOfMessage(3),
+                interimSegment(4, "Link: </style.css>\r\n\r\n"),
+                segmentEnd(5),
+                write(6, finalResponse),
+                close(7)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(
+            List.of(interimResponse),
+            sink.interimResponses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.interimResponseRequestIds);
+        Assertions.assertEquals(
+            List.of(finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+    }
+
+    @Test
     void ordinaryWriteIsNeverAcceptedAsAnInterimCompatibilityEncoding() {
         var ordinaryWrite = "HTTP/1.1 100 Continue\r\n\r\n";
         var finalResponse = "HTTP/1.1 204 No Content\r\n\r\n";

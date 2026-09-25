@@ -446,7 +446,6 @@ public final class SourceConnectionState {
 
         incomingRequest = null;
         discardingFinalWriteSegmentsBeforeRequestEnd = false;
-        interimResponseUnderAssembly = null;
         responseBeingAssembledFor = replayRequestId;
         responseStateByRequest.put(
             replayRequestId,

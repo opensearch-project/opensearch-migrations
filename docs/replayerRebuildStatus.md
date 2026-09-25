@@ -30,7 +30,7 @@ Plan A and Plan B.
 | G0 | proved | One in-place module; member-level limbo; deterministic fixtures; marker verifier |
 | G1 | proved | Kafka `dump-raw` reaches `TrafficReplayer.main`; real proxy/topic envelope evidence; multi-partition bounds and metadata checked |
 | G2 | proved | Kafka source owner, wakeup boundary, generation/commit handling, and repeated design-conformance/falsification review; R9 proved |
-| G3 | `blocked(PA2)` | Implementation, falsification, and repeated conformance review complete through `3dbec52cf`; the committed focused six-class validation reports 56 passing tests, and the final review found no production-code conformance defect. The typed source-interim design amendment is authorized; closure waits only on PA2 item 5's producer/consumer interoperability |
+| G3 | `blocked(PA2 edge rulings)` | The typed producer → Kafka → rebuilt intake → dumper chain is implemented and its core evidence passes. Closure waits only on PA2 item 5's three design-silent edge dispositions: truncated interim at close, ordinary final response before request EOM, and an unowned typed interim |
 | G4 | proved | Commit authority complete through `49dd4cea0`: ordered observed-record head, one operation-level resolution latch, monotonic recommit, rejected/unknown distinction, revocation conservation, fixed-cardinality telemetry, 65-test focused validation, exact-revision falsification, and resumed Claude conformance review |
 | G5 | proved | Production implementation is complete through `19c05162d`; the 60-test focused milestone set passed in `/private/tmp/gradle-evidence.95607.20320.log`, the final transformation-fallback correction passed its reopened two-test evidence in `/private/tmp/gradle-evidence.94140.3082.log`, and exact-revision falsification caught every applied production-property removal, including the separately owned tuple-writer force-before-durability cleanup inversion in `/private/tmp/gradle-evidence.80172.31070.log`. Claude session `fc13e47d-fbea-4f74-859a-efb46d729d0f` resumed through the exact final production diff and returned `NO_ACTIONABLE_FINDINGS`. The exact-method trace audit completed in `4905d409f` with 147 balanced mappings across 16 files, unchanged and branch-only claims removed, retained sources preserved for the final sweep, and the pre-carry RequestSender source gap recorded |
 | G6 | proved | Production implementation is complete through `45cfa95a5`; four exact inherited-responsibility trace pairs were added in `cc44f427b`. Exact-commit `compileJava` passed in `/private/tmp/gradle-evidence.38094.13160.log`, and the six-class focused set passed 56 tests with zero failures or skips in `/private/tmp/gradle-evidence.38541.15964.log`. One batched direct Codex worker caught all 18 valid timing, ordering, waiting, cap, and fatal-boundary mutations and restored clean at `45cfa95a5`. Claude session `replayer-G6-20260925T170810Z-a882` resumed through the implementation fix and confirmed trace commit and returned `NO_ACTIONABLE_FINDINGS` |
@@ -110,11 +110,11 @@ refuted. Full measurements remain in the archived status.
 | Request timing evidence | C | resolved by owner | Carry first-byte source time, request-EOM source time, and request-completing Kafka `LogAppendTime`; nominal target send time is anchored to request first byte |
 | Bare `SegmentEnd` without an active segment | C | fixed by owner ruling | Ignore it in request and response assembly; deterministic tests cover both |
 | Duplicate/out-of-order batch validation | C | withdrawn | `ObservedRecordCommitQueue` already owns ordering; do not add a second model |
-| Typed source-interim protocol | owner decision | blocked on PA2 implementation | PA2 item 5 produces typed whole/segmented observations; G3 consumes only those, with no ordinary-`Write` or old-capture compatibility path; the authoritative design amendment is recorded below |
+| Typed source-interim protocol | owner decision | core chain proved; edge rulings pending | Typed whole/segmented observations flow through the real chain with no ordinary-`Write` or old-capture compatibility path; three design-silent edge dispositions remain recorded below |
 | Active-record-tracker gauge during generation cancellation | A, unreachable before G8 | deferred(G8) | Every unfinished tracker removed by `GenerationCleanupTracker` decrements the process-wide gauge once; prove return to the pre-generation value without generation metric attributes |
 | G3 final review | conformance | proved | Seventh pass found no production-code design-conformance defect; only the typed-interim plan/design mismatch remains |
 
-## PA2 items 1–4 latest dispositions
+## PA2 latest dispositions
 
 | Exit obligation | State | Evidence |
 |---|---|---|
@@ -123,6 +123,7 @@ refuted. Full measurements remain in the archived status.
 | In-process fatal proxy exit is observable without halting the test JVM | proved | JVM actions are injected at `CaptureProxy.main`; the fixture observes exit 78, and disabling produce rejection makes the focused test time out |
 | Intentional drop advances the successor baseline | proved | The serializer increments `eomsSoFar`; the successor reports one prior request, and removing the increment makes it report zero |
 | Review and falsification | proved | The read-only design-conformance pass returned `NO_ACTIONABLE_FINDINGS`; one direct ephemeral worker inverted all four properties independently and restored clean at `9ea48669f` |
+| Typed source-interim producer/consumer chain | core chain proved; edge rulings pending | Fields 17/19, exact whole/segmented bytes, `100`/`102`/`103` classification, `101`/`413`/`417` exclusion, request continuation, record association, both dump modes, and real proxy → Kafka → rebuilt-intake interoperability pass. One direct worker falsified classification and request continuation at `0ca6f634f` |
 
 ## G4 latest dispositions
 
@@ -192,7 +193,7 @@ refuted. Full measurements remain in the archived status.
 | D-2 | No-response retries indefinitely; HTTP-response retries retain cap 4, lifted to top-level config | owner decided | G5/G9 |
 | D-3 | Record accounting is over `(generation, offset)` read events; retain the tiered and balancing equations in the metric table below | owner decided; AGENTS wording still needs owner-confirmed reconciliation | G4/G10/G12 |
 | D-4 | Preserve all 33 replay-pipeline metric names shipped on `main`, including the five dashboard-pinned names, only with their existing semantics, units, and fixed-cardinality attributes | owner decided | G5/G9 |
-| Source interim protocol | Typed whole/segmented observations based on PR #3000; ordinary `Write` is never a fallback and old captures get no compatibility decoder | owner decided; design amended 2026-09-25 | PA2/G3 |
+| Source interim protocol | Typed whole/segmented observations based on PR #3000; ordinary `Write` is never a fallback and old captures get no compatibility decoder | core chain proved; three edge rulings pending | PA2/G3 |
 | Target interim responses | Preserve after the rewrite with a complete target-channel → aggregation → tuple chain; keep current discard/TODO until then | owner deferred | POST1 |
 | Record association placement | `PartitionIntakeState` is the sole source of contributing-record and reverse-association state | owner decided | G3 |
 | Record tracker retirement | Ordinary completion removes only after required source-queue submission is accepted; cancellation removal and gauge balance belong to G8; prove via emitted messages and fixed-cardinality metrics, not map accessors | owner decided | G3/G8 |
@@ -266,7 +267,7 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 |---|---|---|---|---|
 | Kafka-backed `dump-http` and `dump-both` | G1 | G3 | Source assembly was required first | proved — `SourceAssemblyEvidenceTest` |
 | Proxy dropped-request successor baseline | G3 | PA2 | Serializer does not increment `eomsSoFar`; proxy-owned repair | proved — `intentionallyDroppedRequestAdvancesSuccessorStreamBaseline`, including falsification without the increment |
-| Typed source-interim observation producer | G3 | PA2 | Proxy must classify source `1xx` other than `101` and emit typed whole/segmented observations before G3 can interoperate; no compatibility path | open — PA2 item 5 |
+| Typed source-interim observation producer | G3 | PA2 | Proxy must classify source `1xx` other than `101` and emit typed whole/segmented observations before G3 can interoperate; no compatibility path | core chain proved; closure pending PA2 item 5 edge rulings — fields 17/19, classification, continuation, association, dump, interoperability, and falsification evidence |
 | Preserve target interim responses in tuples | G5 | POST1 | Owner deliberately placed the complete target-channel → aggregation → tuple chain after the rewrite | open |
 | Replace temporary per-connection tuple-writer placement and preserve stable sink index | G5 | G9 | G5 owns the complete logical transform/drop/retry/durability chain; G9 owns the configured bounded worker set, stable integer worker/sink index including S3 naming, per-worker transformer/sink construction, explicit close, and deletion of G5's per-connection placement | open |
 | Inherited connection-owner and context-lifetime assertions | G3 | G5 | Requires the G5 connection owner and process-local registry/context chain | proved — matching-lifetime release, generation separation, and fresh process-local lifetime assertions run on the G5 context chain |
@@ -304,6 +305,7 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | Proxy `MAX_ID_SIZE` assertion; replayer `-da:` workaround | inherited/G1 workaround | PA2 item 2; delete workaround in same repair | proved — assertion and workaround deleted; production-shaped identifiers round-trip; restored bound fails |
 | In-process proxy `System.exit(78)` and broker-lifetime workaround | inherited/G1 workaround | PA2 item 3; delete workaround in same repair | proved — JVM actions injected; in-process fatal exit observed as 78; healthy-produce falsification times out |
 | Proxy dropped-request successor baseline | inherited | PA2 item 4 | proved — drop advances `eomsSoFar`; successor baseline test proves one prior request; no-increment falsification reports zero |
+| Typed source-interim producer/consumer chain | G3/PA2 | PA2 item 5 edge rulings | core path proved; three design-silent edge dispositions remain |
 | Marked connection/context lifetime members | G2 carry | G5 | proved live refactor; trace-eligible predecessor members remain marked through the final completeness sweep |
 | Marked revocation/stale-assembly/cleanup members | G2 carry | G8 | open; preserve and refactor onto typed cancellation/cleanup |
 | Interrupted-source application-close member | G2 carry | G11 | open; process teardown only |
@@ -336,6 +338,7 @@ Fixed-cardinality counters are pre-authorized; identity-cardinality attributes r
 | `replayIntakeInputsApplied{inputKind}` / `replayIntakeRecordsApplied` | Applied input variants and records | G3 |
 | `replayIntakeActiveRecordTrackers` / `replayIntakeRecordTrackersRetired` | Active tracker balance and accepted-retirement progress | G3 |
 | `replayIntakeRequestsReconstituted` | Requests delivered from source assembly | G3 |
+| `replayIntakeInterimResponsesObserved` | Typed source interim responses crossing source assembly without ending request assembly | G3/PA2 |
 | `replayIntakeResponsesProvenComplete` / `replayIntakeResponsesUnprovenComplete` | Response confidence | G3 |
 | `replayIntakeResponsesIncomplete{incompleteReason}` | Expiration/cancellation-ended assembly | G3 |
 | `replayIntakeCapturedClosesAccepted` | Captured closes reaching a real sink | G3 |
@@ -418,8 +421,11 @@ Every row records explicit owner authorization. The detailed rationale is retain
 
 | Item | State | Owner / next action |
 |---|---|---|
-| G3 closure | blocked(PA2) | Production conformance review and the exact source-interim design amendment are complete; land PA2 item 5 producer/consumer interoperability |
+| G3 closure | blocked(PA2 edge rulings) | The typed producer/consumer chain and interoperability are proved; resolve the three item 5 design silences below |
 | Authoritative source-interim fallback replacement | resolved by owner, 2026-09-25 | Designs require typed observations only; no ordinary-`Write` or pre-change-capture compatibility path |
+| Identified but incomplete source interim when the source closes | open; blocks PA2/G3 | Choose drop with diagnostic, add an explicit incomplete-interim protocol value, or fail capture; review recommends drop without relabeling partial bytes |
+| Ordinary final source `Write` before request EOM | open; blocks PA2/G3 | Choose exact buffering until request identity exists, silent discard, or protocol failure; review recommends exact buffering for early `413`/`417` responses |
+| Typed source interim with no current request | open; blocks PA2/G3 | Choose ignore, protocol failure, or attach to the next request; review recommends ignore because no safe request identity exists |
 | Which preserved source timestamp anchors nominal target send time | resolved by owner, 2026-09-25 | Request first byte; design amended and G5/G7 may consume it |
 | Conservation wording mismatch between AGENTS equation and D-3 decision | open, non-blocking | Owner confirmation required before semantic reconciliation |
 | Rejected-versus-unknown commit outcome split was assigned to G2 but not proved | resolved ownership discrepancy | G2 scope/Exit now excludes it; G4 scope/Exit and the deferral ledger own the complete issuance, resolution, abandonment, observability, and evidence chain |

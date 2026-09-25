@@ -140,6 +140,26 @@ work, not deferred work. Status for each lives in `docs/replayerRebuildStatus.md
    before this protocol change. G3 consumes the typed observations and keeps request assembly active until
    its request end marker.
 
+   **Evidence landed.** `SourceInterimResponseCaptureTest` proves fragmented/coalesced `100`, `102`, `103`,
+   and multiple interims are typed while `101`, `413`, and `417` remain ordinary final writes.
+   `StreamChannelConnectionCaptureSerializerTest` proves byte-exact whole and forced-segmented serialization.
+   `SourceReconstructionTest` proves byte/order/ordinal/request continuation, later-final reconstruction, and
+   rejection of ordinary `Write` as a compatibility encoding; `RecordAssociationAccumulatorTest` proves an
+   interim-only record stays associated until the request lifecycle releases it. `TrafficStreamDumperTest`
+   and `HttpTransactionDumperTest` prove both diagnostic consumers preserve the typed distinction.
+   `SourceAssemblyEvidenceTest` proves real proxy → Kafka → rebuilt intake → `dump-http` interoperability for
+   `100`, `103`, and the later `200`. One direct `/private/tmp` Codex worker falsified classification and
+   request continuation independently at `0ca6f634f`, observed both intended test failures, and restored a
+   clean worktree at that exact revision.
+
+   The first read-only conformance pass found three edge semantics on which the amended designs are silent:
+   disposition of an identified but truncated interim at connection close, an ordinary final `Write` observed
+   before request EOM, and a typed interim observed with no current request. PA2 item 5 remains open until the
+   owner selects those semantics and authorizes any corresponding narrow design text. The unambiguous findings
+   from that pass are already corrected: steady-state final writes no longer take a heap-copy detour,
+   post-EOM typed interims have deterministic evidence, and a segmented interim straddling request EOM is
+   retained rather than cleared.
+
 **PA2 Exit:** all five focused repairs above have direct tests, their temporary replayer-side workarounds are
 deleted, intentional suppression followed by a stream boundary preserves the successor
 `priorRequestsReceived` ordinal, and source interim responses are emitted only as the typed whole or segmented
