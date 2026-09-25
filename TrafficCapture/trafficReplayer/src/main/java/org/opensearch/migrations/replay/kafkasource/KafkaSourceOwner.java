@@ -31,25 +31,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// pollBatch raw-record stamping -> handlePollResult creates IKafkaRecordContext with KafkaRecordId
-// old request/accumulator-owned trace closure -> completeCommittedRecordContexts only after
-//     acknowledged commit, completeRecordContext on commit-ineligible disposition, and
-//     completeGenerationRecordContexts when this process relinquishes the generation
-// old implicit parent lookups -> ApplicationKafkaRecord carries the record context into intake
-// commit authority and commit API calls remain in the same KafkaSourceOwner functions
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// handlePollResult's RecordContextFactory creation -> predecessor pollBatch record-read span creation.
-// ApplicationKafkaRecord recordContext propagation -> predecessor request/accumulator parent lookup.
-// completeCommittedRecordContexts -> predecessor trace closure after acknowledged commit.
-// completeRecordContext(commit-ineligible) -> predecessor terminal non-commit trace closure.
-// completeGenerationRecordContexts -> predecessor generation-end trace closure after this process
-//     relinquishes responsibility; it does not claim that this process redelivers the record.
-// submitLoopCommitIfEligible/submitRevocationCommit and commit callbacks ->
-//     same predecessor Kafka-source commit-authority functions.
-// REBUILD-TRACE-END(G5,target)
-
 /**
  * Owns Kafka reading, per-partition demand, and commit authority. Runs on the dedicated Kafka thread and
  * holds all of its state there. Defined by {@code kafkaLLD §5}, with the loop in {@code §3}.

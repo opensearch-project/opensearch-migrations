@@ -6,15 +6,6 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 
 import lombok.NonNull;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// PreparationOutcome success/filter/fallback handling -> RequestPreparationReady transformation status.
-// Preparation cancellation -> RequestPreparationCancelled.
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// RequestPreparationReady carries completed and fallback-error prepared requests, plus intentional drop;
-// RequestPreparationCancelled remains the only other preparation result.
-// REBUILD-TRACE-END(G5,target)
-
 public final class ReplayOutcomes {
     private ReplayOutcomes() {}
 

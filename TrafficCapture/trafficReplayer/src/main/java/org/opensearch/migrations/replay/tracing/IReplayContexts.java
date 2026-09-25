@@ -11,35 +11,6 @@ import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// IChannelKeyContext identity access -> IConnectionContext.getConnectionProcessingId
-// IKafkaRecordContext String record id/createTrafficLifecyleContext ->
-//     typed KafkaRecordId/createTrafficStreamContext/complete
-// ITrafficStreamsLifecycleContext ITrafficStreamKey/createHttpTransactionContext ->
-//     traffic-stream ordinal/createRequestContext(ReplayRequestId, source time)
-// IReplayerHttpTransactionContext legacy key/channel access ->
-//     IRequestContext getRequestId/getConnectionProcessingId/getCapturedRequestOrdinal
-// request reconstitution metric callback -> IRequestContext.onRequestReconstituted
-// request/response accumulation, transformation, scheduling, target, and tuple context factories ->
-//     same lifecycle positions with typed parents
-// ITargetRequestContext legacy enclosing lookups -> direct request/connection identity accessors
-// all 33 legacy MetricNames -> same literal names, units, and fixed-cardinality attributes
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// IConnectionContext.getConnectionProcessingId -> predecessor IChannelKeyContext identity access.
-// IKafkaRecordContext.getRecordId/createTrafficStreamContext/complete ->
-//     predecessor String record id/createTrafficLifecyleContext and terminal span closure.
-// ITrafficStreamsLifecycleContext.getTrafficStreamNumber/createRequestContext ->
-//     predecessor ITrafficStreamKey/createHttpTransactionContext.
-// IRequestContext getRequestId/getConnectionProcessingId/getCapturedRequestOrdinal/
-//     onRequestReconstituted -> predecessor legacy request-key/channel access plus metric callback.
-// IRequestContext child factories -> predecessor request/response accumulation, transformation,
-//     scheduling, target, and tuple factories at the same hierarchy positions.
-// ITargetRequestContext direct identity and target child factories ->
-//     predecessor enclosing-scope lookup and same target sub-span creators.
-// MetricNames constants -> predecessor constants with unchanged literal names.
-// REBUILD-TRACE-END(G5,target)
-
 public interface IReplayContexts {
 
     class ActivityNames {

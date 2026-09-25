@@ -1,34 +1,5 @@
 package org.opensearch.migrations.replay;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// CapturedTrafficToHttpTransactionAccumulator constructors ->
-//     ReplayIntakeOwner constructors/newPartitionState + SourceConnectionState constructor.
-// SpanWrappingAccumulationCallbacks.onRequestReceived/onConnectionClose/onTrafficStreamsExpired/
-//     onTrafficStreamIgnored -> ObservedSourceAssemblySink + PartitionIntakeState association retirement.
-// getStatsString/logHeartbeat and numberOf* accessors ->
-//     ReplayIntakeOwner.Metrics + owner activity/registry diagnostics; no parallel accumulator counters.
-// summarizeTrafficStream -> typed KafkaRecordId/ConnectionProcessingId diagnostics; the TrafficStream
-//     object formatter is not retained because owner state carries the normative identities.
-// accept -> ReplayIntakeOwner.applyRecord/applyPayload/applyTrafficStream.
-// createInitialAccumulation -> ReplayIntakeOwner.newPartitionState +
-//     SourceConnectionState constructor/requestUnderAssembly/responseUnderAssembly.
-// addObservationToAccumulation -> SourceConnectionState.apply.
-// handleObservationForSkipState -> SourceConnectionState.applyWhileDiscardingInheritedTail.
-// getTrafficStreamsHeldByAccum -> PartitionIntakeState's record-association/reverse-association maps.
-// handleCloseObservationThatAffectEveryState -> SourceConnectionState.applyCapturedClose/
-//     applyConnectionException.
-// handleObservationForReadState -> SourceConnectionState.applyBetweenRequests/applyToRequest.
-// handleObservationForWriteState -> SourceConnectionState.applyToResponse.
-// handleDroppedRequestForAccumulation -> SourceConnectionState.applyRequestDropped.
-// rotateAccumulationIfNecessary/rotateAccumulationOnReadIfNecessary ->
-//     ReplayIntakeOwner's ConnectionProcessingId lifetime routing + SourceConnectionState.completeResponse.
-// handleEndOfRequest -> SourceConnectionState.reconstituteRequest.
-// handleEndOfResponse -> SourceConnectionState.completeResponse.
-// close/closeAsTrafficSourceReaderInterruptedAndRemove/fireAccumulationsCallbacksAndClose ->
-//     SourceConnectionState.expire/endAssemblyAtBoundary/stopAssembling plus G7/G8 typed
-//     generation-cancellation and connection-cleanup inputs.
-// REBUILD-TRACE-END(G5,source)
-
 // REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
 // regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
@@ -264,6 +235,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private static class SpanWrappingAccumulationCallbacks {
         private final AccumulationCallbacks underlying;
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.SpanWrappingAccumulationCallbacks.onRequestReceived ->
+//     ReplayIntakeOwner.ObservedSourceAssemblySink.onRequestReconstituted
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
         public Consumer<RequestResponsePacketPair> onRequestReceived(
             IReplayContexts.IRequestAccumulationContext requestCtx,
             @NonNull HttpMessageAndTimestamp request,
@@ -277,6 +256,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             };
         }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.SpanWrappingAccumulationCallbacks.onConnectionClose ->
+//     ReplayIntakeOwner.ObservedSourceAssemblySink.onCapturedClose
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
         public void onConnectionClose(
             @NonNull Accumulation accum,
             RequestResponsePacketPair.ReconstructionStatus status,
@@ -295,6 +282,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             );
         }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.SpanWrappingAccumulationCallbacks.onTrafficStreamsExpired ->
+//     ReplayIntakeOwner.ObservedSourceAssemblySink.onSourceResponseIncomplete
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
         public void onTrafficStreamsExpired(
             RequestResponsePacketPair.ReconstructionStatus status,
             IReplayContexts.ITrafficStreamsLifecycleContext tsCtx,
@@ -352,6 +347,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .toString();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.accept -> ReplayIntakeOwner.applyRecord
+// CapturedTrafficToHttpTransactionAccumulator.accept -> ReplayIntakeOwner.applyPayload
+// CapturedTrafficToHttpTransactionAccumulator.accept -> ReplayIntakeOwner.applyTrafficStream
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     public void accept(SourceInput sourceInput) {
         var trafficStreamAndKey = (ITrafficStreamWithKey) sourceInput;
         var tsk = trafficStreamAndKey.getKey();
@@ -579,6 +583,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.createInitialAccumulation ->
+//     PartitionIntakeState.connectionFor
+// CapturedTrafficToHttpTransactionAccumulator.createInitialAccumulation ->
+//     SourceConnectionState.<init>
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private Accumulation createInitialAccumulation(ITrafficStreamWithKey streamWithKey) {
         var stream = streamWithKey.getStream();
         var key = streamWithKey.getKey();
@@ -613,6 +627,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return addObservationToAccumulation(accum, trafficStreamKey, observation, null);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.addObservationToAccumulation(
+//     Accumulation,ITrafficStreamKey,TrafficObservation,KafkaRecordId) ->
+//     SourceConnectionState.apply(TrafficObservation,KafkaRecordId,long,ITrafficStreamsLifecycleContext)
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private CONNECTION_STATUS addObservationToAccumulation(
         @NonNull Accumulation accum,
         @NonNull ITrafficStreamKey trafficStreamKey,
@@ -650,6 +673,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             });
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.handleObservationForSkipState ->
+//     SourceConnectionState.applyWhileDiscardingInheritedTail
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private Optional<CONNECTION_STATUS> handleObservationForSkipState(
         Accumulation accum,
         TrafficObservation observation
@@ -674,6 +705,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return Optional.empty();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.handleCloseObservationThatAffectEveryState ->
+//     SourceConnectionState.applyCapturedClose
+// CapturedTrafficToHttpTransactionAccumulator.handleCloseObservationThatAffectEveryState ->
+//     SourceConnectionState.applyConnectionException
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private Optional<CONNECTION_STATUS> handleCloseObservationThatAffectEveryState(
         Accumulation accum,
         TrafficObservation observation,
@@ -713,6 +754,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return Optional.empty();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.handleObservationForReadState ->
+//     SourceConnectionState.applyBetweenRequests
+// CapturedTrafficToHttpTransactionAccumulator.handleObservationForReadState ->
+//     SourceConnectionState.applyToRequest
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private Optional<CONNECTION_STATUS> handleObservationForReadState(
         @NonNull Accumulation accum,
         TrafficObservation observation,
@@ -769,6 +820,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return Optional.of(CONNECTION_STATUS.ALIVE);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.handleObservationForWriteState ->
+//     SourceConnectionState.applyToResponse
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private Optional<CONNECTION_STATUS> handleObservationForWriteState(
         Accumulation accum,
         TrafficObservation observation,
@@ -819,6 +878,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return Optional.of(CONNECTION_STATUS.ALIVE);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.handleDroppedRequestForAccumulation ->
+//     SourceConnectionState.applyRequestDropped
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private void handleDroppedRequestForAccumulation(Accumulation accum) {
         var sourceAssociation = accum.state == Accumulation.State.ACCUMULATING_READS
             ? sourceRequestAssemblyId(accum)
@@ -834,6 +901,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     // This function manages the transition case when an observation comes in that would terminate
     // any previous HTTP transaction for the connection. It returns true if there WAS a previous
     // transaction that has been reset and false otherwise
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.rotateAccumulationIfNecessary ->
+//     SourceConnectionState.completeResponse
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private boolean rotateAccumulationIfNecessary(String connectionId, Accumulation accum) {
         // If this was brand new, we don't need to care about triggering the callback.
         // We only need to worry about this if we have yet to send the RESPONSE.
@@ -845,6 +920,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return false;
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.rotateAccumulationOnReadIfNecessary ->
+//     SourceConnectionState.completeResponse
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private boolean rotateAccumulationOnReadIfNecessary(String connectionId, Accumulation accum) {
         if (rotateAccumulationIfNecessary(connectionId, accum)) {
             reusedKeepAliveCounter.incrementAndGet();
@@ -859,6 +942,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     /**
      * @return True if something was sent to the callback, false if nothing had been accumulated
      */
+// REBUILD-LIMBO-START(G11)
+/*
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.handleEndOfRequest ->
+//     SourceConnectionState.reconstituteRequest
+// REBUILD-TRACE-END(G5,source)
 // REBUILD-LIMBO-START(G11)
 /*
     private boolean handleEndOfRequest(Accumulation accumulation) {
@@ -883,6 +974,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return true;
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.handleEndOfResponse ->
+//     SourceConnectionState.completeResponse
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private void handleEndOfResponse(Accumulation accumulation, RequestResponsePacketPair.ReconstructionStatus status) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_WRITES;
         log.atDebug().setMessage("handleEndOfResponse for {} status={}")
@@ -898,6 +997,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         accumulation.resetForNextRequest();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.close -> SourceConnectionState.expire
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     public void close() {
         liveStreams.values().forEach(accum -> {
             requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
@@ -934,6 +1040,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         liveStreams.remove(tsk.getNodeId(), tsk.getConnectionId());
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.fireAccumulationsCallbacksAndClose ->
+//     SourceConnectionState.endAssemblyAtBoundary
+// CapturedTrafficToHttpTransactionAccumulator.fireAccumulationsCallbacksAndClose ->
+//     SourceConnectionState.stopAssembling
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G11)
+/*
     private void fireAccumulationsCallbacksAndClose(
         Accumulation accumulation,
         RequestResponsePacketPair.ReconstructionStatus status

@@ -40,6 +40,16 @@ public class RequestTransformerAndSender<T> {
 
     protected final IRetryVisitorFactory<T> retryVisitorFactory;
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestTransformerAndSender.getRetryCheckVisitor ->
+//     NettyPacketToHttpConsumer.ActiveAttempt.classify
+// RequestTransformerAndSender.getRetryCheckVisitor -> RequestReplayOwner.evaluateTargetResponse
+// RequestTransformerAndSender.getRetryCheckVisitor -> RequestReplayOwner.applyRetryDecision
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     RequestSenderOrchestrator.RetryVisitor<T>
     getRetryCheckVisitor(TransformedOutputAndResult<ByteBufListProducer> transformedResult,
                          TrackedFuture<String, ? extends IRequestResponsePacketPair> finishedAccumulatingResponseFuture,
@@ -116,6 +126,26 @@ public class RequestTransformerAndSender<T> {
      * will NOT be included as responses since that's independent of the outgoing request (since bytes
      * hadn't begun to be sent).
      */
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
+//     RequestReplayOwner.beginPreparation
+// RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
+//     RequestReplayOwner.applyPreparationResult
+// RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
+//     RequestReplayOwner.startAttempt
+// RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
+//     RequestReplayOwner.tryStartTuple
+// RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+//     RequestReplayOwner.beginPreparation
+// RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+//     RequestReplayOwner.applyPreparationResult
+// RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+//     RequestReplayOwner.startAttempt
+// RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+//     RequestReplayOwner.tryStartTuple
+// The two baseline overloads were consolidated into the retained ten-argument predecessor below
+// before the live owner path split preparation, attempts, and tuple settlement.
+// REBUILD-TRACE-END(G5,source)
 // REBUILD-LIMBO-START(G5)
 /*
     public TrackedFuture<String, T> transformAndSendRequest(

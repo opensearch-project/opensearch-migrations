@@ -420,6 +420,13 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         return finalWriteAttempt != 0;
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleWork -> RequestReplayOwner.beginPreparation
+    // RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
+    //     RequestReplayOwner.beginPreparation
+    // RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+    //     RequestReplayOwner.beginPreparation
+    // REBUILD-TRACE-END(G5,target)
     void beginPreparation() {
         requireOwnerThread();
         if (!(preparationState instanceof PreparationState.Admitted<P>)) {
@@ -623,6 +630,12 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         tryEmitCleanup();
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
+    //     RequestReplayOwner.applyPreparationResult
+    // RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+    //     RequestReplayOwner.applyPreparationResult
+    // REBUILD-TRACE-END(G5,target)
     private void applyPreparationResult(
         OutstandingOperationRegistry.Registration registration,
         RequestPreparationResult<P> result,
@@ -697,6 +710,15 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleSendRequestOnConnectionReplaySession ->
+    //     RequestReplayOwner.startAttempt
+    // RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.startAttempt
+    // RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
+    //     RequestReplayOwner.startAttempt
+    // RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+    //     RequestReplayOwner.startAttempt
+    // REBUILD-TRACE-END(G5,target)
     private void startAttempt(TargetAttemptPermitProvider.Permit permit) {
         if (!(preparationState instanceof PreparationState.Ready<P> ready)) {
             permit.close();
@@ -894,6 +916,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.sendRequestWithRetries ->
+    //     RequestReplayOwner.applyTargetAttemptOutcome
+    // REBUILD-TRACE-END(G5,target)
     private void applyTargetAttemptOutcome(
         int attemptNumber,
         OutstandingOperationRegistry.Registration registration,
@@ -956,6 +982,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.evaluateTargetResponse
+    // RequestTransformerAndSender.getRetryCheckVisitor -> RequestReplayOwner.evaluateTargetResponse
+    // REBUILD-TRACE-END(G5,target)
     private void evaluateTargetResponse(
         TargetAttemptOutcome.TargetResponseObtained<R> response
     ) {
@@ -984,6 +1014,11 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         applyRetryDecision(response);
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.doubleRetryDelayCapped -> RequestReplayOwner.applyRetryDecision
+    // RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.applyRetryDecision
+    // RequestTransformerAndSender.getRetryCheckVisitor -> RequestReplayOwner.applyRetryDecision
+    // REBUILD-TRACE-END(G5,target)
     private void applyRetryDecision(
         TargetAttemptOutcome.TargetResponseObtained<R> response
     ) {
@@ -1017,6 +1052,14 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.doubleRetryDelayCapped -> RequestReplayOwner.scheduleRetry
+    // RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.scheduleRetry
+    // NettyPacketToHttpConsumer.createClientConnection(4-argument) ->
+    //     RequestReplayOwner.scheduleRetry
+    // NettyPacketToHttpConsumer.createClientConnection(5-argument) ->
+    //     RequestReplayOwner.scheduleRetry
+    // REBUILD-TRACE-END(G5,target)
     private void scheduleRetry() {
         if (cancellationState instanceof CancellationState.Forced forced) {
             targetServerState = new TargetServerState.Cancelled<>(forced.cause());
@@ -1063,6 +1106,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.retryTimerFired
+    // REBUILD-TRACE-END(G5,target)
     private void retryTimerFired(OutstandingOperationRegistry.Registration registration) {
         requireOwnerThread();
         if (!(targetServerState instanceof TargetServerState.WaitingForRetryTime<R> waiting)
@@ -1161,6 +1207,12 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         );
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
+    //     RequestReplayOwner.tryStartTuple
+    // RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+    //     RequestReplayOwner.tryStartTuple
+    // REBUILD-TRACE-END(G5,target)
     private void tryStartTuple() {
         if (!(tupleState instanceof TupleState.NotReady)
             || !(preparationState instanceof PreparationState.Ready<P> ready)) {

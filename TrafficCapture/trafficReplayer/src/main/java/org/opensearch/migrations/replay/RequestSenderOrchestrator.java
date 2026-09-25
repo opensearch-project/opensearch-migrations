@@ -1,25 +1,5 @@
 package org.opensearch.migrations.replay;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// RequestSenderOrchestrator constructors -> TrafficReplayerTopLevel.createConnection constructs
-//     TargetConnectionOwner, RequestReplayOwner, and NettyPacketToHttpConsumer.
-// scheduleAtFixedRate -> G9 supervisor/activity scheduling; no request-lifecycle timer is global.
-// scheduleWork/submitUnorderedWorkToEventLoop overloads ->
-//     TargetConnectionOwner.submitInput/postRequired + OutstandingOperationRegistry.
-// scheduleRequest -> TargetConnectionOwner.submit(AdmitReconstitutedRequest).
-// cancelConnection -> TargetConnectionOwner graceful/force cancellation typed inputs.
-// scheduleClose/scheduleCloseOnConnectionReplaySession ->
-//     TargetConnectionOwner.submit(AdmitCapturedClose)/applyCapturedClose.
-// bindNettyScheduleToCompletableFuture overloads ->
-//     TargetConnectionOwner scheduleAdmissionHead/scheduleExecutionHead and
-//     RequestReplayOwner.scheduleRetry/retryTimerFired.
-// now/getDelayFromNowMs -> injected Clock + TargetConnectionOwner.nonNegativeDelay.
-// doubleRetryDelayCapped -> RequestReplayOwner.RetryPolicy/configured retry decision.
-// sendRequestWithRetries -> RequestReplayOwner.startAttempt/applyTargetAttemptOutcome/
-//     evaluateTargetResponse/applyRetryDecision/scheduleRetry.
-// sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.sendPacket/schedulePacket/finalizeResponse.
-// REBUILD-TRACE-END(G5,source)
-
 // REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
 // regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
@@ -605,12 +585,53 @@ public class RequestSenderOrchestrator {
 */
 // REBUILD-LIMBO-END(G5)
 // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestSenderOrchestrator.<init>(ClientConnectionPool,BiFunction) ->
+//     TrafficReplayerTopLevel.createConnection
+// RequestSenderOrchestrator.<init>(ClientConnectionPool,Duration,Duration,BiFunction) ->
+//     TrafficReplayerTopLevel.createConnection
+// RequestSenderOrchestrator.scheduleWork -> TargetConnectionOwner.scheduleAdmissionHead
+// RequestSenderOrchestrator.scheduleWork -> RequestReplayOwner.beginPreparation
+// RequestSenderOrchestrator.scheduleRequest ->
+//     TargetConnectionOwner.submit(AdmitReconstitutedRequest)
+// RequestSenderOrchestrator.scheduleRequest -> TargetConnectionOwner.applyRequestAdmission
+// RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.gracefulCancel
+// RequestSenderOrchestrator.cancelConnection -> TargetConnectionOwner.forceCancel
+// RequestSenderOrchestrator.scheduleClose ->
+//     TargetConnectionOwner.submit(AdmitCapturedClose)
+// RequestSenderOrchestrator.scheduleClose -> TargetConnectionOwner.applyCapturedClose
+// RequestSenderOrchestrator.submitUnorderedWorkToEventLoop -> TargetConnectionOwner.submitInput
+// RequestSenderOrchestrator.scheduleSendRequestOnConnectionReplaySession ->
+//     TargetConnectionOwner.evaluateExecutionHead
+// RequestSenderOrchestrator.scheduleSendRequestOnConnectionReplaySession ->
+//     TargetConnectionOwner.acquirePermit
+// RequestSenderOrchestrator.scheduleSendRequestOnConnectionReplaySession ->
+//     TargetConnectionOwner.applyPermitResult
+// RequestSenderOrchestrator.scheduleSendRequestOnConnectionReplaySession ->
+//     RequestReplayOwner.startAttempt
+// RequestSenderOrchestrator.scheduleCloseOnConnectionReplaySession ->
+//     TargetConnectionOwner.applyCapturedClose
+// RequestSenderOrchestrator.scheduleCloseOnConnectionReplaySession ->
+//     TargetConnectionOwner.closeTargetChannel
 // RequestSenderOrchestrator.scheduleOnConnectionReplaySession -> TargetConnectionOwner.scheduleAdmissionHead
 //     [preparation-time scheduling].
 // RequestSenderOrchestrator.scheduleOnConnectionReplaySession -> TargetConnectionOwner.scheduleExecutionHead
 //     [execution-time scheduling].
-// The baseline source predates the Plan A carry and is inspected at 2fe4538a; restoring its deleted
-// body here would violate the history-preserving carry baseline.
+// RequestSenderOrchestrator.getDelayFromNowMs -> TargetConnectionOwner.nonNegativeDelay
+// RequestSenderOrchestrator.doubleRetryDelayCapped -> RequestReplayOwner.applyRetryDecision
+// RequestSenderOrchestrator.doubleRetryDelayCapped -> RequestReplayOwner.scheduleRetry
+// RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.startAttempt
+// RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.applyTargetAttemptOutcome
+// RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.evaluateTargetResponse
+// RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.applyRetryDecision
+// RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.scheduleRetry
+// RequestSenderOrchestrator.sendRequestWithRetries -> RequestReplayOwner.retryTimerFired
+// RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.start
+// RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.sendPacket
+// RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.settlePacket
+// RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.schedulePacket
+// RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.finalizeResponse
+// These baseline sources are inspected at 2fe4538a and were already absent before the Plan A carry;
+// restoring their deleted bodies here would violate the history-preserving carry baseline.
 // REBUILD-TRACE-END(G5,source)
 // REBUILD-LIMBO-START(G5)
 /*

@@ -786,12 +786,6 @@ public class TrafficReplayer {
     }
     */
     // REBUILD-LIMBO-END(G9)
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // createS3TupleWriterIfConfigured is the deployed source side for TupleWriter's temporary
-    // target map: S3 client/configuration stays here for G9 startup, transformer and sink creation
-    // move to ManagedTupleTransformerFactory/ManagedPhysicalTupleSinkFactory, writeTuple moves to
-    // TupleWriter.write, and the old sinkIndex becomes G9's bounded writer-worker index.
-    // REBUILD-TRACE-END(G5,source)
     // REBUILD-LIMBO-START(G5)
     // buildTransformerSupplier -- blocked on P4 (FilteringTransformerWrapper) and the
     // jsonMessageTransformerInterface dependency. TransformationLoader and PredicateLoader are already available.

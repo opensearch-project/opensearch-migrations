@@ -33,31 +33,6 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// CapturedTrafficToHttpTransactionAccumulator constructor/accept ->
-//     newPartitionState/applyRecord/applyPayload/applyTrafficStream
-// accumulator per-connection map/rotation -> PartitionIntakeState + SourceConnectionState
-// accumulator record callback bookkeeping -> PartitionIntakeState associations +
-//     applyRequestProcessingFinished/submitRecordProcessingFinished
-// accumulator connection lifecycle callbacks -> SourceAssemblySink +
-//     applyConnectionOwnerFinished
-// accumulator getStatsString/logHeartbeat/counters -> ReplayIntake Metrics and owner diagnostics
-// accumulator close/fireAccumulationsCallbacksAndClose ->
-//     typed generation cancellation and connection-cleanup inputs owned by G7/G8
-// old caller-thread mutation -> runLoop/apply; applyOnCallingThread is deterministic-test-only
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// constructors/newPartitionState -> accumulator construction/createInitialAccumulation.
-// runLoop/apply/applyRecordBatch -> accumulator accept's caller-thread mutation boundary.
-// applyRecord/applyPayload/applyTrafficStream -> accumulator accept.
-// ObservedSourceAssemblySink.onRequestReconstituted/onSourceResponseComplete/
-//     onSourceResponseIncomplete/onCapturedClose/onConnectionOwnerFinished ->
-//     accumulator SpanWrappingAccumulationCallbacks and terminal callbacks.
-// applyRequestProcessingFinished/submitRecordProcessingFinished ->
-//     accumulator record-work callback bookkeeping.
-// metrics and partitionState diagnostics -> accumulator getStatsString/logHeartbeat/numberOf*.
-// REBUILD-TRACE-END(G5,target)
-
 /**
  * Sole owner of replay-intake state and of applying source records — {@code kafkaLLD §3}, {@code §7}.
  *
@@ -398,6 +373,9 @@ public final class ReplayIntakeOwner {
      * that crosses them, and step 2 creates the tracker before any observation can associate with it. Each is
      * a rule about what must not have happened yet.
      */
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // CapturedTrafficToHttpTransactionAccumulator.accept -> ReplayIntakeOwner.applyRecord
+    // REBUILD-TRACE-END(G5,target)
     private boolean applyRecord(PartitionIntakeState state, ApplicationKafkaRecord record) {
         // 1. Validate that its generation is active for application.
         // REBUILD-LIMBO-NOTE(G8): §15 cancellation state extends this check beyond identity equality: a
@@ -437,6 +415,9 @@ public final class ReplayIntakeOwner {
      * {@code §7.1}'s exhaustive payload switch. No {@code default} branch and no trial decoding of several
      * protobuf types: the active {@code payload} field is the only record-type discriminator.
      */
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // CapturedTrafficToHttpTransactionAccumulator.accept -> ReplayIntakeOwner.applyPayload
+    // REBUILD-TRACE-END(G5,target)
     private boolean applyPayload(PartitionIntakeState state, ApplicationKafkaRecord record) {
         var envelope = record.envelope();
         return switch (envelope.getPayloadCase()) {
@@ -464,6 +445,9 @@ public final class ReplayIntakeOwner {
      * several request identities ({@code §8.3}) — a record carrying the end of request <em>N</em> and the start
      * of <em>N+1</em> has exactly both.
      */
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // CapturedTrafficToHttpTransactionAccumulator.accept -> ReplayIntakeOwner.applyTrafficStream
+    // REBUILD-TRACE-END(G5,target)
     private boolean applyTrafficStream(
         PartitionIntakeState state,
         ApplicationKafkaRecord record,
@@ -537,6 +521,10 @@ public final class ReplayIntakeOwner {
         }
 
         @Override
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // CapturedTrafficToHttpTransactionAccumulator.SpanWrappingAccumulationCallbacks.onRequestReceived ->
+        //     ReplayIntakeOwner.ObservedSourceAssemblySink.onRequestReconstituted
+        // REBUILD-TRACE-END(G5,target)
         public void onRequestReconstituted(
             ReplayRequestId replayRequestId,
             long capturedRequestOrdinal,
@@ -582,6 +570,10 @@ public final class ReplayIntakeOwner {
         }
 
         @Override
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // CapturedTrafficToHttpTransactionAccumulator.SpanWrappingAccumulationCallbacks.onTrafficStreamsExpired ->
+        //     ReplayIntakeOwner.ObservedSourceAssemblySink.onSourceResponseIncomplete
+        // REBUILD-TRACE-END(G5,target)
         public void onSourceResponseIncomplete(
             ReplayRequestId replayRequestId,
             IncompleteReason reason
@@ -591,6 +583,10 @@ public final class ReplayIntakeOwner {
         }
 
         @Override
+        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // CapturedTrafficToHttpTransactionAccumulator.SpanWrappingAccumulationCallbacks.onConnectionClose ->
+        //     ReplayIntakeOwner.ObservedSourceAssemblySink.onCapturedClose
+        // REBUILD-TRACE-END(G5,target)
         public void onCapturedClose(
             ConnectionProcessingId connectionProcessingId,
             long capturedOrdinal,

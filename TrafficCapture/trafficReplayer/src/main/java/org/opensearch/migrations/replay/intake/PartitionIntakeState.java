@@ -224,6 +224,10 @@ public final class PartitionIntakeState {
      * a later {@code TrafficStream} for the same captured identity is a protocol violation rather than fresh
      * reconstruction.
      */
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // CapturedTrafficToHttpTransactionAccumulator.createInitialAccumulation ->
+    //     PartitionIntakeState.connectionFor
+    // REBUILD-TRACE-END(G5,target)
     public SourceConnectionState connectionFor(
         @NonNull CapturedConnectionId capturedConnectionId,
         @NonNull TrafficStream firstStream,
