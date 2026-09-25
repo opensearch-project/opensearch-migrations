@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-"""Print or search live Java source after validating and omitting REBUILD-LIMBO regions."""
+"""Print or search Java code after omitting limbo and rebuild traceability records."""
 
 from __future__ import annotations
 
@@ -21,6 +21,23 @@ MARKER_PREFIX = re.compile(r"^\s*//\s*REBUILD-LIMBO-(?:START|END)\b")
 OPEN_DELIMITER = re.compile(r"^\s*/\*\s*$")
 CLOSE_DELIMITER = re.compile(r"^\s*\*/\s*$")
 COMMENT_LINE = re.compile(r"^\s*//")
+BLANK_LINE = re.compile(r"^\s*$")
+TRACE_START = re.compile(
+    r"^\s*// REBUILD-TRACE-START\("
+    r"(?P<milestone>[^,()\s]+),(?P<side>source|target)"
+    r"\):(?:\s+.*)?$"
+)
+TRACE_END = re.compile(
+    r"^\s*// REBUILD-TRACE-END\("
+    r"(?P<milestone>[^,()\s]+),(?P<side>source|target)"
+    r"\)\s*$"
+)
+TRACE_LINE = re.compile(
+    r"^\s*// REBUILD-TRACE\("
+    r"(?P<milestone>[^,()\s]+),(?P<side>source|target)"
+    r"\):(?:\s+.*)?$"
+)
+TRACE_PREFIX = re.compile(r"^\s*//\s*REBUILD-TRACE(?:-START|-END)?\b")
 
 
 class LimboFormatError(ValueError):
@@ -37,6 +54,10 @@ def fail(path: Path, line_number: int, message: str) -> LimboFormatError:
     return LimboFormatError(f"{path}:{line_number}: malformed REBUILD-LIMBO region: {message}")
 
 
+def fail_trace(path: Path, line_number: int, message: str) -> LimboFormatError:
+    return LimboFormatError(f"{path}:{line_number}: malformed REBUILD-TRACE record: {message}")
+
+
 def parse_live_lines(path: Path) -> list[LiveLine]:
     try:
         source_lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -47,9 +68,51 @@ def parse_live_lines(path: Path) -> list[LiveLine]:
     state = "outside"
     milestone = ""
     start_line = 0
+    trace_key: tuple[str, str] | None = None
+    trace_start_line = 0
 
     for line_number, line in enumerate(source_lines, start=1):
-        marker = MARKER.fullmatch(line.rstrip("\r\n"))
+        stripped = line.rstrip("\r\n")
+        trace_start = TRACE_START.fullmatch(stripped)
+        trace_end = TRACE_END.fullmatch(stripped)
+        trace_line = TRACE_LINE.fullmatch(stripped)
+
+        if trace_key is not None:
+            if trace_start is not None or trace_line is not None:
+                raise fail_trace(path, line_number, "nested traceability record")
+            if trace_end is not None:
+                ending_key = (trace_end.group("milestone"), trace_end.group("side"))
+                if ending_key != trace_key:
+                    raise fail_trace(
+                        path,
+                        line_number,
+                        f"START{trace_key} at line {trace_start_line} closes with END{ending_key}",
+                    )
+                trace_key = None
+                trace_start_line = 0
+                continue
+            if TRACE_PREFIX.search(line):
+                raise fail_trace(path, line_number, "trace marker does not match the required line format")
+            if not COMMENT_LINE.match(line) and not BLANK_LINE.fullmatch(stripped):
+                raise fail_trace(path, line_number, "traceability records may contain comment lines only")
+            continue
+
+        if trace_end is not None:
+            raise fail_trace(
+                path,
+                line_number,
+                f"unmatched END({trace_end.group('milestone')},{trace_end.group('side')})",
+            )
+        if trace_start is not None:
+            trace_key = (trace_start.group("milestone"), trace_start.group("side"))
+            trace_start_line = line_number
+            continue
+        if trace_line is not None:
+            continue
+        if TRACE_PREFIX.search(line):
+            raise fail_trace(path, line_number, "trace marker does not match the required line format")
+
+        marker = MARKER.fullmatch(stripped)
 
         if MARKER_PREFIX.search(line) and marker is None:
             raise fail(path, line_number, "START/END marker does not match the required line format")
@@ -112,6 +175,12 @@ def parse_live_lines(path: Path) -> list[LiveLine]:
             len(source_lines) + 1,
             f"unmatched START({milestone}) at line {start_line}; expected {expected} before end of file",
         )
+    if trace_key is not None:
+        raise fail_trace(
+            path,
+            len(source_lines) + 1,
+            f"unmatched START{trace_key} at line {trace_start_line}",
+        )
 
     return live
 
@@ -153,15 +222,19 @@ def search_source(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Validate Java REBUILD-LIMBO markers, omit marked regions, then print or search."
+        description=(
+            "Validate Java REBUILD-LIMBO and REBUILD-TRACE markers, omit both, then print or search."
+        )
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    print_parser = subparsers.add_parser("print", help="print one Java file without limbo regions")
+    print_parser = subparsers.add_parser(
+        "print", help="print one Java file without limbo or traceability records"
+    )
     print_parser.add_argument("file")
 
     search_parser = subparsers.add_parser(
-        "search", help="search live lines and print path:original-line:text"
+        "search", help="search executable-source lines and print path:original-line:text"
     )
     search_parser.add_argument("-F", "--fixed-string", action="store_true")
     search_parser.add_argument("pattern")

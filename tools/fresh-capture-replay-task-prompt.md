@@ -12,7 +12,8 @@ coordinator. Claude is a direct-CLI, read-only reviewer. Do not use Brazil or AP
 Read only the selected milestone, its cited authoritative design sections, and relevant live-register
 rows. Before editing, map every responsibility through producer, queue, owner, consumer,
 observability, construction path, and evidence. Search REBUILD-LIMBO and history before creating or
-replacing anything; preserve inherited paths and blame.
+replacing anything; preserve inherited paths and blame. Read REBUILD-TRACE records as navigation aids,
+but use tools/java-without-limbo.py for executable-code searches and verify every mapping against code.
 
 Stop at red lines with one batched decision table. Otherwise implement the complete usable chains,
 their observability, wiring, and focused evidence. Invoke Gradle only through

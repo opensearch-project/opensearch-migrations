@@ -26,6 +26,11 @@ what make the output usable, and a reviewer given only the scope reverts to list
 > uncompilable and is not part of the implementation. A finding about it is a finding about code that does not
 > run.
 >
+> **Use `REBUILD-TRACE` records only as navigation aids.** They map legacy source functions to replacement
+> targets for equivalence review, but they are comments, not evidence of reachability or preserved behavior.
+> Use `tools/java-without-limbo.py` for executable-code searches so traceability prose cannot create false
+> callers or symbols, then verify each relevant mapping against code and history.
+>
 > ### Classify every finding, because the classification decides what happens to it
 >
 > **Class A — design-conformance defect.** The implementation contradicts something the design states. To
