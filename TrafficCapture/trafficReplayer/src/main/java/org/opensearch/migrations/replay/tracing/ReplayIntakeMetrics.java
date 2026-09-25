@@ -38,6 +38,7 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         public static final String ACTIVE_RECORD_TRACKERS = "replayIntakeActiveRecordTrackers";
         public static final String RECORD_TRACKERS_RETIRED = "replayIntakeRecordTrackersRetired";
         public static final String REQUESTS_RECONSTITUTED = "replayIntakeRequestsReconstituted";
+        public static final String INTERIM_RESPONSES_OBSERVED = "replayIntakeInterimResponsesObserved";
         public static final String RESPONSES_PROVEN_COMPLETE = "replayIntakeResponsesProvenComplete";
         public static final String RESPONSES_UNPROVEN_COMPLETE = "replayIntakeResponsesUnprovenComplete";
         public static final String RESPONSES_INCOMPLETE = "replayIntakeResponsesIncomplete";
@@ -66,6 +67,7 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private final LongUpDownCounter activeRecordTrackers;
     private final LongCounter recordTrackersRetired;
     private final LongCounter requestsReconstituted;
+    private final LongCounter interimResponsesObserved;
     private final LongCounter responsesProvenComplete;
     private final LongCounter responsesUnprovenComplete;
     private final LongCounter responsesIncomplete;
@@ -89,6 +91,7 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
             .build();
         recordTrackersRetired = counter(meter, MetricNames.RECORD_TRACKERS_RETIRED, "records");
         requestsReconstituted = counter(meter, MetricNames.REQUESTS_RECONSTITUTED, "requests");
+        interimResponsesObserved = counter(meter, MetricNames.INTERIM_RESPONSES_OBSERVED, "responses");
         responsesProvenComplete = counter(meter, MetricNames.RESPONSES_PROVEN_COMPLETE, "responses");
         responsesUnprovenComplete = counter(meter, MetricNames.RESPONSES_UNPROVEN_COMPLETE, "responses");
         responsesIncomplete = counter(meter, MetricNames.RESPONSES_INCOMPLETE, "responses");
@@ -140,6 +143,11 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     @Override
     public void requestReconstituted() {
         requestsReconstituted.add(1);
+    }
+
+    @Override
+    public void interimResponseObserved() {
+        interimResponsesObserved.add(1);
     }
 
     @Override

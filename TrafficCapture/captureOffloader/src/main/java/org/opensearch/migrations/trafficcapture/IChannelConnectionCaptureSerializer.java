@@ -32,6 +32,8 @@ public interface IChannelConnectionCaptureSerializer<T> {
 
     void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException;
 
+    void addInterimResponseEvent(Instant timestamp, ByteBuf buffer) throws IOException;
+
     void addExceptionCaughtEvent(Instant timestamp, Throwable throwable) throws IOException;
 
     void addEndOfFirstLineIndicator(int characterIndex) throws IOException;

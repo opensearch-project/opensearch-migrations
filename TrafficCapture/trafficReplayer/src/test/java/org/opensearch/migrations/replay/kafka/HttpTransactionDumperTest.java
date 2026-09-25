@@ -46,6 +46,9 @@ class HttpTransactionDumperTest {
         response.add("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
             .getBytes(StandardCharsets.UTF_8));
         response.setLastPacketTimestamp(Instant.ofEpochSecond(103));
+        var interim = new HttpMessageAndTimestamp.InterimResponse(Instant.ofEpochSecond(101));
+        interim.add("HTTP/1.1 103 Early Hints\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        interim.setLastPacketTimestamp(Instant.ofEpochSecond(101));
         var requestId = new ReplayRequestId(CONNECTION, 7);
 
         dumper.onRequestReconstituted(
@@ -56,6 +59,7 @@ class HttpTransactionDumperTest {
             Instant.ofEpochSecond(101),
             1_000L
         );
+        dumper.onSourceInterimResponse(requestId, interim);
         dumper.onSourceResponseComplete(requestId, response, true);
         dumper.onCapturedClose(CONNECTION, 1, Instant.ofEpochSecond(104));
 
@@ -63,9 +67,9 @@ class HttpTransactionDumperTest {
         log.info("dump-http output:\n{}", output);
 
         var lines = output.strip().split("\n");
-        Assertions.assertEquals(3, lines.length, "REQ, RSP, and CLOSED must each be visible");
+        Assertions.assertEquals(4, lines.length, "REQ, INT, RSP, and CLOSED must each be visible");
 
-        boolean hasReq = false, hasRsp = false, hasClose = false;
+        boolean hasReq = false, hasInterim = false, hasRsp = false, hasClose = false;
         for (var line : lines) {
             if (line.contains("REQ")) {
                 hasReq = true;
@@ -73,6 +77,10 @@ class HttpTransactionDumperTest {
                 Assertions.assertTrue(line.contains("nc:node1.conn1:"));
                 Assertions.assertTrue(line.contains("p:0"), "partition value");
                 Assertions.assertTrue(line.contains("o:      "), "a transaction has no single Kafka offset");
+            }
+            if (line.contains("INT")) {
+                hasInterim = true;
+                Assertions.assertTrue(line.contains("HTTP/1.1 103 Early Hints"));
             }
             if (line.contains("RSP")) {
                 hasRsp = true;
@@ -83,6 +91,7 @@ class HttpTransactionDumperTest {
             }
         }
         Assertions.assertTrue(hasReq, "Missing REQ line");
+        Assertions.assertTrue(hasInterim, "Missing INT line");
         Assertions.assertTrue(hasRsp, "Missing RSP line");
         Assertions.assertTrue(hasClose, "Missing CLOSED line");
     }

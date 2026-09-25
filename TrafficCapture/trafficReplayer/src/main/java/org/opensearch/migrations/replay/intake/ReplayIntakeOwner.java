@@ -69,6 +69,7 @@ public final class ReplayIntakeOwner {
         default void activeRecordTrackersChanged(int delta) {}
         default void recordTrackerRetired() {}
         default void requestReconstituted() {}
+        default void interimResponseObserved() {}
         default void responseCompleted(boolean keptAlive) {}
         default void responseIncomplete(SourceAssemblySink.IncompleteReason reason) {}
         default void retrySourceResponseCompleted() {}
@@ -627,6 +628,15 @@ public final class ReplayIntakeOwner {
                 requestCompletingLogAppendTime,
                 replayContext
             );
+        }
+
+        @Override
+        public void onSourceInterimResponse(
+            ReplayRequestId replayRequestId,
+            HttpMessageAndTimestamp.InterimResponse interimResponse
+        ) {
+            delegate.onSourceInterimResponse(replayRequestId, interimResponse);
+            metrics.interimResponseObserved();
         }
 
         @Override

@@ -1,8 +1,11 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -15,6 +18,8 @@ import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingCo
 import org.opensearch.migrations.trafficcapture.netty.tracing.IWireCaptureContexts;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -218,7 +223,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     private CompletableFuture<T> captureCloseFuture;
     private ScheduledFuture<?> connectionDeadline;
     private ScheduledFuture<?> requestAssemblyDeadline;
+    private final ByteArrayOutputStream pendingSourceResponseBytes = new ByteArrayOutputStream();
     private boolean contextsClosed;
+
+    private record ClassifiedResponseBytes(boolean interim, byte[] data) {}
 
     public LoggingHttpHandler(
         @NonNull IRootWireLoggingContext rootContext,
@@ -308,10 +316,12 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         cancelConnectionDeadline();
         cancelRequestAssemblyDeadline();
         if (!captureProcessState.shouldCapture()) {
+            pendingSourceResponseBytes.reset();
             captureCloseFuture = CompletableFuture.completedFuture(null);
             return captureCloseFuture;
         }
         try {
+            flushUnclassifiedSourceResponseBytes(timestamp);
             trafficOffloader.addCloseEvent(timestamp);
             captureCloseFuture = trafficOffloader.flushCommitAndResetStream(true);
         } catch (Throwable t) {
@@ -563,28 +573,139 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
-        IWireCaptureContexts.IResponseContext responseContext;
-        if (!(messageContext instanceof IWireCaptureContexts.IResponseContext)) {
-            messageContext = responseContext = messageContext.createResponseContext();
-        } else {
-            responseContext = (IWireCaptureContexts.IResponseContext) messageContext;
+        var bb = (ByteBuf) msg;
+        var timestamp = Instant.now();
+        if (messageContext instanceof IWireCaptureContexts.IResponseContext responseContext) {
+            if (captureProcessState.shouldCapture()
+                && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()
+                && !runRequiredCaptureOperation(ctx, () -> trafficOffloader.addWriteEvent(timestamp, bb))) {
+                ReferenceCountUtil.release(msg);
+                promise.tryFailure(new IOException("Required response capture failed"));
+                return;
+            }
+            responseContext.onBytesWritten(bb.readableBytes());
+            super.write(ctx, msg, promise);
+            return;
         }
 
-        var bb = (ByteBuf) msg;
+        var classifiedBytes = classifySourceResponseBytes(bb);
+        IWireCaptureContexts.IResponseContext responseContext = null;
+        if (classifiedBytes.stream().anyMatch(classified -> !classified.interim())) {
+            messageContext = responseContext = messageContext.createResponseContext();
+        }
+
         if (captureProcessState.shouldCapture()
             && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
             if (!runRequiredCaptureOperation(
                 ctx,
-                () -> trafficOffloader.addWriteEvent(Instant.now(), bb)
+                () -> {
+                    for (var classified : classifiedBytes) {
+                        var capturedBytes = Unpooled.wrappedBuffer(classified.data());
+                        try {
+                            if (classified.interim()) {
+                                trafficOffloader.addInterimResponseEvent(timestamp, capturedBytes);
+                            } else {
+                                trafficOffloader.addWriteEvent(timestamp, capturedBytes);
+                            }
+                        } finally {
+                            capturedBytes.release();
+                        }
+                    }
+                }
             )) {
                 ReferenceCountUtil.release(msg);
                 promise.tryFailure(new IOException("Required response capture failed"));
                 return;
             }
         }
-        responseContext.onBytesWritten(bb.readableBytes());
+        if (responseContext != null) {
+            responseContext.onBytesWritten(
+                classifiedBytes.stream()
+                    .filter(classified -> !classified.interim())
+                    .mapToInt(classified -> classified.data().length)
+                    .sum()
+            );
+        }
 
         super.write(ctx, msg, promise);
+    }
+
+    private List<ClassifiedResponseBytes> classifySourceResponseBytes(ByteBuf buffer) {
+        pendingSourceResponseBytes.writeBytes(
+            ByteBufUtil.getBytes(buffer, buffer.readerIndex(), buffer.readableBytes(), false)
+        );
+        var classified = new ArrayList<ClassifiedResponseBytes>();
+        while (pendingSourceResponseBytes.size() >= 12) {
+            var pending = pendingSourceResponseBytes.toByteArray();
+            if (!isNonSwitchingInformationalResponse(pending)) {
+                classified.add(new ClassifiedResponseBytes(false, pending));
+                pendingSourceResponseBytes.reset();
+                break;
+            }
+            var interimEnd = indexAfterHttpHeaders(pending);
+            if (interimEnd < 0) {
+                break;
+            }
+            classified.add(new ClassifiedResponseBytes(
+                true,
+                Arrays.copyOfRange(pending, 0, interimEnd)
+            ));
+            pendingSourceResponseBytes.reset();
+            pendingSourceResponseBytes.writeBytes(
+                Arrays.copyOfRange(pending, interimEnd, pending.length)
+            );
+        }
+        return classified;
+    }
+
+    private void flushUnclassifiedSourceResponseBytes(Instant timestamp) throws IOException {
+        if (pendingSourceResponseBytes.size() == 0) {
+            return;
+        }
+        var unclassified = Unpooled.wrappedBuffer(pendingSourceResponseBytes.toByteArray());
+        pendingSourceResponseBytes.reset();
+        try {
+            if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
+                trafficOffloader.addWriteEvent(timestamp, unclassified);
+            }
+        } finally {
+            unclassified.release();
+        }
+    }
+
+    private static boolean isNonSwitchingInformationalResponse(byte[] bytes) {
+        if (bytes.length < 12
+            || bytes[0] != 'H'
+            || bytes[1] != 'T'
+            || bytes[2] != 'T'
+            || bytes[3] != 'P'
+            || bytes[4] != '/'
+            || bytes[5] != '1'
+            || bytes[6] != '.'
+            || !isAsciiDigit(bytes[7])
+            || bytes[8] != ' '
+            || bytes[9] != '1'
+            || !isAsciiDigit(bytes[10])
+            || !isAsciiDigit(bytes[11])) {
+            return false;
+        }
+        return bytes[10] != '0' || bytes[11] != '1';
+    }
+
+    private static int indexAfterHttpHeaders(byte[] bytes) {
+        for (var i = 3; i < bytes.length; ++i) {
+            if (bytes[i - 3] == '\r'
+                && bytes[i - 2] == '\n'
+                && bytes[i - 1] == '\r'
+                && bytes[i] == '\n') {
+                return i + 1;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isAsciiDigit(byte value) {
+        return value >= '0' && value <= '9';
     }
 
     private boolean runRequiredCaptureOperation(

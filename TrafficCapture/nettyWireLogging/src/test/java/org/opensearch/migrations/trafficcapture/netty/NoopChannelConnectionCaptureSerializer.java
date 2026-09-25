@@ -36,6 +36,9 @@ abstract class NoopChannelConnectionCaptureSerializer<T>
     public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {}
 
     @Override
+    public void addInterimResponseEvent(Instant timestamp, ByteBuf buffer) throws IOException {}
+
+    @Override
     public void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {}
 
     @Override

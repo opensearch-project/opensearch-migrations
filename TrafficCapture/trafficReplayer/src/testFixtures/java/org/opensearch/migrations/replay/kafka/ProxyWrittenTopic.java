@@ -92,21 +92,42 @@ public final class ProxyWrittenTopic implements AutoCloseable {
      * @param partitions more than one is what G2 needs to exercise per-partition demand and revocation
      */
     public static ProxyWrittenTopic start(String topic, int partitions) throws Exception {
+        var body = DESTINATION_BODY.getBytes(StandardCharsets.UTF_8);
+        return start(
+            topic,
+            partitions,
+            List.of(new SimpleHttpResponse(
+                Map.of("Content-Type", "text/plain", "Content-Length", String.valueOf(body.length)),
+                body,
+                "OK",
+                200
+            ))
+        );
+    }
+
+    /** Starts the real proxy against a source server that emits the supplied response sequence. */
+    public static ProxyWrittenTopic startWithSourceResponses(
+        String topic,
+        List<SimpleHttpResponse> sourceResponses
+    ) throws Exception {
+        return start(topic, 1, List.copyOf(sourceResponses));
+    }
+
+    private static ProxyWrittenTopic start(
+        String topic,
+        int partitions,
+        List<SimpleHttpResponse> sourceResponses
+    ) throws Exception {
         var kafka = new org.testcontainers.kafka.ConfluentKafkaContainer(SharedDockerImageNames.KAFKA);
         kafka.start();
         SimpleNettyHttpServer destination = null;
         CaptureProxyContainer proxy = null;
         try {
             createTrafficTopic(stripScheme(kafka.getBootstrapServers()), topic, partitions);
-            var body = DESTINATION_BODY.getBytes(StandardCharsets.UTF_8);
-            // Content-Length matters: without it the client reads until EOF, and since the proxy keeps the
-            // connection alive that is a hang rather than a response.
-            destination = SimpleNettyHttpServer.makeServer(false, request -> new SimpleHttpResponse(
-                Map.of("Content-Type", "text/plain", "Content-Length", String.valueOf(body.length)),
-                body,
-                "OK",
-                200
-            ));
+            destination = SimpleNettyHttpServer.makeServerWithResponses(
+                false,
+                request -> sourceResponses
+            );
             var destinationUri = destination.localhostEndpoint().toString();
             var brokers = stripScheme(kafka.getBootstrapServers());
             proxy = new CaptureProxyContainer(

@@ -9,6 +9,7 @@
 package org.opensearch.migrations.replay.intake;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,13 +111,16 @@ public final class SourceConnectionState {
     private Long nextExpectedObservationSequence;
 
     private Phase phase;
-    private boolean ignoringInformationalWriteSegments;
+    private boolean discardingFinalWriteSegmentsBeforeRequestEnd;
     private boolean requestEverReconstituted;
     private long currentCapturedRequestOrdinal;
     private HttpMessageAndTimestamp.Request incomingRequest;
     private IReplayContexts.IRequestContext requestContext;
     private IReplayContexts.IRequestAccumulationContext requestAccumulationContext;
     private IReplayContexts.IResponseAccumulationContext responseAccumulationContext;
+    private HttpMessageAndTimestamp.InterimResponse interimResponseUnderAssembly;
+    private final List<HttpMessageAndTimestamp.InterimResponse> pendingInterimResponses =
+        new ArrayList<>();
     private ReplayRequestId responseBeingAssembledFor;
     private final Map<ReplayRequestId, HttpMessageAndTimestamp.Response> responseStateByRequest =
         new LinkedHashMap<>();
@@ -326,9 +330,15 @@ public final class SourceConnectionState {
                 .addSegment(observation.getReadSegment().getData().toByteArray());
             return added(assembly);
         }
+        if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
+            return applyInterimResponse(observation, assembly, timestamp);
+        }
         if (observation.hasSegmentEnd()) {
-            if (ignoringInformationalWriteSegments) {
-                ignoringInformationalWriteSegments = false;
+            if (interimResponseUnderAssembly != null) {
+                return finalizeInterimResponseSegment(assembly, timestamp);
+            }
+            if (discardingFinalWriteSegmentsBeforeRequestEnd) {
+                discardingFinalWriteSegmentsBeforeRequestEnd = false;
                 return ObservationOutcome.none();
             }
             var request = requireRequestUnderAssembly();
@@ -345,7 +355,7 @@ public final class SourceConnectionState {
             return ObservationOutcome.none();
         }
         if (observation.hasWriteSegment()) {
-            ignoringInformationalWriteSegments = true;
+            discardingFinalWriteSegmentsBeforeRequestEnd = true;
             return ObservationOutcome.none();
         }
         return ObservationOutcome.none();
@@ -373,7 +383,13 @@ public final class SourceConnectionState {
                 .addSegment(observation.getWriteSegment().getData().toByteArray());
             return added(association);
         }
+        if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
+            return applyInterimResponse(observation, association, timestamp);
+        }
         if (observation.hasSegmentEnd()) {
+            if (interimResponseUnderAssembly != null) {
+                return finalizeInterimResponseSegment(association, timestamp);
+            }
             var response = responseUnderAssembly(timestamp);
             if (!response.hasInProgressSegment()) {
                 return ObservationOutcome.none();
@@ -429,7 +445,7 @@ public final class SourceConnectionState {
         var requestAssociation = new RecordAssociationId.Request(replayRequestId);
 
         incomingRequest = null;
-        ignoringInformationalWriteSegments = false;
+        discardingFinalWriteSegmentsBeforeRequestEnd = false;
         responseBeingAssembledFor = replayRequestId;
         responseStateByRequest.put(
             replayRequestId,
@@ -463,6 +479,10 @@ public final class SourceConnectionState {
                 requestContext
             );
         }
+        pendingInterimResponses.forEach(
+            interimResponse -> sink.onSourceInterimResponse(replayRequestId, interimResponse)
+        );
+        pendingInterimResponses.clear();
         // The end-of-message record contributes to the request too, and its association is the request's
         // from the outset rather than an assembly identity that is immediately relabelled.
         return new ObservationOutcome(
@@ -565,7 +585,8 @@ public final class SourceConnectionState {
         var finished = List.<RecordAssociationId>of(currentAssemblyId());
         incomingRequest = null;
         closeIncompleteRequestContexts();
-        ignoringInformationalWriteSegments = false;
+        clearInterimResponses();
+        discardingFinalWriteSegmentsBeforeRequestEnd = false;
         currentCapturedRequestOrdinal++;
         phase = Phase.BETWEEN_REQUESTS;
         return new ObservationOutcome(List.of(), finished, List.of(), false);
@@ -592,7 +613,8 @@ public final class SourceConnectionState {
             incomingRequest = null;
             closeIncompleteRequestContexts();
         }
-        ignoringInformationalWriteSegments = false;
+        clearInterimResponses();
+        discardingFinalWriteSegmentsBeforeRequestEnd = false;
         if (responseBeingAssembledFor != null) {
             completeResponse(false);
         }
@@ -618,7 +640,8 @@ public final class SourceConnectionState {
             incomingRequest = null;
             closeIncompleteRequestContexts();
         }
-        ignoringInformationalWriteSegments = false;
+        clearInterimResponses();
+        discardingFinalWriteSegmentsBeforeRequestEnd = false;
         if (responseBeingAssembledFor != null) {
             var requestId = responseBeingAssembledFor;
             responseStateByRequest.remove(requestId);
@@ -732,6 +755,62 @@ public final class SourceConnectionState {
             responseBeingAssembledFor,
             ignored -> new HttpMessageAndTimestamp.Response(firstPacketTimestamp)
         );
+    }
+
+    private ObservationOutcome applyInterimResponse(
+        TrafficObservation observation,
+        RecordAssociationId association,
+        Instant timestamp
+    ) {
+        if (observation.hasInterimResponse()) {
+            if (interimResponseUnderAssembly != null) {
+                throw new CaptureProtocolViolation(
+                    "whole interim response for " + connectionProcessingId
+                        + " arrived while a segmented interim response was under assembly"
+                );
+            }
+            var interimResponse = new HttpMessageAndTimestamp.InterimResponse(timestamp);
+            appendTo(
+                interimResponse,
+                observation.getInterimResponse().getData().toByteArray(),
+                timestamp
+            );
+            emitOrDeferInterimResponse(interimResponse);
+            return added(association);
+        }
+        if (interimResponseUnderAssembly == null) {
+            interimResponseUnderAssembly = new HttpMessageAndTimestamp.InterimResponse(timestamp);
+        }
+        interimResponseUnderAssembly.addSegment(
+            observation.getInterimResponseSegment().getData().toByteArray()
+        );
+        return added(association);
+    }
+
+    private ObservationOutcome finalizeInterimResponseSegment(
+        RecordAssociationId association,
+        Instant timestamp
+    ) {
+        interimResponseUnderAssembly.finalizeRequestSegments(timestamp);
+        var completed = interimResponseUnderAssembly;
+        interimResponseUnderAssembly = null;
+        emitOrDeferInterimResponse(completed);
+        return added(association);
+    }
+
+    private void emitOrDeferInterimResponse(HttpMessageAndTimestamp.InterimResponse interimResponse) {
+        if (phase == Phase.ASSEMBLING_REQUEST) {
+            pendingInterimResponses.add(interimResponse);
+            return;
+        }
+        if (phase == Phase.ASSEMBLING_RESPONSE && responseBeingAssembledFor != null) {
+            sink.onSourceInterimResponse(responseBeingAssembledFor, interimResponse);
+        }
+    }
+
+    private void clearInterimResponses() {
+        interimResponseUnderAssembly = null;
+        pendingInterimResponses.clear();
     }
 
     /**

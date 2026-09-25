@@ -27,6 +27,7 @@ import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -189,6 +190,48 @@ class RecordAssociationAccumulatorTest {
             ),
             sourceCompletions(),
             "both records finish together, and only once the request's processing is complete"
+        );
+    }
+
+    @Test
+    void interimOnlyRecordIsRelabeledAndHeldUntilRequestProcessingFinishes() {
+        var request = stream(0, read(1, "GET / HTTP/1.1\r\n\r\n"));
+        var interim = stream(1, interim(2, "HTTP/1.1 103 Early Hints\r\n\r\n"));
+        var completion = stream(
+            2,
+            endOfMessage(3),
+            write(4, "HTTP/1.1 200 OK\r\n\r\n"),
+            close(5)
+        );
+        var script = new RecordScript(TOPIC)
+            .addTraffic(0, 0, Instant.ofEpochMilli(1_000), WRITER, request)
+            .addTraffic(0, 1, Instant.ofEpochMilli(2_000), WRITER, interim)
+            .addTraffic(0, 2, Instant.ofEpochMilli(3_000), WRITER, completion);
+        assignAndApply(script);
+
+        Assertions.assertTrue(
+            sourceCompletions().isEmpty(),
+            "the interim-only record must retain the request assembly association through relabeling"
+        );
+        Assertions.assertEquals(
+            3,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS
+            )
+        );
+
+        finishRequest(script, 0);
+
+        var completions = sourceCompletions();
+        Assertions.assertEquals(3, completions.size(), "each contributing record must finish exactly once");
+        Assertions.assertEquals(
+            Set.of(
+                new KafkaRecordId(script.generation(0), 0),
+                new KafkaRecordId(script.generation(0), 1),
+                new KafkaRecordId(script.generation(0), 2)
+            ),
+            Set.copyOf(completions)
         );
     }
 
@@ -457,6 +500,12 @@ class RecordAssociationAccumulatorTest {
         }
 
         @Override
+        public void onSourceInterimResponse(
+            ReplayRequestId replayRequestId,
+            HttpMessageAndTimestamp.InterimResponse interimResponse
+        ) {}
+
+        @Override
         public void onSourceResponseComplete(
             ReplayRequestId replayRequestId,
             HttpMessageAndTimestamp.Response response,
@@ -498,6 +547,12 @@ class RecordAssociationAccumulatorTest {
 
     private static TrafficObservation write(long sequence, String data) {
         return observation(sequence).setWrite(WriteObservation.newBuilder().setData(utf8(data))).build();
+    }
+
+    private static TrafficObservation interim(long sequence, String data) {
+        return observation(sequence)
+            .setInterimResponse(InterimResponseObservation.newBuilder().setData(utf8(data)))
+            .build();
     }
 
     private static TrafficObservation endOfMessage(long sequence) {

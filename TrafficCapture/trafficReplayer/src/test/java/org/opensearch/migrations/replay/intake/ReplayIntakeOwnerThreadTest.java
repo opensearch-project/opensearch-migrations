@@ -263,6 +263,14 @@ class ReplayIntakeOwnerThreadTest {
         }
 
         @Override
+        public void onSourceInterimResponse(
+            ReplayRequestId replayRequestId,
+            HttpMessageAndTimestamp.InterimResponse interimResponse
+        ) {
+            everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
+        }
+
+        @Override
         public void onSourceResponseComplete(
             ReplayRequestId replayRequestId,
             HttpMessageAndTimestamp.Response response,

@@ -43,6 +43,20 @@ public class HttpTransactionDumper implements SourceAssemblySink {
         this(out, "");
     }
 
+    @Override
+    public void onSourceInterimResponse(
+        @NonNull ReplayRequestId replayRequestId,
+        @NonNull HttpMessageAndTimestamp.InterimResponse interimResponse
+    ) {
+        out.println(linePrefix
+            + buildPrefix(
+                replayRequestId.connectionProcessingId(),
+                interimResponse.getFirstPacketTimestamp(),
+                interimResponse.getLastPacketTimestamp())
+            + " INT[" + messageSize(interimResponse) + "]"
+            + " " + extractFirstLine(interimResponse));
+    }
+
     public HttpTransactionDumper(PrintStream out, String linePrefix) {
         this.out = out;
         this.linePrefix = linePrefix;

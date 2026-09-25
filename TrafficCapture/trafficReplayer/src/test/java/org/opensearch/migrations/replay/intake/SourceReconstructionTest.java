@@ -28,6 +28,8 @@ import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseObservation;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -392,7 +394,13 @@ class SourceReconstructionTest {
     }
 
     @Test
-    void anInformationalWriteBeforeRequestEndDoesNotDiscardOrAdvanceTheRequest() {
+    void typedInterimsBeforeAndDuringRequestBodyPreserveBytesAndRequestContinuation() {
+        var requestPrefix = "POST /thing HTTP/1.1\r\nContent-Length: 4\r\n\r\na";
+        var requestSuffix = "bcd";
+        var expectedRequest = requestPrefix + requestSuffix;
+        var interim100 = "HTTP/1.1 100 Continue\r\n\r\n";
+        var interim102 = "HTTP/1.1 102 Processing\r\n\r\n";
+        var interim103 = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n";
         var finalResponse = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
         var script = new RecordScript(TOPIC).addTraffic(
             0,
@@ -401,24 +409,121 @@ class SourceReconstructionTest {
             WRITER,
             stream(
                 0,
-                read(1, "GET /thing HTTP/1.1\r\n"),
-                write(2, "HTTP/1.1 100 Continue\r\n\r\n"),
-                read(3, "Host: source\r\n\r\n"),
-                endOfMessage(4),
-                write(5, finalResponse),
-                close(6)
+                read(1, requestPrefix),
+                interim(2, interim100),
+                read(3, "b"),
+                interim(4, interim102),
+                interimSegment(5, "HTTP/1.1 103 Early Hints\r\n"),
+                interimSegment(6, "Link: </style.css>\r\n\r\n"),
+                segmentEnd(7),
+                read(8, "cd"),
+                endOfMessage(9),
+                write(10, finalResponse),
+                close(11)
             )
         );
 
         applyAll(script);
 
-        Assertions.assertEquals(List.of(REQUEST_BYTES), sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList());
+        Assertions.assertEquals(
+            List.of(expectedRequest),
+            sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
         Assertions.assertEquals(0L, sink.requestIds.get(0).capturedRequestOrdinal());
+        Assertions.assertEquals(
+            List.of(interim100, interim102, interim103),
+            sink.interimResponses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(
+            List.of(sink.requestIds.get(0), sink.requestIds.get(0), sink.requestIds.get(0)),
+            sink.interimResponseRequestIds
+        );
         Assertions.assertEquals(List.of(finalResponse), sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList());
+        Assertions.assertEquals(
+            3,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.INTERIM_RESPONSES_OBSERVED
+            )
+        );
     }
 
     @Test
-    void segmentedInformationalWritesAreIgnoredThroughTheirSegmentEnd() {
+    void typedInterimsAfterRequestEndRemainAssociatedAndSeparateFromTheFinalResponse() {
+        var interim102 = "HTTP/1.1 102 Processing\r\n\r\n";
+        var interim103 = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n";
+        var finalResponse = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                interim(3, interim102),
+                interimSegment(4, "HTTP/1.1 103 Early Hints\r\n"),
+                interimSegment(5, "Link: </style.css>\r\n\r\n"),
+                segmentEnd(6),
+                write(7, finalResponse),
+                close(8)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(
+            List.of(interim102, interim103),
+            sink.interimResponses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(
+            List.of(sink.requestIds.get(0), sink.requestIds.get(0)),
+            sink.interimResponseRequestIds
+        );
+        Assertions.assertEquals(
+            List.of(finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+    }
+
+    @Test
+    void segmentedInterimCanStraddleRequestEndWithoutLosingBytes() {
+        var interimResponse = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n";
+        var finalResponse = "HTTP/1.1 204 No Content\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                interimSegment(2, "HTTP/1.1 103 Early Hints\r\n"),
+                endOfMessage(3),
+                interimSegment(4, "Link: </style.css>\r\n\r\n"),
+                segmentEnd(5),
+                write(6, finalResponse),
+                close(7)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(
+            List.of(interimResponse),
+            sink.interimResponses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.interimResponseRequestIds);
+        Assertions.assertEquals(
+            List.of(finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+    }
+
+    @Test
+    void ordinaryWriteIsNeverAcceptedAsAnInterimCompatibilityEncoding() {
+        var ordinaryWrite = "HTTP/1.1 100 Continue\r\n\r\n";
         var finalResponse = "HTTP/1.1 204 No Content\r\n\r\n";
         var script = new RecordScript(TOPIC).addTraffic(
             0,
@@ -428,13 +533,14 @@ class SourceReconstructionTest {
             stream(
                 0,
                 read(1, "GET /thing HTTP/1.1\r\n"),
-                writeSegment(2, "HTTP/1.1 100 "),
-                writeSegment(3, "Continue\r\n\r\n"),
-                segmentEnd(4),
-                read(5, "Host: source\r\n\r\n"),
-                endOfMessage(6),
-                write(7, finalResponse),
-                close(8)
+                write(2, ordinaryWrite),
+                writeSegment(3, "HTTP/1.1 102 "),
+                writeSegment(4, "Processing\r\n\r\n"),
+                segmentEnd(5),
+                read(6, "Host: source\r\n\r\n"),
+                endOfMessage(7),
+                write(8, finalResponse),
+                close(9)
             )
         );
 
@@ -442,6 +548,7 @@ class SourceReconstructionTest {
 
         Assertions.assertEquals(List.of(REQUEST_BYTES), sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList());
         Assertions.assertEquals(0L, sink.requestIds.get(0).capturedRequestOrdinal());
+        Assertions.assertTrue(sink.interimResponses.isEmpty());
         Assertions.assertEquals(List.of(finalResponse), sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList());
     }
 
@@ -885,6 +992,8 @@ class SourceReconstructionTest {
         private final List<Instant> requestFirstByteSourceTimes = new ArrayList<>();
         private final List<Instant> requestEndOfMessageSourceTimes = new ArrayList<>();
         private final List<Long> requestCompletingLogAppendTimes = new ArrayList<>();
+        private final List<ReplayRequestId> interimResponseRequestIds = new ArrayList<>();
+        private final List<HttpMessageAndTimestamp.InterimResponse> interimResponses = new ArrayList<>();
         private final List<ReplayRequestId> completeResponses = new ArrayList<>();
         private final List<HttpMessageAndTimestamp.Response> responses = new ArrayList<>();
         /** Completed, but with nothing proving the source finished writing — {@code §9.2}'s {@code keptAlive}. */
@@ -910,6 +1019,15 @@ class SourceReconstructionTest {
             requestFirstByteSourceTimes.add(requestFirstByteSourceTime);
             requestEndOfMessageSourceTimes.add(requestEndOfMessageSourceTime);
             requestCompletingLogAppendTimes.add(requestCompletingLogAppendTime);
+        }
+
+        @Override
+        public void onSourceInterimResponse(
+            ReplayRequestId replayRequestId,
+            HttpMessageAndTimestamp.InterimResponse interimResponse
+        ) {
+            interimResponseRequestIds.add(replayRequestId);
+            interimResponses.add(interimResponse);
         }
 
         @Override
@@ -1028,6 +1146,20 @@ class SourceReconstructionTest {
     private static TrafficObservation writeSegment(long sequence, String data) {
         return observation(sequence)
             .setWriteSegment(WriteSegmentObservation.newBuilder().setData(ByteString.copyFromUtf8(data)))
+            .build();
+    }
+
+    private static TrafficObservation interim(long sequence, String data) {
+        return observation(sequence)
+            .setInterimResponse(InterimResponseObservation.newBuilder().setData(ByteString.copyFromUtf8(data)))
+            .build();
+    }
+
+    private static TrafficObservation interimSegment(long sequence, String data) {
+        return observation(sequence)
+            .setInterimResponseSegment(
+                InterimResponseSegmentObservation.newBuilder().setData(ByteString.copyFromUtf8(data))
+            )
             .build();
     }
 
