@@ -271,7 +271,8 @@ class ReplayIntakeOwnerThreadTest {
                         close(10)
                     )
                 )
-                .addHeartbeat(0, 3, Instant.ofEpochMilli(1_003), "writer", 100);
+                .addHeartbeat(0, 3, Instant.ofEpochMilli(1_003), "writer", 100)
+                .addHeartbeat(0, 4, Instant.ofEpochMilli(1_004), "writer", 100);
             var generation = script.generation(0);
 
             owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
@@ -282,12 +283,17 @@ class ReplayIntakeOwnerThreadTest {
                 .orElseThrow();
             owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
                 new PartitionBatchRequestId(generation, 0),
-                script.records().subList(0, 3)
+                script.records().subList(0, 4)
             ));
 
             var state = owner.partitionState(generation).orElseThrow();
             Assertions.assertEquals(3, state.retryReadyRequestSupplyCount());
             Assertions.assertFalse(state.demandOpen(2), "one complete batch may overshoot N");
+            Assertions.assertEquals(
+                List.of(0L, 1L, 2L, 3L),
+                observedOffsets,
+                "satisfying demand inside a batch must not truncate its trailing record"
+            );
             Assertions.assertEquals(
                 List.of(0L, 1L, 2L),
                 sink.requests.stream().map(ReplayRequestId::capturedRequestOrdinal).toList()
@@ -305,10 +311,10 @@ class ReplayIntakeOwnerThreadTest {
 
             owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
                 explicitOne,
-                List.of(script.records().get(3))
+                List.of(script.records().get(4))
             ));
 
-            Assertions.assertEquals(List.of(0L, 1L, 2L, 3L), observedOffsets);
+            Assertions.assertEquals(List.of(0L, 1L, 2L, 3L, 4L), observedOffsets);
             Assertions.assertTrue(
                 sourceInputs.drain().stream()
                     .noneMatch(KafkaSourceInput.RequestNextPartitionBatch.class::isInstance),
