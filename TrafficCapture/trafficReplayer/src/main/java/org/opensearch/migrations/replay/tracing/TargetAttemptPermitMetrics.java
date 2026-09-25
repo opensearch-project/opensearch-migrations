@@ -29,6 +29,8 @@ public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProv
             "targetAttemptPermitAcquisitionsPending";
         public static final String ACQUISITIONS_CANCELLED =
             "targetAttemptPermitAcquisitionsCancelled";
+        public static final String ACQUISITIONS_FAILED =
+            "targetAttemptPermitAcquisitionsFailed";
         public static final String PERMITS_ACQUIRED = "targetAttemptPermitsAcquired";
         public static final String PERMITS_ACTIVE = "targetAttemptPermitsActive";
         public static final String PERMITS_RELEASED = "targetAttemptPermitsReleased";
@@ -39,6 +41,7 @@ public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProv
     private final LongCounter acquisitionRequests;
     private final LongUpDownCounter acquisitionsPending;
     private final LongCounter acquisitionsCancelled;
+    private final LongCounter acquisitionsFailed;
     private final LongCounter permitsAcquired;
     private final LongUpDownCounter permitsActive;
     private final LongCounter permitsReleased;
@@ -52,6 +55,9 @@ public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProv
             .setUnit("requests")
             .build();
         acquisitionsCancelled = meter.counterBuilder(MetricNames.ACQUISITIONS_CANCELLED)
+            .setUnit("requests")
+            .build();
+        acquisitionsFailed = meter.counterBuilder(MetricNames.ACQUISITIONS_FAILED)
             .setUnit("requests")
             .build();
         permitsAcquired = meter.counterBuilder(MetricNames.PERMITS_ACQUIRED)
@@ -81,6 +87,11 @@ public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProv
     @Override
     public void acquisitionCancelled() {
         acquisitionsCancelled.add(1);
+    }
+
+    @Override
+    public void acquisitionFailed() {
+        acquisitionsFailed.add(1);
     }
 
     @Override

@@ -32,6 +32,7 @@ class TargetAttemptPermitMetricsTest {
             metrics.acquisitionPendingChanged(1);
             metrics.acquisitionPendingChanged(-1);
             metrics.acquisitionCancelled();
+            metrics.acquisitionFailed();
             metrics.permitAcquired();
             metrics.activePermitsChanged(1);
             metrics.activePermitsChanged(-1);
@@ -52,6 +53,11 @@ class TargetAttemptPermitMetricsTest {
             assertLongPoint(
                 recorded,
                 TargetAttemptPermitMetrics.MetricNames.ACQUISITIONS_CANCELLED,
+                1
+            );
+            assertLongPoint(
+                recorded,
+                TargetAttemptPermitMetrics.MetricNames.ACQUISITIONS_FAILED,
                 1
             );
             assertLongPoint(

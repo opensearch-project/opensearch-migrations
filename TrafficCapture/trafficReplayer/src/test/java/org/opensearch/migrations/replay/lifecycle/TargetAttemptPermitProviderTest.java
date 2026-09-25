@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -37,6 +38,7 @@ class TargetAttemptPermitProviderTest {
 
         first.close();
 
+        Assertions.assertTrue(second.completion().toCompletableFuture().isDone());
         var secondPermit = acquired(second);
         Assertions.assertEquals(request(1), secondPermit.requestId());
         Assertions.assertEquals(1, fixture.activeTargetAttempts.get());
@@ -59,6 +61,8 @@ class TargetAttemptPermitProviderTest {
         );
         Assertions.assertSame(cause, cancelled.cause());
         Assertions.assertEquals(1, fixture.activeTargetAttempts.get());
+        Assertions.assertEquals(0, fixture.metrics.pending);
+        Assertions.assertEquals(1, fixture.metrics.cancellations);
 
         active.close();
         var replacement = acquired(fixture.provider.acquire(request(2)));
@@ -69,17 +73,105 @@ class TargetAttemptPermitProviderTest {
     }
 
     @Test
-    void permitReleaseIsOneShotAndDuplicateReleaseDoesNotCorruptTheCounter() {
+    void invalidCounterFailsAnAcquisitionInsteadOfLeavingItUnsettled() {
+        var fixture = new Fixture(1);
+        fixture.activeTargetAttempts.set(-1);
+
+        var acquisition = fixture.provider.acquire(request(0));
+
+        Assertions.assertTrue(acquisition.completion().toCompletableFuture().isDone());
+        Assertions.assertThrows(
+            CompletionException.class,
+            () -> acquisition.completion().toCompletableFuture().join()
+        );
+        Assertions.assertEquals(-1, fixture.activeTargetAttempts.get());
+        Assertions.assertEquals(1, fixture.fatalFailures.size());
+        Assertions.assertEquals(1, fixture.metrics.acquisitionFailures);
+    }
+
+    @Test
+    void invalidCounterStopsDrainAndFailsEveryPendingAcquisition() {
+        var fixture = new Fixture(1);
+        var active = acquired(fixture.provider.acquire(request(0)));
+        var firstPending = fixture.provider.acquire(request(1));
+        var secondPending = fixture.provider.acquire(request(2));
+        fixture.activeTargetAttempts.set(-1);
+
+        active.close();
+
+        Assertions.assertTrue(firstPending.completion().toCompletableFuture().isDone());
+        Assertions.assertTrue(secondPending.completion().toCompletableFuture().isDone());
+        Assertions.assertThrows(
+            CompletionException.class,
+            () -> firstPending.completion().toCompletableFuture().join()
+        );
+        Assertions.assertThrows(
+            CompletionException.class,
+            () -> secondPending.completion().toCompletableFuture().join()
+        );
+        Assertions.assertEquals(-1, fixture.activeTargetAttempts.get());
+        Assertions.assertEquals(0, fixture.metrics.pending);
+        Assertions.assertEquals(1, fixture.fatalFailures.size());
+        Assertions.assertEquals(2, fixture.metrics.acquisitionFailures);
+    }
+
+    @Test
+    void invalidReservationDuringDrainFailsTheCurrentAndRemainingAcquisitions() {
+        var metrics = new FailingPermitAcquiredMetrics(2);
+        var counter = new AtomicInteger();
+        var failures = new ArrayList<Error>();
+        var provider = new TargetAttemptPermitProvider(
+            1,
+            counter,
+            metrics,
+            failures::add
+        );
+        var active = acquired(provider.acquire(request(0)));
+        var firstPending = provider.acquire(request(1));
+        var secondPending = provider.acquire(request(2));
+
+        active.close();
+
+        var firstCompletion = firstPending.completion().toCompletableFuture();
+        var secondCompletion = secondPending.completion().toCompletableFuture();
+        Assertions.assertTrue(firstCompletion.isDone());
+        Assertions.assertTrue(secondCompletion.isDone());
+        var failedAcquisition = firstCompletion.isCompletedExceptionally()
+            ? firstPending
+            : secondPending;
+        var grantedAcquisition = firstCompletion.isCompletedExceptionally()
+            ? secondPending
+            : firstPending;
+        var pendingPermit = acquired(grantedAcquisition);
+        Assertions.assertTrue(secondPending.completion().toCompletableFuture().isDone());
+        Assertions.assertThrows(
+            CompletionException.class,
+            () -> failedAcquisition.completion().toCompletableFuture().join()
+        );
+        Assertions.assertEquals(0, metrics.pending);
+        Assertions.assertEquals(1, metrics.acquisitionFailures);
+        Assertions.assertEquals(1, failures.size());
+
+        pendingPermit.close();
+        Assertions.assertEquals(0, counter.get());
+    }
+
+    @Test
+    void everyDuplicateReleaseReachesFatalHandlingWithoutCorruptingTheCounter() {
         var fixture = new Fixture(1);
         var permit = acquired(fixture.provider.acquire(request(0)));
 
         permit.close();
         permit.close();
+        permit.close();
 
         Assertions.assertEquals(0, fixture.activeTargetAttempts.get());
-        Assertions.assertEquals(1, fixture.fatalFailures.size());
+        Assertions.assertEquals(2, fixture.fatalFailures.size());
         Assertions.assertTrue(
             fixture.fatalFailures.get(0).getCause().getMessage().contains("more than once")
+        );
+        Assertions.assertTrue(
+            fixture.fatalFailures.get(1).getCause().getMessage().contains("more than once")
         );
     }
 
@@ -139,6 +231,7 @@ class TargetAttemptPermitProviderTest {
         permit.close();
 
         Assertions.assertEquals(1, metrics.acquisitions);
+        Assertions.assertEquals(0, metrics.acquisitionFailures);
         Assertions.assertEquals(1, metrics.permitsAcquired);
         Assertions.assertEquals(1, metrics.permitsReleased);
         Assertions.assertEquals(0, metrics.activePermits);
@@ -150,9 +243,11 @@ class TargetAttemptPermitProviderTest {
     private static TargetAttemptPermitProvider.Permit acquired(
         TargetAttemptPermitProvider.Acquisition acquisition
     ) {
+        var completion = acquisition.completion().toCompletableFuture();
+        Assertions.assertTrue(completion.isDone(), "expected synchronous permit acquisition");
         return Assertions.assertInstanceOf(
             TargetAttemptPermitProvider.PermitAcquired.class,
-            acquisition.completion().toCompletableFuture().join()
+            completion.join()
         ).permit();
     }
 
@@ -170,28 +265,30 @@ class TargetAttemptPermitProviderTest {
     private static final class Fixture {
         private final AtomicInteger activeTargetAttempts = new AtomicInteger();
         private final ArrayList<Error> fatalFailures = new ArrayList<>();
+        private final RecordingMetrics metrics = new RecordingMetrics();
         private final TargetAttemptPermitProvider provider;
 
         private Fixture(int capacity) {
             provider = new TargetAttemptPermitProvider(
                 capacity,
                 activeTargetAttempts,
-                TargetAttemptPermitProvider.Metrics.NOOP,
+                metrics,
                 fatalFailures::add
             );
         }
     }
 
-    private static final class RecordingMetrics
+    private static class RecordingMetrics
         implements TargetAttemptPermitProvider.Metrics {
 
-        private int acquisitions;
-        private int pending;
-        private int cancellations;
-        private int permitsAcquired;
-        private int activePermits;
-        private int permitsReleased;
-        private final ArrayList<Duration> heldDurations = new ArrayList<>();
+        int acquisitions;
+        int pending;
+        int cancellations;
+        int acquisitionFailures;
+        int permitsAcquired;
+        int activePermits;
+        int permitsReleased;
+        final ArrayList<Duration> heldDurations = new ArrayList<>();
 
         @Override
         public void acquisitionRequested() {
@@ -206,6 +303,11 @@ class TargetAttemptPermitProviderTest {
         @Override
         public void acquisitionCancelled() {
             cancellations++;
+        }
+
+        @Override
+        public void acquisitionFailed() {
+            acquisitionFailures++;
         }
 
         @Override
@@ -226,6 +328,24 @@ class TargetAttemptPermitProviderTest {
         @Override
         public void permitHeld(Duration duration) {
             heldDurations.add(duration);
+        }
+    }
+
+    private static final class FailingPermitAcquiredMetrics extends RecordingMetrics {
+        private final int failureInvocation;
+        private int invocations;
+
+        private FailingPermitAcquiredMetrics(int failureInvocation) {
+            this.failureInvocation = failureInvocation;
+        }
+
+        @Override
+        public void permitAcquired() {
+            super.permitAcquired();
+            invocations++;
+            if (invocations == failureInvocation) {
+                throw new IllegalStateException("permit-acquired metric failure");
+            }
         }
     }
 }

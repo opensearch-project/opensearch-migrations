@@ -48,6 +48,9 @@ public final class TargetAttemptPermitProvider {
             public void acquisitionCancelled() {}
 
             @Override
+            public void acquisitionFailed() {}
+
+            @Override
             public void permitAcquired() {}
 
             @Override
@@ -65,6 +68,8 @@ public final class TargetAttemptPermitProvider {
         void acquisitionPendingChanged(int delta);
 
         void acquisitionCancelled();
+
+        void acquisitionFailed();
 
         void permitAcquired();
 
@@ -86,6 +91,13 @@ public final class TargetAttemptPermitProvider {
     public interface Acquisition {
         ReplayRequestId requestId();
 
+        /**
+         * Completes on whichever thread grants or cancels the acquisition.
+         *
+         * <p>The receiving connection owner must post the typed result to its assigned event loop.
+         * If that required post is rejected, it must release an acquired permit before reporting the
+         * rejection to the fatal boundary.</p>
+         */
         CompletionStage<AcquisitionResult> completion();
 
         boolean cancel(CancellationException cause);
@@ -101,7 +113,8 @@ public final class TargetAttemptPermitProvider {
     private enum AcquisitionState {
         WAITING,
         ACQUIRED,
-        CANCELLED
+        CANCELLED,
+        FAILED
     }
 
     private enum Reservation {
@@ -118,6 +131,7 @@ public final class TargetAttemptPermitProvider {
     private final ConcurrentLinkedQueue<PendingAcquisition> pendingAcquisitions =
         new ConcurrentLinkedQueue<>();
     private final AtomicBoolean draining = new AtomicBoolean();
+    private final AtomicReference<Error> fatalFailure = new AtomicReference<>();
 
     public TargetAttemptPermitProvider(
         int capacity,
@@ -128,7 +142,7 @@ public final class TargetAttemptPermitProvider {
         this(capacity, activeTargetAttempts, metrics, fatalHandler, System::nanoTime);
     }
 
-    TargetAttemptPermitProvider(
+    public TargetAttemptPermitProvider(
         int capacity,
         @NonNull AtomicInteger activeTargetAttempts,
         @NonNull Metrics metrics,
@@ -157,6 +171,11 @@ public final class TargetAttemptPermitProvider {
     public Acquisition acquire(@NonNull ReplayRequestId requestId) {
         var acquisition = new PendingAcquisition(requestId);
         recordMetric(metrics::acquisitionRequested, "recording a requested target-attempt permit");
+        var existingFatalFailure = fatalFailure.get();
+        if (existingFatalFailure != null) {
+            acquisition.fail(existingFatalFailure);
+            return acquisition;
+        }
 
         var reservation = reserveAttempt();
         if (reservation == Reservation.RESERVED) {
@@ -165,12 +184,17 @@ public final class TargetAttemptPermitProvider {
             acquisition.markPending();
             pendingAcquisitions.add(acquisition);
             drainPendingAcquisitions();
+        } else {
+            acquisition.fail(requireFatalFailure());
         }
         return acquisition;
     }
 
     private Reservation reserveAttempt() {
         while (true) {
+            if (fatalFailure.get() != null) {
+                return Reservation.INVALID;
+            }
             var active = activeTargetAttempts.get();
             if (active < 0 || active > capacity) {
                 reportInvariantFailure(
@@ -209,12 +233,20 @@ public final class TargetAttemptPermitProvider {
     }
 
     private void drainPendingAcquisitions() {
+        if (fatalFailure.get() != null) {
+            failPendingAcquisitions(requireFatalFailure());
+            return;
+        }
         if (!draining.compareAndSet(false, true)) {
             return;
         }
         while (true) {
             drainWhileCapacityIsAvailable();
             draining.set(false);
+            if (fatalFailure.get() != null) {
+                failPendingAcquisitions(requireFatalFailure());
+                return;
+            }
             if (pendingAcquisitions.isEmpty()
                 || activeTargetAttempts.get() >= capacity
                 || !draining.compareAndSet(false, true)) {
@@ -240,10 +272,18 @@ public final class TargetAttemptPermitProvider {
                 return;
             }
             if (reservation == Reservation.INVALID) {
-                pendingAcquisitions.add(acquisition);
+                acquisition.fail(requireFatalFailure());
+                failPendingAcquisitions(requireFatalFailure());
                 return;
             }
             grantReservedAttempt(acquisition);
+        }
+    }
+
+    private void failPendingAcquisitions(Error failure) {
+        PendingAcquisition acquisition;
+        while ((acquisition = pendingAcquisitions.poll()) != null) {
+            acquisition.fail(failure);
         }
     }
 
@@ -254,6 +294,7 @@ public final class TargetAttemptPermitProvider {
                 reportInvariantFailure(
                     "cannot release an undelivered reservation from active count " + active
                 );
+                failPendingAcquisitions(requireFatalFailure());
                 return;
             }
             if (activeTargetAttempts.compareAndSet(active, active - 1)) {
@@ -272,6 +313,7 @@ public final class TargetAttemptPermitProvider {
                         + " from active count "
                         + active
                 );
+                failPendingAcquisitions(requireFatalFailure());
                 return;
             }
             if (activeTargetAttempts.compareAndSet(active, active - 1)) {
@@ -301,15 +343,29 @@ public final class TargetAttemptPermitProvider {
         }
     }
 
-    private void reportInvariantFailure(String message) {
-        reportFatal(
+    private Error reportInvariantFailure(String message) {
+        return reportFatal(
             "target-attempt permit invariant failed",
             new IllegalStateException(message)
         );
     }
 
-    private void reportFatal(String message, Throwable cause) {
-        fatalHandler.onFatal(new Error(message, cause));
+    private Error reportFatal(String message, Throwable cause) {
+        var proposed = new Error(message, cause);
+        fatalFailure.compareAndSet(null, proposed);
+        fatalHandler.onFatal(proposed);
+        return fatalFailure.get();
+    }
+
+    private Error requireFatalFailure() {
+        var failure = fatalFailure.get();
+        if (failure != null) {
+            return failure;
+        }
+        return reportFatal(
+            "target-attempt permit provider entered an invalid state",
+            new IllegalStateException("invalid reservation without a recorded fatal failure")
+        );
     }
 
     private final class PendingAcquisition implements Acquisition {
@@ -370,6 +426,19 @@ public final class TargetAttemptPermitProvider {
                     "recording a settled target-attempt permit acquisition"
                 );
             }
+        }
+
+        private void fail(Error failure) {
+            if (!state.compareAndSet(AcquisitionState.WAITING, AcquisitionState.FAILED)) {
+                return;
+            }
+            pendingAcquisitions.remove(this);
+            clearPending();
+            recordMetric(
+                metrics::acquisitionFailed,
+                "recording a failed target-attempt permit acquisition"
+            );
+            completion.completeExceptionally(failure);
         }
     }
 
