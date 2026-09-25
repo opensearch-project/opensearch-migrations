@@ -1,7 +1,7 @@
 # Replayer Rebuild Status
 
 Compact live register. Historical narrative and closed review detail are non-authoritative and retained in
-[`archive/replayerRebuildStatus-through-2026-09-24.md`](archive/replayerRebuildStatus-through-2026-09-24.md).
+[`archive/replayerRebuildStatus-through-2026-09-25.md`](archive/replayerRebuildStatus-through-2026-09-25.md).
 Update rows, not prose checkpoints.
 
 **States:** `proved` · `open` · `deferred(<milestone>)` · `blocked(<reason>)` · `wontfix(<reason>)`
@@ -19,8 +19,8 @@ Plan A and Plan B.
 
 | Measurement | Before | After |
 |---|---:|---:|
-| Active task context | 443,332 bytes | 95,755 bytes |
-| Active corpus | 533,694 bytes | 186,056 bytes |
+| Active task context | 461,527 bytes | 102,359 bytes |
+| Active corpus | 560,959 bytes | 201,730 bytes |
 
 ## Current state and evidence
 
@@ -30,10 +30,10 @@ Plan A and Plan B.
 | G0 | proved | One in-place module; member-level limbo; deterministic fixtures; marker verifier |
 | G1 | proved | Kafka `dump-raw` reaches `TrafficReplayer.main`; real proxy/topic envelope evidence; multi-partition bounds and metadata checked |
 | G2 | proved | Kafka source owner, wakeup boundary, generation/commit handling, and repeated design-conformance/falsification review; R9 proved |
-| G3 | `open(review)` | Production source-assembly chain landed through `c0ec3ddd6`; 24 focused deterministic tests and three real proxy/topic `SourceAssemblyEvidenceTest` cases last recorded; latest fix reopened review and owner decisions remain below |
+| G3 | `blocked(PA2/design)` | Implementation, falsification, and repeated conformance review complete through `3dbec52cf`; the committed focused six-class validation reports 56 passing tests, and the final review found no production-code conformance defect. Closure waits only on PA2 item 5's typed producer/interoperability and the exact authorized design amendment removing ordinary-`Write` fallback semantics |
 | Production compile | proved | Last recorded passing with the required Gradle Spotless exclusions |
 | Compiled test set | proved | Last recorded 108 tests, 0 failures; inherited unresolved tests remain marked and owned below |
-| Limbo regions | open | Measured 2026-09-24: 216 files with `REBUILD-LIMBO-START`; 6 files with `REBUILD-LIMBO-NOTE`; 221 files with either marker; 349 Java / 362 total files under `TrafficCapture/trafficReplayer/src` |
+| Limbo regions | open | Measured 2026-09-25: 215 files with `REBUILD-LIMBO-START`; 6 files with `REBUILD-LIMBO-NOTE`; 220 files with either marker; 349 Java / 362 total files under `TrafficCapture/trafficReplayer/src`. Historical counts drift; the START grep is authoritative |
 | Limbo integrity | proved | `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh`; rerun after every marking change |
 | PR strategy | decided | Keep draft PR #3394 and the same branch through the red-CI stretch; repair CI at the swing |
 | DCO debt | `deferred(post-G12)` | Seven inherited PR commits lack sign-off: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`; preserve history during the eventual rewrite |
@@ -88,20 +88,28 @@ refuted. Full measurements remain in the archived status.
 | D17 | Connection owner forgets request at turn end | G5 | open | |
 | D18 | Work admitted under fabricated partition identity | G3 | open | |
 
-## G3 open review and owner decisions
+## G3 latest dispositions and blockers
 
 | Finding / decision | Class | State | Required disposition |
 |---|---|---|---|
-| Request-less close reached a nonexistent connection owner | A | fixed; review reopened | Re-review `c0ec3ddd6` production diff |
-| `SourceConnectionState` does not directly store the contributing record identities named by kafkaLLD §9 | A | open owner decision | Choose redundant local state or accept the partition-owned reverse index placement |
-| Async commit callback plus `WakeupException` can resolve one submission twice | A; G4 owner | open | Complete §2 deferral into G4 before G3 closes; use one resolution latch |
+| Request-less close reached a nonexistent connection owner | A | fixed; final review clean | Source side settles close-only records; only a lifetime that reconstituted a request emits the ordered close |
+| `SourceConnectionState` does not directly store the contributing record identities named by kafkaLLD §9 | A | owner ruled; fixed by placement | `PartitionIntakeState` remains the sole source of contributing-record identity and reverse-association state |
+| Async commit callback plus `WakeupException` can resolve one submission twice | A; G4 owner | deferred(G4) | Plan A G4 now owns the complete one-operation identity, callback owner, wakeup propagation, monotonic restaging, observability, and race evidence |
 | Checked-in G3 shell falsifier is stale and conflicts with direct-CLI falsification | B | open owner deletion decision | Delete or explicitly retain; current evidence is the exact-commit ephemeral worker |
-| Six carried lifecycle tests still name G3 though their members belong to later milestones | B | open | Correct every receiving milestone before G3 closes |
-| Carried deterministic `HttpTransactionDumper` test remains marked | B | open register item | Restore/refactor with the existing test; do not reinvent |
-| Five new accessors and two private parameters have no caller | B | open owner decision | Delete or explicitly retain |
+| Six carried lifecycle tests still named G3 though their members belong elsewhere | B | fixed | Plan and ledger now split member responsibilities across G5, G8, and G11 |
+| Carried deterministic `HttpTransactionDumper` test remained marked | B | fixed | Refactored in place onto live `SourceAssemblySink`, preserving request/response/close and first-line assertions |
+| Response bytes across periodic record boundaries lacked direct proof | B | fixed | Split-record reconstruction test compares exact bytes |
+| G7 insertion notes omitted request-state and separate bootstrap/requested batch state | B | fixed | Exact insertion notes now name all three states |
+| Five new accessors and two private parameters had no caller | B | fixed | Tracker introspection, unused methods, and final unused import removed; tests use lifecycle messages and conservation metrics |
 | Marked `replay/lifecycle/ReplayIntakeInput` references deleted enclosing predecessors | B | open owner decision | Retire as dead or restore enough predecessor shape for mechanical reconstruction |
 | `replayIntakeInputsApplied` counts a rejected post-violation batch | B | wontfix | Input applied the terminal-state rule; record and rejection counters remain separate |
-| Post-close observations; duplicate request completion; within-batch offset validation; request source-event timestamp; segment-end without active segmented value | C | open owner decisions | Designs are silent or conflicting; do not infer |
+| Post-close observations across records | C | fixed; final review clean | Keep the explicitly closed lifetime in the existing current mapping while knowable; reject later observations without adding an identity tombstone |
+| Request timing evidence | C | values preserved; consumer decision open | Carry first-byte source time, request-EOM source time, and request-completing Kafka `LogAppendTime`; owner must choose the pacing anchor before G5/G7 consumes them |
+| Bare `SegmentEnd` without an active segment | C | fixed by owner ruling | Ignore it in request and response assembly; deterministic tests cover both |
+| Duplicate/out-of-order batch validation | C | withdrawn | `ObservedRecordCommitQueue` already owns ordering; do not add a second model |
+| Typed source-interim protocol | owner decision | blocked on design/PA2 | PA2 item 5 produces typed whole/segmented observations; G3 consumes only those, with no ordinary-`Write` or old-capture compatibility path |
+| Active-record-tracker gauge during generation cancellation | A, unreachable before G8 | deferred(G8) | Every unfinished tracker removed by `GenerationCleanupTracker` decrements the process-wide gauge once; prove return to the pre-generation value without generation metric attributes |
+| G3 final review | conformance | proved | Seventh pass found no production-code design-conformance defect; only the typed-interim plan/design mismatch remains |
 
 ## Standing implementation decisions
 
@@ -112,6 +120,13 @@ refuted. Full measurements remain in the archived status.
 | D-2 | No-response retries indefinitely; HTTP-response retries retain cap 4, lifted to top-level config | owner decided | G5/G9 |
 | D-3 | Record accounting is over `(generation, offset)` read events; retain the tiered and balancing equations in the metric table below | owner decided; AGENTS wording still needs owner-confirmed reconciliation | G4/G10/G12 |
 | D-4 | Preserve the five dashboard-pinned names only with identical semantics; changed semantics require a new name and escalation | owner decided | G9 |
+| Source interim protocol | Typed whole/segmented observations based on PR #3000; ordinary `Write` is never a fallback and old captures get no compatibility decoder | owner decided; design amendment still required | PA2/G3 |
+| Target interim responses | Preserve after the rewrite with a complete target-channel → aggregation → tuple chain; keep current discard/TODO until then | owner deferred | POST1 |
+| Record association placement | `PartitionIntakeState` is the sole source of contributing-record and reverse-association state | owner decided | G3 |
+| Record tracker retirement | Ordinary completion removes only after required source-queue submission is accepted; cancellation removal and gauge balance belong to G8; prove via emitted messages and fixed-cardinality metrics, not map accessors | owner decided | G3/G8 |
+| Generation observability | Generation identity belongs in logs/exceptions/spans, never as a metric dimension | owner decided | G3+ |
+| Carried lifecycle evidence | Preserve inherited assertions until replacement behavior is proved; split members by responsibility | owner decided | G5/G8/G11 |
+| Async commit uncertainty | Stage monotonic recommit and never backpedal; land the owner/callback one-shot chain together | owner decided; implementation open | G4 |
 | Tuple writer | Transform off Netty loops on a bounded executor; one non-concurrently invoked transformer and sink per writer worker; explicit per-worker close; parallelism becomes a setting | reversible default, vetoable through G10 | G9 |
 | Image | `traffic_replayer` may remain broken during construction | reversible through G10 | G0 |
 | Branch/PR | Same branch and draft PR #3394 through red CI | owner decided | through swing |
@@ -171,6 +186,12 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 |---|---|---|---|---|
 | Kafka-backed `dump-http` and `dump-both` | G1 | G3 | Source assembly was required first | proved — `SourceAssemblyEvidenceTest` |
 | Proxy dropped-request successor baseline | G3 | PA2 | Serializer does not increment `eomsSoFar`; proxy-owned repair | open — PA2 item 4 |
+| Typed source-interim observation producer | G3 | PA2 | Proxy must classify source `1xx` other than `101` and emit typed whole/segmented observations before G3 can interoperate; no compatibility path | open — PA2 item 5 |
+| Preserve target interim responses in tuples | G5 | POST1 | Owner deliberately placed the complete target-channel → aggregation → tuple chain after the rewrite | open |
+| Inherited connection-owner and context-lifetime assertions | G3 | G5 | Requires the G5 connection owner and process-local registry/context chain | open |
+| Inherited revocation, stale-assembly, cleanup-acknowledgement, and successor-gating assertions | G3 | G8 | Requires typed generation cancellation and cleanup chain | open |
+| Active-record-tracker gauge cleanup balance | G3 | G8 | Only G8 can remove unfinished trackers during generation cancellation; decrement once per removal and prove return to the pre-generation value | open |
+| Interrupted source teardown still reaches application close | G3 | G11 | Process-teardown member belongs to the final supervisor/application chain | open |
 | Real replay construction from Kafka owner through connection/request consumer | G2 | G5 | Real consumer does not exist before G5 | open |
 | §17.4 case 1: demand below `N` | G2 | G7 | Requires G7 supply count | open |
 | §17.4 case 2: unresolved retry input not supply | G2 | G7 | Requires G3 reconstitution and G7 bookkeeping | open |
@@ -186,14 +207,14 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | §17.4 case 28: bootstrap waits behind prior cleanup | G2 | G8 | G8 owns generation cleanup gate | open |
 | `ConnectionAdmissionEntry`, `TargetChannelPort`, `RequestPreparationResult`, `RetryDecision` shells | G0 | G5 | Land with first real consumer | open |
 | `TupleWriter`, `TupleWriteResult` shells | G0 | G9 | Land with tuple path and threading contract | open |
-| `PartitionIntakeState` shell | G0 | G3 | Land with source assembly | open; implementation exists, review closure pending |
-| Async commit resolution latch finding | G3 | G4 | Commit authority is G4's complete-chain responsibility | open; Plan A endpoints must be amended before G3 closes |
+| `PartitionIntakeState` shell | G0 | G3 | Land with source assembly | proved; implementation and conformance review complete |
+| One-shot asynchronous commit resolution under callback/wakeup races | G3 | G4 | G4 owns the complete submission identity, in-flight state, callback owner, monotonic recommit, observability, and deterministic race evidence | open |
 
 ## Scaffolding and known-broken-test ownership
 
 | Item | Introduced | Removal / repair | State |
 |---|---|---|---|
-| `REBUILD-LIMBO` regions | G0 | each owning milestone; zero at rebuild completion | open — 216 START files |
+| `REBUILD-LIMBO` regions | G0 | each owning milestone; zero at rebuild completion | open — 215 START files; remeasure with the command |
 | `REBUILD-LIMBO-NOTE` stand-ins | varies | named milestone in each note | open — 6 NOTE files |
 | Module `build.gradle` limbo note | G0 | last limbo region | open |
 | `KafkaSourceRootContext` | G2 | G3 | proved deleted |
@@ -201,10 +222,12 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | Proxy `MAX_ID_SIZE` assertion; replayer `-da:` workaround | inherited/G1 workaround | PA2 item 2; delete workaround in same repair | open |
 | In-process proxy `System.exit(78)` and broker-lifetime workaround | inherited/G1 workaround | PA2 item 3; delete workaround in same repair | open |
 | Proxy dropped-request successor baseline | inherited | PA2 item 4 | open |
-| Marked revoke/reassign source-assembly tests | G2 carry | G3/G8 according to member responsibility | open; six stale G3 ownership labels must be corrected |
+| Marked connection/context lifetime members | G2 carry | G5 | open; preserve and refactor onto the connection-owner chain |
+| Marked revocation/stale-assembly/cleanup members | G2 carry | G8 | open; preserve and refactor onto typed cancellation/cleanup |
+| Interrupted-source application-close member | G2 carry | G11 | open; process teardown only |
 | Marked quiescent connection tests | G2 carry | G5 | open |
 | Marked long-running Kafka/replayer integration tests | G2 carry | G9 | open |
-| Marked deterministic `HttpTransactionDumper` test | inherited | G3 | open |
+| Marked deterministic `HttpTransactionDumper` test | inherited | G3 | proved refactored in place |
 | Historical 4 fixture and 57 test compile errors | S6b | G11/wontfix while marked | compiled active suite green; do not restore without owner milestone |
 | Eight transformation-module inherited test failures | S6b | follows G11 test-fixture resolution | open ownership; current redirects no longer create a second module |
 
@@ -218,6 +241,7 @@ Fixed-cardinality counters are pre-authorized; identity-cardinality attributes r
 | `kafkaSourceRevocationsCleanedBeforeDeadline` / `kafkaSourceRevocationsReachingDeadline` | Grace-ceiling tuning pair | G2 |
 | `replayIntakeOwnerStarted` / `replayIntakeOwnerStoppedAfterDraining` | Owner lifecycle and FIFO stop | G3 |
 | `replayIntakeInputsApplied{inputKind}` / `replayIntakeRecordsApplied` | Applied input variants and records | G3 |
+| `replayIntakeActiveRecordTrackers` / `replayIntakeRecordTrackersRetired` | Active tracker balance and accepted-retirement progress | G3 |
 | `replayIntakeRequestsReconstituted` | Requests delivered from source assembly | G3 |
 | `replayIntakeResponsesProvenComplete` / `replayIntakeResponsesUnprovenComplete` | Response confidence | G3 |
 | `replayIntakeResponsesIncomplete{incompleteReason}` | Expiration/cancellation-ended assembly | G3 |
@@ -227,6 +251,9 @@ Fixed-cardinality counters are pre-authorized; identity-cardinality attributes r
 
 Conservation is per partition and generation and counts read **instances** `(generation, offset)`, including
 rereads in later generations.
+
+G3 also proves `requests reconstructed == proven complete + unproven complete + incomplete` from the designed
+lifecycle-result metrics; suppressing a terminal-result metric fails the focused evidence.
 
 | Instrument | Type | Fires when | Owner |
 |---|---|---|---|
@@ -262,7 +289,7 @@ Every row records explicit owner authorization. The detailed rationale is retain
 | Date | Section | Authorized change |
 |---|---|---|
 | 2026-09-24 | `kafkaLLD §9`, `§9.4`, `§16`; `procCommit §5.2`, `§10.2` | Inherited incomplete request reserves one ordinal; EOM/write/drop ends tail discard without advancing again; first capture-protocol violation latches replay-wide admission cutoff with a 60-second side-effect drain |
-| 2026-09-24 | `kafkaLLD §9`; `procCommit §5.2` | Source write before request EOM is informational; ignore it and preserve request assembly, ordinal, and response state |
+| 2026-09-24 | `kafkaLLD §9`; `procCommit §5.2` | Superseded later the same day: the ordinary-`Write` informational fallback remains historical only; typed source-interim observations now require a separately authorized amendment before production removes the fallback |
 | 2026-09-24 | `kafkaLLD §9.3` | Captured close discards only incomplete request assembly and completes response assembly as `SourceResponseComplete(keptAlive=false)` before ordered close |
 | 2026-09-24 | `proxyProtocol §4.1`; `kafkaLLD §9.4`; `procCommit §5.2` | `RequestIntentionallyDropped` ends partially captured suppressed request, releases associations, advances once, creates no replay request/tuple, leaves connection open; no-prefix marker is violation |
 | 2026-09-24 | `kafkaLLD §4.1`; `procCommit §5.2`, `§10.1` | Orderly intake termination uses FIFO stop-after-draining queue control outside the nine business inputs; fatal shutdown does not wait |
@@ -284,7 +311,9 @@ Every row records explicit owner authorization. The detailed rationale is retain
 
 | Item | State | Owner / next action |
 |---|---|---|
-| G3 review decisions listed above | open; blocks G3 | Batch for owner, amend any deferral endpoints, then resume same uniquely named Claude milestone session |
+| G3 closure | blocked(PA2/design) | Production conformance review is complete; obtain the exact source-interim design authorization and land PA2 item 5 producer/consumer interoperability |
+| Authoritative source-interim design still describes the superseded ordinary-`Write` fallback | open; blocks typed G3 closure | Obtain explicit authorization for the exact design amendment; PA2 item 5 and G3 then implement only typed observations |
+| Which preserved source timestamp anchors nominal target send time | open; blocks consuming G5/G7 wiring | Options are request first byte, request EOM, or another explicit formula. Recommendation: first byte; authorize the exact design amendment before consumption |
 | Conservation wording mismatch between AGENTS equation and D-3 decision | open, non-blocking | Owner confirmation required before semantic reconciliation |
 | Rejected-versus-unknown commit outcome split was assigned to G2 but not proved | open; milestone ownership discrepancy | Do not silently reassign it: amend G2 and a named receiving milestone plus this ledger under AGENTS §2 before closure |
 | `FinalTargetWriteSubmitted` was added as a second milestone by implication | open owner veto | Retain unless the owner rejects it; first-write still owns channel reuse while final-write owns graceful-cancellation completion |
