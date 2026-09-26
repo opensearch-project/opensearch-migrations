@@ -239,7 +239,7 @@ public class ReplayEngine {
     ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
-        var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
+        var atTime = Instant.now();
         var channelKey = ctx.getChannelKey();
         logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
         var future = networkSendOrchestrator.scheduleClose(ctx, channelSessionNumber, channelInteractionNum, atTime);

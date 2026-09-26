@@ -21,6 +21,9 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -104,6 +107,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     final TrackingKafkaConsumer trackingKafkaConsumer;
     private final ExecutorService kafkaExecutor;
+    private final ScheduledExecutorService keepAliveScheduler;
+    private final ScheduledFuture<?> keepAliveFuture;
     private final AtomicLong trafficStreamsRead;
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final ChannelContextManager channelContextManager;
@@ -164,6 +169,28 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
         isClosed = new AtomicBoolean(false);
+        // Background keepalive: submits poll(ZERO) to kafkaExecutor every keepAliveInterval.
+        // This prevents max.poll.interval.ms expiry when the main loop is blocked in batch
+        // processing (trafficToHttpTransactionAccumulator::accept can take minutes for large records).
+        keepAliveScheduler = Executors.newSingleThreadScheduledExecutor(
+            new DefaultThreadFactory("kafkaKeepAliveScheduler"));
+        long intervalMs = keepAliveInterval.toMillis();
+        keepAliveFuture = keepAliveScheduler.scheduleAtFixedRate(() -> {
+            if (!isClosed.get()) {
+                try {
+                    kafkaExecutor.submit(() -> {
+                        try {
+                            trackingKafkaConsumer.keepAlive();
+                        } catch (Exception e) {
+                            log.atWarn().setCause(e)
+                                .setMessage("Background keepalive poll failed").log();
+                        }
+                    });
+                } catch (java.util.concurrent.RejectedExecutionException e) {
+                    log.atTrace().setMessage("keepAlive submit rejected — executor shutting down").log();
+                }
+            }
+        }, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
         // Register callback: when partitions are truly lost, enqueue synthetic closes for their active connections
         trackingKafkaConsumer.setOnPartitionsTrulyLostCallback(this::enqueueTrafficSourceReaderInterruptedClosesForPartitions);
     }
@@ -429,6 +456,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     public void close() throws IOException, InterruptedException, ExecutionException {
         if (isClosed.compareAndSet(false, true)) {
+            keepAliveFuture.cancel(false);
+            keepAliveScheduler.shutdownNow();
             kafkaExecutor.submit(trackingKafkaConsumer::close).get();
             kafkaExecutor.shutdownNow();
         }

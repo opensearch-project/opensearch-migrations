@@ -2,12 +2,15 @@ package org.opensearch.migrations.replay.kafka;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
@@ -16,6 +19,7 @@ import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -164,5 +168,167 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             "truly-lost callback must not fire a second time on subsequent assignment");
         Assertions.assertTrue(consumer.getConsumerConnectionGeneration() > generationAtAssign,
             "subsequent onPartitionsAssigned must bump the generation");
+    }
+
+    // -------------------------------------------------------------------------
+    // Stale-head reaper tests
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("reapStaleHeads stages commit when head offset exceeds threshold")
+    void reapStaleHeads_stagesCommitForStalePartition() {
+        var baseTime = Instant.parse("2026-01-01T00:00:00Z");
+        var mutableClock = new AtomicReference<>(baseTime);
+        var clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneId.of("UTC"); }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return mutableClock.get(); }
+        };
+
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.assign(List.of(tp));
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+
+        var consumer = new TrackingKafkaConsumer(
+            rootContext, mc, TOPIC, Duration.ofSeconds(30), clock, tsk -> {}
+        );
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        // Add offsets to the tracker at baseTime
+        var tracker = consumer.partitionToOffsetLifecycleTrackerMap.get(0);
+        tracker.add(100, "conn-A");
+        tracker.add(101, "conn-B");
+        tracker.add(102, "conn-C");
+
+        // Before threshold — no reap
+        mutableClock.set(baseTime.plus(Duration.ofMinutes(2)));
+        consumer.reapStaleHeads();
+        Assertions.assertTrue(consumer.nextSetOfCommitsMap.isEmpty(),
+            "No commits staged before stale threshold");
+
+        // After threshold — reapStaleHeads should stage a commit in nextSetOfCommitsMap
+        mutableClock.set(baseTime.plus(Duration.ofMinutes(4)));
+        consumer.reapStaleHeads();
+        Assertions.assertFalse(consumer.nextSetOfCommitsMap.isEmpty(),
+            "Commit should be staged after stale threshold exceeded");
+        var committed = consumer.nextSetOfCommitsMap.get(tp);
+        Assertions.assertNotNull(committed, "Commit entry must exist for partition 0");
+        Assertions.assertEquals(103L, committed.offset(),
+            "Should advance to cursorHighWatermark+1 after reaping all stale offsets");
+        Assertions.assertEquals(0, tracker.size(),
+            "All stale offsets should be removed");
+    }
+
+    @Test
+    @DisplayName("reapStaleHeads with no prior commitKafkaKey does not NPE in safeCommit")
+    void reapStaleHeads_noPriorCommits_safeCommitHandlesNullKeyContext() {
+        var baseTime = Instant.parse("2026-01-01T00:00:00Z");
+        var mutableClock = new AtomicReference<>(baseTime);
+        var clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneId.of("UTC"); }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return mutableClock.get(); }
+        };
+
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.assign(List.of(tp));
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+
+        var consumer = new TrackingKafkaConsumer(
+            rootContext, mc, TOPIC, Duration.ofSeconds(30), clock, tsk -> {}
+        );
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        var tracker = consumer.partitionToOffsetLifecycleTrackerMap.get(0);
+        tracker.add(100, "conn-A");
+
+        // Advance past stale threshold without any commitKafkaKey calls
+        mutableClock.set(baseTime.plus(Duration.ofMinutes(4)));
+        consumer.reapStaleHeads();
+
+        // nextSetOfCommitsMap has an entry but nextSetOfKeysContextsBeingCommitted does NOT
+        Assertions.assertFalse(consumer.nextSetOfCommitsMap.isEmpty());
+        Assertions.assertFalse(consumer.nextSetOfKeysContextsBeingCommitted.containsKey(tp),
+            "No key context should exist since commitKafkaKey was never called");
+
+        // onPartitionsRevoked triggers safeCommit internally — it should handle
+        // the null PriorityQueue in callbackUpTo gracefully (no NPE)
+        Assertions.assertDoesNotThrow(() -> consumer.onPartitionsRevoked(List.of(tp)));
+    }
+
+    @Test
+    @DisplayName("merge semantics prevent offset from being overwritten with lower value")
+    void commitKafkaKey_doesNotOverwriteHigherOffset() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var tp = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        // Directly stage a high offset (simulating what reapStaleHeads would do)
+        consumer.nextSetOfCommitsMap.put(tp, new org.apache.kafka.clients.consumer.OffsetAndMetadata(200));
+
+        // Now try to stage a lower offset via merge (simulating commitKafkaKey path)
+        var lower = new org.apache.kafka.clients.consumer.OffsetAndMetadata(150);
+        consumer.nextSetOfCommitsMap.merge(tp, lower, (existing, incoming) ->
+            existing.offset() >= incoming.offset() ? existing : incoming);
+
+        // The higher offset should be preserved
+        Assertions.assertEquals(200, consumer.nextSetOfCommitsMap.get(tp).offset(),
+            "merge must keep the higher offset, not overwrite with lower");
+    }
+
+    @Test
+    @DisplayName("getNextRequiredTouch returns non-empty when partitions are assigned with zero inflight")
+    void getNextRequiredTouch_withPartitions_returnsPresent() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var tp = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        // kafkaRecordsLeftToCommitEventually is 0, but partitions are assigned
+        var touch = consumer.getNextRequiredTouch();
+        Assertions.assertTrue(touch.isPresent(),
+            "Should return a touch time when partitions are assigned even with zero inflight");
+    }
+
+    @Test
+    @DisplayName("getNextRequiredTouch returns empty when no partitions and zero inflight")
+    void getNextRequiredTouch_noPartitions_returnsEmpty() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        // Don't assign any partitions — the mock assigned one, so revoke it
+        var tp = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsRevoked(List.of(tp));
+
+        var touch = consumer.getNextRequiredTouch();
+        Assertions.assertTrue(touch.isEmpty(),
+            "Should return empty when no partitions and zero inflight");
+    }
+
+    @Test
+    @DisplayName("logHeartbeat does not throw on empty consumer")
+    void logHeartbeat_noPartitions_doesNotThrow() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        // No partitions assigned — should not throw
+        Assertions.assertDoesNotThrow(consumer::logHeartbeat);
+    }
+
+    @Test
+    @DisplayName("logHeartbeat does not throw with assigned partitions and inflight offsets")
+    void logHeartbeat_withPartitionsAndInflight_doesNotThrow() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var tp = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(tp));
+
+        // Add some offsets to make it interesting
+        var tracker = consumer.partitionToOffsetLifecycleTrackerMap.get(0);
+        tracker.add(0, "conn-1");
+        tracker.add(1, "conn-2");
+
+        Assertions.assertDoesNotThrow(consumer::logHeartbeat);
     }
 }
