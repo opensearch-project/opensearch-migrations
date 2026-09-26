@@ -417,7 +417,17 @@ public final class ReplayIntakeOwner {
         RequestLifecycleInput.RequestProcessingFinished finished
     ) {
         var state = partitions.get(finished.generation());
-        if (state == null || !state.hasRequest(finished.requestId())) {
+        if (state == null) {
+            metrics.staleGenerationInputIgnored(InputKind.REQUEST_PROCESSING_FINISHED);
+            return;
+        }
+        if (!state.hasRequest(finished.requestId())) {
+            if (state.cancellationState() == PartitionIntakeState.GenerationCancellationState.ACTIVE) {
+                throw new IllegalStateException(
+                    "active generation received processing completion for unknown request "
+                        + finished.requestId()
+                );
+            }
             metrics.staleGenerationInputIgnored(InputKind.REQUEST_PROCESSING_FINISHED);
             return;
         }
@@ -429,8 +439,17 @@ public final class ReplayIntakeOwner {
         RequestLifecycleInput.ConnectionRequestFinished finished
     ) {
         var state = partitions.get(finished.generation());
-        if (state == null
-            || !state.applyConnectionRequestFinishedInput(finished.requestId())) {
+        if (state == null) {
+            metrics.staleGenerationInputIgnored(InputKind.CONNECTION_REQUEST_FINISHED);
+            return;
+        }
+        if (!state.applyConnectionRequestFinishedInput(finished.requestId())) {
+            if (state.cancellationState() == PartitionIntakeState.GenerationCancellationState.ACTIVE) {
+                throw new IllegalStateException(
+                    "active generation received duplicate or impossible connection-request completion for "
+                        + finished.requestId()
+                );
+            }
             metrics.staleGenerationInputIgnored(InputKind.CONNECTION_REQUEST_FINISHED);
         }
     }
@@ -490,13 +509,13 @@ public final class ReplayIntakeOwner {
             metrics.staleGenerationInputIgnored(InputKind.CONNECTION_OWNER_FINISHED);
             return;
         }
-        if (!finished.connectionProcessingId().generation().equals(state.generation())) {
-            metrics.staleGenerationInputIgnored(InputKind.CONNECTION_OWNER_FINISHED);
-            return;
-        }
         if (state.cancellationState() == PartitionIntakeState.GenerationCancellationState.ACTIVE) {
             state.removeConnectionOwner(finished.connectionProcessingId());
             assemblySink.onConnectionOwnerFinished(finished.connectionProcessingId());
+            return;
+        }
+        if (!finished.connectionProcessingId().generation().equals(state.generation())) {
+            metrics.staleGenerationInputIgnored(InputKind.CONNECTION_OWNER_FINISHED);
             return;
         }
         applyConnectionTerminalAcknowledgement(
@@ -513,6 +532,12 @@ public final class ReplayIntakeOwner {
         if (state == null) {
             metrics.staleGenerationInputIgnored(InputKind.CONNECTION_CLEANUP_FINISHED);
             return;
+        }
+        if (state.cancellationState() == PartitionIntakeState.GenerationCancellationState.ACTIVE) {
+            throw new IllegalStateException(
+                "active generation received cancellation cleanup for "
+                    + finished.connectionProcessingId()
+            );
         }
         applyConnectionTerminalAcknowledgement(
             state,

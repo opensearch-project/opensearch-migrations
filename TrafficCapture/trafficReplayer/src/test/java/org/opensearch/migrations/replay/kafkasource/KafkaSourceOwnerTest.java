@@ -13,6 +13,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.opensearch.migrations.replay.identity.CancellationGrace;
@@ -71,6 +72,14 @@ class KafkaSourceOwnerTest {
     private boolean nextWaitConsumesTheWholeInterval;
     private final KafkaSourceInputQueue sourceInputs = new KafkaSourceInputQueue(wakeupController);
     private final RecordingMetrics commitMetrics = new RecordingMetrics();
+
+    @Test
+    void revocationGraceDefaultsToOneSecond() {
+        Assertions.assertEquals(
+            Duration.ofSeconds(1),
+            KafkaSourceOwner.DEFAULT_REVOCATION_GRACE
+        );
+    }
 
     @AfterEach
     void closeTelemetry() {
@@ -574,6 +583,92 @@ class KafkaSourceOwnerTest {
         Assertions.assertEquals(1, commitMetrics.recordsCommitted);
         Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
         commitMetrics.assertConservation();
+    }
+
+    @Test
+    void rebalanceDuringOrderlyShutdownNeverUpgradesItsGenerationsToForce() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
+        var owner = ownerFor(port);
+        assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+        var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        var generation1 = owner.partitionState(PARTITION_1).orElseThrow().generation();
+        drainIntake();
+
+        owner.beginOrderlyShutdown();
+        var initialShutdownInputs = drainIntake();
+        Assertions.assertEquals(
+            2,
+            initialShutdownInputs.stream()
+                .filter(ReplayIntakeInput.GracefulGenerationCancellation.class::isInstance)
+                .count()
+        );
+
+        port.scriptRebalanceDuringNextPoll(() -> {
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+            owner.onPartitionsLost(List.of(PARTITION_1));
+        });
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            drainIntake().stream()
+                .noneMatch(ReplayIntakeInput.ForceGenerationCancellation.class::isInstance),
+            "shutdown generations stay in unbounded grace across revoke and loss callbacks"
+        );
+
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation0));
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation1));
+        owner.runOnce();
+
+        Assertions.assertTrue(owner.isOrderlyShutdownReadyToClose());
+        owner.closeAfterOrderlyShutdown();
+        Assertions.assertTrue(port.isClosed());
+    }
+
+    @Test
+    void assignmentDuringOrderlyShutdownIsPausedAndReceivesShutdownGraceBeforeAnyRead() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var initialGeneration = assignAndGetGeneration(owner, port, PARTITION_0);
+        drainIntake();
+        owner.beginOrderlyShutdown();
+        drainIntake();
+
+        port.addAssignedPartition(PARTITION_1);
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsAssigned(List.of(PARTITION_1)));
+        owner.runOnce();
+
+        var assignedDuringShutdown = owner.partitionState(PARTITION_1).orElseThrow();
+        var assignmentInputs = drainIntake();
+        Assertions.assertFalse(assignedDuringShutdown.lifecycleAllowsIntake());
+        Assertions.assertTrue(port.isPaused(PARTITION_1));
+        Assertions.assertTrue(
+            assignmentInputs.stream().anyMatch(input ->
+                input instanceof ReplayIntakeInput.PartitionGenerationAssigned assigned
+                    && assigned.generation().equals(assignedDuringShutdown.generation())
+            )
+        );
+        Assertions.assertTrue(
+            assignmentInputs.stream().anyMatch(input ->
+                input instanceof ReplayIntakeInput.GracefulGenerationCancellation graceful
+                    && graceful.generation().equals(assignedDuringShutdown.generation())
+                    && graceful.grace() == CancellationGrace.Shutdown.INSTANCE
+            ),
+            "a late assignment must enter the same shutdown grace before it can read"
+        );
+
+        port.scriptPoll(Map.of(PARTITION_1, List.of(record(20))));
+        owner.runOnce();
+        Assertions.assertTrue(
+            drainIntake().stream().noneMatch(ReplayIntakeInput.PartitionRecordBatch.class::isInstance),
+            "shutdown cannot admit records from an assignment delivered during its drain"
+        );
+
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(initialGeneration));
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(
+            assignedDuringShutdown.generation()
+        ));
+        owner.runOnce();
+        Assertions.assertTrue(owner.isOrderlyShutdownReadyToClose());
     }
 
     /**
@@ -1527,6 +1622,12 @@ class KafkaSourceOwnerTest {
         // The scripted duration is what ends the wait: the commit "takes" the whole interval, so the deadline
         // passes because modelled work consumed it, not because the test slept.
         port.scriptCommitDuration(GRACE);
+        var gracefulCancellationQueuedBeforeCommit = new AtomicBoolean();
+        port.onObservation(call -> {
+            if (call.startsWith("commitSync")) {
+                gracefulCancellationQueuedBeforeCommit.set(intakeInputs.size() > 0);
+            }
+        });
         port.scriptRebalanceDuringNextPoll(() -> {
             sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
                 new KafkaRecordId(generation, 10)));
@@ -1546,6 +1647,10 @@ class KafkaSourceOwnerTest {
                 + " history: " + port.history()
         );
         Assertions.assertEquals(Map.of(PARTITION_0, 11L), boundedCommits.get(0).nextPositions());
+        Assertions.assertTrue(
+            gracefulCancellationQueuedBeforeCommit.get(),
+            "graceful generation cancellation must be accepted before any revocation commit is attempted"
+        );
         Assertions.assertTrue(
             boundedCommits.get(0).bound().compareTo(GRACE) <= 0,
             () -> "the commit must be bounded by the grace remaining, was " + boundedCommits.get(0).bound()

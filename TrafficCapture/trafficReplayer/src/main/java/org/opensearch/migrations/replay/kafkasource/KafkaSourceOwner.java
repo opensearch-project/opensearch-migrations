@@ -42,6 +42,8 @@ import org.apache.kafka.common.errors.WakeupException;
  */
 @Slf4j
 public final class KafkaSourceOwner {
+    public static final Duration DEFAULT_REVOCATION_GRACE = Duration.ofSeconds(1);
+
 
     public enum AbandonmentCause {
         REJECTED,
@@ -744,7 +746,7 @@ public final class KafkaSourceOwner {
     private void beginGeneration(TopicPartition topicPartition) {
         var generation = new PartitionGenerationId(topicPartition, nextGenerationSequence++);
         var state = new PartitionSourceState(generation);
-        if (protocolViolationDetected) {
+        if (protocolViolationDetected || orderlyShutdownStarted) {
             state.endIntake();
         }
         // A newly assigned generation cannot reuse mutable state from the previous one, so both the state and
@@ -757,6 +759,15 @@ public final class KafkaSourceOwner {
             state.setPriorGenerationCleanupPending(true);
         }
         submitRequired(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+        if (orderlyShutdownStarted) {
+            cleanupOutstanding
+                .computeIfAbsent(topicPartition, ignored -> new LinkedHashSet<>())
+                .add(generation);
+            submitRequired(new ReplayIntakeInput.GracefulGenerationCancellation(
+                generation,
+                CancellationGrace.Shutdown.INSTANCE
+            ));
+        }
     }
 
     /**
@@ -774,6 +785,10 @@ public final class KafkaSourceOwner {
     public void onPartitionsRevoked(Collection<TopicPartition> revoked) throws InterruptedException {
         wakeupController.enterRebalanceCallback();
         try {
+            if (orderlyShutdownStarted) {
+                revoked.forEach(this::retireGeneration);
+                return;
+            }
             var generations = new ArrayList<PartitionGenerationId>();
             for (var topicPartition : revoked) {
                 var state = partitions.get(topicPartition);
@@ -1081,6 +1096,10 @@ public final class KafkaSourceOwner {
     public void onPartitionsLost(Collection<TopicPartition> lost) {
         wakeupController.enterRebalanceCallback();
         try {
+            if (orderlyShutdownStarted) {
+                lost.forEach(this::retireGeneration);
+                return;
+            }
             for (var topicPartition : lost) {
                 var state = partitions.get(topicPartition);
                 if (state != null) {

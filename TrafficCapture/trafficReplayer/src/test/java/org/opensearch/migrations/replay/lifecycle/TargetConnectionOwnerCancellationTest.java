@@ -45,6 +45,11 @@ class TargetConnectionOwnerCancellationTest {
         ));
         fixture.eventLoop.runUntilIdle();
 
+        Assertions.assertEquals(
+            0,
+            fixture.eventLoop.pendingTimers(),
+            "shutdown grace is host-bounded and must not install a process-local cancellation deadline"
+        );
         Assertions.assertEquals(1, fixture.tupleSink.flushes, "shutdown grace must flush on entry");
         Assertions.assertEquals(0, fixture.targetChannel.attempt(0).abortCalls);
         Assertions.assertEquals(

@@ -683,6 +683,70 @@ class RecordAssociationAccumulatorTest {
         Assertions.assertTrue(sink.forceCancellations.isEmpty());
     }
 
+    @Test
+    void activeGenerationRejectsDuplicateAndImpossibleLifecycleInputs() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, read(1, "GET / HTTP/1.1\r\n\r\n"), endOfMessage(2))
+        );
+        assignAndApply(script);
+        var generation = script.generation(0);
+        var connection = sink.reconstituted.get(0).connectionProcessingId();
+        var requestId = new ReplayRequestId(connection, 0);
+
+        owner.applyOnCallingThread(new RequestLifecycleInput.ConnectionRequestFinished(
+            generation,
+            requestId
+        ));
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> owner.applyOnCallingThread(new RequestLifecycleInput.ConnectionRequestFinished(
+                generation,
+                requestId
+            )),
+            "an active generation must reject duplicate target-turn completion"
+        );
+
+        var unknownRequest = new ReplayRequestId(connection, 99);
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> owner.applyOnCallingThread(new RequestLifecycleInput.RequestProcessingFinished(
+                generation,
+                unknownRequest
+            )),
+            "an active generation must reject processing completion for an unknown request"
+        );
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> owner.applyOnCallingThread(new ReplayIntakeInput.ConnectionCleanupFinished(
+                generation,
+                connection
+            )),
+            "cancellation cleanup is impossible while a generation remains active"
+        );
+
+        var mismatchedGeneration = new org.opensearch.migrations.replay.identity.PartitionGenerationId(
+            generation.topicPartition(),
+            generation.localSequence() + 1
+        );
+        var mismatchedConnection = new ConnectionProcessingId(
+            mismatchedGeneration,
+            connection.capturedConnectionId(),
+            connection.localSequence()
+        );
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> owner.applyOnCallingThread(new ReplayIntakeInput.ConnectionOwnerFinished(
+                generation,
+                mismatchedConnection
+            )),
+            "an active generation must reject a connection-owner completion carrying another generation"
+        );
+    }
+
     /**
      * {@code procCommit §6.1}: a close-only record finishes once source assembly settles it. {@code §9.3}
      * says no connection owner is created merely to process that close when no request was reconstituted.

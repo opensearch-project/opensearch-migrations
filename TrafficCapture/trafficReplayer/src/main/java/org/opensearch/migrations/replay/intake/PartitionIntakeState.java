@@ -41,8 +41,6 @@ import lombok.NonNull;
  * <p>Every map is changed only by the replay-intake thread, which {@link OwnerThreadGuard} enforces on each
  * mutator. A record completing on a Netty loop instead would race the Kafka source's commit prefix.
  *
- * <p>REBUILD-LIMBO-NOTE(G8): {@code §6}'s {@code cancellationState} and {@code GenerationCleanupTracker},
- * which are {@code §15.2} and {@code §15.3}.
  */
 public final class PartitionIntakeState {
 
@@ -209,10 +207,7 @@ public final class PartitionIntakeState {
     private final BrokerTimeConfiguration brokerTimeConfiguration;
     /** Emits {@code RecordProcessingFinished} for a record whose work is done ({@code §7} step 9). */
     private final Consumer<KafkaRecordId> recordCompletionSink;
-    /**
-     * REBUILD-LIMBO-NOTE(G8): generation cleanup decrements this for every tracker it removes without ordinary
-     * completion, so the process-wide gauge remains balanced when a generation is cancelled.
-     */
+    /** Generation cleanup decrements this for each tracker removed without ordinary completion. */
     private final IntConsumer activeRecordTrackersChanged;
     private final Runnable recordTrackerRetired;
     private final IntConsumer retryReadySupplyChanged;
@@ -725,7 +720,6 @@ public final class PartitionIntakeState {
         recordTrackersByKafkaRecordId.clear();
         for (var i = 0; i < trackerCount; i++) {
             activeRecordTrackersChanged.accept(-1);
-            recordTrackerRetired.run();
         }
         writerTimeStateByWriterNodeId.clear();
         activeSourceConnectionsByCapturedConnectionId.clear();
