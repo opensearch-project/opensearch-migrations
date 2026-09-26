@@ -664,6 +664,12 @@ class KafkaSourceOwnerTest {
         );
 
         sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(initialGeneration));
+        owner.runOnce();
+        Assertions.assertFalse(
+            owner.isOrderlyShutdownReadyToClose(),
+            "a generation assigned during shutdown remains part of the close gate until its exact cleanup"
+        );
+
         sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(
             assignedDuringShutdown.generation()
         ));
@@ -706,6 +712,60 @@ class KafkaSourceOwnerTest {
         Assertions.assertFalse(
             successor.isPriorGenerationCleanupPending(),
             "the matching cleanup completion must release it"
+        );
+    }
+
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficSourceReaderInterruptedCloseWiringTest.emptyBatchReturnedWhileTerminationObligationIsPending -> KafkaSourceOwnerTest.aSuccessorReadsOnlyAfterEveryEarlierGenerationFinishesCleanup
+    // TrafficSourceReaderInterruptedCloseAccountingTest.realReadsResumeOnlyAfterEveryTerminationObligationSettles -> KafkaSourceOwnerTest.aSuccessorReadsOnlyAfterEveryEarlierGenerationFinishesCleanup
+    // REBUILD-TRACE-END(G8,target)
+    @Test
+    void aSuccessorReadsOnlyAfterEveryEarlierGenerationFinishesCleanup() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var firstGeneration = assignAndGetGeneration(owner, port, PARTITION_0);
+        drainIntake();
+
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+        var secondGeneration = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        drainIntake();
+
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+        var successor = owner.partitionState(PARTITION_0).orElseThrow();
+        drainIntake();
+
+        Assertions.assertTrue(successor.isAssignmentBootstrapPending());
+        Assertions.assertTrue(
+            successor.outstandingRequest().isEmpty(),
+            "the assignment bootstrap alone must make the successor readable after cleanup"
+        );
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(firstGeneration));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            successor.isPriorGenerationCleanupPending(),
+            "cleanup of only one predecessor must leave the successor gated on every other predecessor"
+        );
+        Assertions.assertTrue(port.isPaused(PARTITION_0));
+        Assertions.assertTrue(
+            drainIntake().stream().noneMatch(ReplayIntakeInput.PartitionRecordBatch.class::isInstance),
+            "real reads cannot resume while any earlier generation still has cleanup outstanding"
+        );
+
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(secondGeneration));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+
+        Assertions.assertFalse(successor.isPriorGenerationCleanupPending());
+        Assertions.assertEquals(
+            1,
+            drainIntake().stream().filter(ReplayIntakeInput.PartitionRecordBatch.class::isInstance).count(),
+            "clearing the last cleanup obligation must release the bootstrap without another demand signal"
         );
     }
 

@@ -39,6 +39,7 @@ import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
@@ -91,7 +92,7 @@ class TrafficReplayerTopLevelConstructionTest {
     private static final TopicPartition TOPIC_PARTITION = new TopicPartition("traffic", 0);
 
     @Test
-    void realOwnerQueuesCarrySourceAdmissionAndCompletionUsingOneOperationRegistry() {
+    void realOwnerQueuesCarrySourceAdmissionAndCompletionUsingOneOperationRegistry() throws Exception {
         var clock = new FakeClock();
         var eventLoop = new TestEventLoop(clock);
         var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
@@ -202,8 +203,14 @@ class TrafficReplayerTopLevelConstructionTest {
                 rootContext,
                 configuration,
                 Duration.ZERO,
-                Duration.ofSeconds(1),
                 fatalFailures::add
+            );
+            var cancellationGrace = KafkaSourceOwner.class.getDeclaredField("cancellationGrace");
+            cancellationGrace.setAccessible(true);
+            Assertions.assertEquals(
+                KafkaSourceOwner.DEFAULT_REVOCATION_GRACE,
+                cancellationGrace.get(replayer.sourceOwner()),
+                "the real default construction path must wire the one-second revocation grace"
             );
             try {
                 replayer.startIntake();
@@ -283,6 +290,14 @@ class TrafficReplayerTopLevelConstructionTest {
             } finally {
                 replayer.close();
             }
+            Assertions.assertTrue(
+                replayer.intakeOwner().termination().toCompletableFuture().isDone(),
+                "a fully drained orderly shutdown must stop replay intake before returning"
+            );
+            Assertions.assertTrue(
+                consumer.closed(),
+                "a fully drained orderly shutdown must close the Kafka consumer before returning"
+            );
         }
     }
 

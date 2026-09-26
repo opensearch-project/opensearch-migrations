@@ -73,6 +73,9 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
      * fireAccumulationsCallbacksAndClose is called, so onTrafficStreamsExpired/handleEndOfResponse
      * is never invoked for the in-flight request.
      */
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseWiringTest.trafficSourceReaderInterruptedClose_completesFinishedAccumulatingResponseFuture -> PartitionIntakeStateTest.forceCancellationUsesTheSharedSupplyTransitionExactlyOnceAndLateRetryCannotReadd
+// REBUILD-TRACE-END(G8,source)
 // REBUILD-LIMBO-START(G11)
 /*
     @Test
@@ -189,6 +192,9 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
      * This test is a placeholder — the full verification requires integration with ReplayEngine.
      * The key assertion: TRAFFIC_SOURCE_READER_INTERRUPTED status does NOT skip replayEngine.closeConnection().
      */
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseWiringTest.trafficSourceReaderInterruptedClose_doesNotSkipReplayEngineClose -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+// REBUILD-TRACE-END(G8,source)
 // REBUILD-LIMBO-START(G11)
 /*
     @Test
@@ -256,6 +262,9 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
      * After draining trafficSourceReaderInterruptedCloseQueue, reads remain gated while an
      * attributable source termination obligation is unresolved.
      */
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseWiringTest.emptyBatchReturnedWhileTerminationObligationIsPending -> KafkaSourceOwnerTest.aSuccessorReadsOnlyAfterEveryEarlierGenerationFinishesCleanup
+// REBUILD-TRACE-END(G8,source)
 // REBUILD-LIMBO-START(G11)
 /*
     @Test

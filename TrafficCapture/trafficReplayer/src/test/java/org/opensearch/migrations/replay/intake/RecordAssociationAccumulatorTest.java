@@ -480,6 +480,12 @@ class RecordAssociationAccumulatorTest {
      * Refactors the stale-accumulation and interrupted-close regressions onto the typed generation boundary.
      * Old assembly is removed before a successor can apply the same captured connection identity.
      */
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // StaleAccumulationCancelOnRejoinTest.revokeAndReassign_synthClosesBeforeNewGenRecord -> RecordAssociationAccumulatorTest.cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput
+    // StaleAccumulationCancelOnRejoinKafkaTest.revokeAndReassign_realKafka_synthClosesBeforeNewGenRecord -> RecordAssociationAccumulatorTest.cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput
+    // PartitionRevocationStaleStateTest.accumulator_staleAccumulationDiscardedOnGenerationBump -> RecordAssociationAccumulatorTest.cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput
+    // TrafficSourceReaderInterruptedCloseAccountingTest.revokedGenerationWithoutLiveConnectionsRetiresImmediatelyAfterRevocation -> RecordAssociationAccumulatorTest.cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput
+    // REBUILD-TRACE-END(G8,target)
     @Test
     void cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput() {
         var predecessor = new RecordScript(TOPIC).addTraffic(
@@ -561,6 +567,15 @@ class RecordAssociationAccumulatorTest {
         );
     }
 
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // PartitionRevocationStaleStateTest.accumulatorHandlesTrafficSourceReaderInterruptedClose -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+    // TrafficSourceReaderInterruptedCloseWiringTest.trafficSourceReaderInterruptedClose_doesNotSkipReplayEngineClose -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+    // TrafficSourceReaderInterruptedCloseAccountingTest.revokedGenerationRetiresOnlyAfterSyntheticSessionTerminationIsAcknowledged -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+    // TrafficSourceReaderInterruptedCloseAccountingTest.terminationAcknowledgementMatchesANonZeroSessionNumber -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+    // TrafficSourceReaderInterruptedCloseAccountingTest.terminationAcknowledgementIsIdempotentWhenRegularCloseArrivesFirst -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+    // TrafficSourceReaderInterruptedCloseAccountingTest.acknowledgementForAnotherGenerationCannotSettleTheObligation -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+    // TrafficSourceReaderInterruptedCloseAccountingTest.oneSessionAcknowledgementSettlesEveryPartitionScopedObligation -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+    // REBUILD-TRACE-END(G8,target)
     @Test
     void cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords() {
         var script = new RecordScript(TOPIC).addTraffic(

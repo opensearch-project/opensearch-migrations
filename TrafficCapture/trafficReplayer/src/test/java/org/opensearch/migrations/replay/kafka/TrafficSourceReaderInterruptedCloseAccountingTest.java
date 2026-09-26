@@ -53,6 +53,13 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
 
     private static final String TOPIC = "test-topic";
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseAccountingTest.revokedGenerationWithoutLiveConnectionsRetiresImmediatelyAfterRevocation -> RecordAssociationAccumulatorTest.cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void revokedGenerationWithoutLiveConnectionsRetiresImmediatelyAfterRevocation() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
@@ -81,6 +88,13 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseAccountingTest.revokedGenerationRetiresOnlyAfterSyntheticSessionTerminationIsAcknowledged -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void revokedGenerationRetiresOnlyAfterSyntheticSessionTerminationIsAcknowledged() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
@@ -150,6 +164,9 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
      * The source obligation is keyed by source connection and generation, so the actual session
      * number discovered by the accumulator cannot cause a missed acknowledgement.
      */
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseAccountingTest.terminationAcknowledgementMatchesANonZeroSessionNumber -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+// REBUILD-TRACE-END(G8,source)
 // REBUILD-LIMBO-START(G11)
 /*
     @Test
@@ -173,6 +190,13 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseAccountingTest.terminationAcknowledgementIsIdempotentWhenRegularCloseArrivesFirst -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void terminationAcknowledgementIsIdempotentWhenRegularCloseArrivesFirst() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
@@ -196,6 +220,13 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseAccountingTest.acknowledgementForAnotherGenerationCannotSettleTheObligation -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void acknowledgementForAnotherGenerationCannotSettleTheObligation() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
@@ -217,6 +248,13 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseAccountingTest.oneSessionAcknowledgementSettlesEveryPartitionScopedObligation -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void oneSessionAcknowledgementSettlesEveryPartitionScopedObligation() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
@@ -241,6 +279,13 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficSourceReaderInterruptedCloseAccountingTest.realReadsResumeOnlyAfterEveryTerminationObligationSettles -> KafkaSourceOwnerTest.aSuccessorReadsOnlyAfterEveryEarlierGenerationFinishesCleanup
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void realReadsResumeOnlyAfterEveryTerminationObligationSettles() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
