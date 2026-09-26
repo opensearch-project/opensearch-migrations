@@ -21,16 +21,80 @@
 # This cannot verify that the owner actually approved a row; nothing mechanical can. What it removes is the
 # failure mode that happened: an edit going in with no record of a decision at all.
 #
-# Usage: tools/verify-design-authorization.sh [base-ref]   (default: docs/captureAndReplay/APPROVED-AT)
+# History reconstruction has one narrow exception. An owner-approved abandoned or superseded history wave
+# may combine design and Java so discarded experiments occupy one obvious commit instead of chronically
+# polluting the retained history. The exception is opt-in per invocation through an exact full-SHA allowlist.
+# Default milestone and pre-push invocations remain strict.
+#
+# Usage:
+#   tools/verify-design-authorization.sh [base-ref]
+#   tools/verify-design-authorization.sh [base-ref] --allow-history-wave-mixes <full-sha-file>
+# The base defaults to docs/captureAndReplay/APPROVED-AT.
 
 set -u -o pipefail
 
 cd "$(git rev-parse --show-toplevel)" || exit 2
+BASE=""
+MIXED_ALLOWLIST=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --allow-history-wave-mixes)
+            if [ "$#" -lt 2 ] || [ -n "$MIXED_ALLOWLIST" ]; then
+                echo "FAIL: --allow-history-wave-mixes requires exactly one file" >&2
+                exit 2
+            fi
+            MIXED_ALLOWLIST="$2"
+            shift 2
+            ;;
+        -*)
+            echo "FAIL: unknown option '$1'" >&2
+            exit 2
+            ;;
+        *)
+            if [ -n "$BASE" ]; then
+                echo "FAIL: multiple base refs supplied" >&2
+                exit 2
+            fi
+            BASE="$1"
+            shift
+            ;;
+    esac
+done
 # Defaults to the settled-design commit recorded in docs/captureAndReplay/APPROVED-AT, so the corpus own
 # authoring history is not read as implementation-era edits.
-BASE="${1:-$(head -1 docs/captureAndReplay/APPROVED-AT)}"
+BASE="${BASE:-$(head -1 docs/captureAndReplay/APPROVED-AT)}"
 DESIGN_DIR="docs/captureAndReplay"
 REGISTER="docs/replayerRebuildStatus.md"
+
+normalized_allowlist=""
+used_allowlist=""
+cleanup() {
+    [ -z "$normalized_allowlist" ] || rm -f "$normalized_allowlist"
+    [ -z "$used_allowlist" ] || rm -f "$used_allowlist"
+}
+trap cleanup EXIT
+
+if [ -n "$MIXED_ALLOWLIST" ]; then
+    if [ ! -f "$MIXED_ALLOWLIST" ]; then
+        echo "FAIL: history-wave mixed-commit allowlist does not exist: $MIXED_ALLOWLIST" >&2
+        exit 2
+    fi
+    normalized_allowlist=$(mktemp "${TMPDIR:-/tmp}/design-mixed-allowlist.XXXXXX")
+    used_allowlist=$(mktemp "${TMPDIR:-/tmp}/design-mixed-used.XXXXXX")
+    sed 's/[[:space:]]*#.*$//; /^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//' \
+        "$MIXED_ALLOWLIST" > "$normalized_allowlist"
+    invalid=$(grep -Ev '^[0-9a-f]{40}$' "$normalized_allowlist" || true)
+    if [ -n "$invalid" ]; then
+        echo "FAIL: history-wave allowlist entries must be exact lowercase 40-character SHAs:" >&2
+        printf '%s\n' "$invalid" >&2
+        exit 2
+    fi
+    duplicate=$(sort "$normalized_allowlist" | uniq -d | head -1)
+    if [ -n "$duplicate" ]; then
+        echo "FAIL: duplicate history-wave allowlist entry: $duplicate" >&2
+        exit 2
+    fi
+fi
 
 if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then
     echo "FAIL: cannot resolve base ref '$BASE'" >&2
@@ -83,28 +147,34 @@ for file in $changed; do
     fi
 done
 
-# A design edit sharing a commit with implementation is not itself a rule violation, but it is how one hides.
-#
-# Already-pushed commits cannot be un-mixed without rewriting shared history, so known ones are listed here with
-# their reason. The list is deliberately explicit and deliberately short: a check that stays red gets ignored,
-# and an exemption nobody can see is worse than no check. Adding to it for a *new* commit is not a remedy.
-# Empty, and that is the point: the one entry this list ever held was split into a design commit and a code
-# commit during the 2026-09-24 history consolidation, so the exemption has no subject. A stale exemption is
-# worse than a visible violation, because it silently widens what the check permits.
-ACKNOWLEDGED_MIXED=""
 for commit in $(git rev-list "$merge_base"..HEAD -- "$DESIGN_DIR"); do
-    short=$(git rev-parse --short "$commit")
-    if printf '%s' "$ACKNOWLEDGED_MIXED" | grep -q "$short"; then
-        echo "  acknowledged mixed commit: $(git log -1 --format='%h %s' "$commit")"
-        continue
-    fi
     if git show --name-only --format= "$commit" | grep -q '^TrafficCapture/.*\.java$'; then
+        subject=$(git log -1 --format='%s' "$commit")
+        treatment=$(git log -1 --format='%B' "$commit" \
+            | grep -E '^History treatment: (abandoned|superseded)\.$' || true)
+        if [ -n "$normalized_allowlist" ] \
+            && grep -Fxq "$commit" "$normalized_allowlist" \
+            && printf '%s\n' "$subject" | grep -Eq '^History wave \((abandoned|superseded)\): ' \
+            && [ -n "$treatment" ]; then
+            echo "  owner-allowed history-wave mix: $(git log -1 --format='%h %s' "$commit")"
+            printf '%s\n' "$commit" >> "$used_allowlist"
+            continue
+        fi
         echo "  MIXED COMMIT: $(git log -1 --format='%h %s' "$commit")"
         echo "                changes a design document and Java in one commit, where a reviewer looking at"
         echo "                code will not expect a design change"
         mixed=$((mixed + 1))
     fi
 done
+
+if [ -n "$normalized_allowlist" ]; then
+    stale=$(comm -23 <(sort "$normalized_allowlist") <(sort -u "$used_allowlist"))
+    if [ -n "$stale" ]; then
+        echo "  STALE OR INVALID HISTORY-WAVE ALLOWLIST ENTRIES:"
+        printf '    %s\n' $stale
+        mixed=$((mixed + 1))
+    fi
+fi
 
 echo
 if [ "$unrecorded" -ne 0 ] || [ "$mixed" -ne 0 ]; then

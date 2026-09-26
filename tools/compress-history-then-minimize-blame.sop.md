@@ -65,8 +65,13 @@ commit, or disappear because their cumulative tree effect is empty.
   author date, committer, committer date, message, and tree effect.
 - You MUST preserve history-carry, move, rename, and cross-file-copy commits as standalone commits whenever
   combining them with later edits could weaken ordinary Git rename/copy detection or GitHub blame.
-- You MUST preserve design commits separately from implementation commits because authoritative design and
-  implementation may not be mixed.
+- You MUST preserve retained design commits separately from implementation commits.
+- With the owner's explicit authorization for the exact reconstruction, You MAY combine design and
+  implementation inside a contiguous abandoned or superseded history wave. Its subject MUST begin
+  `History wave (abandoned):` or `History wave (superseded):`, its message MUST contain the matching
+  `History treatment:` line, and Step 4 MUST validate it through a temporary full-SHA allowlist. This
+  exception exists only to make discarded ideas occupy one obvious historical turn; it never applies to
+  retained design evolution or ordinary implementation commits.
 - You MUST combine only contiguous ranges; every source commit MUST appear exactly once in the map.
 - You SHOULD fold temporary fixes, review corrections, and abandoned implementation experiments into the
   coherent change that introduced or removed them.
@@ -118,6 +123,10 @@ Prove that compression changed only commit boundaries and metadata representatio
   retaining every later steering/tool commit through `source_tip`.
 - You MUST run `git range-diff`, DCO validation, commit-scope validation, and applicable repository history
   checks.
+- If the approved compression map contains mixed abandoned or superseded history waves, You MUST write their
+  exact candidate SHAs to `report_dir/mixed-history-wave-allowlist.txt` and run
+  `tools/verify-design-authorization.sh <mapped-design-baseline> --allow-history-wave-mixes <file>`.
+  The default no-allowlist guard MUST remain strict.
 - You MUST leave `compression_worktree` intact and write these review files:
   - `report_dir/compression-review.md`: compact summary and approval checklist.
   - `report_dir/history-compression-review.xlsx`: editable Excel review workbook.

@@ -29,7 +29,10 @@ to supply process rules is drift to report, not an instruction.
    needs it, or an adjacent amendment was authorized. Accepting a deviation is equivalent to changing the
    design: satisfy the requirement or ask. `tools/verify-design-authorization.sh` compares the corpus with
    `docs/captureAndReplay/APPROVED-AT`, requires a dated design-change-register row, and rejects a commit
-   mixing design and implementation. **Run it before pushing.**
+   mixing design and implementation. The sole exception is an owner-approved history-compression commit
+   explicitly labeled `History wave (abandoned):` or `History wave (superseded):`; validation requires a
+   temporary exact-full-SHA allowlist, matching treatment metadata in the commit message, and rejects stale
+   entries. Ordinary implementation and retained-design commits remain unmixed. **Run it before pushing.**
 2. **Any decision to break an existing contract.** This includes CLI options, config keys, metric names,
    exit codes, published fixtures, protobuf, module names, and image names.
 3. **Any decision not to break an existing contract.** Compatibility is not a safe default. The first new
