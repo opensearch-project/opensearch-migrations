@@ -780,6 +780,11 @@ closed explicitly. Preserve a stable integer worker index and pass it to deploye
 S3 object naming. Delete G5's per-connection transformer/sink creation and closure when the worker pool is
 wired. `TupleWriter` and `TupleWriteResult` are already live G5 types, not G9 shells.
 
+Diagnostic proxy → Kafka → deployed replayer → target smoke may begin once late G9 has one coherent committed
+startup checkpoint. It is an early interoperability and observability probe, not G9 acceptance and not a
+substitute for G9.5 or G10. Record what it exposes; formal agent-driven reproduction, correction, and E2E
+acceptance belong to G10.
+
 **Exit:** killing a target event loop under load yields exit code 80 with bounded hook time and a thread
 dump at the watchdog bound, and cannot hang; every retired deployed option parses, warns, has no
 behavioral effect, and does not fail as an unrecognized key; the already-integrated replay application from
@@ -789,21 +794,89 @@ queue construction; configured startup selects every preserved replay-pipeline m
 changing its semantics; the bounded writer workers retain stable sink indices and G5's temporary
 per-connection writer placement is gone. Covers `D13`, `D14`; contributes `R1`, `R19`.
 
-### G9.5 — Full correctness review at production-complete
+### G9.5 — Production-complete audits and full correctness review
 
 **Design refs:** the nine safety arguments `procCommit §12:1448-1530` are the checklist — each is a
 proof the implementation must not have invalidated. Also `captureAndReplayArchitecture §14:1308-1403`
 for the ten system-level arguments. The obligation and required-test inventories to check against are the
 `Defined in` and `Required tests` columns of `replayerRebuildStatus.md`.
 
-The production code is now implementation-complete and no test triage has happened yet. **One deep
-correctness review of the whole implementation against the design** — the only unbounded-scope review in
-the process, per `../AGENTS.md` §3.2, and placed here deliberately because this is the first moment a
-complete artifact exists to review.
+The first G9.5 activity is the two-stage history preparation defined by
+`../tools/compress-history-then-minimize-blame.sop.md`. It first creates a byte-identical compressed candidate
+stack that folds abandoned implementation churn and fixups into coherent commits, preserves blame-sensitive
+carry/move commits, and corrects DCO trailers. It then stops for owner confirmation. Only after the owner
+approves the exact compressed candidate SHA does the task run the minimal-delta and history-reconstruction
+sweep defined by `../TrafficCapture/trafficReplayer/tools/minimizeBlameChangesTask.md`, while every retained
+source body and trace record still exists. The sweep replaces recreated inherited code
+with the narrowest design-correct adaptation of its predecessor and prepares a candidate commit stack with
+temporary fixes folded into the commits they repair. It does not change behavior to reduce a diff, preserve a
+legacy concept to improve blame, or force-update the active branch without owner approval.
+The sweep enumerates every surviving added line or replaced line range in every changed Java file in the
+repository, including replayer and proxy production code, tests, Java fixtures, and Java tooling, against one
+exact current upstream-main commit. Proxy Java is included only for source shaping and history preservation;
+this G9.5 activity does not implement PA work, change proxy behavior, or make proxy design or contract
+decisions. For each changed hunk, it asks whether an inherited method or coherent method slice in the same
+file, limbo, deleted rebuild code, another file, or history should have been its starting point. When so, it
+moves, copies, or promotes that predecessor into the design-correct live location before applying the narrow
+adaptation; a hunk combining multiple predecessors is split into coherent methods where needed to preserve
+each source. It does not inventory unchanged members.
+The diff is generated with rename and copy detection and supplies a completeness index, not proof that its
+added lines are net-new. Pinning means reconstructed Git ancestry and ordinary blame, not a trace comment.
+Baseline `2fe4538a` owns trace eligibility; current upstream main supplies the latest inherited code and
+history whose post-baseline drift must be preserved or explicitly dispositioned.
 
-Reviewed as a whole rather than as a diff: the owner boundaries, the commit-authority path end to end,
-every `R1`–`R19` obligation, and every `D1`–`D18` behavior confirmed absent. Findings triaged and brought
-to the owner before `G10` burns time debugging a rig against code with a known structural defect.
+The coordinator freezes one explicitly bounded original commit list and builds one isolated candidate tree
+from oldest to newest. Hunk provenance is computed once and reused; the full history is not rescanned for
+each commit in the approved compressed stack. After every candidate commit,
+`../tools/java-structural-equalizer.py compare-commit-pair` compares the
+repository-wide union of changed Java paths with the cumulative original endpoint represented by that commit
+before replay may continue. G9.5 does not pass `--root`; a narrowed comparison could omit proxy or another
+changed Java area. Syntactically invalid `.java` fixtures use an exact-content digest fallback rather than
+being omitted. The equalizer
+removes comments, normalizes tokens, and sorts order-insensitive imports, methods, uninitialized fields, and
+nested types while retaining order-sensitive initialization, enum, record, and method-body structure. A
+mismatch blocks the next commit. When several temporary-fix commits are folded into one candidate commit, the
+gate compares that candidate with the endpoint of the contiguous original range.
+
+After the candidate exists, the coordinator records its exact production-complete commit and launches three
+independent direct-Claude CLI, read-only review lanes in parallel. Every lane is pinned to that same minimized
+commit in its own read-only `/private/tmp` worktree and has its own fresh named session. The active branch is
+not force-updated while these reviews run. The sweep and the following reviews are activities inside G9.5,
+not additional milestones:
+
+1. **Bounded migration/disposition audit.** Independently reconstruct responsibility disposition from
+   baseline `2fe4538aef16eafa098545e76545873335bf2d11`, rather than accepting trace comments or the register as
+   proof. Classify carried, dropped, refactored, unchanged, retired, and genuinely net-new responsibilities;
+   reconcile the reconstruction with every relevant `REBUILD-TRACE`, `REBUILD-LIMBO`, and status row; trace
+   live reachability with limbo omitted; and inspect move/copy history plus ordinary and copy-diagnostic blame
+   for lost attribution, duplicated inherited implementations, missing dispositions, or misleading mappings.
+2. **Bounded test-evidence delta audit.** Compare the production-complete test assertions and behaviors with
+   both baseline `2fe4538aef16eafa098545e76545873335bf2d11` and the exact current upstream-main commit. Map the
+   finite required-test cases in the cited designs and the live-register test obligations to executable
+   evidence. There is no coverage-percentage target. Identify weakened, dropped, or silently changed
+   assertions; inherited behavior without replacement evidence; tests or fakes that cannot fail; violations
+   of the deterministic-versus-real-channel harness split; and missing or ineffective falsification.
+3. **Whole-design correctness review.** Run the one deep review of the complete implementation against the
+   authoritative design under `../AGENTS.md` §3.2. This remains the process's sole unbounded-scope review.
+   Review the owner boundaries, commit-authority path end to end, every `R1`–`R19` obligation, every
+   `D1`–`D18` behavior confirmed absent, and the safety arguments cited above.
+
+The coordinator verifies findings, reports them to the owner, repairs every verified design-conformance
+defect in G9.5, and resumes each affected lane in its existing named session. Any production correction
+invalidates every lane whose scope it touches. Before G9.5 exits, all three final verdicts must name the same
+exact corrected production commit; resume an otherwise stale lane at least far enough to verify that the
+intervening production diff does not affect its bounded scope.
+
+**Exit:** the reviewed minimal-delta candidate and old-to-new commit mapping are recorded; ordinary blame
+retains inherited attribution wherever the design permits; the three lane reports and dispositions are
+recorded; every verified design-conformance defect is closed; non-conformance findings are triaged once;
+every silence or contract decision is escalated; and all three final verdicts are pinned to one identical
+production-complete candidate. The sweep report accounts for every surviving added or replaced Java hunk
+repository-wide, names its inherited starting point or explicit net-new disposition, and accounts for every applicable
+post-baseline upstream-main change. Every candidate commit has a passing structural-equalizer result against
+its mapped original cumulative endpoint. The coordinator pushes the candidate branch and supplies the exact
+guarded replacement command, but only the owner may approve replacing the active branch. G10 cannot begin
+until the reviewed candidate is accepted.
 
 ### G10 — The fuse
 
@@ -813,8 +886,9 @@ to the owner before `G10` burns time debugging a rig against code with a known s
 
 One small rig, topologically identical to the ship gate: **one proxy, two topics, one replayer**, a few
 hundred requests per second, tens of seconds, docker compose rather than k8s or Argo, reusing the
-existing `TrafficCapture/trafficLoadTest` scenarios. Assert on the conservation ledger and on a
-source-versus-target doc count.
+existing `TrafficCapture/trafficLoadTest` scenarios. G10 is the formal agent-driven E2E defect-resolution
+milestone. It consumes observations from the diagnostic late-G9 smoke, reproduces each real defect in the
+smallest deterministic evidence available, corrects it, and reruns the rig.
 
 This is the "everything breaks, now debug it" milestone. Read the first run as an **observability test
 first and a correctness test second**: gaps in what can be seen are the findings.
@@ -823,7 +897,22 @@ At this scale, run **both** exact per-record comparison and the counter-based ch
 agree. That validates the cheap oracle against the expensive one, which is what earns the right to rely
 on counters at 200 MB/s.
 
-**Exit:** deliberately underspecified. Settled at the `G9` boundary with the human.
+Representative cases are selected from the cited finite design inventories, not from a coverage target:
+multi-observation and shared records, requests or responses split across records, normal and unavailable
+retry inputs around `B + W`, demand/bootstrap overshoot and permit recovery, partition transfer during
+target/tuple work, protocol/fatal termination, and orderly shutdown with admitted work in flight. Keep the
+rig small enough that every source record, target request, tuple result, and terminal accounting event can be
+compared exactly.
+
+**Exit:** a clean deployed cold start brings up source, proxy, both Kafka topics, replayer, and target through
+the shipping configuration with no pre-existing replay state; every generated source record has an exact
+expected replay disposition and exact record comparison passes; the record-accounting equations and sequence
+continuity reconcile with the per-record oracle; source and target document contents are equal, not merely
+equal in count; the representative cases above pass; and normal shutdown stops intake, drains every admitted
+complete request, durably emits tuple output, promptly commits every eligible contiguous prefix, closes
+resources, sends no force cancellation, and exits only after drain. Fatal and protocol cases retain their
+designed bounded/non-commit behavior. Every accepted G9-smoke or G10 E2E defect has a focused regression and a
+recorded disposition.
 
 ### G11 — Formerly the swing; now the last marked region
 
@@ -840,9 +929,11 @@ What remains under this heading is bookkeeping that the earlier milestones produ
   assertions belong to G8; G11 owns only this process-teardown member.
 - The `sonar-project.properties:274` path glob updated if `ClientConnectionPool` is gone.
 - The `REBUILD-LIMBO` scaffolding note in the module's `build.gradle` removed with the last region.
+- After the cleanup commit, rerun the G10 fuse with the same cold-start, exact-comparison, conservation,
+  document-equality, and shutdown/drain assertions so cleanup cannot silently change production behavior.
 
 **Exit:** the assembled application runs, the §2.3 contract surface is unchanged, interrupted source teardown
-still reaches application close, and no marked region remains.
+still reaches application close, no marked region remains, and the post-cleanup G10 fuse rerun passes.
 
 ### G12 — Ship gate
 
@@ -854,13 +945,17 @@ within a connection, not across.
 The existing k6 rig at scale: 10+ proxies, 20 topics, 10+ replayers, >100K requests/second, ~200 MB/s
 aggregate, ten minutes, verified by source-versus-target doc count with all metrics reconciling.
 
-Deliberately not specified further. The rig substantially exists — `trafficLoadTest` scenarios and
+G12 owns scale and stronger ordering confirmation. In addition to document equality and reconciled metrics,
+run stateful create → update → query → delete or paging sequences pinned to complete
+`(writerNodeId, connectionId)` identity and verify their target/tuple order. Also spread control sequences
+across connections to confirm the rig does not assert an ordering guarantee the design does not provide.
+
+The rig substantially exists — `trafficLoadTest` scenarios and
 configs, the `k6LoadTest` chart with the k6-operator and Argo templates, the Grafana dashboard,
 `eksCdcK6LoadTestCover.groovy`, and the console `loadtest` CLI. What it needs is delivery verification
-rather than dashboards. Settled with the human when `G10` passes.
-
-Known open question, banked and not acted on: doc counts catch loss but not ordering, and a stateful
-sequence replayed out of order surfaces as a silent comparison mismatch rather than a count delta.
+rather than dashboards. G10 and the post-G11 rerun establish small-scale exact correctness; G12 confirms
+throughput, horizontal scaling, metric conservation, document equality, and the stronger per-connection
+ordering oracle under the workload profiles and memory asymmetry described above.
 
 ### POST1 — Preserve target interim responses in tuples
 
@@ -923,9 +1018,11 @@ decode or interoperability failure rather than at final acceptance.
 
 ## 8. Reviews
 
-Codex is the reviewer, invoked per milestone against the milestone diff **and the design sections named in
-that milestone's `Design refs:` line**, with the specific invariants to check. Findings come back to the human as a summary with impact and mitigations,
-not as raw output. See `../AGENTS.md` §3.
+Codex is the coordinator and verifier. Claude is invoked directly through the CLI as the non-mutating
+reviewer against the milestone diff **and the design sections named in that milestone's `Design refs:` line**,
+with the specific invariants to check. G9.5 uses the three lane topology in its milestone section; no other
+milestone is created for those audits. Findings come back to the human as a summary with impact and
+mitigations, not as raw output. See `../AGENTS.md` §3.
 
 **Repeated, not single.** `../AGENTS.md` §3.1 gates closure on a pass returning no unfixed
 design-conformance defect, and every production change — including one made to fix a finding — re-opens the
@@ -933,11 +1030,13 @@ review. `G0`–`G2` took five passes, and the later ones found defects in the ea
 `../tools/review-prompt-design-conformance.md`: the prompt is the instrument, and each of its requirements
 corresponds to a way a pass here has actually gone wrong.
 
-The review pass also runs the **falsification check** of `../AGENTS.md` §4.1 as a separate subagent in a
-throwaway worktree: it breaks one timing, ordering, interruption or waiting property at a time and
-confirms the corresponding test fails. This is the one review activity that mutates code, which is why it
-is isolated to a discarded worktree rather than run under §3.2a's read-only reviewer. It starts at `G3`,
-whose accumulation and apply-order tests are the first large set of ordering assertions in the rebuild.
+The review pass also runs the **falsification check** of `../AGENTS.md` §4.1 through one direct ephemeral
+Codex CLI worker in a throwaway worktree: it breaks one timing, ordering, interruption or waiting property
+at a time and confirms the corresponding test fails. This is the one review activity that mutates code,
+which is why it is isolated to a discarded worktree rather than run by a read-only Claude reviewer. It
+starts at `G3`, whose accumulation and apply-order tests are the first large set of ordering assertions in
+the rebuild. G9.5's bounded test-evidence lane audits the accumulated falsification record and reruns only
+the focused falsification made necessary by a verified correction.
 
 ## 9. Open decisions
 

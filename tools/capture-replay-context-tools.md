@@ -71,6 +71,41 @@ Self-test:
 tools/test-java-without-limbo.sh
 ```
 
+## Java structural equalizer
+
+Compare two Java files after removing comments, normalizing tokens, and sorting order-insensitive declarations:
+
+```bash
+tools/java-structural-equalizer.py compare-files original.java candidate.java
+```
+
+Validate one cleaned commit against the cumulative original commit or contiguous commit range it represents:
+
+```bash
+tools/java-structural-equalizer.py compare-commit-pair \
+  --repo . \
+  --original-parent ORIGINAL_RANGE_PARENT \
+  --original ORIGINAL_RANGE_ENDPOINT \
+  --candidate-parent CLEAN_PARENT \
+  --candidate CLEAN_COMMIT
+```
+
+The commit-pair command compares the repository-wide union of Java paths edited by both sides by default. Its
+optional `--root` argument narrows diagnostic comparisons, but G9.5 MUST NOT use it because doing so could
+omit proxy or another changed Java area. It ignores comments, formatting, import order, method order,
+uninitialized-field order, and nested-type order. It deliberately retains initialized-field and
+initializer-block order, enum-constant order, record headers, and method bodies because those can affect
+behavior. A mismatch exits nonzero and writes both canonical forms under `/private/tmp` unless `--report-dir`
+is supplied. Intentionally unparseable `.java` fixtures are compared by exact-content digest, so they remain
+covered conservatively. The G9.5 history reconstruction runs this repository-wide gate after every candidate
+commit.
+
+Self-test:
+
+```bash
+tools/test-java-structural-equalizer.sh
+```
+
 ## Compact Gradle evidence
 
 Pass ordinary Gradle arguments directly to the wrapper:
