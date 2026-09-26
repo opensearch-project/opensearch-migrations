@@ -738,9 +738,11 @@ class KafkaSourceOwnerTest {
         var successor = owner.partitionState(PARTITION_0).orElseThrow();
         drainIntake();
 
-        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
-            new PartitionBatchRequestId(successor.generation(), 1)
-        ));
+        Assertions.assertTrue(successor.isAssignmentBootstrapPending());
+        Assertions.assertTrue(
+            successor.outstandingRequest().isEmpty(),
+            "the assignment bootstrap alone must make the successor readable after cleanup"
+        );
         sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(firstGeneration));
         port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
         owner.runOnce();
@@ -763,7 +765,7 @@ class KafkaSourceOwnerTest {
         Assertions.assertEquals(
             1,
             drainIntake().stream().filter(ReplayIntakeInput.PartitionRecordBatch.class::isInstance).count(),
-            "the successor may read as soon as every earlier generation has reported cleanup"
+            "clearing the last cleanup obligation must release the bootstrap without another demand signal"
         );
     }
 
