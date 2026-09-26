@@ -310,11 +310,16 @@ The replayer has no downstream dependencies — nothing waits on it. The checksu
 | `spec.otelTraceCollectorEndpoint` | Safe | Trace export config | Yes (rolling) | ❌ |
 | `spec.otelMetricsCollectorEndpoint` | Safe | Metrics export config | Yes (rolling) | ❌ |
 | `spec.speedupFactor` | Safe | Replay rate tuning | Yes (rolling) | ❌ |
-| `spec.lookaheadTimeSeconds` | Safe | Buffer tuning | Yes (rolling) | ❌ |
-| `spec.maxConcurrentRequests` | Safe | Performance tuning | Yes (rolling) | ❌ |
+| `spec.lookaheadTimeSeconds` | Safe | Deprecated compatibility field; parsed and ignored | Yes (rolling) | ❌ |
+| `spec.maxConcurrentTargetAttempts` | Safe | Target-attempt concurrency tuning | Yes (rolling) | ❌ |
+| `spec.maxConcurrentRequests` | Safe | Deprecated alias for target-attempt concurrency | Yes (rolling) | ❌ |
 | `spec.numClientThreads` | Safe | Performance tuning | Yes (rolling) | ❌ |
-| `spec.observedPacketConnectionTimeout` | Safe | Timeout tuning | Yes (rolling) | ❌ |
-| `spec.quiescentPeriodMs` | Safe | Timing tuning | Yes (rolling) | ❌ |
+| `spec.heartbeatExpirationIntervalSeconds` | Safe | Broker-time heartbeat expiration interval `E` | Yes (rolling) | ❌ |
+| `spec.maximumBackwardSkewSeconds` | Safe | Permitted Kafka broker timestamp regression `S` | Yes (rolling) | ❌ |
+| `spec.sourceResponseRetryWindowSeconds` | Safe | Broker-time source-response retry window `W` | Yes (rolling) | ❌ |
+| `spec.readyRequestsBufferPerThread` | Safe | Retry-ready request buffer `P` per target event-loop thread | Yes (rolling) | ❌ |
+| `spec.observedPacketConnectionTimeout` | Safe | Deprecated compatibility field; parsed and ignored | Yes (rolling) | ❌ |
+| `spec.quiescentPeriodMs` | Safe | Deprecated compatibility field; parsed and ignored | Yes (rolling) | ❌ |
 | `spec.targetServerResponseTimeoutSeconds` | Safe | Timeout tuning | Yes (rolling) | ❌ |
 | `spec.userAgent` | Safe | Cosmetic | Yes (rolling) | ❌ |
 

@@ -5,11 +5,10 @@ server, recording the packet traffic of the new interactions for future analysis
 
 ## Overview
 
-The replayer will consume an InputStream of protobuf
-encoded [TrafficStream](../captureProtobufs/src/main/proto/TrafficCaptureStream.proto) objects.
-
-Currently, these TrafficStream objects are ingested via stdin and are reconstructed into entire traffic channels. This
-involves some buffering for those connections whose contents are divided into a number of TrafficStream objects.
+The replayer consumes protobuf-encoded
+[TrafficStream](../captureProtobufs/src/main/proto/TrafficCaptureStream.proto) objects from a configured Kafka topic
+and reconstructs complete traffic channels. This involves buffering connections whose contents are divided across
+multiple Kafka records.
 Read and write observations are extracted from TrafficStream objects into source requests and source responses.
 The [CapturedTrafficToHttpTransactionAccumulator](src/main/java/org/opensearch/migrations/replay/CapturedTrafficToHttpTransactionAccumulator.java)
 takes full requests (as defined by the data, not necessarily by the HTTP format) and sends them to
@@ -172,12 +171,12 @@ There is a level of precedence that will determine which or if any Auth header s
 
 ## Diagnostic Dump Modes
 
-In addition to replaying traffic, the replayer binary supports two diagnostic modes that print
+In addition to replaying traffic, the replayer binary supports three diagnostic modes that print
 summaries of captured traffic without sending anything to a target cluster. These are useful for
 inspecting what the capture proxy recorded and diagnosing issues before or during a replay.
 
-Both modes are invoked via the `--mode` flag and reuse the same Kafka/file source configuration
-as the replayer (brokers, topic, MSK auth, property file, or `-i` for file input).
+The modes are invoked via the `--mode` flag and reuse the same Kafka source configuration
+as the replayer (brokers, topic, MSK auth, and optional Kafka property file).
 No target URI is required.
 
 **Dump modes do not use a consumer group.** They use Kafka's `assign()` API to read
@@ -200,7 +199,7 @@ the current end.
 
 ### Mode: `dump-raw`
 
-Prints one line per TrafficStream record directly from Kafka/file, with no cross-record
+Prints one line per TrafficStream record directly from Kafka, with no cross-record
 aggregation. Each line shows the observations within that single record.
 
 **Usage:**
@@ -209,8 +208,8 @@ traffic-replayer --mode dump-raw \
   --kafka-traffic-brokers kafka:9092 \
   --kafka-traffic-topic my-topic \
   [--start-time 1709596300] [--end-time 1709596400] \
-  [--preview-bytes-read 64] \
-  [--preview-bytes-write 64]
+  [--preview-bytes-read 24] \
+  [--preview-bytes-write 24]
 ```
 
 **Output format:**
@@ -220,7 +219,7 @@ traffic-replayer --mode dump-raw \
 
 Fields:
 - `[start-end]` — min/max epoch-seconds of observation timestamps within this record
-- `p:0 o:1234` — Kafka partition and offset (omitted for file input)
+- `p:0 o:1234` — Kafka partition and offset
 - `ncs:node1.conn123.5` — nodeId.connectionId.streamIndex (matches log format from
   `TrafficChannelKeyFormatter`)
 - Observation tokens:
@@ -230,10 +229,10 @@ Fields:
   - `EOM` — EndOfMessageIndication (marks the boundary between request and response)
   - `DROPPED` — RequestIntentionallyDropped
   - `EXCEPTION` — ConnectionExceptionObservation
-  - `R[size]: preview...` — Coalesced consecutive Read + ReadSegment observations. Size is the
-    total bytes across the run. Preview shows the first `--preview-bytes-read` bytes (default 64).
-  - `W[size]: preview...` — Same for Write + WriteSegment observations, controlled by
-    `--preview-bytes-write` (default 64).
+- `R[size]: preview...` — Coalesced consecutive Read + ReadSegment observations. Size is the
+  total bytes across the run. Preview shows the first `--preview-bytes-read` bytes (default 24).
+- `W[size]: preview...` — Same for Write + WriteSegment observations, controlled by
+  `--preview-bytes-write` (default 24).
 
 Consecutive reads (Read/ReadSegment) are coalesced into a single `R[totalSize]` token.
 Consecutive writes (Write/WriteSegment) are coalesced into a single `W[totalSize]` token.
@@ -273,11 +272,12 @@ one line per request and one line per response as they become available.
 traffic-replayer --mode dump-http \
   --kafka-traffic-brokers kafka:9092 \
   --kafka-traffic-topic my-topic \
-  [-t 360]
+  [--packet-timeout-seconds 360]
 ```
 
-The `-t` (packet timeout) flag controls how long the accumulator waits for a connection to
-complete before expiring it, same as in replay mode.
+`--packet-timeout-seconds` is retained only as a deprecated compatibility option. It parses with a
+warning and has no effect; dump HTTP uses its fixed diagnostic timeout. The removed `-t` shorthand
+is rejected.
 
 **Output format:**
 ```
@@ -296,9 +296,13 @@ Fields:
 - `EXPIRED` — connection timed out before completing; shows the accumulator state at expiry
 - `CLOSED` — connection closed normally; shows how many requests were completed
 
+### Mode: `dump-both`
+
+Emits the `dump-raw` record view and the reconstructed `dump-http` transaction view in one run.
+
 ### Implementation notes
 
-- Both modes bypass the replay engine, connection pool, transformers, and backpressure
+- All dump modes bypass the replay engine, connection pool, transformers, and backpressure
   (`BlockingTrafficSource`). They use `TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource`
   directly.
 - For Kafka sources, dump modes create a bare `KafkaConsumer` using `assign()` instead of

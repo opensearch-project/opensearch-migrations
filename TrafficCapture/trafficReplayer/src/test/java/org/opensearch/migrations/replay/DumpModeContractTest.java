@@ -8,6 +8,8 @@
 
 package org.opensearch.migrations.replay;
 
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+
 import com.beust.jcommander.ParameterException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -73,19 +75,18 @@ class DumpModeContractTest {
     }
 
     @Test
-    void fileInputInADumpModeIsPermanentlyRejected() {
-        var params = dumpModeParams("dump-raw");
-        params.inputFilename = "/some/captured/file";
+    void fileInputIsNoLongerPartOfTheDeployedParserSurface() {
+        var parser = JsonCommandLineParser.newBuilder()
+            .addObject(new TrafficReplayer.Parameters())
+            .build();
 
-        var thrown = Assertions.assertThrows(
-            ParameterException.class,
-            () -> TrafficReplayer.validateDumpModeParams(params)
-        );
-
-        Assertions.assertTrue(
-            thrown.getMessage().contains("no longer supported"),
-            () -> "the rejection must state that file-backed dumping was retired: " + thrown.getMessage()
-        );
+        for (var option : new String[] { "--input", "-i" }) {
+            Assertions.assertThrows(
+                ParameterException.class,
+                () -> parser.parse(new String[] { option, "/some/captured/file" }),
+                option
+            );
+        }
     }
 
     /** A consumer group is meaningless for a read-only inspection, and accepting one would imply otherwise. */

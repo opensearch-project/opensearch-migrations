@@ -64,4 +64,3 @@ traffic:
       toTarget: target1
       replayerConfig:
         speedupFactor: 2
-        observedPacketConnectionTimeout: 30

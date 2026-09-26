@@ -671,12 +671,24 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficPropertyFile: z.string().optional()
         .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.")
         .changeRestriction('impossible'),
-    lookaheadTimeSeconds: z.number().default(400).optional()
-        .describe("Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."),
-    maxConcurrentRequests: z.number().default(10000).optional()
-        .describe("Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."),
-    numClientThreads: z.number().default(0).optional()
-        .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
+    lookaheadTimeSeconds: z.number().optional()
+        .describe("[Deprecated] Accepted for existing resources but ignored. Replay intake demand is controlled by retry-ready supply."),
+    maxConcurrentTargetAttempts: z.number().int().min(1).optional()
+        .describe("Maximum number of target HTTP attempts that can be in flight simultaneously."),
+    maxConcurrentRequests: z.number().int().min(1).optional()
+        .describe("[Deprecated] Alias for maxConcurrentTargetAttempts. Conflicting simultaneous values are rejected."),
+    numClientThreads: z.number().int().min(1).optional()
+        .describe("Positive number of target Netty event-loop threads. Omit to use Netty's configured default."),
+    cancellationGraceMs: z.number().int().nonnegative().default(1000).optional()
+        .describe("Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown."),
+    heartbeatExpirationIntervalSeconds: z.number().int().min(1).default(30).optional()
+        .describe("Broker-time heartbeat expiration interval E in seconds."),
+    maximumBackwardSkewSeconds: z.number().int().nonnegative().default(5).optional()
+        .describe("Maximum permitted Kafka broker timestamp regression S in seconds."),
+    sourceResponseRetryWindowSeconds: z.number().int().min(1).default(5).optional()
+        .describe("Broker-time source-response retry window W in seconds."),
+    readyRequestsBufferPerThread: z.number().int().min(1).default(2).optional()
+        .describe("Retry-ready request buffer target P for each target Netty event-loop thread."),
     nonRetryableDocExceptionTypes: z.array(z.string()).optional()
         .describe("List of document-level exception types that should not be retried during bulk replay. " +
             "These errors still count as failures in the output but are not retried because they are " +
@@ -686,16 +698,18 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "Set explicitly to override the defaults entirely (not additive). " +
             "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
             "illegal_argument_exception, resource_already_exists_exception."),
-    observedPacketConnectionTimeout: z.number().default(360).optional()
-        .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
+    observedPacketConnectionTimeout: z.number().optional()
+        .describe("[Deprecated] Accepted for existing resources but ignored. Broker-time heartbeat expiration uses E and S."),
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
-    quiescentPeriodMs: z.number().default(5000).optional()
-        .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
+    quiescentPeriodMs: z.number().optional()
+        .describe("[Deprecated] Accepted for existing resources but ignored. Typed generation cleanup gates reassignment."),
     removeAuthHeader: z.boolean().default(false).optional()
         .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.")
         .changeRestriction('gated'),
-    speedupFactor: z.number().default(1.1).optional()
+    speedupFactor: z.number()
+        .refine(value => value > 0, "speedupFactor must be positive")
+        .default(1.1).optional()
         .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."),
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
         .describe("Maximum seconds to wait for a response from the target cluster before timing out a replayed request."),
@@ -774,12 +788,12 @@ export const USER_REPLAYER_OPTIONS = z.object({
         });
     }
 
-    if (data.lookaheadTimeSeconds !== undefined && data.observedPacketConnectionTimeout !== undefined
-        && data.lookaheadTimeSeconds <= data.observedPacketConnectionTimeout) {
+    if (data.maxConcurrentTargetAttempts !== undefined && data.maxConcurrentRequests !== undefined
+        && data.maxConcurrentTargetAttempts !== data.maxConcurrentRequests) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: `lookaheadTimeSeconds (${data.lookaheadTimeSeconds}) must be strictly greater than observedPacketConnectionTimeout (${data.observedPacketConnectionTimeout})`,
-            path: ['lookaheadTimeSeconds']
+            message: `maxConcurrentTargetAttempts (${data.maxConcurrentTargetAttempts}) conflicts with deprecated maxConcurrentRequests (${data.maxConcurrentRequests})`,
+            path: ['maxConcurrentTargetAttempts']
         });
     }
 });

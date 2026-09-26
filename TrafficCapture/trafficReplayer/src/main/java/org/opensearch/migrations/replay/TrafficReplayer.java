@@ -2,27 +2,72 @@ package org.opensearch.migrations.replay;
 
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.DoubleSupplier;
+import java.util.function.IntFunction;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
+import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
+import org.opensearch.migrations.replay.intake.PartitionIntakeState;
+import org.opensearch.migrations.replay.kafka.KafkaConsumerProperties;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
+import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
+import org.opensearch.migrations.replay.sink.S3TupleSink;
+import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
+import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
+import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.transform.PredicateLoader;
+import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.URIHelper;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import io.netty.channel.EventLoop;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class TrafficReplayer {
@@ -38,6 +83,14 @@ public class TrafficReplayer {
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     static final int DEFAULT_KAFKA_LOOKAHEAD_SECONDS = 30;
     static final int DEFAULT_LEGACY_LOOKAHEAD_SECONDS = 400;
+    static final int DEFAULT_DUMP_OBSERVED_PACKET_TIMEOUT_SECONDS = 360;
+    static final int DEFAULT_MAX_CONCURRENT_TARGET_ATTEMPTS = 10000;
+    static final int DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL_SECONDS = 30;
+    static final int DEFAULT_MAXIMUM_BACKWARD_SKEW_SECONDS = 5;
+    static final int DEFAULT_SOURCE_RESPONSE_RETRY_WINDOW_SECONDS = 5;
+    static final int DEFAULT_READY_REQUESTS_BUFFER_PER_THREAD = 2;
+    static final int DEFAULT_MAXIMUM_RESPONSE_RETRIES = 4;
+    static final Duration DEFAULT_KAFKA_POLL_TIMEOUT = Duration.ofSeconds(1);
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
@@ -117,13 +170,13 @@ public class TrafficReplayer {
             required = false,
             names = { "--preview-bytes-read" },
             arity = 1,
-            description = "For dump-raw: max bytes to preview for read observations (default 64)")
+            description = "For dump-raw: max bytes to preview for read observations (default 24)")
         int previewBytesRead = 24;
         @Parameter(
             required = false,
             names = { "--preview-bytes-write" },
             arity = 1,
-            description = "For dump-raw: max bytes to preview for write observations (default 64)")
+            description = "For dump-raw: max bytes to preview for write observations (default 24)")
         int previewBytesWrite = 24;
         @Parameter(
             required = false,
@@ -189,18 +242,12 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = { "-i", "--input" },
-            arity = 1,
-            description = "input file to read the request/response traces for the source cluster")
-        String inputFilename;
-        @Parameter(
-            required = false,
-            names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME, "--packetTimeoutSeconds",
+            names = {PACKET_TIMEOUT_SECONDS_PARAMETER_NAME, "--packetTimeoutSeconds",
                 "--observedPacketConnectionTimeout" },
             arity = 1,
             description = "assume that connections were terminated after this many "
                 + "seconds of inactivity observed in the captured stream")
-        int observedPacketConnectionTimeout = 360;
+        Integer observedPacketConnectionTimeout;
         @Parameter(
             required = false,
             names = { "--speedup-factor", "--speedupFactor" },
@@ -219,19 +266,72 @@ public class TrafficReplayer {
             required = false,
             names = {
                 "--max-concurrent-target-attempts",
-                "--maxConcurrentTargetAttempts",
+                "--maxConcurrentTargetAttempts"
+            },
+            arity = 1,
+            description = "Maximum number of target attempts that can be in flight")
+        Integer maxConcurrentTargetAttempts;
+        @Parameter(
+            required = false,
+            names = {
                 "--max-concurrent-requests",
                 "--maxConcurrentRequests"
             },
             arity = 1,
-            description = "Maximum number of target attempts that can be in flight")
-        int maxConcurrentTargetAttempts = 10000;
+            description = "Deprecated alias for --max-concurrent-target-attempts")
+        Integer deprecatedMaxConcurrentRequests;
         @Parameter(
             required = false,
             names = { "--num-client-threads", "--numClientThreads" },
             arity = 1,
             description = "Number of threads to use to send requests from.")
-        int numClientThreads = 0;
+        Integer numClientThreads;
+        @Parameter(
+            required = false,
+            names = { "--cancellation-grace-ms", "--cancellationGraceMs" },
+            arity = 1,
+            description = "Milliseconds allowed for generation-revocation cancellation before force")
+        long cancellationGraceMs = 1_000;
+        @Parameter(
+            required = false,
+            names = {
+                "--heartbeat-expiration-interval-seconds",
+                "--heartbeatExpirationIntervalSeconds"
+            },
+            arity = 1,
+            description = "Broker-time heartbeat expiration interval E in seconds")
+        int heartbeatExpirationIntervalSeconds =
+            DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL_SECONDS;
+        @Parameter(
+            required = false,
+            names = {
+                "--maximum-backward-skew-seconds",
+                "--maximumBackwardSkewSeconds"
+            },
+            arity = 1,
+            description = "Maximum permitted Kafka broker timestamp regression S in seconds")
+        long maximumBackwardSkewSeconds =
+            DEFAULT_MAXIMUM_BACKWARD_SKEW_SECONDS;
+        @Parameter(
+            required = false,
+            names = {
+                "--source-response-retry-window-seconds",
+                "--sourceResponseRetryWindowSeconds"
+            },
+            arity = 1,
+            description = "Broker-time source-response retry window W in seconds")
+        int sourceResponseRetryWindowSeconds =
+            DEFAULT_SOURCE_RESPONSE_RETRY_WINDOW_SECONDS;
+        @Parameter(
+            required = false,
+            names = {
+                "--ready-requests-buffer-per-thread",
+                "--readyRequestsBufferPerThread"
+            },
+            arity = 1,
+            description = "Retry-ready request buffer target P per target event-loop thread")
+        int readyRequestsBufferPerThread =
+            DEFAULT_READY_REQUESTS_BUFFER_PER_THREAD;
 
         // https://github.com/opensearch-project/opensearch-java/blob/main/java-client/src/main/java/org/opensearch/client/transport/httpclient5/ApacheHttpClient5TransportBuilder.java#L49-L54
         @Parameter(
@@ -246,10 +346,8 @@ public class TrafficReplayer {
             required = false,
             names = { "--quiescent-period-ms", "--quiescentPeriodMs" },
             arity = 1,
-            description = "Milliseconds to delay the first request on a resumed connection (one that was " +
-                "mid-flight when a Kafka partition was reassigned). Allows the previous replayer's " +
-                "in-flight requests to complete before the new replayer sends. Default: 5000ms.")
-        long quiescentPeriodMs = 5000;
+            description = "Deprecated compatibility option; generation cleanup now owns reassignment safety")
+        Long quiescentPeriodMs;
 
         @Parameter(
             required = false,
@@ -414,21 +512,90 @@ public class TrafficReplayer {
             }
         }
 
+        List<String> validateAndCollectCompatibilityWarnings() {
+            var warnings = new ArrayList<String>();
+            validateKafkaAuthFlags();
+            if (mode == null
+                || !List.of("replay", MODE_DUMP_RAW, MODE_DUMP_HTTP, MODE_DUMP_BOTH)
+                    .contains(mode)) {
+                throw new ParameterException("Unsupported --mode value: " + mode);
+            }
+            if (lookaheadTimeSeconds != null) {
+                warnings.add(
+                    LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
+                        + " is deprecated and ignored; replay intake demand is controlled by P * T_threads"
+                );
+            }
+            if (quiescentPeriodMs != null) {
+                warnings.add(
+                    "--quiescent-period-ms is deprecated and ignored; typed generation cleanup now gates reassignment"
+                );
+            }
+            if (observedPacketConnectionTimeout != null) {
+                warnings.add(
+                    PACKET_TIMEOUT_SECONDS_PARAMETER_NAME
+                        + " is deprecated and ignored; broker-time heartbeat expiration uses configured E and S"
+                );
+            }
+            if (deprecatedMaxConcurrentRequests != null) {
+                warnings.add(
+                    "--max-concurrent-requests is deprecated; use --max-concurrent-target-attempts"
+                );
+            }
+            if (maxConcurrentTargetAttempts != null
+                && deprecatedMaxConcurrentRequests != null
+                && !maxConcurrentTargetAttempts.equals(deprecatedMaxConcurrentRequests)) {
+                throw new ParameterException(
+                    "--max-concurrent-target-attempts conflicts with --max-concurrent-requests"
+                );
+            }
+            if (getEffectiveMaxConcurrentTargetAttempts() <= 0) {
+                throw new ParameterException("--max-concurrent-target-attempts must be positive");
+            }
+            if (numClientThreads != null && numClientThreads < 1) {
+                throw new ParameterException("--num-client-threads must be at least 1 when supplied");
+            }
+            if (cancellationGraceMs < 0) {
+                throw new ParameterException("--cancellation-grace-ms must not be negative");
+            }
+            if (heartbeatExpirationIntervalSeconds <= 0) {
+                throw new ParameterException(
+                    "--heartbeat-expiration-interval-seconds must be positive"
+                );
+            }
+            if (maximumBackwardSkewSeconds < 0) {
+                throw new ParameterException(
+                    "--maximum-backward-skew-seconds must not be negative"
+                );
+            }
+            if (sourceResponseRetryWindowSeconds <= 0) {
+                throw new ParameterException(
+                    "--source-response-retry-window-seconds must be positive"
+                );
+            }
+            if (readyRequestsBufferPerThread < 1) {
+                throw new ParameterException(
+                    "--ready-requests-buffer-per-thread must be at least 1"
+                );
+            }
+            if (!(speedupFactor > 0.0) || !Double.isFinite(speedupFactor)) {
+                throw new ParameterException("--speedup-factor must be a finite positive value");
+            }
+            return List.copyOf(warnings);
+        }
+
+        int getEffectiveMaxConcurrentTargetAttempts() {
+            if (maxConcurrentTargetAttempts != null) {
+                return maxConcurrentTargetAttempts;
+            }
+            if (deprecatedMaxConcurrentRequests != null) {
+                return deprecatedMaxConcurrentRequests;
+            }
+            return DEFAULT_MAX_CONCURRENT_TARGET_ATTEMPTS;
+        }
+
         boolean isKafkaTrafficEnableMSKAuth() {
             return KAFKA_AUTH_TYPE_MSK_IAM.equals(getEffectiveKafkaAuthType());
-        }
-
-        int getEffectiveLookaheadTimeSeconds() {
-            if (lookaheadTimeSeconds != null) {
-                return lookaheadTimeSeconds;
-            }
-            return kafkaTrafficBrokers != null
-                ? DEFAULT_KAFKA_LOOKAHEAD_SECONDS
-                : DEFAULT_LEGACY_LOOKAHEAD_SECONDS;
-        }
-
-        boolean usesKafkaTrafficSource() {
-            return kafkaTrafficBrokers != null;
         }
 
         String getEffectiveKafkaAuthType() {
@@ -522,7 +689,8 @@ public class TrafficReplayer {
         var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
             parser.parse(args);
-            p.validateKafkaAuthFlags();
+            p.validateAndCollectCompatibilityWarnings()
+                .forEach(warning -> System.err.println("WARNING: " + warning));
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
@@ -548,11 +716,36 @@ public class TrafficReplayer {
             throw new ParameterException(
                 "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");
         }
-        if (params.inputFilename != null) {
-            throw new ParameterException(
-                "dump modes support Kafka topics only; file-backed dumping is no longer supported."
-                    + " Use --kafka-traffic-brokers and --kafka-traffic-topic.");
+    }
+
+    static void validateReplayModeParams(Parameters params) {
+        if (params.targetUriString == null || params.targetUriString.isBlank()) {
+            throw new ParameterException("--target-uri is required in replay mode");
         }
+        validateRequiredKafkaParams(
+            params.kafkaTrafficBrokers,
+            params.kafkaTrafficTopic,
+            params.kafkaTrafficGroupId
+        );
+    }
+
+    static PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration(
+        Parameters params
+    ) {
+        return new PartitionIntakeState.BrokerTimeConfiguration(
+            Math.multiplyExact(
+                (long) params.heartbeatExpirationIntervalSeconds,
+                1_000L
+            ),
+            Math.multiplyExact(
+                params.maximumBackwardSkewSeconds,
+                1_000L
+            ),
+            Math.multiplyExact(
+                (long) params.sourceResponseRetryWindowSeconds,
+                1_000L
+            )
+        );
     }
     /** Runs a dump mode against a Kafka topic. */
     private static void runDumpMode(Parameters params) throws Exception {
@@ -570,7 +763,7 @@ public class TrafficReplayer {
                 params.kafkaTrafficPropertyFile,
                 params.startOffset, params.startTime, params.endOffset, params.endTime,
                 params.previewBytesRead, params.previewBytesWrite,
-                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
+                DEFAULT_DUMP_OBSERVED_PACKET_TIMEOUT_SECONDS, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
                 rootContext);
         } else {
             System.err.println("Dump modes require --kafka-traffic-brokers and --kafka-traffic-topic");
@@ -592,29 +785,6 @@ public class TrafficReplayer {
             System.err.println(e.getMessage());
             log.atError().setCause(e).setMessage("{}").addArgument(msg).log();
             System.exit(3);
-            return null;
-        }
-        int lookaheadTimeSeconds = params.getEffectiveLookaheadTimeSeconds();
-        if (lookaheadTimeSeconds <= 0) {
-            String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME + " must be positive";
-            System.err.println(msg);
-            log.error(msg);
-            System.exit(4);
-            return null;
-        }
-        if (!params.usesKafkaTrafficSource()
-            && lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
-            String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
-                + "("
-                + lookaheadTimeSeconds
-                + ") must be > "
-                + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME
-                + "("
-                + params.observedPacketConnectionTimeout
-                + ")";
-            System.err.println(msg);
-            log.error(msg);
-            System.exit(4);
             return null;
         }
         return uri;
@@ -786,11 +956,42 @@ public class TrafficReplayer {
     }
     */
     // REBUILD-LIMBO-END(G9)
-    // REBUILD-LIMBO-START(G5)
-    // buildTransformerSupplier -- blocked on P4 (FilteringTransformerWrapper) and the
-    // jsonMessageTransformerInterface dependency. TransformationLoader and PredicateLoader are already available.
-    // Nothing here is in doubt; it returns verbatim once P4 lands.
-    /*
+    // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayer.setupShutdownHookForReplayer -> TrafficReplayer.runReplayMode
+    // REBUILD-TRACE-END(G9,target)
+    private static void runReplayMode(Parameters params) throws Exception {
+        validateReplayModeParams(params);
+        var targetUri = parseAndValidateReplayTarget(params);
+        if (targetUri == null) {
+            return;
+        }
+        var deployed = createDeployedReplayApplication(
+            params,
+            targetUri,
+            brokerTimeConfiguration(params)
+        );
+        var shutdownHook = deployed.application().createShutdownHook();
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
+        log.atInfo()
+            .setMessage(
+                "ReplayerConfig - speedup={} maxConcurrentTargetAttempts={} "
+                    + "serverResponseTimeout={}s targetUri={} numClientThreads={} "
+                    + "heartbeatExpiration={}s maximumBackwardSkew={}s "
+                    + "sourceResponseRetryWindow={}s readyRequestsBufferPerThread={}"
+            )
+            .addArgument(params.speedupFactor)
+            .addArgument(params.getEffectiveMaxConcurrentTargetAttempts())
+            .addArgument(params.targetServerResponseTimeoutSeconds)
+            .addArgument(targetUri)
+            .addArgument(params.numClientThreads)
+            .addArgument(params.heartbeatExpirationIntervalSeconds)
+            .addArgument(params.maximumBackwardSkewSeconds)
+            .addArgument(params.sourceResponseRetryWindowSeconds)
+            .addArgument(params.readyRequestsBufferPerThread)
+            .log();
+        deployed.application().run();
+    }
+
     static Supplier<IJsonTransformer> buildTransformerSupplier(
         TransformationLoader transformationLoader,
         String hostname,
@@ -807,22 +1008,16 @@ public class TrafficReplayer {
         log.atInfo().setMessage("Request filter configured").log();
         return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
     }
-    */
-    // REBUILD-LIMBO-END(G5)
-    // REBUILD-LIMBO-START(G9)
-    // configureResponsePostProcessor -- blocked on TrafficReplayerTopLevel (it assigns
-    // tr.responsePostProcessor directly). The loader call itself is final-form.
-    /*
-    static void configureResponsePostProcessor(
-        TrafficReplayerTopLevel tr, TransformationLoader loader, String config
+    static Supplier<IJsonTransformer> buildResponsePostProcessorSupplier(
+        TransformationLoader loader,
+        String config
     ) {
-        if (config != null && !config.isBlank()) {
-            tr.responsePostProcessor = loader.getTransformerFactoryLoader(null, null, config);
-            log.atInfo().setMessage("Response post-processor configured").log();
+        if (config == null || config.isBlank()) {
+            return null;
         }
+        log.atInfo().setMessage("Response post-processor configured").log();
+        return () -> loader.getTransformerFactoryLoader(null, null, config);
     }
-    */
-    // REBUILD-LIMBO-END(G9)
     // REBUILD-LIMBO-START(G5)
     // createS3TupleWriterIfConfigured -- blocked ONLY on the TupleWriter shape.
     // S3TupleSink is a reusable library object in :TrafficCapture:tupleSink and the S3 client construction is not
@@ -865,6 +1060,592 @@ public class TrafficReplayer {
     }
     */
     // REBUILD-LIMBO-END(G5)
+
+    static final class TupleSinkResources implements AutoCloseable {
+        private final TrafficReplayerTopLevel.ManagedPhysicalTupleSinkFactory<Map<String, Object>>
+            factory;
+        private final AutoCloseable sharedResource;
+
+        private TupleSinkResources(
+            TrafficReplayerTopLevel.ManagedPhysicalTupleSinkFactory<Map<String, Object>> factory,
+            AutoCloseable sharedResource
+        ) {
+            this.factory = factory;
+            this.sharedResource = sharedResource;
+        }
+
+        TrafficReplayerTopLevel.ManagedPhysicalTupleSinkFactory<Map<String, Object>> factory() {
+            return factory;
+        }
+
+        @Override
+        public void close() throws Exception {
+            sharedResource.close();
+        }
+    }
+
+    static Optional<TupleSinkResources> createS3TupleSinkResourcesIfConfigured(
+        Parameters params
+    ) {
+        if (params.tupleS3Bucket == null || params.tupleS3Bucket.isBlank()) {
+            return Optional.empty();
+        }
+        if (params.tupleS3Region == null || params.tupleS3Region.isBlank()) {
+            throw new ParameterException(
+                "--tuple-s3-region is required when --tuple-s3-bucket is configured"
+            );
+        }
+        if (params.tupleMaxFileSizeMb <= 0) {
+            throw new ParameterException("--tuple-max-file-size-mb must be positive");
+        }
+        if (params.tupleMaxBufferSeconds <= 0) {
+            throw new ParameterException("--tuple-max-buffer-seconds must be positive");
+        }
+        if (params.tupleMaxPerFile < 0) {
+            throw new ParameterException("--tuple-max-per-file must not be negative");
+        }
+
+        var credentialsProvider = DefaultCredentialsProvider.builder().build();
+        var s3ClientBuilder = S3AsyncClient.builder()
+            .region(Region.of(params.tupleS3Region))
+            .credentialsProvider(credentialsProvider);
+        if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isBlank()) {
+            s3ClientBuilder
+                .endpointOverride(URI.create(params.tupleS3Endpoint))
+                .forcePathStyle(true);
+        }
+        return Optional.of(createS3TupleSinkResources(params, s3ClientBuilder.build()));
+    }
+
+    static TupleSinkResources createS3TupleSinkResources(
+        Parameters params,
+        S3AsyncClient s3Client
+    ) {
+        var replayerId = ProcessHelpers.getNodeInstanceName();
+        var prefix = params.tupleS3Prefix == null ? "" : params.tupleS3Prefix;
+        return new TupleSinkResources(
+            sinkIndex -> TrafficReplayerTopLevel.deployedTupleSink(
+                new S3TupleSink(
+                    s3Client,
+                    params.tupleS3Bucket,
+                    prefix,
+                    replayerId,
+                    sinkIndex,
+                    Math.multiplyExact(params.tupleMaxFileSizeMb, 1024L * 1024L),
+                    Duration.ofSeconds(params.tupleMaxBufferSeconds),
+                    params.tupleMaxPerFile
+                )
+            ),
+            s3Client
+        );
+    }
+
+    static final class DeployedReplayLifecycle implements ReplayLifecycle {
+        private final TrafficReplayerTopLevel<
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            Map<String, Object>
+        > replayer;
+        private final Consumer<String, byte[]> kafkaConsumer;
+        private final String kafkaTopic;
+        private final NioEventLoopGroup targetEventLoopGroup;
+        private final IAuthTransformerFactory authTransformerFactory;
+        private final Optional<TupleSinkResources> tupleSinkResources;
+
+        private DeployedReplayLifecycle(
+            TrafficReplayerTopLevel<
+                NettyPacketToHttpConsumer.PreparedRequest,
+                AggregatedRawResponse,
+                Map<String, Object>
+            > replayer,
+            Consumer<String, byte[]> kafkaConsumer,
+            String kafkaTopic,
+            NioEventLoopGroup targetEventLoopGroup,
+            IAuthTransformerFactory authTransformerFactory,
+            Optional<TupleSinkResources> tupleSinkResources
+        ) {
+            this.replayer = replayer;
+            this.kafkaConsumer = kafkaConsumer;
+            this.kafkaTopic = kafkaTopic;
+            this.targetEventLoopGroup = targetEventLoopGroup;
+            this.authTransformerFactory = authTransformerFactory;
+            this.tupleSinkResources = tupleSinkResources;
+        }
+
+        @Override
+        public void start() {
+            replayer.startIntake();
+            kafkaConsumer.subscribe(List.of(kafkaTopic), replayer.rebalanceListener());
+        }
+
+        @Override
+        public void runSourceOnce() {
+            replayer.runSourceOnce();
+        }
+
+        @Override
+        public void wakeSourceOwner() {
+            replayer.wakeSourceOwner();
+        }
+
+        @Override
+        public void closeOrderly() {
+            replayer.close();
+        }
+
+        @Override
+        public void closeTargetOwnersAfterOrderly() {
+            replayer.allowTargetEventLoopTermination();
+            Throwable failure = null;
+            try {
+                targetEventLoopGroup.shutdownGracefully().syncUninterruptibly();
+            } catch (Throwable groupFailure) {
+                failure = groupFailure;
+            }
+            if (authTransformerFactory != null) {
+                try {
+                    authTransformerFactory.close();
+                } catch (Throwable authFailure) {
+                    failure = appendFailure(failure, authFailure);
+                }
+            }
+            if (tupleSinkResources.isPresent()) {
+                try {
+                    tupleSinkResources.orElseThrow().close();
+                } catch (Throwable tupleResourceFailure) {
+                    failure = appendFailure(failure, tupleResourceFailure);
+                }
+            }
+            if (failure != null) {
+                throw new IllegalStateException(
+                    "Failed to close deployed replay resources",
+                    failure
+                );
+            }
+        }
+
+        TrafficReplayerTopLevel<
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            Map<String, Object>
+        > replayer() {
+            return replayer;
+        }
+    }
+
+    record DeployedReplayApplication(
+        SupervisedReplayApplication application,
+        ProcessSupervisor supervisor,
+        DeployedReplayLifecycle lifecycle,
+        RootReplayerContext rootContext
+    ) {}
+
+    @FunctionalInterface
+    interface ProcessSupervisorFactory {
+        ProcessSupervisor create(
+            ProcessSupervisor.Metrics metrics,
+            ProcessSupervisor.InputStopper inputStopper
+        );
+    }
+
+    static DeployedReplayApplication createDeployedReplayApplication(
+        Parameters params,
+        URI targetUri,
+        PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration
+    ) throws Exception {
+        return createDeployedReplayApplication(
+            params,
+            targetUri,
+            brokerTimeConfiguration,
+            deployedTupleRetryDelayPolicy(
+                () -> ThreadLocalRandom.current().nextDouble()
+            )
+        );
+    }
+
+    static DeployedReplayApplication createDeployedReplayApplication(
+        Parameters params,
+        URI targetUri,
+        PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        Duration tupleRetryDelay
+    ) throws Exception {
+        return createDeployedReplayApplication(
+            params,
+            targetUri,
+            brokerTimeConfiguration,
+            TupleWriter.fixedRetryDelay(tupleRetryDelay)
+        );
+    }
+
+    static DeployedReplayApplication createDeployedReplayApplication(
+        Parameters params,
+        URI targetUri,
+        PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        TupleWriter.RetryDelayPolicy tupleRetryDelayPolicy
+    ) throws Exception {
+        var rootContext = new RootReplayerContext(
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                new OtelCollectorEndpoints(
+                    params.otelTraceCollectorEndpoint,
+                    params.otelMetricsCollectorEndpoint
+                ),
+                "replay",
+                ProcessHelpers.getNodeInstanceName()
+            )
+        );
+        var kafkaProperties = KafkaConsumerProperties.buildKafkaProperties(
+            params.kafkaTrafficBrokers,
+            params.kafkaTrafficGroupId,
+            params.getEffectiveKafkaAuthType(),
+            params.kafkaTrafficUserName,
+            params.kafkaTrafficPassword,
+            params.kafkaTrafficPropertyFile
+        );
+        var consumer = new KafkaConsumer<String, byte[]>(kafkaProperties);
+        var targetEventLoopGroup = new NioEventLoopGroup(
+            params.numClientThreads == null ? 0 : params.numClientThreads,
+            new DefaultThreadFactory("targetConnectionPool")
+        );
+        var authTransformerFactory = buildAuthTransformerFactory(params);
+        Optional<TupleSinkResources> tupleSinkResources = Optional.empty();
+        try {
+            tupleSinkResources = createS3TupleSinkResourcesIfConfigured(params);
+            return createDeployedReplayApplication(
+                params,
+                targetUri,
+                brokerTimeConfiguration,
+                tupleRetryDelayPolicy,
+                rootContext,
+                consumer,
+                targetEventLoopGroup,
+                authTransformerFactory,
+                tupleSinkResources,
+                Clock.systemUTC(),
+                System::nanoTime,
+                ProcessSupervisor::new
+            );
+        } catch (Throwable failure) {
+            closeAfterConstructionFailure(
+                consumer,
+                targetEventLoopGroup,
+                authTransformerFactory,
+                tupleSinkResources,
+                failure
+            );
+            if (failure instanceof Exception exception) {
+                throw exception;
+            }
+            throw failure;
+        }
+    }
+
+    static DeployedReplayApplication createDeployedReplayApplication(
+        Parameters params,
+        URI targetUri,
+        PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        Duration tupleRetryDelay,
+        RootReplayerContext rootContext,
+        Consumer<String, byte[]> consumer,
+        NioEventLoopGroup targetEventLoopGroup,
+        IAuthTransformerFactory authTransformerFactory,
+        Optional<TupleSinkResources> tupleSinkResources,
+        Clock clock,
+        LongSupplier nanoTime
+    ) throws Exception {
+        return createDeployedReplayApplication(
+            params,
+            targetUri,
+            brokerTimeConfiguration,
+            TupleWriter.fixedRetryDelay(tupleRetryDelay),
+            rootContext,
+            consumer,
+            targetEventLoopGroup,
+            authTransformerFactory,
+            tupleSinkResources,
+            clock,
+            nanoTime,
+            ProcessSupervisor::new
+        );
+    }
+
+    static DeployedReplayApplication createDeployedReplayApplication(
+        Parameters params,
+        URI targetUri,
+        PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        TupleWriter.RetryDelayPolicy tupleRetryDelayPolicy,
+        RootReplayerContext rootContext,
+        Consumer<String, byte[]> consumer,
+        NioEventLoopGroup targetEventLoopGroup,
+        IAuthTransformerFactory authTransformerFactory,
+        Optional<TupleSinkResources> tupleSinkResources,
+        Clock clock,
+        LongSupplier nanoTime,
+        ProcessSupervisorFactory processSupervisorFactory
+    ) throws Exception {
+        var eventLoops = targetEventLoops(targetEventLoopGroup);
+        var sslContext = loadTargetSslContext(
+            targetUri,
+            params.allowInsecureConnections
+        );
+        var timeShifter = new TimeShifter(
+            params.speedupFactor,
+            Duration.ZERO,
+            clock
+        );
+        var transformationLoader = new TransformationLoader();
+        var requestTransformerConfig =
+            TransformerConfigUtils.getTransformerConfig(
+                params.requestTransformationParams
+            );
+        var tupleTransformerConfig =
+            TransformerConfigUtils.getTransformerConfig(
+                params.tupleTransformationParams
+            );
+        var requestTransformerSupplier = buildTransformerSupplier(
+            transformationLoader,
+            targetUri.getHost(),
+            params.userAgent,
+            requestTransformerConfig,
+            params.requestFilterConfig
+        );
+        var responsePostProcessorSupplier =
+            buildResponsePostProcessorSupplier(
+                transformationLoader,
+                params.responsePostProcessorConfig
+            );
+        var resultsToLogsConsumer = new ResultsToLogsConsumer();
+        var tupleSinkFactory = tupleSinkResources
+            .map(TupleSinkResources::factory)
+            .orElseGet(resultsToLogsConsumer::tupleSinkFactory);
+        var errorClassifier = params.nonRetryableDocExceptionTypes == null
+            ? new BulkItemErrorClassifier()
+            : new BulkItemErrorClassifier(
+                new java.util.HashSet<>(params.nonRetryableDocExceptionTypes)
+            );
+        var poisonAllowlist = params.poisonDocExceptionTypes == null
+            ? ExceptionTypeAllowlist.empty()
+            : new ExceptionTypeAllowlist(params.poisonDocExceptionTypes);
+        var topLevelReference = new AtomicReference<TrafficReplayerTopLevel<
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            Map<String, Object>
+        >>();
+        var supervisor = processSupervisorFactory.create(
+            rootContext.getReplayProcessFatalMetrics(),
+            signal -> {
+                var topLevel = topLevelReference.get();
+                if (topLevel != null) {
+                    topLevel.stopNewInputForFatal(signal);
+                } else {
+                    consumer.wakeup();
+                }
+            }
+        );
+        var configuration = new TrafficReplayerTopLevel.Configuration<
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            Map<String, Object>
+        >(
+            clock,
+            nanoTime,
+            sourceTime -> {
+                timeShifter.setFirstTimestamp(sourceTime);
+                return timeShifter.transformSourceTimeToRealTime(sourceTime);
+            },
+            connectionId -> eventLoops.get(
+                Math.floorMod(connectionId.hashCode(), eventLoops.size())
+            ),
+            eventLoops,
+            TrafficReplayerTopLevel.deployedOwnerTaskRunner(),
+            (connectionId, connectionContext) ->
+                TrafficReplayerTopLevel.deployedRequestPreparer(
+                    requestTransformerSupplier,
+                    authTransformerFactory,
+                    params.speedupFactor
+                ),
+            new OpenSearchDefaultRetry(errorClassifier),
+            (connectionId, eventLoop, connectionContext) ->
+                NettyPacketToHttpConsumer.create(
+                    connectionId,
+                    eventLoop,
+                    clock,
+                    connectionContext,
+                    targetUri,
+                    sslContext,
+                    Duration.ofSeconds(
+                        params.targetServerResponseTimeoutSeconds
+                    )
+                ),
+            resultsToLogsConsumer::createTupleAndReportProgress,
+            deployedResourceReleaser(),
+            workerIndex -> TrafficReplayerTopLevel.deployedTupleTransformer(
+                () -> transformationLoader.getTransformerFactoryLoader(
+                    tupleTransformerConfig
+                ),
+                responsePostProcessorSupplier
+            ),
+            tupleSinkFactory,
+            ignored -> {},
+            tupleRetryDelayPolicy,
+            brokerTimeConfiguration,
+            params.readyRequestsBufferPerThread,
+            DEFAULT_MAXIMUM_RESPONSE_RETRIES,
+            params.getEffectiveMaxConcurrentTargetAttempts()
+        );
+        var replayer = new TrafficReplayerTopLevel<>(
+            consumer,
+            rootContext,
+            configuration,
+            DEFAULT_KAFKA_POLL_TIMEOUT,
+            Duration.ofMillis(params.cancellationGraceMs),
+            supervisor.failureSink()
+        );
+        topLevelReference.set(replayer);
+        var lifecycle = new DeployedReplayLifecycle(
+            replayer,
+            consumer,
+            params.kafkaTrafficTopic,
+            targetEventLoopGroup,
+            authTransformerFactory,
+            tupleSinkResources
+        );
+        return new DeployedReplayApplication(
+            new SupervisedReplayApplication(lifecycle, supervisor),
+            supervisor,
+            lifecycle,
+            rootContext
+        );
+    }
+
+    static TupleWriter.RetryDelayPolicy deployedTupleRetryDelayPolicy(
+        DoubleSupplier randomFraction
+    ) {
+        return TupleWriter.randomizedExponentialRetryDelay(
+            TupleWriter.DEFAULT_INITIAL_RETRY_DELAY,
+            TupleWriter.DEFAULT_MAXIMUM_RETRY_DELAY,
+            randomFraction
+        );
+    }
+
+    private static RequestReplayOwner.ResourceReleaser<
+        HttpMessageAndTimestamp.Request,
+        NettyPacketToHttpConsumer.PreparedRequest,
+        AggregatedRawResponse,
+        HttpMessageAndTimestamp.Response
+    > deployedResourceReleaser() {
+        return new RequestReplayOwner.ResourceReleaser<>() {
+            @Override
+            public void releaseSourceRequest(
+                HttpMessageAndTimestamp.Request sourceRequest
+            ) {}
+
+            @Override
+            public void releasePreparedRequest(
+                NettyPacketToHttpConsumer.PreparedRequest preparedRequest
+            ) {
+                preparedRequest.close();
+            }
+
+            @Override
+            public void releaseTargetResponse(
+                AggregatedRawResponse targetResponse
+            ) {}
+
+            @Override
+            public void releaseSourceResponse(
+                HttpMessageAndTimestamp.Response sourceResponse
+            ) {}
+        };
+    }
+
+    private static List<EventLoop> targetEventLoops(
+        NioEventLoopGroup targetEventLoopGroup
+    ) {
+        var eventLoops = new ArrayList<EventLoop>();
+        targetEventLoopGroup.forEach(executor -> {
+            if (!(executor instanceof EventLoop eventLoop)) {
+                throw new IllegalStateException(
+                    "NioEventLoopGroup contained a non-EventLoop executor"
+                );
+            }
+            eventLoops.add(eventLoop);
+        });
+        if (eventLoops.isEmpty()) {
+            throw new IllegalStateException(
+                "target event-loop group created no event loops"
+            );
+        }
+        return List.copyOf(eventLoops);
+    }
+
+    private static SslContext loadTargetSslContext(
+        URI targetUri,
+        boolean allowInsecureConnections
+    ) throws Exception {
+        if (!"https".equalsIgnoreCase(targetUri.getScheme())) {
+            return null;
+        }
+        var builder = SslContextBuilder.forClient();
+        if (allowInsecureConnections) {
+            builder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+        }
+        return builder.build();
+    }
+
+    private static void closeAfterConstructionFailure(
+        Consumer<String, byte[]> consumer,
+        NioEventLoopGroup targetEventLoopGroup,
+        IAuthTransformerFactory authTransformerFactory,
+        Optional<TupleSinkResources> tupleSinkResources,
+        Throwable constructionFailure
+    ) {
+        try {
+            consumer.close();
+        } catch (Throwable closeFailure) {
+            constructionFailure.addSuppressed(closeFailure);
+        }
+        try {
+            targetEventLoopGroup
+                .shutdownGracefully(0, 0, TimeUnit.MILLISECONDS)
+                .syncUninterruptibly();
+        } catch (Throwable closeFailure) {
+            constructionFailure.addSuppressed(closeFailure);
+        }
+        if (authTransformerFactory != null) {
+            try {
+                authTransformerFactory.close();
+            } catch (Throwable closeFailure) {
+                constructionFailure.addSuppressed(closeFailure);
+            }
+        }
+        if (tupleSinkResources.isPresent()) {
+            try {
+                tupleSinkResources.orElseThrow().close();
+            } catch (Throwable closeFailure) {
+                constructionFailure.addSuppressed(closeFailure);
+            }
+        }
+    }
+
+    private static Throwable appendFailure(
+        Throwable current,
+        Throwable additional
+    ) {
+        if (current == null) {
+            return additional;
+        }
+        if (current != additional) {
+            current.addSuppressed(additional);
+        }
+        return current;
+    }
+    // REBUILD-TRACE-START(G9,source): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayer.setupShutdownHookForReplayer -> TrafficReplayer.runReplayMode
+    // TrafficReplayer.setupShutdownHookForReplayer ->
+    //     TrafficReplayer.SupervisedReplayApplication.createShutdownHook
+    // TrafficReplayer.setupShutdownHookForReplayer ->
+    //     TrafficReplayer.SupervisedReplayApplication.requestAndAwaitOrderlyShutdown
+    // REBUILD-TRACE-END(G9,source)
     // REBUILD-LIMBO-START(G9)
     // setupShutdownHookForReplayer -- blocked on TrafficReplayerTopLevel.
     // This is one of D14's three unbounded waits for orderly recovery. A defect to fix at G9, not behavior to
@@ -903,6 +1684,116 @@ public class TrafficReplayer {
     */
     // REBUILD-LIMBO-END(G9)
 
+    interface ReplayLifecycle {
+        void start();
+
+        void runSourceOnce();
+
+        void wakeSourceOwner();
+
+        void closeOrderly();
+
+        void closeTargetOwnersAfterOrderly();
+    }
+
+    /**
+     * Owns only process sequencing. Mutable Kafka, intake, connection, request, and tuple state remain in
+     * their existing G5-G8 owners.
+     */
+    static final class SupervisedReplayApplication {
+        private final ReplayLifecycle lifecycle;
+        private final ProcessSupervisor supervisor;
+        private final AtomicBoolean orderlyShutdownRequested = new AtomicBoolean();
+        private final CompletableFuture<Void> orderlyShutdownFinished = new CompletableFuture<>();
+
+        SupervisedReplayApplication(
+            ReplayLifecycle lifecycle,
+            ProcessSupervisor supervisor
+        ) {
+            this.lifecycle = java.util.Objects.requireNonNull(lifecycle, "lifecycle");
+            this.supervisor = java.util.Objects.requireNonNull(supervisor, "supervisor");
+        }
+
+        void run() {
+            try {
+                lifecycle.start();
+                while (!orderlyShutdownRequested.get()
+                    && !supervisor.fatalTerminationStarted()) {
+                    lifecycle.runSourceOnce();
+                }
+                if (supervisor.fatalTerminationStarted()) {
+                    finishAfterFatal();
+                    return;
+                }
+
+                lifecycle.closeOrderly();
+                if (supervisor.fatalTerminationStarted()) {
+                    finishAfterFatal();
+                    return;
+                }
+                lifecycle.closeTargetOwnersAfterOrderly();
+                orderlyShutdownFinished.complete(null);
+            } catch (Throwable failure) {
+                var error = failure instanceof Error existing
+                    ? existing
+                    : new Error("Replay application lifecycle failed", failure);
+                supervisor.unexpectedOwnerFailure(
+                    "replay application",
+                    orderlyShutdownRequested.get()
+                        ? "orderly shutdown"
+                        : "startup or source loop",
+                    error
+                );
+                orderlyShutdownFinished.completeExceptionally(error);
+            }
+        }
+
+        // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // TrafficReplayer.setupShutdownHookForReplayer ->
+        //     TrafficReplayer.SupervisedReplayApplication.createShutdownHook
+        // REBUILD-TRACE-END(G9,target)
+        Thread createShutdownHook() {
+            return new Thread(
+                this::requestAndAwaitOrderlyShutdown,
+                "traffic-replayer-orderly-shutdown"
+            );
+        }
+
+        // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
+        // TrafficReplayer.setupShutdownHookForReplayer ->
+        //     TrafficReplayer.SupervisedReplayApplication.requestAndAwaitOrderlyShutdown
+        // REBUILD-TRACE-END(G9,target)
+        void requestAndAwaitOrderlyShutdown() {
+            if (supervisor.fatalTerminationStarted()) {
+                return;
+            }
+            orderlyShutdownRequested.set(true);
+            lifecycle.wakeSourceOwner();
+            try {
+                orderlyShutdownFinished.join();
+            } catch (CompletionException fatalDuringDrain) {
+                if (!supervisor.fatalTerminationStarted()) {
+                    throw fatalDuringDrain;
+                }
+            }
+        }
+
+        boolean orderlyShutdownRequested() {
+            return orderlyShutdownRequested.get();
+        }
+
+        CompletableFuture<Void> orderlyShutdownFinished() {
+            return orderlyShutdownFinished;
+        }
+
+        private void finishAfterFatal() {
+            var failure = supervisor.firstFatalSignal()
+                .map(ProcessSupervisor.FatalSignal::failure)
+                .orElseGet(() -> new Error("fatal replay termination began without a signal"));
+            orderlyShutdownFinished.completeExceptionally(failure);
+        }
+    }
+
     /**
      * This method returns a username:password Base64 encoded basic auth header
      * @param username The plaintext username
@@ -929,12 +1820,6 @@ public class TrafficReplayer {
         );
     }
 
-    // REBUILD-LIMBO-START(G9)
-    // buildAuthTransformerFactory -- blocked on P6 (the five transform/ auth factories), itself gated on
-    // P1, because IAuthTransformer references HttpJsonRequestWithFaultingPayload in the datahandler layer.
-    // Pure argument arbitration over the auth options; returns verbatim once P1 and P6 land. Its two helpers,
-    // getBasicAuthHeader and formatAuthArgFlagsAsString, are live above -- they needed no new dependency.
-    /*
     private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
         long authOptionsSpecified = Stream.of(
             params.removeAuthHeader,
@@ -979,33 +1864,10 @@ public class TrafficReplayer {
             return null; // default is to do nothing to auth headers
         }
     }
-    */
-    // REBUILD-LIMBO-END(G9)
 
-    /**
-     * Distinct from the exit codes G9 owns -- 80 for owner loss and 89 for an unexpected fatal error -- and
-     * from the argument-validation codes 2, 3, and 4 that {@link #parseArgs} and
-     * {@link #parseAndValidateReplayTarget} still produce, so that "ran the unfinished module" can never be
-     * confused with a real replay failure or a bad invocation.
-     */
-    static final int NOT_IMPLEMENTED_EXIT_CODE = 70;
-
-    /**
-     * <strong>The one member of this class deliberately not carried.</strong> The original {@code main} was
-     * mode dispatch over {@code runDumpMode} and {@code runReplayMode}, both of which are in REBUILD-LIMBO
-     * regions above; restoring it would mean restoring a dispatcher to two absent destinations.
-     *
-     * <p>It fails rather than doing nothing. This module already owns the {@code traffic_replayer} image
-     * name, so a silent no-op entry point is something a deployment could run without noticing. The
-     * assembled application not working during reconstruction is expected and accepted; failing quietly is
-     * not.</p>
-     */
     public static void main(String[] args) throws Exception {
         var params = parseArgs(args);
 
-        // Dump mode is the one reachable path as of G1. Without this dispatch the dumper would be live,
-        // compiled and tested but with no production caller -- which AGENTS.md section 4 does not count as
-        // wired, and is how 707 lines of RecordDispositionLedger previously sat dead.
         if (isDumpMode(params)) {
             try {
                 validateDumpModeParams(params);
@@ -1021,12 +1883,11 @@ public class TrafficReplayer {
             return;
         }
 
-        System.err.println(
-            "Replay mode is under reconstruction and has no runnable entry point yet.\n"
-                + "Available now: --mode dump-raw for one line per record, --mode dump-http for one line\n"
-                + "per reconstructed HTTP transaction, and --mode dump-both for both interleaved. The full\n"
-                + "replay path and supervision arrive at milestone G9.\n"
-                + "See docs/replayerRebuildPlanA-inPlace.md and docs/replayerRebuildStatus.md.");
-        System.exit(NOT_IMPLEMENTED_EXIT_CODE);
+        try {
+            runReplayMode(params);
+        } catch (ParameterException badReplayArgs) {
+            System.err.println(badReplayArgs.getMessage());
+            System.exit(2);
+        }
     }
 }

@@ -312,7 +312,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private final LongSupplier nanoTime;
     private final Function<Instant, Instant> replayTimeMapper;
     private final RequestReplayOwner.RequestPreparer<S, P> preparer;
-    private final RequestReplayOwner.RetryPolicy<R, F> retryPolicy;
+    private final RequestReplayOwner.RetryPolicy<P, R, F> retryPolicy;
     private final int maximumResponseRetries;
     private final TargetChannelPort<P, R> targetChannel;
     private final TupleWriter<T> tupleWriter;
@@ -350,7 +350,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull LongSupplier nanoTime,
         @NonNull Function<Instant, Instant> replayTimeMapper,
         @NonNull RequestReplayOwner.RequestPreparer<S, P> preparer,
-        @NonNull RequestReplayOwner.RetryPolicy<R, F> retryPolicy,
+        @NonNull RequestReplayOwner.RetryPolicy<P, R, F> retryPolicy,
         @NonNull TargetChannelPort<P, R> targetChannel,
         @NonNull TupleWriter<T> tupleWriter,
         @NonNull RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory,
@@ -388,7 +388,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull LongSupplier nanoTime,
         @NonNull Function<Instant, Instant> replayTimeMapper,
         @NonNull RequestReplayOwner.RequestPreparer<S, P> preparer,
-        @NonNull RequestReplayOwner.RetryPolicy<R, F> retryPolicy,
+        @NonNull RequestReplayOwner.RetryPolicy<P, R, F> retryPolicy,
         @NonNull TargetChannelPort<P, R> targetChannel,
         @NonNull TupleWriter<T> tupleWriter,
         @NonNull RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory,
@@ -427,7 +427,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull LongSupplier nanoTime,
         @NonNull Function<Instant, Instant> replayTimeMapper,
         @NonNull RequestReplayOwner.RequestPreparer<S, P> preparer,
-        @NonNull RequestReplayOwner.RetryPolicy<R, F> retryPolicy,
+        @NonNull RequestReplayOwner.RetryPolicy<P, R, F> retryPolicy,
         @NonNull TargetChannelPort<P, R> targetChannel,
         @NonNull TupleWriter<T> tupleWriter,
         @NonNull RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory,

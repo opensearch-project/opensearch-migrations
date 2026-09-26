@@ -44,6 +44,36 @@ class TupleWriterTest {
     );
 
     @Test
+    void randomizedExponentialBackoffUsesFullJitterAndCapsAtFiveSeconds() {
+        var policy = TupleWriter.randomizedExponentialRetryDelay(
+            TupleWriter.DEFAULT_INITIAL_RETRY_DELAY,
+            TupleWriter.DEFAULT_MAXIMUM_RETRY_DELAY,
+            () -> 0.5
+        );
+
+        Assertions.assertEquals(
+            Duration.ofMillis(50),
+            policy.delayAfterFailure(1)
+        );
+        Assertions.assertEquals(
+            Duration.ofMillis(100),
+            policy.delayAfterFailure(2)
+        );
+        Assertions.assertEquals(
+            Duration.ofMillis(1_600),
+            policy.delayAfterFailure(6)
+        );
+        Assertions.assertEquals(
+            Duration.ofMillis(2_500),
+            policy.delayAfterFailure(7)
+        );
+        Assertions.assertEquals(
+            Duration.ofMillis(2_500),
+            policy.delayAfterFailure(40)
+        );
+    }
+
+    @Test
     void oneLogicalWriteOwnsPhysicalRetriesUntilDurable() {
         var contexts = new ContextFixture();
         var clock = new FakeClock();

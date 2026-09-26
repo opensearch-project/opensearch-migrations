@@ -1,7 +1,9 @@
 package org.opensearch.migrations.replay;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -12,11 +14,13 @@ import org.slf4j.event.Level;
 @Slf4j
 public class TimeShifter {
 
-    private final AtomicReference<Instant> sourceTimeStart = new AtomicReference<>();
-    private AtomicReference<Instant> systemTimeStart = new AtomicReference<>();
+    private record Baseline(Instant sourceTimeStart, Instant systemTimeStart) {}
+
+    private final AtomicReference<Baseline> baseline = new AtomicReference<>();
 
     private final double rateMultiplier;
     private final Duration realtimeOffset;
+    private final Clock clock;
 
     public TimeShifter() {
         this(1.0);
@@ -27,16 +31,23 @@ public class TimeShifter {
     }
 
     public TimeShifter(double rateMultiplier, Duration realtimeOffset) {
+        this(rateMultiplier, realtimeOffset, Clock.systemUTC());
+    }
+
+    public TimeShifter(double rateMultiplier, Duration realtimeOffset, Clock clock) {
+        if (!(rateMultiplier > 0.0) || !Double.isFinite(rateMultiplier)) {
+            throw new IllegalArgumentException("rateMultiplier must be finite and positive");
+        }
         this.rateMultiplier = rateMultiplier;
-        this.realtimeOffset = realtimeOffset;
+        this.realtimeOffset = Objects.requireNonNull(realtimeOffset, "realtimeOffset");
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     public void setFirstTimestamp(Instant sourceTime) {
-        var didSet = sourceTimeStart.compareAndSet(null, sourceTime);
-        if (didSet) {
-            var didSetSystemStart = systemTimeStart.compareAndSet(null, Instant.now());
-            assert didSetSystemStart : "expected to always start systemTimeStart immediately after sourceTimeStart ";
-        }
+        var didSet = baseline.compareAndSet(
+            null,
+            new Baseline(sourceTime, clock.instant())
+        );
         log.atLevel(didSet ? Level.INFO : Level.TRACE)
             .setMessage("Set baseline source timestamp for all future interactions to {}")
             .addArgument(sourceTime)
@@ -44,25 +55,29 @@ public class TimeShifter {
     }
 
     Instant transformSourceTimeToRealTime(Instant sourceTime) {
-        if (sourceTimeStart.get() == null) {
+        var established = baseline.get();
+        if (established == null) {
             throw new IllegalStateException("setFirstTimestamp has not yet been called");
         }
         // realtime = systemTimeStart + ((sourceTime-sourceTimeStart) / rateMultiplier) + targetOffset
-        return systemTimeStart.get()
+        return established.systemTimeStart()
             .plus(
                 Duration.ofMillis(
-                    (long) (Duration.between(sourceTimeStart.get(), sourceTime).toMillis() / rateMultiplier)
+                    (long) (Duration.between(established.sourceTimeStart(), sourceTime).toMillis() / rateMultiplier)
                 )
             )
             .plus(realtimeOffset);
     }
 
     Optional<Instant> transformRealTimeToSourceTime(Instant realTime) {
-        return Optional.ofNullable(sourceTimeStart.get()).map(start ->
+        return Optional.ofNullable(baseline.get()).map(established ->
         // sourceTime = sourceTimeStart + (realTime-systemTimeStart-targetOffset) * rateMultiplier
-        start.plus(
+        established.sourceTimeStart().plus(
             Duration.ofMillis(
-                (long) (Duration.between(systemTimeStart.get(), realTime.minus(realtimeOffset)).toMillis()
+                (long) (Duration.between(
+                    established.systemTimeStart(),
+                    realTime.minus(realtimeOffset)
+                ).toMillis()
                     * rateMultiplier)
             )
         ));

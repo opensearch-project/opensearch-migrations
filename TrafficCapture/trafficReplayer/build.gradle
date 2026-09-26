@@ -32,6 +32,7 @@ dependencies {
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':TrafficCapture:tupleSink')
     implementation project(':coreUtilities')
+    implementation project(':awsUtilities')
     // TransformerParams, for the two transformer-config parameter delegates on the CLI surface.
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
 
@@ -45,6 +46,9 @@ dependencies {
     implementation libs.log4j.api
     implementation libs.log4j.core
     implementation libs.log4j.slf4j2.impl
+    implementation libs.aws.auth
+    implementation libs.aws.sdk.core
+    implementation libs.aws.s3
 
     // The deterministic fixtures are production-shaped: TestEventLoop is a real Netty EventLoop, the
     // only thing the design lets an owner be assigned to, and RecordScript emits real CaptureRecord

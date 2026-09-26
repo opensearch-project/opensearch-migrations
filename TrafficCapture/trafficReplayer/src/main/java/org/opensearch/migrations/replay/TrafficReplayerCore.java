@@ -822,7 +822,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
 // REBUILD-LIMBO-END(G5)
         // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
         // TrafficReplayerCore.TrafficReplayerAccumulationCallbacks.packageAndWriteTuple ->
-        //     TrafficReplayerTopLevel.deployedTupleFactory
+        //     ResultsToLogsConsumer.createTupleAndReportProgress
+        // TrafficReplayerCore.TrafficReplayerAccumulationCallbacks.packageAndWriteTuple ->
+        //     RequestReplayOwner.tryStartTuple
         // REBUILD-TRACE-END(G5,source)
 // REBUILD-LIMBO-START(G5)
 /*
@@ -961,6 +963,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
      * Apply a response post-processor to all target responses in the parsed messages.
      * Package-private static for testability.
      */
+// REBUILD-TRACE-START(G9,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerCore.applyResponsePostProcessor ->
+//     TrafficReplayerTopLevel.postProcessTargetResponses
+// REBUILD-TRACE-END(G9,source)
 // REBUILD-LIMBO-START(G5)
 /*
     @SuppressWarnings("unchecked")

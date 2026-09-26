@@ -119,10 +119,14 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         );
     }
 
-    public interface RetryPolicy<R, F> {
-        boolean requiresSourceResponse(R targetResponse);
+    public interface RetryPolicy<P, R, F> {
+        boolean requiresSourceResponse(P preparedRequest, R targetResponse);
 
-        RetryDecision decide(R targetResponse, RetrySourceResponse<F> sourceResponse);
+        RetryDecision decide(
+            P preparedRequest,
+            R targetResponse,
+            RetrySourceResponse<F> sourceResponse
+        );
 
         Duration retryDelay(int completedAttemptCount);
     }
@@ -323,7 +327,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private final Clock clock;
     private final LongSupplier nanoTime;
     private final RequestPreparer<S, P> preparer;
-    private final RetryPolicy<R, F> retryPolicy;
+    private final RetryPolicy<P, R, F> retryPolicy;
     private final int maximumResponseRetries;
     private final TargetChannelPort<P, R> targetChannel;
     private final TupleFactory<S, P, R, F, T> tupleFactory;
@@ -363,7 +367,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull Clock clock,
         @NonNull LongSupplier nanoTime,
         @NonNull RequestPreparer<S, P> preparer,
-        @NonNull RetryPolicy<R, F> retryPolicy,
+        @NonNull RetryPolicy<P, R, F> retryPolicy,
         @NonNull TargetChannelPort<P, R> targetChannel,
         @NonNull TupleFactory<S, P, R, F, T> tupleFactory,
         @NonNull TupleWriter<T> tupleWriter,
@@ -1003,7 +1007,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     ) {
         final boolean needsSource;
         try {
-            needsSource = retryPolicy.requiresSourceResponse(response.response());
+            needsSource = retryPolicy.requiresSourceResponse(
+                preparedRequestForRetry(),
+                response.response()
+            );
         } catch (Throwable failure) {
             impossible("retry source-response requirement", failure);
             return;
@@ -1051,7 +1058,11 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         final RetryDecision decision;
         try {
             decision = Objects.requireNonNull(
-                retryPolicy.decide(response.response(), source),
+                retryPolicy.decide(
+                    preparedRequestForRetry(),
+                    response.response(),
+                    source
+                ),
                 "retry policy returned no decision"
             );
         } catch (Throwable failure) {
@@ -1084,6 +1095,16 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         return attemptHistory.stream()
             .filter(TargetAttemptOutcome.TargetResponseObtained.class::isInstance)
             .count();
+    }
+
+    private P preparedRequestForRetry() {
+        if (!(preparationState instanceof PreparationState.Ready<P> ready)
+            || ready.preparation().value() == null) {
+            throw new IllegalStateException(
+                "retry evaluation requires a prepared request"
+            );
+        }
+        return ready.preparation().value();
     }
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
@@ -1245,6 +1266,8 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     // RequestTransformerAndSender.transformAndSendRequest(7-argument) ->
     //     RequestReplayOwner.tryStartTuple
     // RequestTransformerAndSender.transformAndSendRequest(8-argument) ->
+    //     RequestReplayOwner.tryStartTuple
+    // TrafficReplayerCore.TrafficReplayerAccumulationCallbacks.packageAndWriteTuple ->
     //     RequestReplayOwner.tryStartTuple
     // REBUILD-TRACE-END(G5,target)
     private void tryStartTuple() {

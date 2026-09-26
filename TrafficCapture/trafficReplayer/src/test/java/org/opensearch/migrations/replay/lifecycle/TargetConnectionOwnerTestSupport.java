@@ -326,7 +326,7 @@ final class TargetConnectionOwnerTestSupport {
     }
 
     static final class FakeRetryPolicy
-        implements RequestReplayOwner.RetryPolicy<String, String> {
+        implements RequestReplayOwner.RetryPolicy<TestPrepared, String, String> {
 
         boolean requiresSourceResponse;
         Duration retryDelay = Duration.ofSeconds(1);
@@ -335,12 +335,16 @@ final class TargetConnectionOwnerTestSupport {
             new ArrayList<>();
 
         @Override
-        public boolean requiresSourceResponse(String targetResponse) {
+        public boolean requiresSourceResponse(
+            TestPrepared preparedRequest,
+            String targetResponse
+        ) {
             return requiresSourceResponse;
         }
 
         @Override
         public RetryDecision decide(
+            TestPrepared preparedRequest,
             String targetResponse,
             RequestReplayOwner.RetrySourceResponse<String> sourceResponse
         ) {
