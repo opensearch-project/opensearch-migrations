@@ -89,7 +89,7 @@ preserving:
 - key nullability and bytes;
 - value nullability and bytes;
 - headers, including duplicates and order; and
-- the timestamp selected by the configured timestamp mode.
+- the archived original `LogAppendTime` numeric timestamp.
 
 Destination Kafka offsets are expected to differ from source offsets. The importer records enough
 mapping information to diagnose an imported record from its archived source partition and offset.
@@ -100,20 +100,9 @@ completed archive load. If a load has an ambiguous or failed outcome, the workfl
 exactly-once publication and does not automatically start another load into the same topic. The
 operator must reset the captured-traffic resource and destination topic before retrying.
 
-## Timestamp modes
+## Timestamp preservation
 
-The import configuration contains:
-
-```ts
-timestampMode: z
-    .enum(["preserve", "rebase-without-expiration"])
-    .default("preserve")
-    .optional()
-```
-
-### `preserve`
-
-`preserve` is the default. The importer writes the archived original `LogAppendTime` numeric value
+The importer always writes the archived original `LogAppendTime` numeric value
 as the destination record timestamp. The dedicated import topic must retain producer-supplied
 timestamps rather than replacing them with the destination broker's current time.
 
@@ -124,28 +113,15 @@ archive metadata, while replay in `preserve` mode treats the imported numeric ti
 archived source broker time.
 
 The replayer uses the archived `E` and `S` values and applies the normal broker-time expiration
-rules. This mode assumes the source Kafka brokers satisfied the declared skew bound while the
+rules. Import assumes the source Kafka brokers satisfied the declared skew bound while the
 capture was produced. The archived record timestamps also reproduce the deterministic
 source-response boundary used by retry policy; the import broker's append time does not replace
 them.
 
-### `rebase-without-expiration`
-
-`rebase-without-expiration` is an expert fallback for an archive whose original broker timestamps
-cannot be preserved or trusted. The destination Kafka broker supplies the imported records'
-timestamps.
-
-In this mode, broker-time heartbeat expiration is disabled. Rebased timestamps must never authorize
-expiration under the original `E + S` proof, because they do not describe the source capture
-timeline. The destination timestamps drive the source-response boundary used by retry policy, but
-not source-run expiration.
-
-For a `range` archive, choosing this mode also accepts that an archive ending with an incomplete
-connection and no terminal `CloseObservation` may remain unresolved indefinitely. End of a range is
-not completion evidence. A `finalized` archive uses the explicit partition-end rule below.
-
-The selected timestamp mode is immutable for one imported capture and is passed explicitly to the
-replayer. Proxy and replayer configuration must agree about the applicable protocol parameters.
+If the archive lacks trustworthy original broker timestamps, the dedicated import topic cannot
+retain the supplied numeric values, or validation observes that Kafka replaced one, import fails
+and the captured-traffic resource never becomes ready. Newly assigned import-broker timestamps are
+never substituted for the source capture's broker-time evidence.
 
 ## Replay behavior
 
@@ -196,10 +172,6 @@ export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
   kafkaTopic: z.string().optional(),
   sourceLabel: z.string(),
   archiveEndMode: z.enum(["finalized", "range"]),
-  timestampMode: z
-      .enum(["preserve", "rebase-without-expiration"])
-      .default("preserve")
-      .optional(),
 });
 ```
 
@@ -209,7 +181,7 @@ created it. Names for live and imported sources must not collide.
 For an imported source:
 
 1. Reconcile the `CapturedTraffic` resource and destination topic.
-2. Reject a changed archive identity, end mode, or timestamp mode for an existing load.
+2. Reject a changed archive identity or end mode for an existing load.
 3. Validate the archive identity and structural metadata.
 4. Stream, validate, and publish the destination records.
 5. Record load statistics and archive identity.
@@ -241,16 +213,15 @@ capture coordination protocol.
 The following tests are required:
 
 1. An archive-codec round trip preserves partition, raw nullable key/value, original timestamp,
-   original timestamp-type metadata, and duplicate ordered headers. Import in `preserve` mode keeps
+   original timestamp-type metadata, and duplicate ordered headers. Import keeps
    the archived numeric timestamp; it does not claim that Kafka reports the destination record with
    the source record's original timestamp type.
 2. A multi-partition archive round trip preserves every partition's record order.
 3. Import rejects unsupported protocol versions, missing partitions, gaps, duplicates, reordering,
    and integrity failures.
-4. `preserve` retains archived timestamps and runs broker-time expiration using archived `E` and
-   `S`.
-5. `rebase-without-expiration` uses destination timestamps and cannot perform broker-time
-   expiration.
+4. Import retains archived timestamps and runs broker-time expiration using archived `E` and `S`.
+5. Import fails if the archive timestamps are not trustworthy or the destination topic does not
+   retain the supplied numeric timestamps.
 6. Imported mixed records retain the same per-observation processing and whole-record commit
    behavior as live records.
 7. Restart and partition reassignment demonstrate at-least-once behavior without introducing an

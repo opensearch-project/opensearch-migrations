@@ -327,23 +327,16 @@ leader epochs are newly assigned Kafka transport identities; the replayer uses t
 for commit accounting. The original offsets remain archive integrity and diagnostic data and do not
 participate in imported-topic commits.
 
-The timestamp policy has two modes:
+Import always writes each archived original `LogAppendTime` numeric value as the record timestamp on
+a dedicated bring-your-own topic configured to preserve producer-supplied timestamps. Kafka reports
+the destination timestamp type according to that destination configuration; the archive retains the
+source record's original timestamp type as metadata. The importer validates that Kafka retained the
+supplied numeric values. If the archive timestamps are not trustworthy, the destination topic cannot
+retain them, or validation observes replacement, import fails and replay does not start.
 
-- **`preserve`**, the default, imports each archived original `LogAppendTime` numeric value as the
-  record timestamp on a dedicated bring-your-own topic configured to preserve producer-supplied
-  timestamps. Kafka reports the destination timestamp type according to that destination
-  configuration; the archive retains the source record's original timestamp type as metadata. The
-  user asserts that the original broker clock-skew bound `S` was healthy. The replayer may apply
-  the ordinary `E + S` expiration proof using the archived timestamp and archived `E` and `S`. That
-  archived timestamp also reproduces the source-response retry boundary; the import broker's append
-  time is not substituted for it.
-- **`rebase-without-expiration`**, an expert mode, accepts newly assigned import-broker timestamps
-  and automatically disables broker-time expiration for that input. Terminal connection
-  observations still resolve incomplete state. The replayer uses the newly assigned timestamps for
-  the source-response retry boundary, but never for the original capture run's expiration proof.
-
-No mode may use newly assigned import-broker time to perform the original capture run's `E + S`
-expiration proof.
+The replayer applies the ordinary `E + S` expiration proof using the archived timestamp and archived
+`E` and `S`. That timestamp also reproduces the source-response retry boundary; newly assigned
+import-broker time is never substituted for it.
 
 `archiveEndMode` distinguishes two uses:
 
@@ -901,9 +894,8 @@ than silent; the expiration proof itself remains valid only while the declared `
 actually enforced on the brokers.
 
 External attestation of broker clock health is a managed-workflow responsibility. Loss of that
-attestation does not need to be inferred or handled by the replayer. The explicitly selected
-`rebase-without-expiration` archive mode in §2.3 does not claim the broker-time expiration proof
-and accepts that incomplete hard-crash state may remain unresolved.
+attestation does not need to be inferred or handled by the replayer. Imported capture is accepted
+only with trustworthy archived broker timestamps under the same declared `S` bound.
 
 ## 9. Replayer processing and whole-record commit
 
@@ -1454,7 +1446,7 @@ real-Kafka tests.
 | Event-loop death | Fatal signal and no ownership transfer | Process-level fault injection; live container restart |
 | Process-wide capture failure policy | Required Kafka publication failure or capture compromise causes immediate `fail-closed` termination or irreversible `fail-open`; managed fail-open forwards no uncaptured source traffic until the controller durably records incomplete capture and acknowledges that exact activation; membership events do neither after startup | Producer failure and ambiguous-outcome fault injection in both modes, lost and duplicate compromise notifications, controller failover before and after durable recording, and acknowledgement timeout |
 | Protocol violations | Immediate `Retain`, intake pause, bounded drain of admitted target/tuple work, and process termination | Corrupt and out-of-order Kafka records with in-flight target and tuple work; redelivery after exit |
-| Bring-your-own archive fidelity | Version, partition ranges, binary key/value, ordered headers, source offsets, original timestamps, exact application-record boundaries, `E`, `S`, checksums, timestamp mode, and explicit finalized-versus-range end mode | Export/import round trip with periodically flushed traffic records, heartbeats, multi-observation records, multiple partitions, corruption, missing-record injection, deterministic finalized partition-end inputs, and unresolved arbitrary-range endings |
+| Bring-your-own archive fidelity | Version, partition ranges, binary key/value, ordered headers, source offsets, original timestamps, exact application-record boundaries, `E`, `S`, checksums, and explicit finalized-versus-range end mode | Export/import round trip with periodically flushed traffic records, heartbeats, multi-observation records, multiple partitions, corruption, missing-record injection, timestamp-replacement rejection, deterministic finalized partition-end inputs, and unresolved arbitrary-range endings |
 
 The full acceptance suite must also prove:
 
@@ -1515,9 +1507,10 @@ The full acceptance suite must also prove:
 - retained records prevent committing later offsets past them;
 - a semantic violation in a later record does not prevent an earlier complete request from reaching
   the target;
-- a `preserve` archive replay produces the same protocol decisions as the original partition logs
+- an imported archive replay produces the same protocol decisions as the original partition logs
   while using newly assigned imported offsets for commits;
-- `rebase-without-expiration` never applies broker-time expiration; and
+- import fails rather than substituting destination-broker time when archived timestamps cannot be
+  retained or trusted; and
 - a `finalized` archive supplies deterministic partition-end inputs that resolve only the
   documented finite-capture state, while a `range` archive's end-of-file never completes an open
   writer, incomplete connection, or retry wait.

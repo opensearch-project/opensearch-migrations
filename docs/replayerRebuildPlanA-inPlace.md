@@ -756,8 +756,9 @@ these.
 **Design refs:** process-failure boundary and the supervisor's six duties `replayerLLD §8:236-248`;
 what is fatal versus a value `replayerLLD §4:146-164` and `async §2:44`; shutdown and failure
 `procCommit §10:1371-1425`; `captureAndReplayArchitecture §12:1193-1273`. Startup validation
-`procCommit:1081` (`P >= 1`, `T >= 1`) and `:1151` (`W` positive). Archive configuration and the
-`preserve` / `rebase-without-expiration` modes `BringYourOwnCapturedTraffic.md:103-149`. The CLI and
+`procCommit:1081` (`P >= 1`, `T >= 1`) and `:1151` (`W` positive). Mandatory archive timestamp
+preservation and rejection when archived broker timestamps cannot be retained or trusted are defined
+by `BringYourOwnCapturedTraffic.md:103-132`. The CLI and
 inline-JSON surface, including every deprecated parse-and-warn alias, is `replayerRebuildPlan.md §7`.
 **Required tests: `connLLD §19.6:783-788` and `procCommit §13.5:1708-1716`.**
 
