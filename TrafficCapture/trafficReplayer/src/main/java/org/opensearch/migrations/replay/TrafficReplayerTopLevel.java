@@ -250,11 +250,29 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull RootReplayerContext rootContext,
         @NonNull Configuration<P, R, T> configuration,
         @NonNull Duration kafkaPollTimeout,
+        @NonNull Consumer<Error> fatalHandler
+    ) {
+        this(
+            consumer,
+            rootContext,
+            configuration,
+            kafkaPollTimeout,
+            KafkaSourceOwner.DEFAULT_REVOCATION_GRACE,
+            fatalHandler
+        );
+    }
+
+    public TrafficReplayerTopLevel(
+        @NonNull org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
+        @NonNull RootReplayerContext rootContext,
+        @NonNull Configuration<P, R, T> configuration,
+        @NonNull Duration kafkaPollTimeout,
         @NonNull Duration cancellationGrace,
         @NonNull Consumer<Error> fatalHandler
     ) {
         this.configuration = configuration;
         this.fatalHandler = fatalHandler;
+        // REBUILD-LIMBO-NOTE(G9): ProcessSupervisor replaces System::exit with supervised termination.
         this.protocolViolationTerminator = ProtocolViolationTerminator.system(
             System::exit,
             new ProtocolViolationMetrics(
