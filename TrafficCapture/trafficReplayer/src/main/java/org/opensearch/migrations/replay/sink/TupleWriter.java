@@ -19,6 +19,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
@@ -37,6 +38,11 @@ import lombok.NonNull;
  * writes on separate owners without changing the logical contract represented here.</p>
  */
 public final class TupleWriter<T> {
+    public static final Duration DEFAULT_INITIAL_RETRY_DELAY =
+        Duration.ofMillis(100);
+    public static final Duration DEFAULT_MAXIMUM_RETRY_DELAY =
+        Duration.ofSeconds(5);
+
     public record WriteTuple<T>(
         @NonNull IReplayContexts.ITupleHandlingContext replayContext,
         @NonNull T tuple
@@ -86,6 +92,11 @@ public final class TupleWriter<T> {
         void onFatal(Error failure);
     }
 
+    @FunctionalInterface
+    public interface RetryDelayPolicy {
+        Duration delayAfterFailure(int failedAttemptCount);
+    }
+
     public interface LogicalWrite {
         CompletionStage<TupleWriteResult> completion();
 
@@ -103,7 +114,7 @@ public final class TupleWriter<T> {
 
     private final EventLoop eventLoop;
     private final Clock clock;
-    private final Duration retryDelay;
+    private final RetryDelayPolicy retryDelayPolicy;
     private final TupleTransformer<T> transformer;
     private final PhysicalTupleSink<T> sink;
     private final Consumer<T> tupleReleaser;
@@ -112,13 +123,6 @@ public final class TupleWriter<T> {
     private final Map<ReplayRequestId, WriteOperation> active = new LinkedHashMap<>();
     private boolean eagerFlush;
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.<init>(IntFunction) -> TupleWriter.<init>(7-argument)
-    // ThreadLocalTupleWriter.<init>(IntFunction) -> TrafficReplayerTopLevel.createConnection
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.<init>(IntFunction) -> TupleWriter.<init>(7-argument)
-    // REBUILD-TRACE-END(G5,target)
     public TupleWriter(
         @NonNull EventLoop eventLoop,
         @NonNull Clock clock,
@@ -140,16 +144,27 @@ public final class TupleWriter<T> {
         );
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.<init>(IntFunction,Supplier) -> TupleWriter.<init>(8-argument)
-    // ThreadLocalTupleWriter.<init>(IntFunction,Supplier) ->
-    //     TrafficReplayerTopLevel.deployedTupleTransformer
-    // ThreadLocalTupleWriter.<init>(IntFunction,Supplier) ->
-    //     TrafficReplayerTopLevel.createConnection
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.<init>(IntFunction,Supplier) -> TupleWriter.<init>(8-argument)
-    // REBUILD-TRACE-END(G5,target)
+    public TupleWriter(
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull RetryDelayPolicy retryDelayPolicy,
+        @NonNull PhysicalTupleSink<T> sink,
+        @NonNull Consumer<T> tupleReleaser,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull OutstandingOperationRegistry.CountHook countHook
+    ) {
+        this(
+            eventLoop,
+            clock,
+            retryDelayPolicy,
+            (replayContext, tuple) -> new TransformedTuple<>(tuple),
+            sink,
+            tupleReleaser,
+            fatalHandler,
+            countHook
+        );
+    }
+
     public TupleWriter(
         @NonNull EventLoop eventLoop,
         @NonNull Clock clock,
@@ -160,12 +175,31 @@ public final class TupleWriter<T> {
         @NonNull FatalHandler fatalHandler,
         @NonNull OutstandingOperationRegistry.CountHook countHook
     ) {
-        if (retryDelay.isNegative()) {
-            throw new IllegalArgumentException("retryDelay must not be negative");
-        }
+        this(
+            eventLoop,
+            clock,
+            fixedRetryDelay(retryDelay),
+            transformer,
+            sink,
+            tupleReleaser,
+            fatalHandler,
+            countHook
+        );
+    }
+
+    public TupleWriter(
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull RetryDelayPolicy retryDelayPolicy,
+        @NonNull TupleTransformer<T> transformer,
+        @NonNull PhysicalTupleSink<T> sink,
+        @NonNull Consumer<T> tupleReleaser,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull OutstandingOperationRegistry.CountHook countHook
+    ) {
         this.eventLoop = eventLoop;
         this.clock = clock;
-        this.retryDelay = retryDelay;
+        this.retryDelayPolicy = retryDelayPolicy;
         this.transformer = transformer;
         this.sink = sink;
         this.tupleReleaser = tupleReleaser;
@@ -177,6 +211,52 @@ public final class TupleWriter<T> {
             fatalHandler::onFatal,
             countHook
         );
+    }
+
+    public static RetryDelayPolicy fixedRetryDelay(@NonNull Duration retryDelay) {
+        if (retryDelay.isNegative()) {
+            throw new IllegalArgumentException("retryDelay must not be negative");
+        }
+        return ignored -> retryDelay;
+    }
+
+    public static RetryDelayPolicy randomizedExponentialRetryDelay(
+        @NonNull Duration initialDelay,
+        @NonNull Duration maximumDelay,
+        @NonNull DoubleSupplier randomFraction
+    ) {
+        if (initialDelay.isZero() || initialDelay.isNegative()) {
+            throw new IllegalArgumentException("initialDelay must be positive");
+        }
+        if (maximumDelay.compareTo(initialDelay) < 0) {
+            throw new IllegalArgumentException(
+                "maximumDelay must be greater than or equal to initialDelay"
+            );
+        }
+        var initialNanos = initialDelay.toNanos();
+        var maximumNanos = maximumDelay.toNanos();
+        return failedAttemptCount -> {
+            if (failedAttemptCount < 1) {
+                throw new IllegalArgumentException(
+                    "failedAttemptCount must be positive"
+                );
+            }
+            var upperBoundNanos = initialNanos;
+            for (var attempt = 1;
+                 attempt < failedAttemptCount && upperBoundNanos < maximumNanos;
+                 attempt++) {
+                upperBoundNanos = upperBoundNanos > maximumNanos / 2
+                    ? maximumNanos
+                    : upperBoundNanos * 2;
+            }
+            var fraction = randomFraction.getAsDouble();
+            if (!(fraction >= 0.0 && fraction < 1.0)) {
+                throw new IllegalStateException(
+                    "randomFraction must return a value in [0.0, 1.0)"
+                );
+            }
+            return Duration.ofNanos((long) (upperBoundNanos * fraction));
+        };
     }
 
     // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
@@ -363,6 +443,16 @@ public final class TupleWriter<T> {
         }
         operation.state = State.WAITING_TO_RETRY;
         try {
+            operation.failedAttemptCount++;
+            var retryDelay = Objects.requireNonNull(
+                retryDelayPolicy.delayAfterFailure(operation.failedAttemptCount),
+                "tuple retry delay policy returned null"
+            );
+            if (retryDelay.isNegative()) {
+                throw new IllegalStateException(
+                    "tuple retry delay policy returned a negative delay"
+                );
+            }
             operation.retryTimer = eventLoop.schedule(
                 () -> submitPhysicalWrite(operation),
                 retryDelay.toNanos(),
@@ -495,6 +585,7 @@ public final class TupleWriter<T> {
         private OutstandingOperationRegistry.Registration logicalRegistration;
         private OutstandingOperationRegistry.Registration physicalRegistration;
         private ScheduledFuture<?> retryTimer;
+        private int failedAttemptCount;
         private T transformedTuple;
 
         private WriteOperation(WriteTuple<T> input) {

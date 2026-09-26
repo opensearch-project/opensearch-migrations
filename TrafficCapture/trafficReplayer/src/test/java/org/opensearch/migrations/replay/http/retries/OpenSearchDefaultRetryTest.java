@@ -1,7 +1,28 @@
 package org.opensearch.migrations.replay.http.retries;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.AbstractMap;
+import java.util.List;
+
+import org.opensearch.migrations.replay.AggregatedRawResponse;
+import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
+import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
+
+import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.http.DefaultHttpResponse;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpVersion;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+// REBUILD-LIMBO(G10) -- inherited test bodies remain marked and recoverable; the live replacement
+// follows the marked regions. Javadoc stays outside the regions and keeps its blame.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
 // javadoc with it. See AGENTS.md section 8a.
 // Test carried byte-identical. Unresolved: RequestSenderOrchestrator . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
@@ -81,6 +102,125 @@ class OpenSearchDefaultRetryTest {
 
 */
 // REBUILD-LIMBO-END(G10)
+
+class OpenSearchDefaultRetryTest {
+    @Test
+    void transformedBulkUriIsClassifiedOnceForRetryPolicy() {
+        try (var prepared = prepared(
+            "POST /prefix/_bulk HTTP/1.1\r\n"
+                + "Host: target\r\n"
+                + "Content-Length: 0\r\n\r\n"
+        )) {
+            Assertions.assertEquals(
+                NettyPacketToHttpConsumer.PreparedRequest.RetryRequestKind.BULK,
+                prepared.retryRequestKind()
+            );
+        }
+    }
+
+    @Test
+    void bulkItemFailureRetriesWithoutWaitingForSourceResponse() {
+        var policy = new OpenSearchDefaultRetry();
+        try (var prepared = prepared(
+            "POST /_bulk HTTP/1.1\r\n"
+                + "Host: target\r\n"
+                + "Content-Length: 0\r\n\r\n"
+        )) {
+            var response = response(
+                200,
+                """
+                HTTP/1.1 200 OK\r
+                Content-Type: application/json\r
+                \r
+                {"errors":true,"items":[{"index":{"error":{"type":"unavailable_shards_exception"}}}]}
+                """
+            );
+            Assertions.assertFalse(
+                policy.requiresSourceResponse(prepared, response)
+            );
+            Assertions.assertInstanceOf(
+                RetryDecision.RetryRequired.class,
+                policy.decide(
+                    prepared,
+                    response,
+                    new RequestReplayOwner.SourceResponseUnavailableForRetry<>()
+                )
+            );
+        }
+    }
+
+    @Test
+    void ordinaryTargetFailureRetainsSourceStatusComparison() {
+        var policy = new OpenSearchDefaultRetry();
+        try (var prepared = prepared(
+            "GET /document HTTP/1.1\r\nHost: target\r\n\r\n"
+        )) {
+            var target = response(
+                404,
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
+            );
+            Assertions.assertTrue(policy.requiresSourceResponse(prepared, target));
+            Assertions.assertInstanceOf(
+                RetryDecision.RetryRequired.class,
+                policy.decide(prepared, target, completeSourceResponse(200))
+            );
+            Assertions.assertInstanceOf(
+                RetryDecision.TargetServerAttemptsFinished.class,
+                policy.decide(prepared, target, completeSourceResponse(404))
+            );
+        }
+    }
+
+    @Test
+    void inheritedRetryBackoffStartsAtOneHundredMillisecondsAndCapsAtFiveMinutes() {
+        var policy = new OpenSearchDefaultRetry();
+
+        Assertions.assertEquals(Duration.ofMillis(100), policy.retryDelay(1));
+        Assertions.assertEquals(Duration.ofMillis(200), policy.retryDelay(2));
+        Assertions.assertEquals(Duration.ofSeconds(300), policy.retryDelay(64));
+    }
+
+    private static NettyPacketToHttpConsumer.PreparedRequest prepared(String request) {
+        var bytes = Unpooled.copiedBuffer(request, StandardCharsets.UTF_8);
+        var packets = new ByteBufList(bytes);
+        bytes.release();
+        return new NettyPacketToHttpConsumer.PreparedRequest(
+            ByteBufListProducer.of(packets),
+            Duration.ZERO
+        );
+    }
+
+    private static AggregatedRawResponse response(int status, String rawResponse) {
+        return new AggregatedRawResponse(
+            new DefaultHttpResponse(
+                HttpVersion.HTTP_1_1,
+                HttpResponseStatus.valueOf(status)
+            ),
+            rawResponse.length(),
+            Duration.ZERO,
+            List.of(new AbstractMap.SimpleEntry<>(
+                Instant.EPOCH,
+                rawResponse.getBytes(StandardCharsets.UTF_8)
+            )),
+            null
+        );
+    }
+
+    private static RequestReplayOwner.CompleteSourceResponseForRetry<
+        HttpMessageAndTimestamp.Response
+    > completeSourceResponse(int status) {
+        var response = new HttpMessageAndTimestamp.Response(Instant.EPOCH);
+        response.add(
+            (
+                "HTTP/1.1 "
+                    + status
+                    + " status\r\nContent-Length: 0\r\n\r\n"
+            ).getBytes(StandardCharsets.UTF_8)
+        );
+        response.setLastPacketTimestamp(Instant.EPOCH);
+        return new RequestReplayOwner.CompleteSourceResponseForRetry<>(response);
+    }
+}
     /**
      * Build a bulk response with optional item-level errors.
      * @param errorTypes if non-null, generates items with these error types (null entry = success item)

@@ -8,6 +8,7 @@
 
 package org.opensearch.migrations.replay;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -19,11 +20,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel.ManagedPhysicalTupleSink;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel.ManagedTupleTransformer;
@@ -63,6 +66,7 @@ import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.google.protobuf.ByteString;
@@ -80,6 +84,7 @@ import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
@@ -92,6 +97,200 @@ class TrafficReplayerTopLevelConstructionTest {
     private static final TopicPartition TOPIC_PARTITION = new TopicPartition("traffic", 0);
 
     @Test
+    void deployedApplicationFactorySelectsThePreservedMetricAndOwnerChain()
+        throws Exception {
+        var parameters = new TrafficReplayer.Parameters();
+        parameters.kafkaTrafficTopic = TOPIC_PARTITION.topic();
+        parameters.numClientThreads = 2;
+        parameters.readyRequestsBufferPerThread = 3;
+        parameters.maxConcurrentTargetAttempts = 7;
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var targetEventLoops = new NioEventLoopGroup(
+            parameters.numClientThreads,
+            new DefaultThreadFactory("g9-deployed-construction")
+        );
+
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var deployed = TrafficReplayer.createDeployedReplayApplication(
+                parameters,
+                URI.create("http://localhost:9200"),
+                new org.opensearch.migrations.replay.intake.PartitionIntakeState.BrokerTimeConfiguration(
+                    30_000,
+                    1_000,
+                    5_000
+                ),
+                Duration.ZERO,
+                rootContext,
+                consumer,
+                targetEventLoops,
+                IAuthTransformerFactory.NullAuthTransformerFactory.instance,
+                Optional.empty(),
+                Clock.systemUTC(),
+                System::nanoTime
+            );
+            try {
+                var replayer = deployed.lifecycle().replayer();
+                var configuration = replayer.configuration();
+
+                Assertions.assertEquals(2, replayer.tupleWriterWorkerCount());
+                Assertions.assertEquals(2, configuration.targetEventLoops().size());
+                Assertions.assertEquals(3, configuration.readyRequestsBufferPerThread());
+                Assertions.assertEquals(6, configuration.retryReadyRequestSupplyTarget());
+                Assertions.assertEquals(7, configuration.maximumTargetAttempts());
+                Assertions.assertInstanceOf(
+                    org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry.class,
+                    configuration.retryPolicy()
+                );
+
+                Assertions.assertAll(
+                    "the deployed root constructs every producer group for the 33 preserved names",
+                    () -> Assertions.assertNotNull(rootContext.kafkaRecordInstruments),
+                    () -> Assertions.assertNotNull(rootContext.trafficStreamLifecycleInstruments),
+                    () -> Assertions.assertNotNull(rootContext.httpTransactionInstruments),
+                    () -> Assertions.assertNotNull(rootContext.transformationInstruments),
+                    () -> Assertions.assertNotNull(rootContext.scheduledInstruments),
+                    () -> Assertions.assertNotNull(rootContext.targetRequestInstruments),
+                    () -> Assertions.assertNotNull(rootContext.channelKeyInstruments),
+                    () -> Assertions.assertNotNull(rootContext.socketInstruments),
+                    () -> Assertions.assertNotNull(rootContext.tupleHandlingInstruments),
+                    () -> Assertions.assertEquals(33, preservedReplayPipelineMetricNames().size())
+                );
+
+                deployed.lifecycle().start();
+                Assertions.assertEquals(
+                    java.util.Set.of(TOPIC_PARTITION.topic()),
+                    consumer.subscription()
+                );
+                Assertions.assertFalse(deployed.supervisor().fatalTerminationStarted());
+            } finally {
+                try {
+                    deployed.lifecycle().closeOrderly();
+                } finally {
+                    deployed.lifecycle().closeTargetOwnersAfterOrderly();
+                }
+            }
+            Assertions.assertTrue(consumer.closed());
+        }
+    }
+
+    private static Set<String> preservedReplayPipelineMetricNames() {
+        return Set.of(
+            IReplayContexts.MetricNames.KAFKA_RECORD_READ,
+            IReplayContexts.MetricNames.KAFKA_BYTES_READ,
+            IReplayContexts.MetricNames.TRAFFIC_STREAMS_READ,
+            IReplayContexts.MetricNames.TRANSFORM_HEADER_PARSE,
+            IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_PARSE_REQUIRED,
+            IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_PARSE_SUCCESS,
+            IReplayContexts.MetricNames.TRANSFORM_JSON_REQUIRED,
+            IReplayContexts.MetricNames.TRANSFORM_JSON_SUCCEEDED,
+            IReplayContexts.MetricNames.TRANSFORM_TEXT_SUCCEEDED,
+            IReplayContexts.MetricNames.TRANSFORM_TEXT_FAILED,
+            IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_BINARY,
+            IReplayContexts.MetricNames.TRANSFORM_PAYLOAD_BYTES_IN,
+            IReplayContexts.MetricNames.TRANSFORM_UNCOMPRESSED_BYTES_IN,
+            IReplayContexts.MetricNames.TRANSFORM_UNCOMPRESSED_BYTES_OUT,
+            IReplayContexts.MetricNames.TRANSFORM_FINAL_PAYLOAD_BYTES_OUT,
+            IReplayContexts.MetricNames.TRANSFORM_SUCCESS,
+            IReplayContexts.MetricNames.TRANSFORM_SKIPPED,
+            IReplayContexts.MetricNames.TRANSFORM_ERROR,
+            IReplayContexts.MetricNames.TRANSFORM_BYTES_IN,
+            IReplayContexts.MetricNames.TRANSFORM_BYTES_OUT,
+            IReplayContexts.MetricNames.TRANSFORM_CHUNKS_IN,
+            IReplayContexts.MetricNames.TRANSFORM_CHUNKS_OUT,
+            IReplayContexts.MetricNames.NETTY_SCHEDULE_LAG,
+            IReplayContexts.MetricNames.NUM_REQUEST_RETRIES,
+            IReplayContexts.MetricNames.SOURCE_TO_TARGET_REQUEST_LAG,
+            IReplayContexts.MetricNames.ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED,
+            IReplayContexts.MetricNames.NONRETRYABLE_CONNECTION_FAILURES,
+            IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS,
+            IReplayContexts.MetricNames.CONNECTIONS_OPENED,
+            IReplayContexts.MetricNames.CONNECTIONS_CLOSED,
+            IReplayContexts.MetricNames.BYTES_WRITTEN_TO_TARGET,
+            IReplayContexts.MetricNames.BYTES_READ_FROM_TARGET,
+            IReplayContexts.MetricNames.TUPLE_COMPARISON
+        );
+    }
+
+    @Test
+    void deployedKafkaSourceFailureReachesTheProcessSupervisor() throws Exception {
+        var parameters = new TrafficReplayer.Parameters();
+        parameters.kafkaTrafficTopic = TOPIC_PARTITION.topic();
+        parameters.numClientThreads = 1;
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        consumer.setPollException(new KafkaException("injected source-owner failure"));
+        var targetEventLoops = new NioEventLoopGroup(
+            parameters.numClientThreads,
+            new DefaultThreadFactory("g9-source-fatal-routing")
+        );
+        var exits = new ArrayList<Integer>();
+        var watchdogAction = new AtomicReference<Runnable>();
+
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var deployed = TrafficReplayer.createDeployedReplayApplication(
+                parameters,
+                URI.create("http://localhost:9200"),
+                new org.opensearch.migrations.replay.intake.PartitionIntakeState.BrokerTimeConfiguration(
+                    30_000,
+                    5_000,
+                    5_000
+                ),
+                TrafficReplayer.deployedTupleRetryDelayPolicy(() -> 0.5),
+                rootContext,
+                consumer,
+                targetEventLoops,
+                IAuthTransformerFactory.NullAuthTransformerFactory.instance,
+                Optional.empty(),
+                Clock.systemUTC(),
+                System::nanoTime,
+                (metrics, inputStopper) -> new ProcessSupervisor(
+                    metrics,
+                    inputStopper,
+                    exits::add,
+                    ignored -> Assertions.fail("halt must wait for the watchdog"),
+                    (delay, action) -> {
+                        Assertions.assertEquals(
+                            ProcessSupervisor.EXIT_WATCHDOG_LIMIT,
+                            delay
+                        );
+                        watchdogAction.set(action);
+                    },
+                    ignored -> Assertions.fail("thread dump must wait for the watchdog"),
+                    () -> {},
+                    System.err
+                )
+            );
+            try {
+                deployed.lifecycle().start();
+                deployed.lifecycle().runSourceOnce();
+
+                Assertions.assertEquals(
+                    List.of(ProcessSupervisor.UNEXPECTED_OWNER_EXIT_CODE),
+                    exits
+                );
+                var signal = deployed.supervisor().firstFatalSignal().orElseThrow();
+                Assertions.assertEquals("Kafka source owner", signal.owner());
+                Assertions.assertEquals("run-loop iteration", signal.operation());
+                Assertions.assertTrue(
+                    signal.failure().getCause().getMessage()
+                        .contains("injected source-owner failure")
+                );
+                Assertions.assertTrue(
+                    deployed.lifecycle().replayer().sourceInputs().isClosed()
+                );
+                Assertions.assertNotNull(watchdogAction.get());
+            } finally {
+                try {
+                    deployed.lifecycle().closeOrderly();
+                } finally {
+                    deployed.lifecycle().closeTargetOwnersAfterOrderly();
+                }
+            }
+        }
+    }
+
+    @Test
     void realOwnerQueuesCarrySourceAdmissionAndCompletionUsingOneOperationRegistry() throws Exception {
         var clock = new FakeClock();
         var eventLoop = new TestEventLoop(clock);
@@ -101,7 +300,11 @@ class TrafficReplayerTopLevelConstructionTest {
         var tupleTransformations = new AtomicInteger();
         var tupleWrites = new AtomicInteger();
         var tupleCompletion = new CompletableFuture<Void>();
-        var fatalFailures = new ArrayList<Error>();
+        var fatalFailures = new ArrayList<ProcessSupervisor.FatalSignal>();
+        var transformerWorkerIndices = new ArrayList<Integer>();
+        var sinkWorkerIndices = new ArrayList<Integer>();
+        var closedTransformerIndices = new ArrayList<Integer>();
+        var closedSinkIndices = new ArrayList<Integer>();
 
         try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
             var configuration = new TrafficReplayerTopLevel.Configuration<
@@ -113,6 +316,11 @@ class TrafficReplayerTopLevelConstructionTest {
                 () -> Duration.between(Instant.EPOCH, clock.instant()).toNanos(),
                 sourceTime -> sourceTime,
                 ignored -> eventLoop,
+                List.of(eventLoop, new TestEventLoop(clock), new TestEventLoop(clock)),
+                (loop, task) -> {
+                    loop.execute(task);
+                    ((TestEventLoop) loop).runUntilIdle();
+                },
                 (connectionId, context) -> filteredPreparer(),
                 terminalRetryPolicy(),
                 (connectionId, loop, context) -> new NettyPacketToHttpConsumer(
@@ -148,13 +356,16 @@ class TrafficReplayerTopLevelConstructionTest {
                     return tuple;
                 },
                 noOpReleaser(),
-                ignored -> new ManagedTupleTransformer<>() {
+                workerIndex -> {
+                    transformerWorkerIndices.add(workerIndex);
+                    return new ManagedTupleTransformer<>() {
                     @Override
                     public TupleWriter.TupleTransformation<Map<String, Object>> transform(
                         org.opensearch.migrations.replay.tracing.IReplayContexts.ITupleHandlingContext
                             replayContext,
                         Map<String, Object> tuple
                     ) {
+                        Assertions.assertTrue(eventLoop.inEventLoop());
                         tupleTransformations.incrementAndGet();
                         var transformed = new LinkedHashMap<>(tuple);
                         transformed.put("transformed", true);
@@ -162,15 +373,21 @@ class TrafficReplayerTopLevelConstructionTest {
                     }
 
                     @Override
-                    public void close() {}
+                    public void close() {
+                        closedTransformerIndices.add(workerIndex);
+                    }
+                    };
                 },
-                ignored -> new ManagedPhysicalTupleSink<>() {
+                workerIndex -> {
+                    sinkWorkerIndices.add(workerIndex);
+                    return new ManagedPhysicalTupleSink<>() {
                     @Override
                     public CompletionStage<Void> write(
                         org.opensearch.migrations.replay.tracing.IReplayContexts.ITupleHandlingContext
                             replayContext,
                         Map<String, Object> tuple
                     ) {
+                        Assertions.assertTrue(eventLoop.inEventLoop());
                         tupleWrites.incrementAndGet();
                         return tupleCompletion;
                     }
@@ -179,7 +396,10 @@ class TrafficReplayerTopLevelConstructionTest {
                     public void flush() {}
 
                     @Override
-                    public void close() {}
+                    public void close() {
+                        closedSinkIndices.add(workerIndex);
+                    }
+                    };
                 },
                 ignored -> {},
                 Duration.ofMillis(1),
@@ -188,13 +408,12 @@ class TrafficReplayerTopLevelConstructionTest {
                     1_000,
                     5_000
                 ),
-                3,
                 4,
                 1
             );
             Assertions.assertEquals(
-                TrafficReplayerTopLevel.DEFAULT_RETRY_READY_REQUEST_SUPPLY_PER_TARGET_THREAD,
-                configuration.retryReadyRequestSupplyPerTargetThread()
+                TrafficReplayerTopLevel.DEFAULT_READY_REQUESTS_BUFFER_PER_THREAD,
+                configuration.readyRequestsBufferPerThread()
             );
             Assertions.assertEquals(6, configuration.retryReadyRequestSupplyTarget(), "N = P * T_threads");
             var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
@@ -205,6 +424,8 @@ class TrafficReplayerTopLevelConstructionTest {
                 Duration.ZERO,
                 fatalFailures::add
             );
+            Assertions.assertEquals(List.of(0, 1, 2), transformerWorkerIndices);
+            Assertions.assertEquals(List.of(0, 1, 2), sinkWorkerIndices);
             var cancellationGrace = KafkaSourceOwner.class.getDeclaredField("cancellationGrace");
             cancellationGrace.setAccessible(true);
             Assertions.assertEquals(
@@ -256,6 +477,8 @@ class TrafficReplayerTopLevelConstructionTest {
                 Assertions.assertEquals(0, targetAttempts.get());
                 Assertions.assertEquals(1, tupleTransformations.get());
                 Assertions.assertEquals(1, tupleWrites.get());
+                Assertions.assertEquals(List.of(0, 1, 2), transformerWorkerIndices);
+                Assertions.assertEquals(List.of(0, 1, 2), sinkWorkerIndices);
                 var connectionId = new ConnectionProcessingId(
                     generation,
                     new CapturedConnectionId("writer", "connection"),
@@ -298,6 +521,8 @@ class TrafficReplayerTopLevelConstructionTest {
                 consumer.closed(),
                 "a fully drained orderly shutdown must close the Kafka consumer before returning"
             );
+            Assertions.assertEquals(List.of(0, 1, 2), closedTransformerIndices);
+            Assertions.assertEquals(List.of(0, 1, 2), closedSinkIndices);
         }
     }
 
@@ -629,6 +854,145 @@ class TrafficReplayerTopLevelConstructionTest {
     }
 
     @Test
+    void deployedRequestPreparerPreservesCapturedPacketPacingAtConfiguredSpeed() {
+        var sourceRequest = new HttpMessageAndTimestamp.Request(Instant.EPOCH);
+        sourceRequest.setLastPacketTimestamp(Instant.EPOCH.plusSeconds(4));
+        var first = Unpooled.wrappedBuffer(new byte[] { 1 });
+        var second = Unpooled.wrappedBuffer(new byte[] { 2 });
+        var third = Unpooled.wrappedBuffer(new byte[] { 3 });
+        var packets = new ByteBufList(first, second, third);
+        first.release();
+        second.release();
+        third.release();
+        var prepared = ByteBufListProducer.of(packets);
+        try {
+            Assertions.assertEquals(
+                Duration.ofSeconds(1),
+                TrafficReplayerTopLevel.deployedPacketInterval(
+                    sourceRequest,
+                    prepared,
+                    2.0
+                ),
+                "four captured seconds at 2x over three packets produces two one-second gaps"
+            );
+        } finally {
+            prepared.close();
+        }
+    }
+
+    @Test
+    void deployedRequestPreparerCompletesExceptionallyAndReleasesOutputWhenFinalPreparationFails() {
+        var generation = new PartitionGenerationId(TOPIC_PARTITION, 12);
+        var requestId = new ReplayRequestId(
+            new ConnectionProcessingId(
+                generation,
+                new CapturedConnectionId("writer", "connection"),
+                1
+            ),
+            5
+        );
+        var sourceRequest = request(
+            "GET /index HTTP/1.1\r\n"
+                + "Host: source.example\r\n"
+                + "Content-Length: 0\r\n\r\n"
+        );
+        var transformedOutput = new AtomicReference<
+            org.opensearch.migrations.replay.datatypes.OwnedPreparedRequest
+        >();
+        var expectedFailure = new IllegalStateException("injected packet interval failure");
+        var preparer = TrafficReplayerTopLevel.deployedRequestPreparer(
+            () -> input -> input,
+            null,
+            (ignoredSourceRequest, output) -> {
+                transformedOutput.set(output);
+                throw expectedFailure;
+            }
+        );
+        var root = new RootReplayerContext(OpenTelemetry.noop());
+        var record = root.createKafkaRecordContext(new KafkaRecordId(generation, 4), 0);
+        var traffic = record.createTrafficStreamContext(4);
+        var requestContext = traffic.createRequestContext(requestId, Instant.EPOCH);
+        requestContext.onRequestReconstituted();
+        var transformationContext = requestContext.createTransformationContext();
+        try {
+            var failure = Assertions.assertThrows(
+                java.util.concurrent.CompletionException.class,
+                () -> preparer.begin(
+                    requestId,
+                    sourceRequest,
+                    transformationContext
+                ).completion().toCompletableFuture().join()
+            );
+
+            Assertions.assertSame(expectedFailure, failure.getCause());
+            var output = Assertions.assertInstanceOf(
+                ByteBufListProducer.class,
+                transformedOutput.get()
+            );
+            Assertions.assertEquals(0, output.refCnt());
+        } finally {
+            transformationContext.close();
+            requestContext.close();
+            traffic.close();
+            record.complete(IReplayContexts.RecordDisposition.COMMIT_INELIGIBLE);
+        }
+    }
+
+    @Test
+    void deployedRequestPreparerRepresentsSuccessfulPassThroughAsReady() throws Exception {
+        var generation = new PartitionGenerationId(TOPIC_PARTITION, 13);
+        var requestId = new ReplayRequestId(
+            new ConnectionProcessingId(
+                generation,
+                new CapturedConnectionId("writer", "connection"),
+                1
+            ),
+            6
+        );
+        var sourceRequest = request(
+            "GET /index HTTP/1.1\r\n"
+                + "Host: source.example\r\n"
+                + "Content-Length: 0\r\n\r\n"
+        );
+        var preparer = TrafficReplayerTopLevel.deployedRequestPreparer(
+            () -> input -> input,
+            null,
+            Duration.ZERO
+        );
+        var root = new RootReplayerContext(OpenTelemetry.noop());
+        var record = root.createKafkaRecordContext(new KafkaRecordId(generation, 5), 0);
+        var traffic = record.createTrafficStreamContext(5);
+        var requestContext = traffic.createRequestContext(requestId, Instant.EPOCH);
+        requestContext.onRequestReconstituted();
+        var transformationContext = requestContext.createTransformationContext();
+        NettyPacketToHttpConsumer.PreparedRequest prepared = null;
+        try {
+            var result = preparer.begin(
+                requestId,
+                sourceRequest,
+                transformationContext
+            ).completion().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            var ready = Assertions.assertInstanceOf(
+                RequestPreparationReady.class,
+                result
+            );
+            prepared = Assertions.assertInstanceOf(
+                NettyPacketToHttpConsumer.PreparedRequest.class,
+                ready.value()
+            );
+            Assertions.assertTrue(ready.transformationStatus().isCompleted());
+        } finally {
+            if (prepared != null) {
+                prepared.close();
+            }
+            transformationContext.close();
+            requestContext.close();
+            traffic.close();
+            record.complete(IReplayContexts.RecordDisposition.COMMIT_INELIGIBLE);
+        }
+    }
+
+    @Test
     void deployedTupleFactoryPopulatesComparisonAttributesFromActualMessages() {
         var generation = new PartitionGenerationId(TOPIC_PARTITION, 11);
         var connection = new ConnectionProcessingId(
@@ -808,18 +1172,23 @@ class TrafficReplayerTopLevelConstructionTest {
     }
 
     private static RequestReplayOwner.RetryPolicy<
+        NettyPacketToHttpConsumer.PreparedRequest,
         AggregatedRawResponse,
         HttpMessageAndTimestamp.Response
     >
     terminalRetryPolicy() {
         return new RequestReplayOwner.RetryPolicy<>() {
             @Override
-            public boolean requiresSourceResponse(AggregatedRawResponse targetResponse) {
+            public boolean requiresSourceResponse(
+                NettyPacketToHttpConsumer.PreparedRequest preparedRequest,
+                AggregatedRawResponse targetResponse
+            ) {
                 return false;
             }
 
             @Override
             public RetryDecision decide(
+                NettyPacketToHttpConsumer.PreparedRequest preparedRequest,
                 AggregatedRawResponse targetResponse,
                 RequestReplayOwner.RetrySourceResponse<HttpMessageAndTimestamp.Response> sourceResponse
             ) {

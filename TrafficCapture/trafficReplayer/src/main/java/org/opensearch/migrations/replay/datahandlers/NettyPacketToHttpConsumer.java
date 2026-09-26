@@ -15,8 +15,10 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.IntConsumer;
+import java.util.regex.Pattern;
 
 import org.opensearch.migrations.replay.AggregatedRawResponse;
+import org.opensearch.migrations.replay.HttpByteBufFormatter;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringHandler;
 import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
 import org.opensearch.migrations.replay.datatypes.AttemptPayload;
@@ -66,11 +68,26 @@ public final class NettyPacketToHttpConsumer
         NettyPacketToHttpConsumer.PreparedRequest,
         AggregatedRawResponse
     > {
+    private static final Pattern BULK_PATH =
+        Pattern.compile("^(/[^/]*)?/_bulk(/.*)?$");
 
     public record PreparedRequest(
         @NonNull OwnedPreparedRequest request,
-        @NonNull Duration packetInterval
+        @NonNull Duration packetInterval,
+        @NonNull RetryRequestKind retryRequestKind
     ) implements AutoCloseable {
+        public enum RetryRequestKind {
+            STANDARD,
+            BULK
+        }
+
+        public PreparedRequest(
+            @NonNull OwnedPreparedRequest request,
+            @NonNull Duration packetInterval
+        ) {
+            this(request, packetInterval, classifyRetryRequest(request));
+        }
+
         public PreparedRequest {
             if (packetInterval.isNegative()) {
                 throw new IllegalArgumentException("packetInterval must not be negative");
@@ -80,6 +97,20 @@ public final class NettyPacketToHttpConsumer
         @Override
         public void close() {
             request.close();
+        }
+    }
+
+    private static PreparedRequest.RetryRequestKind classifyRetryRequest(
+        OwnedPreparedRequest request
+    ) {
+        try (var diagnostic = request.retainDiagnosticCopy()) {
+            var parsed = HttpByteBufFormatter.parseHttpRequestFromBufs(
+                diagnostic.packets().streamUnretained(),
+                0
+            );
+            return parsed != null && BULK_PATH.matcher(parsed.uri()).matches()
+                ? PreparedRequest.RetryRequestKind.BULK
+                : PreparedRequest.RetryRequestKind.STANDARD;
         }
     }
 

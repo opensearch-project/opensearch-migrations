@@ -24,6 +24,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final ReplayIntakeMetrics replayIntakeMetrics;
     public final TargetAttemptPermitMetrics targetAttemptPermitMetrics;
     public final KafkaCommitStateMetrics kafkaCommitStateMetrics;
+    public final ReplayProcessFatalMetrics replayProcessFatalMetrics;
     public final ReplayContexts.ConnectionContext.MetricInstruments channelKeyInstruments;
     public final ReplayContexts.KafkaRecordContext.MetricInstruments kafkaRecordInstruments;
     public final ReplayContexts.TrafficStreamLifecycleContext.MetricInstruments trafficStreamLifecycleInstruments;
@@ -59,6 +60,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         replayIntakeMetrics = new ReplayIntakeMetrics(meter);
         targetAttemptPermitMetrics = new TargetAttemptPermitMetrics(meter);
         kafkaCommitStateMetrics = new KafkaCommitStateMetrics(meter);
+        replayProcessFatalMetrics = new ReplayProcessFatalMetrics(meter);
         channelKeyInstruments = ReplayContexts.ConnectionContext.makeMetrics(meter);
         socketInstruments = ReplayContexts.SocketContext.makeMetrics(meter);
         kafkaRecordInstruments = ReplayContexts.KafkaRecordContext.makeMetrics(meter);

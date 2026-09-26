@@ -3,12 +3,16 @@ package org.opensearch.migrations.replay;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -17,11 +21,13 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+import java.util.function.IntConsumer;
 
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datahandlers.TransformedPacketReceiver;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
@@ -61,6 +67,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.EventLoop;
 import lombok.NonNull;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
+import org.slf4j.LoggerFactory;
 
 /**
  * G5's production composition root. G9 owns starting and supervising its two owner loops.
@@ -72,7 +79,14 @@ import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     implements AutoCloseable {
 
-    public static final int DEFAULT_RETRY_READY_REQUEST_SUPPLY_PER_TARGET_THREAD = 2;
+    private static final org.slf4j.Logger log =
+        LoggerFactory.getLogger(TrafficReplayerTopLevel.class);
+    public static final int DEFAULT_READY_REQUESTS_BUFFER_PER_THREAD = 2;
+
+    @FunctionalInterface
+    public interface OwnerTaskRunner {
+        void runAndWait(EventLoop eventLoop, Runnable task);
+    }
 
     @FunctionalInterface
     public interface TargetChannelFactory<P, R> {
@@ -85,7 +99,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
 
     @FunctionalInterface
     public interface ManagedTupleTransformerFactory<T> {
-        ManagedTupleTransformer<T> create(ConnectionProcessingId connectionProcessingId);
+        ManagedTupleTransformer<T> create(int workerIndex);
     }
 
     public interface ManagedTupleTransformer<T> extends TupleTransformer<T>, AutoCloseable {
@@ -95,7 +109,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
 
     @FunctionalInterface
     public interface ManagedPhysicalTupleSinkFactory<T> {
-        ManagedPhysicalTupleSink<T> create(ConnectionProcessingId connectionProcessingId);
+        ManagedPhysicalTupleSink<T> create(int workerIndex);
     }
 
     public interface ManagedPhysicalTupleSink<T> extends PhysicalTupleSink<T>, AutoCloseable {
@@ -111,12 +125,14 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull LongSupplier nanoTime,
         @NonNull Function<Instant, Instant> replayTimeMapper,
         @NonNull Function<ConnectionProcessingId, EventLoop> eventLoopFor,
+        @NonNull List<EventLoop> targetEventLoops,
+        @NonNull OwnerTaskRunner ownerTaskRunner,
         @NonNull BiFunction<
             ConnectionProcessingId,
             IReplayContexts.IConnectionContext,
             RequestReplayOwner.RequestPreparer<HttpMessageAndTimestamp.Request, P>
         > requestPreparerFactory,
-        @NonNull RequestReplayOwner.RetryPolicy<R, HttpMessageAndTimestamp.Response> retryPolicy,
+        @NonNull RequestReplayOwner.RetryPolicy<P, R, HttpMessageAndTimestamp.Response> retryPolicy,
         @NonNull TargetChannelFactory<P, R> targetChannelFactory,
         @NonNull RequestReplayOwner.TupleFactory<
             HttpMessageAndTimestamp.Request,
@@ -134,10 +150,9 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull ManagedTupleTransformerFactory<T> tupleTransformerFactory,
         @NonNull ManagedPhysicalTupleSinkFactory<T> tupleSinkFactory,
         @NonNull Consumer<T> tupleReleaser,
-        @NonNull Duration tupleRetryDelay,
+        @NonNull TupleWriter.RetryDelayPolicy tupleRetryDelayPolicy,
         @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
-        int retryReadyRequestSupplyPerTargetThread,
-        int targetEventLoopThreadCount,
+        int readyRequestsBufferPerThread,
         int maximumResponseRetries,
         int maximumTargetAttempts
     ) {
@@ -146,12 +161,14 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             @NonNull LongSupplier nanoTime,
             @NonNull Function<Instant, Instant> replayTimeMapper,
             @NonNull Function<ConnectionProcessingId, EventLoop> eventLoopFor,
+            @NonNull List<EventLoop> targetEventLoops,
+            @NonNull OwnerTaskRunner ownerTaskRunner,
             @NonNull BiFunction<
                 ConnectionProcessingId,
                 IReplayContexts.IConnectionContext,
                 RequestReplayOwner.RequestPreparer<HttpMessageAndTimestamp.Request, P>
             > requestPreparerFactory,
-            @NonNull RequestReplayOwner.RetryPolicy<R, HttpMessageAndTimestamp.Response> retryPolicy,
+            @NonNull RequestReplayOwner.RetryPolicy<P, R, HttpMessageAndTimestamp.Response> retryPolicy,
             @NonNull TargetChannelFactory<P, R> targetChannelFactory,
             @NonNull RequestReplayOwner.TupleFactory<
                 HttpMessageAndTimestamp.Request,
@@ -171,7 +188,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             @NonNull Consumer<T> tupleReleaser,
             @NonNull Duration tupleRetryDelay,
             @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
-            int targetEventLoopThreadCount,
+            int readyRequestsBufferPerThread,
             int maximumResponseRetries,
             int maximumTargetAttempts
         ) {
@@ -180,6 +197,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 nanoTime,
                 replayTimeMapper,
                 eventLoopFor,
+                targetEventLoops,
+                ownerTaskRunner,
                 requestPreparerFactory,
                 retryPolicy,
                 targetChannelFactory,
@@ -188,45 +207,111 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 tupleTransformerFactory,
                 tupleSinkFactory,
                 tupleReleaser,
-                tupleRetryDelay,
+                TupleWriter.fixedRetryDelay(tupleRetryDelay),
                 brokerTimeConfiguration,
-                DEFAULT_RETRY_READY_REQUEST_SUPPLY_PER_TARGET_THREAD,
-                targetEventLoopThreadCount,
+                readyRequestsBufferPerThread,
+                maximumResponseRetries,
+                maximumTargetAttempts
+            );
+        }
+
+        public Configuration(
+            @NonNull Clock clock,
+            @NonNull LongSupplier nanoTime,
+            @NonNull Function<Instant, Instant> replayTimeMapper,
+            @NonNull Function<ConnectionProcessingId, EventLoop> eventLoopFor,
+            @NonNull List<EventLoop> targetEventLoops,
+            @NonNull OwnerTaskRunner ownerTaskRunner,
+            @NonNull BiFunction<
+                ConnectionProcessingId,
+                IReplayContexts.IConnectionContext,
+                RequestReplayOwner.RequestPreparer<HttpMessageAndTimestamp.Request, P>
+            > requestPreparerFactory,
+            @NonNull RequestReplayOwner.RetryPolicy<P, R, HttpMessageAndTimestamp.Response> retryPolicy,
+            @NonNull TargetChannelFactory<P, R> targetChannelFactory,
+            @NonNull RequestReplayOwner.TupleFactory<
+                HttpMessageAndTimestamp.Request,
+                P,
+                R,
+                HttpMessageAndTimestamp.Response,
+                T
+            > tupleFactory,
+            @NonNull RequestReplayOwner.ResourceReleaser<
+                HttpMessageAndTimestamp.Request,
+                P,
+                R,
+                HttpMessageAndTimestamp.Response
+            > resourceReleaser,
+            @NonNull ManagedTupleTransformerFactory<T> tupleTransformerFactory,
+            @NonNull ManagedPhysicalTupleSinkFactory<T> tupleSinkFactory,
+            @NonNull Consumer<T> tupleReleaser,
+            @NonNull Duration tupleRetryDelay,
+            @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+            int maximumResponseRetries,
+            int maximumTargetAttempts
+        ) {
+            this(
+                clock,
+                nanoTime,
+                replayTimeMapper,
+                eventLoopFor,
+                targetEventLoops,
+                ownerTaskRunner,
+                requestPreparerFactory,
+                retryPolicy,
+                targetChannelFactory,
+                tupleFactory,
+                resourceReleaser,
+                tupleTransformerFactory,
+                tupleSinkFactory,
+                tupleReleaser,
+                TupleWriter.fixedRetryDelay(tupleRetryDelay),
+                brokerTimeConfiguration,
+                DEFAULT_READY_REQUESTS_BUFFER_PER_THREAD,
                 maximumResponseRetries,
                 maximumTargetAttempts
             );
         }
 
         public Configuration {
-            if (tupleRetryDelay.isNegative()) {
-                throw new IllegalArgumentException("tupleRetryDelay must not be negative");
-            }
             if (maximumTargetAttempts <= 0) {
                 throw new IllegalArgumentException("maximumTargetAttempts must be positive");
             }
             if (maximumResponseRetries <= 0) {
                 throw new IllegalArgumentException("maximumResponseRetries must be positive");
             }
-            if (retryReadyRequestSupplyPerTargetThread <= 0) {
+            if (readyRequestsBufferPerThread <= 0) {
                 throw new IllegalArgumentException(
-                    "retryReadyRequestSupplyPerTargetThread must be positive"
+                    "readyRequestsBufferPerThread must be positive"
                 );
             }
-            if (targetEventLoopThreadCount <= 0) {
-                throw new IllegalArgumentException("targetEventLoopThreadCount must be positive");
+            targetEventLoops = List.copyOf(targetEventLoops);
+            if (targetEventLoops.isEmpty()) {
+                throw new IllegalArgumentException("targetEventLoops must not be empty");
+            }
+            var distinct = java.util.Collections.newSetFromMap(
+                new IdentityHashMap<EventLoop, Boolean>()
+            );
+            distinct.addAll(targetEventLoops);
+            if (distinct.size() != targetEventLoops.size()) {
+                throw new IllegalArgumentException("targetEventLoops must contain distinct owners");
             }
             Math.multiplyExact(
-                retryReadyRequestSupplyPerTargetThread,
-                targetEventLoopThreadCount
+                readyRequestsBufferPerThread,
+                targetEventLoops.size()
             );
         }
 
         public int retryReadyRequestSupplyTarget() {
             return Math.multiplyExact(
-                retryReadyRequestSupplyPerTargetThread,
-                targetEventLoopThreadCount
+                readyRequestsBufferPerThread,
+                targetEventLoops.size()
             );
         }
+    }
+
+    public static OwnerTaskRunner deployedOwnerTaskRunner() {
+        return (eventLoop, task) -> eventLoop.submit(task).syncUninterruptibly();
     }
 
     private final KafkaSourceInputQueue sourceInputs;
@@ -237,8 +322,15 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     private final Configuration<P, R, T> configuration;
     private final ChannelContextManager contextManager;
     private final TargetAttemptPermitProvider permitProvider;
-    private final Consumer<Error> fatalHandler;
+    private final ProcessSupervisor.FailureSink fatalSink;
     private final ProtocolViolationTerminator protocolViolationTerminator;
+    private final Runnable kafkaWakeup;
+    private final List<TupleWriterWorker> tupleWriterWorkers;
+    private final Map<EventLoop, TupleWriterWorker> tupleWriterWorkersByEventLoop;
+    private final AtomicBoolean targetEventLoopTerminationExpected = new AtomicBoolean();
+    private final AtomicBoolean fatalTerminationStarted = new AtomicBoolean();
+    private final CompletableFuture<ProcessSupervisor.FatalSignal> firstFatalSignal =
+        new CompletableFuture<>();
     private boolean intakeStarted;
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
@@ -250,7 +342,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull RootReplayerContext rootContext,
         @NonNull Configuration<P, R, T> configuration,
         @NonNull Duration kafkaPollTimeout,
-        @NonNull Consumer<Error> fatalHandler
+        @NonNull ProcessSupervisor.FailureSink fatalSink
     ) {
         this(
             consumer,
@@ -258,7 +350,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             configuration,
             kafkaPollTimeout,
             KafkaSourceOwner.DEFAULT_REVOCATION_GRACE,
-            fatalHandler
+            System::exit,
+            fatalSink
         );
     }
 
@@ -268,13 +361,33 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull Configuration<P, R, T> configuration,
         @NonNull Duration kafkaPollTimeout,
         @NonNull Duration cancellationGrace,
-        @NonNull Consumer<Error> fatalHandler
+        @NonNull ProcessSupervisor.FailureSink fatalSink
+    ) {
+        this(
+            consumer,
+            rootContext,
+            configuration,
+            kafkaPollTimeout,
+            cancellationGrace,
+            System::exit,
+            fatalSink
+        );
+    }
+
+    public TrafficReplayerTopLevel(
+        @NonNull org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
+        @NonNull RootReplayerContext rootContext,
+        @NonNull Configuration<P, R, T> configuration,
+        @NonNull Duration kafkaPollTimeout,
+        @NonNull Duration cancellationGrace,
+        @NonNull IntConsumer protocolViolationTermination,
+        @NonNull ProcessSupervisor.FailureSink fatalSink
     ) {
         this.configuration = configuration;
-        this.fatalHandler = fatalHandler;
-        // REBUILD-LIMBO-NOTE(G9): ProcessSupervisor replaces System::exit with supervised termination.
+        this.fatalSink = fatalSink;
+        this.kafkaWakeup = consumer::wakeup;
         this.protocolViolationTerminator = ProtocolViolationTerminator.system(
-            System::exit,
+            protocolViolationTermination,
             new ProtocolViolationMetrics(
                 rootContext.getMeterProvider().get(RootReplayerContext.SCOPE_NAME)
             )
@@ -287,9 +400,15 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             configuration.maximumTargetAttempts(),
             new AtomicInteger(),
             rootContext.getTargetAttemptPermitMetrics(),
-            fatalHandler::accept,
+            unexpectedFailure("target-attempt permit provider", "owner transition")::accept,
             configuration.nanoTime()
         );
+        this.tupleWriterWorkers = createTupleWriterWorkers();
+        this.tupleWriterWorkersByEventLoop = new IdentityHashMap<>();
+        tupleWriterWorkers.forEach(worker ->
+            tupleWriterWorkersByEventLoop.put(worker.eventLoop, worker)
+        );
+        watchTargetEventLoops();
         this.connectionAssemblySink = new ConnectionAssemblySink(
             configuration.replayTimeMapper()
         );
@@ -297,7 +416,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             intakeInputs,
             sourceInputs,
             connectionAssemblySink,
-            fatalHandler::accept,
+            unexpectedFailure("replay intake owner", "owner loop")::accept,
             rootContext.getReplayIntakeMetrics(),
             ReplayIntakeOwner.RecordObserver.NOOP,
             configuration.brokerTimeConfiguration(),
@@ -320,6 +439,169 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         );
     }
 
+    private List<TupleWriterWorker> createTupleWriterWorkers() {
+        var created = new ArrayList<TupleWriterWorker>();
+        try {
+            for (var workerIndex = 0; workerIndex < configuration.targetEventLoops().size(); workerIndex++) {
+                var eventLoop = configuration.targetEventLoops().get(workerIndex);
+                created.add(createTupleWriterWorker(workerIndex, eventLoop));
+            }
+            return List.copyOf(created);
+        } catch (Throwable failure) {
+            for (var worker : created) {
+                worker.closeAfterConstructionFailure(failure);
+            }
+            throw failure;
+        }
+    }
+
+    // REBUILD-TRACE-START(G9,source): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.<init>(IntFunction<TupleSink>) ->
+    //     TrafficReplayerTopLevel.createTupleWriterWorker
+    // ThreadLocalTupleWriter.<init>(IntFunction<TupleSink>,Supplier<IJsonTransformer>) ->
+    //     TrafficReplayerTopLevel.createTupleWriterWorker
+    // ThreadLocalTupleWriter.threadLocalSink.initialValue ->
+    //     TrafficReplayerTopLevel.createTupleWriterWorker
+    // REBUILD-TRACE-END(G9,source)
+    // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.<init>(IntFunction<TupleSink>) ->
+    //     TrafficReplayerTopLevel.createTupleWriterWorker
+    // ThreadLocalTupleWriter.<init>(IntFunction<TupleSink>,Supplier<IJsonTransformer>) ->
+    //     TrafficReplayerTopLevel.createTupleWriterWorker
+    // ThreadLocalTupleWriter.threadLocalSink.initialValue ->
+    //     TrafficReplayerTopLevel.createTupleWriterWorker
+    // REBUILD-TRACE-END(G9,target)
+    private TupleWriterWorker createTupleWriterWorker(
+        int workerIndex,
+        EventLoop eventLoop
+    ) {
+        var transformer = Objects.requireNonNull(
+            configuration.tupleTransformerFactory().create(workerIndex),
+            "tuple transformer factory returned null for worker " + workerIndex
+        );
+        ManagedPhysicalTupleSink<T> sink;
+        try {
+            sink = Objects.requireNonNull(
+                configuration.tupleSinkFactory().create(workerIndex),
+                "tuple sink factory returned null for worker " + workerIndex
+            );
+        } catch (Throwable failure) {
+            closePartiallyConstructed(transformer, "tuple transformer", workerIndex, failure);
+            throw failure;
+        }
+        return new TupleWriterWorker(workerIndex, eventLoop, transformer, sink);
+    }
+
+    private void closePartiallyConstructed(
+        AutoCloseable closeable,
+        String component,
+        int workerIndex,
+        Throwable constructionFailure
+    ) {
+        try {
+            closeable.close();
+        } catch (Throwable closeFailure) {
+            constructionFailure.addSuppressed(new IllegalStateException(
+                "Failed to close " + component + " for tuple worker " + workerIndex,
+                closeFailure
+            ));
+        }
+    }
+
+    private void watchTargetEventLoops() {
+        tupleWriterWorkers.forEach(worker ->
+            worker.eventLoop.terminationFuture().addListener(ignored -> {
+                if (targetEventLoopTerminationExpected.get()) {
+                    return;
+                }
+                var cause = worker.eventLoop.terminationFuture().cause();
+                signalFatal(new ProcessSupervisor.FatalSignal(
+                    ProcessSupervisor.Reason.EVENT_LOOP_TERMINATED,
+                    "target event loop worker " + worker.workerIndex,
+                    "termination future",
+                    new Error(
+                        "Target event loop worker "
+                            + worker.workerIndex
+                            + " terminated before orderly process shutdown",
+                        cause
+                    )
+                ));
+            })
+        );
+    }
+
+    private Consumer<Error> unexpectedFailure(String owner, String operation) {
+        return failure -> signalFatal(new ProcessSupervisor.FatalSignal(
+            ProcessSupervisor.Reason.UNEXPECTED_FATAL_ERROR,
+            owner,
+            operation,
+            failure
+        ));
+    }
+
+    private Consumer<Error> eventLoopOwnedFailure(
+        EventLoop eventLoop,
+        String owner,
+        String operation
+    ) {
+        return failure -> signalFatal(new ProcessSupervisor.FatalSignal(
+            classifyEventLoopOwnedFailure(eventLoop, failure),
+            owner,
+            operation,
+            failure
+        ));
+    }
+
+    static ProcessSupervisor.Reason classifyEventLoopOwnedFailure(
+        EventLoop eventLoop,
+        Throwable failure
+    ) {
+        var eventLoopUnavailable =
+            eventLoop.isShuttingDown() || eventLoop.isShutdown() || eventLoop.isTerminated();
+        for (var current = failure; current != null; current = current.getCause()) {
+            if (eventLoopUnavailable && current instanceof RejectedExecutionException) {
+                return ProcessSupervisor.Reason.EVENT_LOOP_TERMINATED;
+            }
+        }
+        return ProcessSupervisor.Reason.UNEXPECTED_FATAL_ERROR;
+    }
+
+    private void signalFatal(ProcessSupervisor.FatalSignal signal) {
+        fatalTerminationStarted.set(true);
+        firstFatalSignal.complete(signal);
+        fatalSink.onFatal(signal);
+    }
+
+    private void reportUnexpectedFailure(
+        String owner,
+        String operation,
+        Throwable failure
+    ) {
+        var error = failure instanceof Error existing
+            ? existing
+            : new Error(owner + " failed during " + operation, failure);
+        unexpectedFailure(owner, operation).accept(error);
+    }
+
+    /**
+     * Abrupt failure-path input stop. It rejects new cross-owner submissions and wakes a blocked Kafka poll;
+     * it does not enter G8's orderly fence and never waits for an owner or event-loop group.
+     */
+    public void stopNewInputForFatal(ProcessSupervisor.FatalSignal ignored) {
+        fatalTerminationStarted.set(true);
+        firstFatalSignal.complete(ignored);
+        sourceInputs.close();
+        intakeInputs.closeNow();
+        kafkaWakeup.run();
+    }
+
+    /**
+     * Called only after G8's orderly drain has completed, immediately before the process closes target loops.
+     */
+    public void allowTargetEventLoopTermination() {
+        targetEventLoopTerminationExpected.set(true);
+    }
+
     public void startIntake() {
         if (intakeStarted) {
             throw new IllegalStateException("replay intake already started");
@@ -329,7 +611,19 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     }
 
     public void runSourceOnce() {
-        sourceOwner.runOnce();
+        try {
+            sourceOwner.runOnce();
+        } catch (Throwable failure) {
+            reportUnexpectedFailure(
+                "Kafka source owner",
+                "run-loop iteration",
+                failure
+            );
+        }
+    }
+
+    public void wakeSourceOwner() {
+        kafkaWakeup.run();
     }
 
     public KafkaSourceOwner sourceOwner() {
@@ -346,6 +640,14 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
 
     public KafkaSourceInputQueue sourceInputs() {
         return sourceInputs;
+    }
+
+    Configuration<P, R, T> configuration() {
+        return configuration;
+    }
+
+    int tupleWriterWorkerCount() {
+        return tupleWriterWorkers.size();
     }
 
     int activeConnectionCount() {
@@ -371,10 +673,17 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                     sourceOwner.onPartitionsRevoked(partitions);
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
-                    fatalHandler.accept(new Error(
-                        "Kafka revocation callback was interrupted",
+                    reportUnexpectedFailure(
+                        "Kafka source owner",
+                        "partition revocation callback",
                         interrupted
-                    ));
+                    );
+                } catch (Throwable failure) {
+                    reportUnexpectedFailure(
+                        "Kafka source owner",
+                        "partition revocation callback",
+                        failure
+                    );
                 }
             }
 
@@ -382,38 +691,78 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             public void onPartitionsAssigned(
                 java.util.Collection<org.apache.kafka.common.TopicPartition> partitions
             ) {
-                sourceOwner.onPartitionsAssigned(partitions);
+                try {
+                    sourceOwner.onPartitionsAssigned(partitions);
+                } catch (Throwable failure) {
+                    reportUnexpectedFailure(
+                        "Kafka source owner",
+                        "partition assignment callback",
+                        failure
+                    );
+                }
             }
 
             @Override
             public void onPartitionsLost(
                 java.util.Collection<org.apache.kafka.common.TopicPartition> partitions
             ) {
-                sourceOwner.onPartitionsLost(partitions);
+                try {
+                    sourceOwner.onPartitionsLost(partitions);
+                } catch (Throwable failure) {
+                    reportUnexpectedFailure(
+                        "Kafka source owner",
+                        "partition loss callback",
+                        failure
+                    );
+                }
             }
         };
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.<init>(IntFunction,Supplier) ->
-    //     TrafficReplayerTopLevel.deployedTupleTransformer
-    // REBUILD-TRACE-END(G5,target)
     public static ManagedTupleTransformer<Map<String, Object>> deployedTupleTransformer(
         @NonNull Supplier<IJsonTransformer> transformerSupplier
+    ) {
+        return deployedTupleTransformer(transformerSupplier, null);
+    }
+
+    public static ManagedTupleTransformer<Map<String, Object>> deployedTupleTransformer(
+        @NonNull Supplier<IJsonTransformer> transformerSupplier,
+        Supplier<IJsonTransformer> responsePostProcessorSupplier
     ) {
         var transformer = Objects.requireNonNull(
             transformerSupplier.get(),
             "tuple transformer supplier returned null"
         );
+        final IJsonTransformer responsePostProcessor;
+        try {
+            responsePostProcessor = responsePostProcessorSupplier == null
+                ? null
+                : Objects.requireNonNull(
+                    responsePostProcessorSupplier.get(),
+                    "response post-processor supplier returned null"
+                );
+        } catch (Throwable failure) {
+            try {
+                transformer.close();
+            } catch (Throwable closeFailure) {
+                if (failure != closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            }
+            throw failure;
+        }
         return new ManagedTupleTransformer<>() {
             @Override
             public TupleWriter.TupleTransformation<Map<String, Object>> transform(
                 IReplayContexts.ITupleHandlingContext replayContext,
                 Map<String, Object> tuple
             ) {
+                var postProcessedTuple = responsePostProcessor == null
+                    ? tuple
+                    : postProcessTargetResponses(responsePostProcessor, tuple);
                 final Object transformed;
                 try {
-                    transformed = transformer.transformJson(tuple);
+                    transformed = transformer.transformJson(postProcessedTuple);
                 } catch (RequestFilteredException intentionalDrop) {
                     return new TupleDropped<>();
                 }
@@ -429,9 +778,76 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
 
             @Override
             public void close() throws Exception {
-                transformer.close();
+                Throwable failure = null;
+                try {
+                    transformer.close();
+                } catch (Throwable transformerFailure) {
+                    failure = transformerFailure;
+                }
+                if (responsePostProcessor != null) {
+                    try {
+                        responsePostProcessor.close();
+                    } catch (Throwable postProcessorFailure) {
+                        if (failure == null) {
+                            failure = postProcessorFailure;
+                        } else if (failure != postProcessorFailure) {
+                            failure.addSuppressed(postProcessorFailure);
+                        }
+                    }
+                }
+                if (failure instanceof Exception exception) {
+                    throw exception;
+                }
+                if (failure instanceof Error error) {
+                    throw error;
+                }
             }
         };
+    }
+
+    // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerCore.applyResponsePostProcessor ->
+    //     TrafficReplayerTopLevel.postProcessTargetResponses
+    // REBUILD-TRACE-END(G9,target)
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> postProcessTargetResponses(
+        @NonNull IJsonTransformer responsePostProcessor,
+        @NonNull Map<String, Object> tuple
+    ) {
+        var targetResponsesValue = tuple.get("targetResponses");
+        if (!(targetResponsesValue instanceof List<?> targetResponses)) {
+            return tuple;
+        }
+        var processedResponses = new ArrayList<Map<String, Object>>(targetResponses.size());
+        for (var index = 0; index < targetResponses.size(); index++) {
+            var original = targetResponses.get(index);
+            if (original == null) {
+                processedResponses.add(null);
+                continue;
+            }
+            try {
+                var transformed = responsePostProcessor.transformJson(original);
+                if (transformed != null && !(transformed instanceof Map<?, ?>)) {
+                    throw new IllegalArgumentException(
+                        "Response post-processor must return a JSON object or null"
+                    );
+                }
+                processedResponses.add((Map<String, Object>) transformed);
+            } catch (Exception failure) {
+                log.atWarn()
+                    .setCause(failure)
+                    .setMessage("Response post-processor failed for response {}, leaving empty")
+                    .addArgument(index)
+                    .log();
+                processedResponses.add(null);
+            }
+        }
+        var processedTuple = new java.util.LinkedHashMap<>(tuple);
+        processedTuple.put(
+            "targetResponses",
+            java.util.Collections.unmodifiableList(processedResponses)
+        );
+        return processedTuple;
     }
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
@@ -449,6 +865,71 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         if (packetInterval.isNegative()) {
             throw new IllegalArgumentException("packetInterval must not be negative");
         }
+        return deployedRequestPreparer(
+            transformerSupplier,
+            authTransformerFactory,
+            (ignoredSourceRequest, ignoredPreparedRequest) -> packetInterval
+        );
+    }
+
+    public static RequestReplayOwner.RequestPreparer<
+        HttpMessageAndTimestamp.Request,
+        NettyPacketToHttpConsumer.PreparedRequest
+    > deployedRequestPreparer(
+        @NonNull Supplier<IJsonTransformer> transformerSupplier,
+        IAuthTransformerFactory authTransformerFactory,
+        double speedupFactor
+    ) {
+        if (!(speedupFactor > 0.0) || !Double.isFinite(speedupFactor)) {
+            throw new IllegalArgumentException("speedupFactor must be finite and positive");
+        }
+        return deployedRequestPreparer(
+            transformerSupplier,
+            authTransformerFactory,
+            (sourceRequest, preparedRequest) ->
+                deployedPacketInterval(
+                    sourceRequest,
+                    preparedRequest,
+                    speedupFactor
+                )
+        );
+    }
+
+    static Duration deployedPacketInterval(
+        HttpMessageAndTimestamp.Request sourceRequest,
+        org.opensearch.migrations.replay.datatypes.OwnedPreparedRequest preparedRequest,
+        double speedupFactor
+    ) {
+        if (!(speedupFactor > 0.0) || !Double.isFinite(speedupFactor)) {
+            throw new IllegalArgumentException("speedupFactor must be finite and positive");
+        }
+        var packetCount = preparedRequest.numByteBufs();
+        if (packetCount <= 1) {
+            return Duration.ZERO;
+        }
+        var first = sourceRequest.getFirstPacketTimestamp();
+        var last = sourceRequest.getLastPacketTimestamp();
+        if (last == null || !last.isAfter(first)) {
+            return Duration.ZERO;
+        }
+        var shiftedDurationMillis =
+            (long) (Duration.between(first, last).toMillis() / speedupFactor);
+        return Duration.ofMillis(shiftedDurationMillis)
+            .dividedBy(packetCount - 1L);
+    }
+
+    static RequestReplayOwner.RequestPreparer<
+        HttpMessageAndTimestamp.Request,
+        NettyPacketToHttpConsumer.PreparedRequest
+    > deployedRequestPreparer(
+        @NonNull Supplier<IJsonTransformer> transformerSupplier,
+        IAuthTransformerFactory authTransformerFactory,
+        @NonNull BiFunction<
+            HttpMessageAndTimestamp.Request,
+            org.opensearch.migrations.replay.datatypes.OwnedPreparedRequest,
+            Duration
+        > packetIntervalFactory
+    ) {
         return (requestId, sourceRequest, replayContext) -> {
             var completion = new CompletableFuture<RequestPreparationResult<
                 NettyPacketToHttpConsumer.PreparedRequest
@@ -487,7 +968,14 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                         }
                     }
                     if (terminalFailure != null) {
-                        completion.completeExceptionally(terminalFailure);
+                        if (containsRequestFilterRejection(terminalFailure)) {
+                            completion.complete(new RequestPreparationReady<>(
+                                null,
+                                HttpRequestTransformationStatus.skipped()
+                            ));
+                        } else {
+                            completion.completeExceptionally(terminalFailure);
+                        }
                         return;
                     }
                     if (transformed == null) {
@@ -496,34 +984,78 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                         ));
                         return;
                     }
-                    var prepared = transformed.transformedOutput == null
-                        ? null
-                        : new NettyPacketToHttpConsumer.PreparedRequest(
-                            transformed.transformedOutput,
-                            packetInterval
+                    NettyPacketToHttpConsumer.PreparedRequest prepared = null;
+                    try {
+                        prepared = transformed.transformedOutput == null
+                            ? null
+                            : new NettyPacketToHttpConsumer.PreparedRequest(
+                                transformed.transformedOutput,
+                                Objects.requireNonNull(
+                                    packetIntervalFactory.apply(
+                                        sourceRequest,
+                                        transformed.transformedOutput
+                                    ),
+                                    "packet interval factory returned null"
+                                )
+                            );
+                        var result = new RequestPreparationReady<>(
+                            prepared,
+                            transformed.transformationStatus
                         );
-                    var result = new RequestPreparationReady<>(
-                        prepared,
-                        transformed.transformationStatus
-                    );
-                    if (!completion.complete(result) && prepared != null) {
-                        prepared.close();
+                        if (!completion.complete(result) && prepared != null) {
+                            prepared.close();
+                        }
+                    } catch (Throwable preparationFailure) {
+                        if (prepared != null) {
+                            try {
+                                prepared.close();
+                            } catch (Throwable closeFailure) {
+                                if (preparationFailure != closeFailure) {
+                                    preparationFailure.addSuppressed(closeFailure);
+                                }
+                            }
+                        } else if (transformed.transformedOutput != null) {
+                            try {
+                                transformed.transformedOutput.close();
+                            } catch (Throwable closeFailure) {
+                                if (preparationFailure != closeFailure) {
+                                    preparationFailure.addSuppressed(closeFailure);
+                                }
+                            }
+                        }
+                        completion.completeExceptionally(preparationFailure);
                     }
                 });
             } catch (Throwable failure) {
+                var terminalFailure =
+                    TrackedFuture.unwindPossibleCompletionException(failure);
                 try {
                     transformer.close();
                 } catch (Throwable closeFailure) {
-                    if (failure != closeFailure) {
-                        failure.addSuppressed(closeFailure);
+                    if (terminalFailure != closeFailure) {
+                        terminalFailure.addSuppressed(closeFailure);
                     }
                 }
-                completion.completeExceptionally(
-                    TrackedFuture.unwindPossibleCompletionException(failure)
-                );
+                if (containsRequestFilterRejection(terminalFailure)) {
+                    completion.complete(new RequestPreparationReady<>(
+                        null,
+                        HttpRequestTransformationStatus.skipped()
+                    ));
+                } else {
+                    completion.completeExceptionally(terminalFailure);
+                }
             }
             return preparationOperation(completion, settled);
         };
+    }
+
+    private static boolean containsRequestFilterRejection(Throwable failure) {
+        for (var current = failure; current != null; current = current.getCause()) {
+            if (current instanceof RequestFilteredException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static RequestReplayOwner.PreparationOperation<
@@ -552,10 +1084,6 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         };
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // TrafficReplayerCore.TrafficReplayerAccumulationCallbacks.packageAndWriteTuple ->
-    //     TrafficReplayerTopLevel.deployedTupleFactory
-    // REBUILD-TRACE-END(G5,target)
     public static RequestReplayOwner.TupleFactory<
         HttpMessageAndTimestamp.Request,
         NettyPacketToHttpConsumer.PreparedRequest,
@@ -603,26 +1131,68 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             sourceOwner.closeAfterOrderlyShutdown();
             sourceInputs.close();
             intakeInputs.closeNow();
+            closeTupleWriterWorkers();
             closeProtocolViolationTerminator();
             return;
         }
         sourceOwner.beginOrderlyShutdown();
         while (!sourceOwner.isOrderlyShutdownReadyToClose()) {
+            if (fatalTerminationStarted.get()) {
+                return;
+            }
             sourceOwner.runOnce();
         }
+        if (fatalTerminationStarted.get()) {
+            return;
+        }
         if (intakeInputs.requestStopAfterDraining()) {
-            intakeOwner.termination().toCompletableFuture().join();
+            if (!awaitIntakeTerminationOrFatal()) {
+                return;
+            }
+        }
+        if (fatalTerminationStarted.get()) {
+            return;
         }
         sourceOwner.closeAfterOrderlyShutdown();
         sourceInputs.close();
+        closeTupleWriterWorkers();
+        if (fatalTerminationStarted.get()) {
+            return;
+        }
         closeProtocolViolationTerminator();
+    }
+
+    boolean awaitIntakeTerminationOrFatal() {
+        return awaitOwnerTerminationUnlessFatal(
+            intakeOwner.termination(),
+            firstFatalSignal,
+            fatalTerminationStarted::get
+        );
+    }
+
+    static boolean awaitOwnerTerminationUnlessFatal(
+        CompletionStage<Void> ownerTermination,
+        CompletionStage<?> fatalSignal,
+        java.util.function.BooleanSupplier fatalTerminationStarted
+    ) {
+        var termination = ownerTermination.toCompletableFuture();
+        CompletableFuture.anyOf(termination, fatalSignal.toCompletableFuture()).join();
+        if (fatalTerminationStarted.getAsBoolean()) {
+            return false;
+        }
+        termination.join();
+        return true;
     }
 
     private void closeProtocolViolationTerminator() {
         try {
             protocolViolationTerminator.close();
         } catch (Exception failure) {
-            fatalHandler.accept(new Error("Failed to close protocol-violation terminator", failure));
+            reportUnexpectedFailure(
+                "protocol-violation terminator",
+                "close",
+                failure
+            );
         }
     }
 
@@ -631,8 +1201,6 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     //     TrafficReplayerTopLevel.createConnection
     // RequestSenderOrchestrator.<init>(ClientConnectionPool,Duration,Duration,BiFunction) ->
     //     TrafficReplayerTopLevel.createConnection
-    // ThreadLocalTupleWriter.<init>(IntFunction) -> TrafficReplayerTopLevel.createConnection
-    // ThreadLocalTupleWriter.<init>(IntFunction,Supplier) -> TrafficReplayerTopLevel.createConnection
     // TrafficReplayerTopLevel.<init>(7-argument) -> TrafficReplayerTopLevel.createConnection
     // TrafficReplayerTopLevel.<init>(8-argument) -> TrafficReplayerTopLevel.createConnection
     // REBUILD-TRACE-END(G5,target)
@@ -644,25 +1212,11 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             configuration.eventLoopFor().apply(connectionId),
             "event-loop selector returned null"
         );
+        var tupleWriterWorker = Objects.requireNonNull(
+            tupleWriterWorkersByEventLoop.get(eventLoop),
+            "event-loop selector returned an owner outside the configured worker set"
+        );
         var connectionContext = contextManager.apply(connectionId);
-        var tupleTransformer = Objects.requireNonNull(
-            configuration.tupleTransformerFactory().create(connectionId),
-            "tuple transformer factory returned null"
-        );
-        var tupleSink = Objects.requireNonNull(
-            configuration.tupleSinkFactory().create(connectionId),
-            "tuple sink factory returned null"
-        );
-        var tupleWriter = new TupleWriter<>(
-            eventLoop,
-            configuration.clock(),
-            configuration.tupleRetryDelay(),
-            tupleTransformer,
-            tupleSink,
-            configuration.tupleReleaser(),
-            fatalHandler::accept,
-            org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP
-        );
         var terminalBinding = new AtomicReference<ConnectionBinding>();
         var owner = new TargetConnectionOwner<
             HttpMessageAndTimestamp.Request,
@@ -683,12 +1237,16 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 eventLoop,
                 connectionContext
             ),
-            tupleWriter,
+            tupleWriterWorker.writer,
             configuration.tupleFactory(),
             configuration.resourceReleaser(),
             permitProvider,
             assemblySink.new IntakeLifecycleSink(connectionId),
-            fatalHandler::accept,
+            eventLoopOwnedFailure(
+                eventLoop,
+                "target connection owner " + connectionId,
+                "owner transition"
+            )::accept,
             org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP,
             configuration.maximumResponseRetries(),
             () -> assemblySink.releaseTerminatedConnection(
@@ -699,12 +1257,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 )
             )
         );
-        var binding = new ConnectionBinding(
-            owner,
-            connectionContext,
-            tupleTransformer,
-            tupleSink
-        );
+        var binding = new ConnectionBinding(owner, connectionContext);
         terminalBinding.set(binding);
         return binding;
     }
@@ -733,47 +1286,133 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             if (cleanupFailure != failure) {
                 cleanupFailure.addSuppressed(failure);
             }
-            fatalHandler.accept(new Error(
-                "Rejected request admission cleanup failed for "
-                    + requestContext.getRequestId(),
+            reportUnexpectedFailure(
+                "replay composition root",
+                "rejected request admission cleanup " + requestContext.getRequestId(),
                 cleanupFailure
-            ));
+            );
         }
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.releaseConnectionResources
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.releaseConnectionResources
-    // REBUILD-TRACE-END(G5,target)
     private void releaseConnectionResources(
         ConnectionProcessingId connectionId,
         ConnectionBinding binding
     ) {
-        closeManaged(binding.tupleTransformer, "tuple transformer", connectionId);
-        closeManaged(binding.tupleSink, "tuple sink", connectionId);
         contextManager.releaseContextFor(binding.connectionContext);
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.closeManaged
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.closeManaged
-    // REBUILD-TRACE-END(G5,target)
-    private void closeManaged(
-        AutoCloseable closeable,
-        String component,
-        ConnectionProcessingId connectionId
-    ) {
-        try {
-            closeable.close();
-        } catch (Exception failure) {
-            fatalHandler.accept(new Error(
-                "Failed to close " + component + " for " + connectionId,
-                failure
-            ));
+    // REBUILD-TRACE-START(G9,source): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.closeTupleWriterWorkers
+    // REBUILD-TRACE-END(G9,source)
+    // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // ThreadLocalTupleWriter.close -> TrafficReplayerTopLevel.closeTupleWriterWorkers
+    // REBUILD-TRACE-END(G9,target)
+    private void closeTupleWriterWorkers() {
+        for (var worker : tupleWriterWorkers) {
+            worker.closeOnOwner();
+            if (fatalTerminationStarted.get()) {
+                return;
+            }
+        }
+    }
+
+    private final class TupleWriterWorker {
+        private final int workerIndex;
+        private final EventLoop eventLoop;
+        private final ManagedTupleTransformer<T> transformer;
+        private final ManagedPhysicalTupleSink<T> sink;
+        private final TupleWriter<T> writer;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private TupleWriterWorker(
+            int workerIndex,
+            EventLoop eventLoop,
+            ManagedTupleTransformer<T> transformer,
+            ManagedPhysicalTupleSink<T> sink
+        ) {
+            this.workerIndex = workerIndex;
+            this.eventLoop = eventLoop;
+            this.transformer = transformer;
+            this.sink = sink;
+            this.writer = new TupleWriter<>(
+                eventLoop,
+                configuration.clock(),
+                configuration.tupleRetryDelayPolicy(),
+                transformer,
+                sink,
+                configuration.tupleReleaser(),
+                eventLoopOwnedFailure(
+                    eventLoop,
+                    "tuple writer worker " + workerIndex,
+                    "owner transition"
+                )::accept,
+                org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP
+            );
+        }
+
+        private void closeOnOwner() {
+            if (closed.get()) {
+                return;
+            }
+            if (eventLoop.inEventLoop()) {
+                closeComponents();
+                return;
+            }
+            try {
+                configuration.ownerTaskRunner().runAndWait(eventLoop, this::closeComponents);
+            } catch (Throwable failure) {
+                reportUnexpectedFailure(
+                    "tuple writer worker " + workerIndex,
+                    "close submission",
+                    failure
+                );
+            }
+        }
+
+        private void closeComponents() {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            Throwable failure = null;
+            try {
+                transformer.close();
+            } catch (Throwable transformerFailure) {
+                failure = transformerFailure;
+            }
+            try {
+                sink.close();
+            } catch (Throwable sinkFailure) {
+                if (failure == null) {
+                    failure = sinkFailure;
+                } else if (failure != sinkFailure) {
+                    failure.addSuppressed(sinkFailure);
+                }
+            }
+            if (failure != null) {
+                reportUnexpectedFailure(
+                    "tuple writer worker " + workerIndex,
+                    "close",
+                    failure
+                );
+            }
+        }
+
+        private void closeAfterConstructionFailure(Throwable constructionFailure) {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            closePartiallyConstructed(
+                transformer,
+                "tuple transformer",
+                workerIndex,
+                constructionFailure
+            );
+            closePartiallyConstructed(
+                sink,
+                "tuple sink",
+                workerIndex,
+                constructionFailure
+            );
         }
     }
 
@@ -786,8 +1425,6 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             T
         > owner;
         private final IReplayContexts.IConnectionContext connectionContext;
-        private final ManagedTupleTransformer<T> tupleTransformer;
-        private final ManagedPhysicalTupleSink<T> tupleSink;
         private volatile boolean intakeRemovalAccepted;
 
         private ConnectionBinding(
@@ -798,14 +1435,10 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 HttpMessageAndTimestamp.Response,
                 T
             > owner,
-            IReplayContexts.IConnectionContext connectionContext,
-            ManagedTupleTransformer<T> tupleTransformer,
-            ManagedPhysicalTupleSink<T> tupleSink
+            IReplayContexts.IConnectionContext connectionContext
         ) {
             this.owner = owner;
             this.connectionContext = connectionContext;
-            this.tupleTransformer = tupleTransformer;
-            this.tupleSink = tupleSink;
         }
     }
 
@@ -1028,9 +1661,13 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             ConnectionBinding binding
         ) {
             if (!binding.intakeRemovalAccepted) {
-                fatalHandler.accept(new Error(
-                    "Connection owner terminated before intake removed " + connectionId
-                ));
+                reportUnexpectedFailure(
+                    "target connection owner " + connectionId,
+                    "termination before intake removal",
+                    new IllegalStateException(
+                        "Connection owner terminated before intake removed " + connectionId
+                    )
+                );
             }
             releaseConnectionResources(connectionId, binding);
         }

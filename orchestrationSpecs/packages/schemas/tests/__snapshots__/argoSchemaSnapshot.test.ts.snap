@@ -3122,15 +3122,47 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "lookaheadTimeSeconds": {
                       "type": "number",
-                      "default": 400
+                      "description": "[Deprecated] Accepted for existing resources but ignored. Replay intake demand is controlled by retry-ready supply."
+                    },
+                    "maxConcurrentTargetAttempts": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Maximum number of target HTTP attempts that can be in flight simultaneously."
                     },
                     "maxConcurrentRequests": {
-                      "type": "number",
-                      "default": 10000
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "[Deprecated] Alias for maxConcurrentTargetAttempts. Conflicting simultaneous values are rejected."
                     },
                     "numClientThreads": {
-                      "type": "number",
-                      "default": 0
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Positive number of target Netty event-loop threads. Omit to use Netty's configured default."
+                    },
+                    "cancellationGraceMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 1000
+                    },
+                    "heartbeatExpirationIntervalSeconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 30
+                    },
+                    "maximumBackwardSkewSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 5
+                    },
+                    "sourceResponseRetryWindowSeconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 5
+                    },
+                    "readyRequestsBufferPerThread": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 2
                     },
                     "nonRetryableDocExceptionTypes": {
                       "type": "array",
@@ -3141,7 +3173,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "observedPacketConnectionTimeout": {
                       "type": "number",
-                      "default": 360
+                      "description": "[Deprecated] Accepted for existing resources but ignored. Broker-time heartbeat expiration uses E and S."
                     },
                     "otelTraceCollectorEndpoint": {
                       "anyOf": [
@@ -3174,7 +3206,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "quiescentPeriodMs": {
                       "type": "number",
-                      "default": 5000
+                      "description": "[Deprecated] Accepted for existing resources but ignored. Typed generation cleanup gates reassignment."
                     },
                     "removeAuthHeader": {
                       "type": "boolean",
@@ -6164,18 +6196,52 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "lookaheadTimeSeconds": {
                     "type": "number",
-                    "default": 400,
-                    "description": "Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."
+                    "description": "[Deprecated] Accepted for existing resources but ignored. Replay intake demand is controlled by retry-ready supply."
+                  },
+                  "maxConcurrentTargetAttempts": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum number of target HTTP attempts that can be in flight simultaneously."
                   },
                   "maxConcurrentRequests": {
-                    "type": "number",
-                    "default": 10000,
-                    "description": "Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "[Deprecated] Alias for maxConcurrentTargetAttempts. Conflicting simultaneous values are rejected."
                   },
                   "numClientThreads": {
-                    "type": "number",
-                    "default": 0,
-                    "description": "Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Positive number of target Netty event-loop threads. Omit to use Netty's configured default."
+                  },
+                  "cancellationGraceMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1000,
+                    "description": "Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown."
+                  },
+                  "heartbeatExpirationIntervalSeconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 30,
+                    "description": "Broker-time heartbeat expiration interval E in seconds."
+                  },
+                  "maximumBackwardSkewSeconds": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 5,
+                    "description": "Maximum permitted Kafka broker timestamp regression S in seconds."
+                  },
+                  "sourceResponseRetryWindowSeconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 5,
+                    "description": "Broker-time source-response retry window W in seconds."
+                  },
+                  "readyRequestsBufferPerThread": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 2,
+                    "description": "Retry-ready request buffer target P for each target Netty event-loop thread."
                   },
                   "nonRetryableDocExceptionTypes": {
                     "type": "array",
@@ -6186,8 +6252,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "observedPacketConnectionTimeout": {
                     "type": "number",
-                    "default": 360,
-                    "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
+                    "description": "[Deprecated] Accepted for existing resources but ignored. Broker-time heartbeat expiration uses E and S."
                   },
                   "otelTraceCollectorEndpoint": {
                     "anyOf": [
@@ -6220,8 +6285,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "quiescentPeriodMs": {
                     "type": "number",
-                    "default": 5000,
-                    "description": "Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."
+                    "description": "[Deprecated] Accepted for existing resources but ignored. Typed generation cleanup gates reassignment."
                   },
                   "removeAuthHeader": {
                     "type": "boolean",

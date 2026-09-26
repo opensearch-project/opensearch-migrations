@@ -108,11 +108,7 @@ services:
       - "logging-group-default"
       - "--kafkaPropertyFile"
       - "/tmp/kafka-consumer.properties"
-      - "--lookahead-time-window"
-      - "400"
-      - "--packet-timeout-seconds"
-      - "300"
-      - "--max-concurrent-requests"
+      - "--max-concurrent-target-attempts"
       - "200"
 
 volumes:

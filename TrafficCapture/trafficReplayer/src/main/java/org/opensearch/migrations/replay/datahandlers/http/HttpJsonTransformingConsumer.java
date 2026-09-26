@@ -276,8 +276,18 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         }
         return offloadingHandler.getPacketReceiverCompletionFuture().getDeferredFutureThroughHandle((v, t) -> {
             if (t != null) {
-                transformationContext.onTransformFailure();
                 t = TrackedFuture.unwindPossibleCompletionException(t);
+                if (hasRequestFilteredCause(t)) {
+                    transformationContext.onTransformSkip();
+                    return TextTrackedFuture.completedFuture(
+                        new TransformedOutputAndResult<>(
+                            null,
+                            HttpRequestTransformationStatus.skipped()
+                        ),
+                        () -> "HttpJsonTransformingConsumer.filteredRequest"
+                    );
+                }
+                transformationContext.onTransformFailure();
                 if (t instanceof NoContentException) {
                     return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                 } else {
@@ -322,7 +332,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
 
     private static HttpRequestTransformationStatus makeStatusForRedrive(Throwable reason) {
         return reason == null
-            ? HttpRequestTransformationStatus.skipped() : HttpRequestTransformationStatus.makeError(reason);
+            ? HttpRequestTransformationStatus.completed() : HttpRequestTransformationStatus.makeError(reason);
     }
 
     private static boolean hasRequestFilteredCause(Throwable t) {
