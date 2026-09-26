@@ -111,6 +111,10 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
      * the re-delivered record must create a fresh accumulation. The accumulator's defensive
      * stale-check branch must NOT fire.
      */
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// StaleAccumulationCancelOnRejoinTest.revokeAndReassign_synthClosesBeforeNewGenRecord -> RecordAssociationAccumulatorTest.cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput
+// StaleAccumulationCancelOnRejoinTest.revokeAndReassign_synthClosesBeforeNewGenRecord -> PartitionIntakeStateTest.forceCancellationUsesTheSharedSupplyTransitionExactlyOnceAndLateRetryCannotReadd
+// REBUILD-TRACE-END(G8,source)
 // REBUILD-LIMBO-START(G10)
 /*
     @Test

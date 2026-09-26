@@ -466,6 +466,11 @@ class PartitionIntakeStateTest {
         intake.removeRequest(finishedBeforeResolution);
     }
 
+    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // StaleAccumulationCancelOnRejoinTest.revokeAndReassign_synthClosesBeforeNewGenRecord -> PartitionIntakeStateTest.forceCancellationUsesTheSharedSupplyTransitionExactlyOnceAndLateRetryCannotReadd
+    // StaleAccumulationCancelOnRejoinKafkaTest.revokeAndReassign_realKafka_synthClosesBeforeNewGenRecord -> PartitionIntakeStateTest.forceCancellationUsesTheSharedSupplyTransitionExactlyOnceAndLateRetryCannotReadd
+    // TrafficSourceReaderInterruptedCloseWiringTest.trafficSourceReaderInterruptedClose_completesFinishedAccumulatingResponseFuture -> PartitionIntakeStateTest.forceCancellationUsesTheSharedSupplyTransitionExactlyOnceAndLateRetryCannotReadd
+    // REBUILD-TRACE-END(G8,target)
     @Test
     void forceCancellationUsesTheSharedSupplyTransitionExactlyOnceAndLateRetryCannotReadd() {
         var supplyDeltas = new ArrayList<Integer>();

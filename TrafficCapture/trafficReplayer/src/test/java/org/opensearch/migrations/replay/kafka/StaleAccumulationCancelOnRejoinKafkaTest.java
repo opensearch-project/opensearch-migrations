@@ -112,6 +112,14 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
     private final ConfluentKafkaContainer embeddedKafkaBroker =
         new ConfluentKafkaContainer(SharedDockerImageNames.KAFKA);
 
+*/
+// REBUILD-LIMBO-END(G10)
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// StaleAccumulationCancelOnRejoinKafkaTest.revokeAndReassign_realKafka_synthClosesBeforeNewGenRecord -> RecordAssociationAccumulatorTest.cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput
+// StaleAccumulationCancelOnRejoinKafkaTest.revokeAndReassign_realKafka_synthClosesBeforeNewGenRecord -> PartitionIntakeStateTest.forceCancellationUsesTheSharedSupplyTransitionExactlyOnceAndLateRetryCannotReadd
+// REBUILD-TRACE-END(G8,source)
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void revokeAndReassign_realKafka_synthClosesBeforeNewGenRecord() throws Exception {
         var producer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());

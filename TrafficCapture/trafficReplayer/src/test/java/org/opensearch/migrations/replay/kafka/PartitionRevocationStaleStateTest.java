@@ -126,6 +126,9 @@ public class PartitionRevocationStaleStateTest {
      * channel session is marked cancelled and won't self-heal when the re-delivered
      * Kafka records (post-rebalance fetch-position reset) create a fresh accumulation.
      */
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// PartitionRevocationStaleStateTest.accumulator_staleAccumulationDiscardedOnGenerationBump -> RecordAssociationAccumulatorTest.cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput
+// REBUILD-TRACE-END(G8,source)
 // REBUILD-LIMBO-START(G10)
 /*
     @Test
@@ -324,6 +327,9 @@ public class PartitionRevocationStaleStateTest {
      * onConnectionClose with ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED.
      * Before fix: accumulator doesn't handle this type — no onConnectionClose fires.
      */
+// REBUILD-TRACE-START(G8,source): retain through the rebuild; remove in final pre-merge cleanup.
+// PartitionRevocationStaleStateTest.accumulatorHandlesTrafficSourceReaderInterruptedClose -> RecordAssociationAccumulatorTest.cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords
+// REBUILD-TRACE-END(G8,source)
 // REBUILD-LIMBO-START(G10)
 /*
     @Test
