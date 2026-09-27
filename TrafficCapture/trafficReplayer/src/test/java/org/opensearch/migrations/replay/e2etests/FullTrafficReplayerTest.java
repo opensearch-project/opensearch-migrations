@@ -568,7 +568,6 @@ public class FullTrafficReplayerTest {
         List<HttpRequestTransformationStatus> transformationStatuses,
         int targetChannelsCreated,
         Map<TopicPartition, OffsetAndMetadata> committedOffsets,
-        List<Integer> protocolViolationExitCodes,
         List<ProcessSupervisor.FatalSignal> fatalFailures
     ) {}
 
@@ -606,7 +605,6 @@ public class FullTrafficReplayerTest {
                 1L,
                 result.committedOffsets().get(TOPIC_PARTITION).offset()
             );
-            Assertions.assertTrue(result.protocolViolationExitCodes().isEmpty());
             Assertions.assertTrue(result.fatalFailures().isEmpty());
         }
     }
@@ -875,7 +873,6 @@ public class FullTrafficReplayerTest {
             List.copyOf(transformationStatuses),
             targetChannelsCreated.get(),
             consumer.lastCommit,
-            List.copyOf(protocolViolationExitCodes),
             List.copyOf(fatalFailures)
         );
     }

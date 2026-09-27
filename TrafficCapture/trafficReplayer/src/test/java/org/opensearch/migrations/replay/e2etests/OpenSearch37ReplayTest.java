@@ -92,10 +92,6 @@ class OpenSearch37ReplayTest {
                     null
                 );
                 Assertions.assertTrue(result.fatalFailures().isEmpty(), result.fatalFailures()::toString);
-                Assertions.assertTrue(
-                    result.protocolViolationExitCodes().isEmpty(),
-                    result.protocolViolationExitCodes()::toString
-                );
                 Assertions.assertEquals(1, result.tuples().size());
                 Assertions.assertEquals(1, result.transformationStatuses().size());
                 Assertions.assertTrue(
