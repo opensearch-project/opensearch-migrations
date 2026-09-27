@@ -43,8 +43,9 @@ restrictions every time, and require every final verdict to name the same exact 
 --continue or --fork-session.
 
 Commit coherent progress as Greg Schohn <schohn@amazon.com> with DCO. Isolated workers do not push or
-merge; the coordinator follows AGENTS.md's integration, push, and PR-ledger rules. For G9.5, push only the
-reviewed ordinary forward commits on `stableAndScalableLiveReplay`; do not create a replacement history or
-force-update the branch. Finish with Commits, Evidence, Findings and dispositions, and Status, including
-exact validation outcomes and clean-worktree state.
+merge; the coordinator follows AGENTS.md's integration, push, and PR-ledger rules. For G9.5, use ordinary
+forward commits unless the live plan records an exact owner-authorized corrective history exception. Such an
+exception must preserve the current branch, rebuild in isolation from the named parent, pass every stated
+equivalence and review gate, and use only the authorized guarded replacement. Finish with Commits, Evidence,
+Findings and dispositions, and Status, including exact validation outcomes and clean-worktree state.
 ```

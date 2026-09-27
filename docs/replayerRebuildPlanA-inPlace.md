@@ -805,10 +805,21 @@ G9.5 begins from the ordinary current tip of `stableAndScalableLiveReplay` after
 coordinator records that exact production-complete commit and launches three
 independent direct-Claude CLI, read-only review lanes in parallel. Every lane is pinned to that same
 production-complete commit in its own read-only `/private/tmp` worktree and has its own fresh named session.
-G9.5 does not squash,
-reconstruct, minimize, or otherwise rewrite Git history. History and ordinary blame may be inspected as
-evidence for responsibility disposition, but attribution quality is not a G9.5 exit criterion and does not
-authorize a history rewrite. The following reviews are lanes inside G9.5, not additional milestones:
+History and ordinary blame may be inspected as evidence for responsibility disposition, but attribution
+quality alone is not a G9.5 exit criterion and does not authorize a history rewrite.
+
+**Owner-authorized corrective history exception, 2026-09-27:** ordinary compression was found to have
+transplanted stale cumulative source trees, beginning with `ef2577355`, and thereby removed unrelated
+upstream behavior and tests. Pause later milestones. Preserve the current branch tip as evidence; create an
+isolated candidate from `a960887ba76eb0d3c6d2a252bc553fee339d3318`; reconstruct every compressed wave
+from its intended source deltas rather than its old tree; audit every reconstructed endpoint; replay the
+later G9.5 commits; compare the replayer production tree and the restored upstream patch separately; and
+rerun compilation, focused tests, falsification, and all three G9.5 review lanes at the new exact production
+SHA. Replace the active remote branch only after all gates pass, using guarded `--force-with-lease`. This
+bounded correction supersedes the earlier no-rewrite direction but does not authorize attribution-only
+cleanup or another history rewrite.
+
+The following reviews are lanes inside G9.5, not additional milestones:
 
 1. **Bounded migration/disposition audit.** Independently reconstruct responsibility disposition from
    baseline `2fe4538aef16eafa098545e76545873335bf2d11`, rather than accepting trace comments or the register as
@@ -838,9 +849,10 @@ intervening production diff does not affect its bounded scope.
 closed; non-conformance findings are triaged once; every silence or contract decision is escalated; and all
 three final verdicts are pinned to one identical production-complete commit on
 `stableAndScalableLiveReplay`. Corrections are ordinary forward commits with focused evidence and resumed
-affected review lanes. The coordinator pushes the reviewed branch through the normal guarded workflow.
-No history rewrite, replacement branch, structural-equalizer replay, or force-update is part of G9.5.
-G10 cannot begin until the reviewed production commit is accepted.
+affected review lanes. Except for the owner-authorized corrective history exception above, the coordinator
+pushes the reviewed branch through the normal guarded workflow and does not rewrite history. For that
+exception, the candidate must pass the same exit gates before the coordinator performs the authorized
+guarded replacement. G10 cannot begin until the reviewed production commit is accepted.
 
 ### G10 — The fuse
 
