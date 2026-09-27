@@ -11,13 +11,20 @@ import java.util.List;
 
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.replay.ParsedHttpMessagesAsDicts;
-import org.opensearch.migrations.testutils.TrafficStreamFixtures;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
+import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Timestamp;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -153,14 +160,31 @@ class OpenSearch37ReplayTest {
             + "Content-Type: application/json\r\n"
             + "Content-Length: " + sourceResponse.body().getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n"
             + sourceResponse.body();
-        return CaptureRecord.newBuilder()
-            .setTrafficStream(TrafficStreamFixtures.makeHttpRequestResponseTrafficStream(
-                "es68-replay",
-                Integer.toString(requestId),
-                requestText,
-                responseText
+        var timestamp = Timestamp.newBuilder().setSeconds(1).build();
+        var trafficStream = TrafficStream.newBuilder()
+            .setNodeId("es68-replay")
+            .setConnectionId(Integer.toString(requestId))
+            .setNumberOfThisLastChunk(0)
+            .addSubStream(observation(timestamp, 0).setRead(
+                ReadObservation.newBuilder().setData(ByteString.copyFromUtf8(requestText))
+            ))
+            .addSubStream(observation(timestamp, 1).setEndOfMessageIndicator(
+                EndOfMessageIndication.getDefaultInstance()
+            ))
+            .addSubStream(observation(timestamp, 2).setWrite(
+                WriteObservation.newBuilder().setData(ByteString.copyFromUtf8(responseText))
+            ))
+            .addSubStream(observation(timestamp, 3).setClose(
+                CloseObservation.getDefaultInstance()
             ))
             .build();
+        return CaptureRecord.newBuilder().setTrafficStream(trafficStream).build();
+    }
+
+    private static TrafficObservation.Builder observation(Timestamp timestamp, long sequence) {
+        return TrafficObservation.newBuilder()
+            .setTs(timestamp)
+            .setConnectionObservationSequence(sequence);
     }
 
     private static JsonNode getJson(HttpClient client, URI cluster, String path) throws Exception {
