@@ -16,6 +16,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
+import org.opensearch.migrations.replay.testing.FakeClock;
+import org.opensearch.migrations.replay.testing.TestEventLoop;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -336,6 +338,42 @@ class TargetConnectionOwnerCancellationTest {
             fixture.lifecycleEvents
         );
         assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void permitGrantedBeforeForceButDeliveredAfterForceIsReleasedWithoutDuplicateTurn() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture(1);
+        var heldPermit = Assertions.assertInstanceOf(
+            TargetAttemptPermitProvider.PermitAcquired.class,
+            fixture.permitProvider.acquire(request(99))
+                .completion()
+                .toCompletableFuture()
+                .join()
+        );
+        fixture.admit(13, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(13);
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+
+        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new CancellationException("force while permit delivery is queued")
+        ));
+        var grantLoop = new TestEventLoop(new FakeClock());
+        grantLoop.execute(heldPermit.permit()::close);
+        grantLoop.runUntilIdle();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+        Assertions.assertEquals(
+            java.util.List.of("cleanup-finished"),
+            fixture.lifecycleEvents,
+            "the force path owns the single turn transition and emits no normal request milestone"
+        );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 

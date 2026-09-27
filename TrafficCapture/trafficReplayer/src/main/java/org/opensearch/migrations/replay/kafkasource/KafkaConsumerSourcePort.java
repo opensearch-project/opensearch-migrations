@@ -66,10 +66,9 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         for (var topicPartition : polled.partitions()) {
             var records = new ArrayList<PolledKafkaRecord>();
             for (var kafkaRecord : polled.records(topicPartition)) {
-                var encodedValue = Objects.requireNonNull(
-                    kafkaRecord.value(),
-                    "Kafka record value at " + topicPartition + "@" + kafkaRecord.offset()
-                );
+                var encodedValue = kafkaRecord.value() == null
+                    ? new byte[0]
+                    : kafkaRecord.value();
                 records.add(new PolledKafkaRecord(
                     kafkaRecord.offset(),
                     kafkaRecord.timestamp(),

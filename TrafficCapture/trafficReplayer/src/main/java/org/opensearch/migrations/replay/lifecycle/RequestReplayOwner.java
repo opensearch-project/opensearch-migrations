@@ -512,9 +512,8 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             );
             return;
         }
-        if (cancellationState instanceof CancellationState.Forced forced) {
+        if (cancellationState instanceof CancellationState.Forced) {
             permit.close();
-            finishTargetTurnWithoutAnotherAttempt(forced.cause());
             return;
         }
         if (cancellationState instanceof CancellationState.Graceful graceful) {

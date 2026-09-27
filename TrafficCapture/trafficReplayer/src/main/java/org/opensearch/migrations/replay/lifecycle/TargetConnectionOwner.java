@@ -29,6 +29,7 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
@@ -240,6 +241,12 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
 
         private ReplayRequestId requestId() {
             return replayContext.getRequestId();
+        }
+
+        private KafkaRecordId kafkaRecordId() {
+            return replayContext.getLogicalEnclosingScope()
+                .getLogicalEnclosingScope()
+                .getRecordId();
         }
 
         @Override
@@ -950,6 +957,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         CompletableFuture<Void> retryDelivery
     ) {
         var registration = operations.register(
+            request.kafkaRecordId(),
             partitionGenerationId,
             connectionProcessingId,
             request.requestId(),
@@ -1232,6 +1240,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         ownerFinishedSubmitted = true;
         requiredLifecycleDelivery(
             null,
+            null,
             sourceLifetime == SourceLifetime.CANCELLING
                 ? "connection cleanup completion"
                 : "connection-owner completion",
@@ -1409,6 +1418,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         }
         request.connectionRequestFinishedSubmitted = true;
         return requiredLifecycleDelivery(
+            request.kafkaRecordId(),
             requestId,
             "connection-request completion",
             () -> lifecycleSink.connectionRequestFinished(
@@ -1431,6 +1441,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             return CompletableFuture.failedFuture(failure);
         }
         return requiredLifecycleDelivery(
+            request.kafkaRecordId(),
             requestId,
             "request-processing completion",
             () -> lifecycleSink.requestProcessingFinished(
@@ -1535,6 +1546,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     private CompletionStage<Void> requiredLifecycleDelivery(
+        KafkaRecordId kafkaRecordId,
         ReplayRequestId requestId,
         String operation,
         RequiredSubmission submission,
@@ -1542,6 +1554,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     ) {
         var completion = new CompletableFuture<Void>();
         var registration = operations.register(
+            kafkaRecordId,
             partitionGenerationId,
             connectionProcessingId,
             requestId,

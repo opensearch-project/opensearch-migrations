@@ -118,6 +118,31 @@ class KafkaConsumerSourcePortTest {
         );
     }
 
+    @Test
+    void nullKafkaValueBecomesPayloadNotSetForReplayIntakeToClassify() throws Exception {
+        var consumer = new MockConsumer<String, byte[]>("earliest");
+        consumer.assign(List.of(PARTITION));
+        consumer.updateBeginningOffsets(Map.of(PARTITION, 0L));
+        consumer.addRecord(new ConsumerRecord<>(
+            PARTITION.topic(),
+            PARTITION.partition(),
+            0,
+            "key",
+            null
+        ));
+        var port = new KafkaConsumerSourcePort(consumer, Duration.ZERO);
+
+        var record = port.poll().get(PARTITION).get(0);
+
+        Assertions.assertEquals(0, record.serializedSizeBytes());
+        Assertions.assertEquals(0, record.encodedEnvelope().size());
+        Assertions.assertEquals(
+            org.opensearch.migrations.trafficcapture.protos.CaptureRecord.PayloadCase.PAYLOAD_NOT_SET,
+            record.decodeEnvelope().getPayloadCase(),
+            "a Kafka tombstone must reach intake's protocol-violation classification instead of owner failure 89"
+        );
+    }
+
     /**
      * {@code §5.7} lists a wakeup-interrupted commit as an unknown outcome, and separately lists what is
      * <em>not</em> an outcome: "Authorization failure, oversized offset metadata, an invalid commit offset

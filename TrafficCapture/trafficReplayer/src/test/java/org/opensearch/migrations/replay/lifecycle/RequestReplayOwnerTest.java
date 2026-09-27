@@ -225,6 +225,18 @@ class RequestReplayOwnerTest {
             "graceful cancellation permits an already-written attempt to settle but starts no retry"
         );
         Assertions.assertEquals(0, fixture.activePermits.get());
+        fixture.eventLoop.advance(Duration.ofSeconds(29));
+        Assertions.assertEquals(
+            List.of("cleanup-finished"),
+            fixture.lifecycleEvents,
+            "by the revocation deadline, a retry that could not start must finish through cleanup only"
+        );
+        Assertions.assertTrue(
+            fixture.lifecycleEvents.stream().noneMatch(event ->
+                event.startsWith("processing:")
+            ),
+            "a retry cancelled by revocation must not manufacture normal processing completion"
+        );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 

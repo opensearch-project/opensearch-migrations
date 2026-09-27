@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
 import org.opensearch.migrations.replay.testing.FakeClock;
@@ -69,11 +70,57 @@ class TargetConnectionOwnerMilestoneTest {
             registeredRequests(fixture),
             "D17: processing acceptance, not turn completion or tuple durability, removes the request"
         );
+        var requiredDelivery = fixture.owner.activitySnapshot()
+            .stream()
+            .filter(snapshot ->
+                snapshot.operationType()
+                    == OutstandingOperationRegistry.OperationType.REQUIRED_DELIVERY
+            )
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(
+            new KafkaRecordId(fixture.generation, 0),
+            requiredDelivery.kafkaRecordId(),
+            "request-specific required delivery must retain its Kafka record identity"
+        );
 
         processingAcceptance.complete(null);
         fixture.eventLoop.runUntilIdle();
 
         Assertions.assertEquals(1, registeredRequests(fixture));
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void permitAcquisitionSnapshotCarriesKafkaRecordIdentity() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture(1);
+        var heldPermit = Assertions.assertInstanceOf(
+            TargetAttemptPermitProvider.PermitAcquired.class,
+            fixture.permitProvider.acquire(
+                TargetConnectionOwnerTestSupport.request(99)
+            ).completion().toCompletableFuture().join()
+        );
+        fixture.admit(7, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(7);
+        fixture.eventLoop.runUntilIdle();
+
+        var permitWait = fixture.owner.activitySnapshot()
+            .stream()
+            .filter(snapshot ->
+                snapshot.operationType()
+                    == OutstandingOperationRegistry.OperationType.PERMIT_ACQUISITION
+            )
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(
+            new KafkaRecordId(fixture.generation, 7),
+            permitWait.kafkaRecordId(),
+            "permit wait activity must identify the Kafka record that owns the request"
+        );
+
+        heldPermit.permit().close();
+        fixture.eventLoop.runUntilIdle();
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
