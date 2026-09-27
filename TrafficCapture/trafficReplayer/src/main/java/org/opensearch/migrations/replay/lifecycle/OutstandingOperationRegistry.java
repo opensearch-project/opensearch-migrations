@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 
@@ -75,6 +76,8 @@ public final class OutstandingOperationRegistry {
 
     public record Snapshot(
         long operationId,
+        @NonNull String ownerIdentity,
+        KafkaRecordId kafkaRecordId,
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ConnectionProcessingId connectionProcessingId,
         ReplayRequestId replayRequestId,
@@ -99,6 +102,7 @@ public final class OutstandingOperationRegistry {
     }
 
     private record Entry(
+        KafkaRecordId kafkaRecordId,
         PartitionGenerationId partitionGenerationId,
         ConnectionProcessingId connectionProcessingId,
         ReplayRequestId replayRequestId,
@@ -109,6 +113,7 @@ public final class OutstandingOperationRegistry {
     ) {
         Entry withWaitReason(WaitReason replacement) {
             return new Entry(
+                kafkaRecordId,
                 partitionGenerationId,
                 connectionProcessingId,
                 replayRequestId,
@@ -119,9 +124,15 @@ public final class OutstandingOperationRegistry {
             );
         }
 
-        Snapshot snapshot(long operationId) {
+        Snapshot snapshot(
+            long operationId,
+            String ownerIdentity,
+            KafkaRecordId kafkaRecordId
+        ) {
             return new Snapshot(
                 operationId,
+                ownerIdentity,
+                kafkaRecordId,
                 partitionGenerationId,
                 connectionProcessingId,
                 replayRequestId,
@@ -134,6 +145,7 @@ public final class OutstandingOperationRegistry {
     }
 
     private final String ownerIdentity;
+    private final KafkaRecordId defaultKafkaRecordId;
     private final EventLoop eventLoop;
     private final Clock clock;
     private final FatalHandler fatalHandler;
@@ -150,7 +162,19 @@ public final class OutstandingOperationRegistry {
         @NonNull FatalHandler fatalHandler,
         @NonNull CountHook countHook
     ) {
+        this(ownerIdentity, null, eventLoop, clock, fatalHandler, countHook);
+    }
+
+    public OutstandingOperationRegistry(
+        @NonNull String ownerIdentity,
+        KafkaRecordId defaultKafkaRecordId,
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull CountHook countHook
+    ) {
         this.ownerIdentity = ownerIdentity;
+        this.defaultKafkaRecordId = defaultKafkaRecordId;
         this.eventLoop = eventLoop;
         this.clock = clock;
         this.fatalHandler = fatalHandler;
@@ -162,6 +186,26 @@ public final class OutstandingOperationRegistry {
     //     OutstandingOperationRegistry.register
     // REBUILD-TRACE-END(G5,target)
     public Registration register(
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        ReplayRequestId replayRequestId,
+        @NonNull OperationType operationType,
+        Instant scheduledTargetTime,
+        @NonNull WaitReason waitReason
+    ) {
+        return register(
+            defaultKafkaRecordId,
+            partitionGenerationId,
+            connectionProcessingId,
+            replayRequestId,
+            operationType,
+            scheduledTargetTime,
+            waitReason
+        );
+    }
+
+    public Registration register(
+        KafkaRecordId kafkaRecordId,
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ConnectionProcessingId connectionProcessingId,
         ReplayRequestId replayRequestId,
@@ -181,6 +225,7 @@ public final class OutstandingOperationRegistry {
         active.put(
             operationId,
             new Entry(
+                kafkaRecordId,
                 partitionGenerationId,
                 connectionProcessingId,
                 replayRequestId,
@@ -264,7 +309,9 @@ public final class OutstandingOperationRegistry {
 
     private void publish(OperationType changedType) {
         var snapshots = new ArrayList<Snapshot>(active.size());
-        active.forEach((operationId, entry) -> snapshots.add(entry.snapshot(operationId)));
+        active.forEach((operationId, entry) ->
+            snapshots.add(entry.snapshot(operationId, ownerIdentity, entry.kafkaRecordId()))
+        );
         publishedSnapshots = List.copyOf(snapshots);
         if (changedType != null) {
             var typeCount = 0;

@@ -1,7 +1,7 @@
 package org.opensearch.migrations.replay.util;
 
-// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// REBUILD-LIMBO(G10) -- the inherited tracker-based test remains inert; focused live G9.5
+// registry-snapshot evidence follows the retained predecessor.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
 // javadoc with it. See AGENTS.md section 8a.
 // Test carried byte-identical. Unresolved: TestContext . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
@@ -369,3 +369,81 @@ class ActiveContextMonitorTest {
 
 */
 // REBUILD-LIMBO-END(G10)
+
+import java.time.Duration;
+import java.util.ArrayList;
+
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.WaitReason;
+import org.opensearch.migrations.replay.testing.FakeClock;
+import org.opensearch.migrations.replay.testing.TestEventLoop;
+
+import org.apache.kafka.common.TopicPartition;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+class ActiveContextMonitorTest {
+    @Test
+    void reportsOnlyLongRunningRegistrationsWithTheirCompleteIdentity() {
+        var clock = new FakeClock();
+        var eventLoop = new TestEventLoop(clock);
+        var generation = new PartitionGenerationId(new TopicPartition("traffic", 2), 7);
+        var connection = new ConnectionProcessingId(
+            generation,
+            new CapturedConnectionId("writer", "captured-connection"),
+            3
+        );
+        var request = new ReplayRequestId(connection, 11);
+        var record = new KafkaRecordId(generation, 41);
+        var fatalFailures = new ArrayList<Error>();
+        var registry = new OutstandingOperationRegistry(
+            "request " + request,
+            record,
+            eventLoop,
+            clock,
+            fatalFailures::add,
+            OutstandingOperationRegistry.CountHook.NOOP
+        );
+        eventLoop.execute(() -> registry.register(
+            generation,
+            connection,
+            request,
+            OperationType.RETRY_TIMER,
+            clock.instant().plusSeconds(60),
+            WaitReason.WAITING_FOR_RETRY_TIME
+        ));
+        eventLoop.runUntilIdle();
+        var reports = new ArrayList<ActiveContextMonitor.Report>();
+        var monitor = new ActiveContextMonitor(
+            clock,
+            Duration.ofSeconds(30),
+            registry::snapshots,
+            reports::add
+        );
+
+        clock.advance(Duration.ofSeconds(29));
+        monitor.run();
+        Assertions.assertTrue(reports.isEmpty());
+
+        clock.advance(Duration.ofSeconds(1));
+        monitor.run();
+
+        var report = Assertions.assertDoesNotThrow(() -> reports.get(0));
+        Assertions.assertEquals(Duration.ofSeconds(30), report.elapsed());
+        Assertions.assertEquals("request " + request, report.snapshot().ownerIdentity());
+        Assertions.assertEquals(record, report.snapshot().kafkaRecordId());
+        Assertions.assertEquals(generation, report.snapshot().partitionGenerationId());
+        Assertions.assertEquals(connection, report.snapshot().connectionProcessingId());
+        Assertions.assertEquals(request, report.snapshot().replayRequestId());
+        Assertions.assertEquals(OperationType.RETRY_TIMER, report.snapshot().operationType());
+        Assertions.assertEquals(WaitReason.WAITING_FOR_RETRY_TIME, report.snapshot().waitReason());
+        Assertions.assertEquals(1, registry.activeCount(), "reporting cannot complete owner work");
+        Assertions.assertTrue(fatalFailures.isEmpty());
+    }
+}

@@ -57,13 +57,15 @@ final class TargetConnectionOwnerTestSupport {
     }
 
     static final class Fixture {
-        final FakeClock clock = new FakeClock();
-        final TestEventLoop eventLoop = new TestEventLoop(clock);
+        final FakeClock clock;
+        final TestEventLoop eventLoop;
+        final PartitionGenerationId generation;
+        final ConnectionProcessingId connection;
         final RootReplayerContext replayContexts = new RootReplayerContext(OpenTelemetry.noop());
         final TestEventLoop tupleEventLoop;
         final List<Error> fatalFailures = new ArrayList<>();
         final AtomicInteger activePermits = new AtomicInteger();
-        final FakePreparer preparer = new FakePreparer(clock);
+        final FakePreparer preparer;
         final FakeRetryPolicy retryPolicy = new FakeRetryPolicy();
         final FakeTargetChannel targetChannel = new FakeTargetChannel();
         final FakeTupleSink tupleSink = new FakeTupleSink();
@@ -98,7 +100,61 @@ final class TargetConnectionOwnerTestSupport {
             boolean separateTupleEventLoop,
             TupleWriter.TupleTransformer<String> tupleTransformer
         ) {
+            this(
+                CONNECTION,
+                new FakeClock(),
+                permitCapacity,
+                separateTupleEventLoop,
+                tupleTransformer
+            );
+        }
+
+        Fixture(
+            ConnectionProcessingId connection,
+            FakeClock clock,
+            TestEventLoop eventLoop
+        ) {
+            this(
+                connection,
+                clock,
+                eventLoop,
+                1,
+                false,
+                (replayContext, tuple) -> new TupleWriter.TransformedTuple<>(tuple)
+            );
+        }
+
+        private Fixture(
+            ConnectionProcessingId connection,
+            FakeClock clock,
+            int permitCapacity,
+            boolean separateTupleEventLoop,
+            TupleWriter.TupleTransformer<String> tupleTransformer
+        ) {
+            this(
+                connection,
+                clock,
+                new TestEventLoop(clock),
+                permitCapacity,
+                separateTupleEventLoop,
+                tupleTransformer
+            );
+        }
+
+        private Fixture(
+            ConnectionProcessingId connection,
+            FakeClock clock,
+            TestEventLoop eventLoop,
+            int permitCapacity,
+            boolean separateTupleEventLoop,
+            TupleWriter.TupleTransformer<String> tupleTransformer
+        ) {
+            this.connection = connection;
+            this.generation = connection.generation();
+            this.clock = clock;
+            this.eventLoop = eventLoop;
             tupleEventLoop = separateTupleEventLoop ? new TestEventLoop(clock) : eventLoop;
+            preparer = new FakePreparer(clock, this::requestFor);
             permitProvider = new TargetAttemptPermitProvider(
                 permitCapacity,
                 activePermits,
@@ -116,7 +172,7 @@ final class TargetConnectionOwnerTestSupport {
                 OutstandingOperationRegistry.CountHook.NOOP
             );
             owner = new TargetConnectionOwner<>(
-                CONNECTION,
+                connection,
                 eventLoop,
                 clock,
                 () -> Duration.between(Instant.EPOCH, clock.instant()).toNanos(),
@@ -179,23 +235,27 @@ final class TargetConnectionOwnerTestSupport {
             Instant firstByteTime
         ) {
             var recordContext = replayContexts.createKafkaRecordContext(
-                new KafkaRecordId(GENERATION, ordinal),
+                new KafkaRecordId(generation, ordinal),
                 0
             );
             var trafficContext = recordContext.createTrafficStreamContext(ordinal);
             var requestContext = trafficContext.createRequestContext(
-                request(ordinal),
+                requestFor(ordinal),
                 firstByteTime
             );
             requestContext.onRequestReconstituted();
             return requestContext;
         }
 
+        private ReplayRequestId requestFor(long ordinal) {
+            return new ReplayRequestId(connection, ordinal);
+        }
+
         void completeSource(long ordinal, String response) {
             owner.submit(new TargetConnectionOwner.RetrySourceResponseComplete<>(
-                CONNECTION,
-                GENERATION,
-                request(ordinal),
+                connection,
+                generation,
+                requestFor(ordinal),
                 response
             ));
             completeFinalSource(ordinal, response);
@@ -203,9 +263,9 @@ final class TargetConnectionOwnerTestSupport {
 
         void completeFinalSource(long ordinal, String response) {
             owner.submit(new TargetConnectionOwner.FinalSourceResponseComplete<>(
-                CONNECTION,
-                GENERATION,
-                request(ordinal),
+                connection,
+                generation,
+                requestFor(ordinal),
                 response,
                 true
             ));
@@ -214,18 +274,18 @@ final class TargetConnectionOwnerTestSupport {
         void incompleteSource(long ordinal) {
             unavailableForRetry(ordinal);
             owner.submit(new TargetConnectionOwner.FinalSourceResponseIncomplete<>(
-                CONNECTION,
-                GENERATION,
-                request(ordinal),
+                connection,
+                generation,
+                requestFor(ordinal),
                 "expired"
             ));
         }
 
         void unavailableForRetry(long ordinal) {
             owner.submit(new TargetConnectionOwner.SourceResponseUnavailableForRetry<>(
-                CONNECTION,
-                GENERATION,
-                request(ordinal)
+                connection,
+                generation,
+                requestFor(ordinal)
             ));
         }
 
@@ -259,13 +319,18 @@ final class TargetConnectionOwnerTestSupport {
         implements RequestReplayOwner.RequestPreparer<String, TestPrepared> {
 
         final FakeClock clock;
+        final java.util.function.LongFunction<ReplayRequestId> requestIdFactory;
         final Map<ReplayRequestId, CompletableFuture<RequestPreparationResult<TestPrepared>>>
             completions = new LinkedHashMap<>();
         final List<ReplayRequestId> begun = new ArrayList<>();
         final List<Instant> beginTimes = new ArrayList<>();
 
-        FakePreparer(FakeClock clock) {
+        FakePreparer(
+            FakeClock clock,
+            java.util.function.LongFunction<ReplayRequestId> requestIdFactory
+        ) {
             this.clock = clock;
+            this.requestIdFactory = requestIdFactory;
         }
 
         @Override
@@ -295,7 +360,7 @@ final class TargetConnectionOwnerTestSupport {
 
         void ready(long ordinal) {
             completions.computeIfAbsent(
-                request(ordinal),
+                requestIdFactory.apply(ordinal),
                 ignored -> new CompletableFuture<>()
             ).complete(new RequestPreparationReady<>(
                 new TestPrepared("prepared-" + ordinal)
@@ -304,7 +369,7 @@ final class TargetConnectionOwnerTestSupport {
 
         void fallback(long ordinal) {
             completions.computeIfAbsent(
-                request(ordinal),
+                requestIdFactory.apply(ordinal),
                 ignored -> new CompletableFuture<>()
             ).complete(new RequestPreparationReady<>(
                 new TestPrepared("fallback-" + ordinal),
@@ -316,7 +381,7 @@ final class TargetConnectionOwnerTestSupport {
 
         void filtered(long ordinal) {
             completions.computeIfAbsent(
-                request(ordinal),
+                requestIdFactory.apply(ordinal),
                 ignored -> new CompletableFuture<>()
             ).complete(new RequestPreparationReady<>(
                 null,
@@ -366,9 +431,15 @@ final class TargetConnectionOwnerTestSupport {
         final List<AttemptRecord> attempts = new ArrayList<>();
         final List<ConnectionProcessingId> closes = new ArrayList<>();
         CompletableFuture<Void> closeCompletion = CompletableFuture.completedFuture(null);
+        int connectionsOpened;
+        boolean connectionOpen;
 
         @Override
         public Attempt<String> startAttempt(AttemptInput<TestPrepared> input) {
+            if (!connectionOpen) {
+                connectionOpen = true;
+                connectionsOpened++;
+            }
             var record = new AttemptRecord(input);
             attempts.add(record);
             return record;
@@ -377,7 +448,12 @@ final class TargetConnectionOwnerTestSupport {
         @Override
         public CompletionStage<Void> close(ConnectionProcessingId connectionProcessingId) {
             closes.add(connectionProcessingId);
+            connectionOpen = false;
             return closeCompletion;
+        }
+
+        void targetInitiatedClose() {
+            connectionOpen = false;
         }
 
         AttemptRecord attempt(int index) {

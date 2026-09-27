@@ -315,6 +315,11 @@ public final class TupleWriter<T> {
             return;
         }
         operation.logicalRegistration = operations.register(
+            operation.input.replayContext()
+                .getLogicalEnclosingScope()
+                .getLogicalEnclosingScope()
+                .getLogicalEnclosingScope()
+                .getRecordId(),
             requestId.connectionProcessingId().generation(),
             requestId.connectionProcessingId(),
             requestId,
@@ -362,6 +367,11 @@ public final class TupleWriter<T> {
         operation.state = State.WRITING;
         var requestId = operation.input.requestId();
         var physicalRegistration = operations.register(
+            operation.input.replayContext()
+                .getLogicalEnclosingScope()
+                .getLogicalEnclosingScope()
+                .getLogicalEnclosingScope()
+                .getRecordId(),
             requestId.connectionProcessingId().generation(),
             requestId.connectionProcessingId(),
             requestId,

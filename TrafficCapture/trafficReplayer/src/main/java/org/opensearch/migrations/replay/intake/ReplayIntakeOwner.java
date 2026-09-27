@@ -31,6 +31,7 @@ import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
+import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -497,9 +498,16 @@ public final class ReplayIntakeOwner {
     private void applyFinalizedArchivePartitionEnd(
         ReplayIntakeInput.FinalizedArchivePartitionEnd finalized
     ) {
-        requireGeneration(finalized.generation()).resolveAllRetryBoundaries().forEach(requestId -> {
+        var state = requireGeneration(finalized.generation());
+        state.resolveAllRetryBoundaries().forEach(requestId -> {
             assemblySink.onSourceResponseUnavailableForRetry(requestId);
             metrics.retrySourceResponseUnavailable();
+        });
+        var expiration = state.expireAllOpenConnections();
+        metrics.sourceConnectionsExpired(expiration.expiredSourceConnections());
+        expiration.targetOwnersToExpire().forEach(connectionProcessingId -> {
+            assemblySink.onCapturedConnectionExpired(connectionProcessingId);
+            metrics.targetConnectionExpirationSent();
         });
     }
 
@@ -644,7 +652,6 @@ public final class ReplayIntakeOwner {
         });
 
         // 6. Decode CaptureRecord.payload. 7. Apply the recognized payload.
-        recordObserver.beforeRecordApplied(record);
         if (!applyPayload(state, record)) {
             state.captureProtocolViolationAt(record.recordId());
             return false;
@@ -667,7 +674,17 @@ public final class ReplayIntakeOwner {
     // CapturedTrafficToHttpTransactionAccumulator.accept -> ReplayIntakeOwner.applyPayload
     // REBUILD-TRACE-END(G5,target)
     private boolean applyPayload(PartitionIntakeState state, ApplicationKafkaRecord record) {
-        var envelope = record.envelope();
+        final CaptureRecord envelope;
+        try {
+            envelope = record.decodeEnvelope();
+        } catch (InvalidProtocolBufferException notAnEnvelope) {
+            submitProtocolViolation(
+                record.recordId(),
+                "Kafka value is not a CaptureRecord envelope"
+            );
+            return false;
+        }
+        recordObserver.beforeRecordApplied(record);
         return switch (envelope.getPayloadCase()) {
             case TRAFFICSTREAM -> applyTrafficStream(state, record, envelope.getTrafficStream());
             case WRITERPARTITIONHEARTBEAT -> {

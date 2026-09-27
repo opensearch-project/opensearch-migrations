@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
+import java.util.function.Predicate;
 
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
@@ -1008,13 +1009,28 @@ public final class PartitionIntakeState {
     // ExpiringKeyQueue.expireItemsBefore -> PartitionIntakeState.expireConnectionsForWriter
     // REBUILD-TRACE-END(G6,target)
     public WriterExpirationResult expireConnectionsForWriter(@NonNull String writerNodeId) {
+        return expireOpenConnections(lifetime ->
+            lifetime.connectionProcessingId().capturedConnectionId().writerNodeId().equals(writerNodeId)
+        );
+    }
+
+    /**
+     * A finalized finite archive is proof that no later observation can complete any open source assembly.
+     */
+    public WriterExpirationResult expireAllOpenConnections() {
+        return expireOpenConnections(ignored -> true);
+    }
+
+    private WriterExpirationResult expireOpenConnections(
+        Predicate<SourceConnectionState> shouldExpire
+    ) {
         ownerThreadGuard.requireOwnerThread();
         var ownersToExpire = new ArrayList<ConnectionProcessingId>();
         var expiredSourceConnections = 0;
         var lifetimes = List.copyOf(activeSourceConnectionsByCapturedConnectionId.values());
         for (var lifetime : lifetimes) {
             if (lifetime.lifetime() != SourceConnectionState.Lifetime.OPEN
-                || !lifetime.connectionProcessingId().capturedConnectionId().writerNodeId().equals(writerNodeId)) {
+                || !shouldExpire.test(lifetime)) {
                 continue;
             }
             var hasConnectionOwner = lifetime.hasConnectionOwner();

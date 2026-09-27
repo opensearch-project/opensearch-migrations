@@ -625,6 +625,51 @@ class KafkaSourceOwnerTest {
     }
 
     @Test
+    void closeTimeRebalanceCallbacksAreHarmlessAndRetirementIsMeasuredExactlyOnce() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        drainIntake();
+
+        owner.beginOrderlyShutdown();
+        drainIntake();
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation));
+        owner.runOnce();
+        Assertions.assertTrue(owner.isOrderlyShutdownReadyToClose());
+
+        port.scriptCloseCallback(() -> {
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+            owner.onPartitionsLost(List.of(PARTITION_0));
+            owner.onPartitionsAssigned(List.of(PARTITION_0));
+        });
+        owner.closeAfterOrderlyShutdown();
+
+        Assertions.assertTrue(port.isClosed());
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED),
+            "orderly retirement is counted once even when close synchronously invokes callbacks"
+        );
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT)
+        );
+        Assertions.assertEquals(
+            0,
+            counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_READ)
+        );
+        Assertions.assertEquals(
+            0,
+            counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
+        );
+        Assertions.assertTrue(
+            drainIntake().stream().noneMatch(
+                ReplayIntakeInput.ForceGenerationCancellation.class::isInstance
+            )
+        );
+    }
+
+    @Test
     void assignmentDuringOrderlyShutdownIsPausedAndReceivesShutdownGraceBeforeAnyRead() {
         var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
@@ -961,6 +1006,18 @@ class KafkaSourceOwnerTest {
             counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT),
             "the design defines two measurements and reads zero as the signal, so this retirement reports zero"
         );
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED)
+        );
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_READ)
+        );
+        Assertions.assertEquals(
+            0,
+            counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
+        );
     }
 
     /** Sums a counter across its recorded points, so an assertion reads the value an operator would see. */
@@ -1018,8 +1075,69 @@ class KafkaSourceOwnerTest {
             );
             Assertions.assertEquals(0, state.recordsRead());
             Assertions.assertEquals(0, state.recordsCommitted());
+            Assertions.assertEquals(
+                1,
+                counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED)
+            );
+            Assertions.assertEquals(
+                1,
+                counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT)
+            );
+            Assertions.assertEquals(
+                0,
+                counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_READ)
+            );
+            Assertions.assertEquals(
+                0,
+                counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
+            );
             assertRetirementLog(logs, generation, PartitionSourceState.CommitUncertainty.NONE_OBSERVED);
         }
+    }
+
+    @Test
+    void acknowledgedProgressIsMeasuredExactlyWhenTheGenerationRetires() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)
+        ));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)
+        ));
+        owner.runOnce();
+        owner.runOnce();
+        Assertions.assertEquals(
+            1,
+            owner.partitionState(PARTITION_0).orElseThrow().recordsCommitted()
+        );
+
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsRevoked(List.of(PARTITION_0))
+        );
+        owner.runOnce();
+
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED)
+        );
+        Assertions.assertEquals(
+            0,
+            counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT)
+        );
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_READ)
+        );
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
+        );
     }
 
     /**
@@ -1053,6 +1171,22 @@ class KafkaSourceOwnerTest {
                 state.commitUncertainty()
             );
             Assertions.assertEquals(0, state.recordsCommitted());
+            Assertions.assertEquals(
+                1,
+                counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED)
+            );
+            Assertions.assertEquals(
+                1,
+                counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT)
+            );
+            Assertions.assertEquals(
+                1,
+                counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_READ)
+            );
+            Assertions.assertEquals(
+                0,
+                counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
+            );
             assertRetirementLog(
                 logs, generation, PartitionSourceState.CommitUncertainty.ASYNC_UNRESOLVED_AT_RETIREMENT
             );
@@ -1092,6 +1226,22 @@ class KafkaSourceOwnerTest {
                 () -> "history: " + port.history()
             );
             Assertions.assertEquals(0, state.recordsCommitted());
+            Assertions.assertEquals(
+                1,
+                counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED)
+            );
+            Assertions.assertEquals(
+                1,
+                counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT)
+            );
+            Assertions.assertEquals(
+                1,
+                counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_READ)
+            );
+            Assertions.assertEquals(
+                0,
+                counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
+            );
             assertRetirementLog(logs, generation, PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN);
         }
     }

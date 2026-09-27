@@ -14,6 +14,9 @@ import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
+
 /**
  * One Kafka application record as the Kafka source observed it, carried to replay intake.
  *
@@ -24,11 +27,11 @@ import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
  * heartbeat baselines could not exist and expiration ran on a wall clock instead. Any record type crossing
  * this boundary without the broker timestamp reintroduces that defect.</p>
  *
- * <p>The envelope is the protocol value, exhaustively switched on by intake per
+ * <p>The encoded envelope is the protocol value, decoded and exhaustively switched on by intake per
  * {@code kafkaLLD §7.1}: {@code TrafficStream}, {@code WriterPartitionHeartbeat},
  * {@code CaptureCapabilityProbe}, and {@code PAYLOAD_NOT_SET} as a protocol violation. It is deliberately the
- * decoded {@code CaptureRecord} rather than a pre-interpreted union, so the switch happens once, at intake,
- * where the design places it.</p>
+ * still-encoded Kafka value rather than a pre-interpreted union, so both protobuf decoding and the payload
+ * switch happen once, at intake, where the design places them.</p>
  *
  * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 5.5.</p>
  */
@@ -36,7 +39,7 @@ public record ApplicationKafkaRecord(
     KafkaRecordId recordId,
     long logAppendTimeMillis,
     int serializedSizeBytes,
-    CaptureRecord envelope,
+    ByteString encodedEnvelope,
     IReplayContexts.IKafkaRecordContext replayContext
 ) {
     public ApplicationKafkaRecord(
@@ -45,12 +48,34 @@ public record ApplicationKafkaRecord(
         int serializedSizeBytes,
         CaptureRecord envelope
     ) {
-        this(recordId, logAppendTimeMillis, serializedSizeBytes, envelope, null);
+        this(
+            recordId,
+            logAppendTimeMillis,
+            serializedSizeBytes,
+            Objects.requireNonNull(envelope, "envelope").toByteString(),
+            null
+        );
+    }
+
+    public ApplicationKafkaRecord(
+        KafkaRecordId recordId,
+        long logAppendTimeMillis,
+        int serializedSizeBytes,
+        CaptureRecord envelope,
+        IReplayContexts.IKafkaRecordContext replayContext
+    ) {
+        this(
+            recordId,
+            logAppendTimeMillis,
+            serializedSizeBytes,
+            Objects.requireNonNull(envelope, "envelope").toByteString(),
+            replayContext
+        );
     }
 
     public ApplicationKafkaRecord {
         Objects.requireNonNull(recordId, "recordId");
-        Objects.requireNonNull(envelope, "envelope");
+        Objects.requireNonNull(encodedEnvelope, "encodedEnvelope");
         if (serializedSizeBytes < 0) {
             throw new IllegalArgumentException("serializedSizeBytes must not be negative: " + serializedSizeBytes);
         }
@@ -60,8 +85,28 @@ public record ApplicationKafkaRecord(
         // than against any constant.
     }
 
+    public CaptureRecord decodeEnvelope() throws InvalidProtocolBufferException {
+        return CaptureRecord.parseFrom(encodedEnvelope);
+    }
+
+    /**
+     * Convenience for code that runs only after replay intake has validated the encoded value.
+     */
+    public CaptureRecord envelope() {
+        try {
+            return decodeEnvelope();
+        } catch (InvalidProtocolBufferException notAnEnvelope) {
+            throw new IllegalStateException(recordId + " is not a CaptureRecord envelope", notAnEnvelope);
+        }
+    }
+
     @Override
     public String toString() {
-        return recordId + "{" + envelope.getPayloadCase() + " logAppendTime=" + logAppendTimeMillis + "}";
+        try {
+            return recordId + "{" + decodeEnvelope().getPayloadCase()
+                + " logAppendTime=" + logAppendTimeMillis + "}";
+        } catch (InvalidProtocolBufferException notAnEnvelope) {
+            return recordId + "{UNPARSEABLE logAppendTime=" + logAppendTimeMillis + "}";
+        }
     }
 }

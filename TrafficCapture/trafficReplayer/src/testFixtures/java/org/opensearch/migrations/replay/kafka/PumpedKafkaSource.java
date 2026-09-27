@@ -90,6 +90,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private CommitOutcome nextRejectedCommitOutcome;
     private boolean neverResolveAsyncCommits;
     private boolean closed;
+    private ThrowingRunnable closeCallback = () -> {};
     private java.util.function.Consumer<String> observationListener = call -> {};
 
     /** A rebalance callback can throw, because {@code onPartitionsRevoked} waits and can be interrupted. */
@@ -213,6 +214,13 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         assignment.add(topicPartition);
     }
 
+    /**
+     * Scripts client callbacks delivered synchronously by {@link #close()}, as real Kafka clients may do.
+     */
+    public void scriptCloseCallback(ThrowingRunnable callback) {
+        closeCallback = Objects.requireNonNull(callback);
+    }
+
     // ---------------------------------------------------------------- KafkaSourcePort
 
     @Override
@@ -285,6 +293,13 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
 
     @Override
     public void close() {
+        try {
+            closeCallback.run();
+        } catch (RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        } catch (Exception checkedFailure) {
+            throw new IllegalStateException("scripted close callback failed", checkedFailure);
+        }
         closed = true;
         record(new SourceClosed());
     }

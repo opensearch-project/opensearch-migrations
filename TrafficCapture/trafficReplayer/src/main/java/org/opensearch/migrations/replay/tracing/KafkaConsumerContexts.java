@@ -313,13 +313,21 @@ public class KafkaConsumerContexts {
             setAttribute(RETIRED_GENERATION_ATTRIBUTE, generationLabel);
             setTraceAttribute(RETIRED_RECORDS_COMMITTED_ATTRIBUTE, recordsCommitted);
             setTraceAttribute(RETIRED_RECORDS_READ_ATTRIBUTE, recordsRead);
-            meterIncrementEvent(getMetrics().generationsRetired);
-            meterIncrementEvent(getMetrics().retiredGenerationRecordsCommitted, recordsCommitted);
-            meterIncrementEvent(getMetrics().retiredGenerationRecordsRead, recordsRead);
+            recordGenerationRetiredMetrics(getMetrics(), recordsCommitted, recordsRead);
+        }
+
+        public static void recordGenerationRetiredMetrics(
+            MetricInstruments instruments,
+            long recordsCommitted,
+            long recordsRead
+        ) {
+            instruments.generationsRetired.add(1);
+            instruments.retiredGenerationRecordsCommitted.add(recordsCommitted);
+            instruments.retiredGenerationRecordsRead.add(recordsRead);
             if (recordsCommitted == 0) {
                 // Counted rather than derived, so the condition procCommit §9.5 names is one series to alarm
                 // on. A run of these on one partition is the head-of-line stall.
-                meterIncrementEvent(getMetrics().generationsRetiredWithoutCommit);
+                instruments.generationsRetiredWithoutCommit.add(1);
             }
         }
     }

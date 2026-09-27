@@ -12,6 +12,9 @@ import java.util.Objects;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
+
 /**
  * One record as Kafka returned it, before any process-local identity is attached.
  *
@@ -23,21 +26,47 @@ import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
  * into an {@link ApplicationKafkaRecord} under the generation it knows is current.
  *
  * <p>Carries the broker timestamp and serialized size because those come from Kafka metadata and cannot be
- * recovered later; everything else intake needs is inside the envelope.
+ * recovered later; everything else intake needs is inside the still-encoded envelope.
  */
 public record PolledKafkaRecord(
     long offset,
     long logAppendTimeMillis,
     int serializedSizeBytes,
-    CaptureRecord envelope
+    ByteString encodedEnvelope
 ) {
+    public PolledKafkaRecord(
+        long offset,
+        long logAppendTimeMillis,
+        int serializedSizeBytes,
+        CaptureRecord envelope
+    ) {
+        this(
+            offset,
+            logAppendTimeMillis,
+            serializedSizeBytes,
+            Objects.requireNonNull(envelope, "envelope").toByteString()
+        );
+    }
+
     public PolledKafkaRecord {
-        Objects.requireNonNull(envelope, "envelope");
+        Objects.requireNonNull(encodedEnvelope, "encodedEnvelope");
         if (offset < 0) {
             throw new IllegalArgumentException("offset must not be negative: " + offset);
         }
         if (serializedSizeBytes < 0) {
             throw new IllegalArgumentException("serializedSizeBytes must not be negative: " + serializedSizeBytes);
+        }
+    }
+
+    public CaptureRecord decodeEnvelope() throws InvalidProtocolBufferException {
+        return CaptureRecord.parseFrom(encodedEnvelope);
+    }
+
+    public CaptureRecord envelope() {
+        try {
+            return decodeEnvelope();
+        } catch (InvalidProtocolBufferException notAnEnvelope) {
+            throw new IllegalStateException("Kafka value is not a CaptureRecord envelope", notAnEnvelope);
         }
     }
 }

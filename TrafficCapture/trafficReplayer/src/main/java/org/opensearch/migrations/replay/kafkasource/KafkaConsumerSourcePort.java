@@ -18,9 +18,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
-
-import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.protobuf.ByteString;
 import org.apache.kafka.clients.consumer.CommitFailedException;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
@@ -68,27 +66,22 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         for (var topicPartition : polled.partitions()) {
             var records = new ArrayList<PolledKafkaRecord>();
             for (var kafkaRecord : polled.records(topicPartition)) {
+                var encodedValue = Objects.requireNonNull(
+                    kafkaRecord.value(),
+                    "Kafka record value at " + topicPartition + "@" + kafkaRecord.offset()
+                );
                 records.add(new PolledKafkaRecord(
                     kafkaRecord.offset(),
                     kafkaRecord.timestamp(),
-                    kafkaRecord.serializedValueSize(),
-                    decode(kafkaRecord.value(), topicPartition, kafkaRecord.offset())
+                    kafkaRecord.serializedValueSize() < 0
+                        ? encodedValue.length
+                        : kafkaRecord.serializedValueSize(),
+                    ByteString.copyFrom(encodedValue)
                 ));
             }
             byPartition.put(topicPartition, List.copyOf(records));
         }
         return byPartition;
-    }
-
-    private static CaptureRecord decode(byte[] value, TopicPartition topicPartition, long offset) {
-        try {
-            return CaptureRecord.parseFrom(value);
-        } catch (InvalidProtocolBufferException notAnEnvelope) {
-            throw new IllegalStateException(
-                "Kafka record at " + topicPartition + "@" + offset + " is not a CaptureRecord envelope",
-                notAnEnvelope
-            );
-        }
     }
 
     @Override

@@ -8,10 +8,14 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 
+import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -188,6 +192,39 @@ class RequestReplayOwnerTest {
             List.of("source-6|target-4|source"),
             fixture.tupleSink.writes
         );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void revocationGraceDoesNotStartAWaitingRetryAttempt() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.retryPolicy.decisions.add(new ReplayOutcomes.RetryDecision.RetryRequired());
+        fixture.admit(8, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(8);
+        fixture.completeSource(8, "source");
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("retryable");
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(1, fixture.targetChannel.attempts.size());
+
+        fixture.owner.submit(new TargetConnectionOwner.GracefulConnectionCancellation<>(
+            TargetConnectionOwnerTestSupport.CONNECTION,
+            TargetConnectionOwnerTestSupport.GENERATION,
+            new CancellationGrace.Revocation(
+                new CancellationDeadline(Duration.ofSeconds(30).toNanos())
+            ),
+            new CancellationException("partition revoked")
+        ));
+        fixture.eventLoop.runUntilIdle();
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
+
+        Assertions.assertEquals(
+            1,
+            fixture.targetChannel.attempts.size(),
+            "graceful cancellation permits an already-written attempt to settle but starts no retry"
+        );
+        Assertions.assertEquals(0, fixture.activePermits.get());
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 

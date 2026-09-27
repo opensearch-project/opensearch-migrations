@@ -30,6 +30,7 @@ import org.apache.logging.log4j.LogManager;
 public final class ProcessSupervisor {
     public static final Duration EXIT_WATCHDOG_LIMIT = Duration.ofMinutes(10);
     public static final int EVENT_LOOP_EXIT_CODE = 80;
+    public static final int CAPTURE_PROTOCOL_VIOLATION_EXIT_CODE = 81;
     public static final int UNEXPECTED_OWNER_EXIT_CODE = 89;
 
     public enum Reason {
@@ -37,6 +38,11 @@ public final class ProcessSupervisor {
             EVENT_LOOP_EXIT_CODE,
             "event_loop_terminated",
             "FATAL: a required replayer event loop terminated"
+        ),
+        CAPTURE_PROTOCOL_VIOLATION(
+            CAPTURE_PROTOCOL_VIOLATION_EXIT_CODE,
+            "capture_protocol_violation",
+            "FATAL: capture protocol violation drain limit expired"
         ),
         UNEXPECTED_FATAL_ERROR(
             UNEXPECTED_OWNER_EXIT_CODE,
@@ -169,6 +175,15 @@ public final class ProcessSupervisor {
 
     public void eventLoopTerminated(String owner, String operation, Error failure) {
         onFatal(new FatalSignal(Reason.EVENT_LOOP_TERMINATED, owner, operation, failure));
+    }
+
+    public void captureProtocolViolationDrainExpired() {
+        onFatal(new FatalSignal(
+            Reason.CAPTURE_PROTOCOL_VIOLATION,
+            "capture protocol violation terminator",
+            "bounded drain expiry",
+            new Error("Capture protocol violation drain limit expired")
+        ));
     }
 
     public FailureSink failureSink() {

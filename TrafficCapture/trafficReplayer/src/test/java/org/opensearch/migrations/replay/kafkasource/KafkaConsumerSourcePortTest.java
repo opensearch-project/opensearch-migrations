@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.apache.kafka.clients.consumer.CommitFailedException;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetCommitCallback;
@@ -90,6 +91,30 @@ class KafkaConsumerSourcePortTest {
         return new KafkaConsumerSourcePort(
             new ScriptedCommitConsumer(failure, null, null),
             Duration.ofSeconds(1)
+        );
+    }
+
+    @Test
+    void malformedKafkaValueRemainsEncodedForReplayIntakeToClassify() {
+        var consumer = new MockConsumer<String, byte[]>("earliest");
+        consumer.assign(List.of(PARTITION));
+        consumer.updateBeginningOffsets(Map.of(PARTITION, 0L));
+        consumer.addRecord(new ConsumerRecord<>(
+            PARTITION.topic(),
+            PARTITION.partition(),
+            0,
+            "key",
+            new byte[] {(byte) 0xff}
+        ));
+        var port = new KafkaConsumerSourcePort(consumer, Duration.ZERO);
+
+        var record = port.poll().get(PARTITION).get(0);
+
+        Assertions.assertEquals(1, record.encodedEnvelope().size());
+        Assertions.assertThrows(
+            com.google.protobuf.InvalidProtocolBufferException.class,
+            record::decodeEnvelope,
+            "the Kafka adapter must carry malformed bytes instead of converting them to owner failure 89"
         );
     }
 

@@ -59,6 +59,7 @@ import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ProtocolViolationMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.util.ActiveContextMonitor;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -324,6 +325,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     private final TargetAttemptPermitProvider permitProvider;
     private final ProcessSupervisor.FailureSink fatalSink;
     private final ProtocolViolationTerminator protocolViolationTerminator;
+    private final ActiveContextMonitor activityMonitor;
     private final Runnable kafkaWakeup;
     private final List<TupleWriterWorker> tupleWriterWorkers;
     private final Map<EventLoop, TupleWriterWorker> tupleWriterWorkersByEventLoop;
@@ -411,6 +413,10 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         watchTargetEventLoops();
         this.connectionAssemblySink = new ConnectionAssemblySink(
             configuration.replayTimeMapper()
+        );
+        this.activityMonitor = ActiveContextMonitor.system(
+            configuration.clock(),
+            this::activitySnapshots
         );
         this.intakeOwner = new ReplayIntakeOwner(
             intakeInputs,
@@ -607,7 +613,13 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             throw new IllegalStateException("replay intake already started");
         }
         intakeStarted = true;
-        intakeOwner.start();
+        activityMonitor.start();
+        try {
+            intakeOwner.start();
+        } catch (Throwable failure) {
+            activityMonitor.close();
+            throw failure;
+        }
     }
 
     public void runSourceOnce() {
@@ -658,6 +670,21 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     activitySnapshot(ConnectionProcessingId connectionProcessingId) {
         return connectionAssemblySink.requireConnection(connectionProcessingId)
             .owner.activitySnapshot();
+    }
+
+    java.util.List<org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.Snapshot>
+    activitySnapshots() {
+        var unique =
+            new java.util.LinkedHashSet<
+                org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.Snapshot
+            >();
+        connectionAssemblySink.connections.values().forEach(binding ->
+            unique.addAll(binding.owner.activitySnapshot())
+        );
+        tupleWriterWorkers.forEach(worker ->
+            unique.addAll(worker.writer.operations().snapshots())
+        );
+        return List.copyOf(unique);
     }
 
     /**
@@ -1133,6 +1160,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             intakeInputs.closeNow();
             closeTupleWriterWorkers();
             closeProtocolViolationTerminator();
+            activityMonitor.close();
             return;
         }
         sourceOwner.beginOrderlyShutdown();
@@ -1160,6 +1188,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             return;
         }
         closeProtocolViolationTerminator();
+        activityMonitor.close();
     }
 
     boolean awaitIntakeTerminationOrFatal() {

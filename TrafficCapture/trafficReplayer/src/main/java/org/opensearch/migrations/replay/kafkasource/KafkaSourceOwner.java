@@ -126,6 +126,7 @@ public final class KafkaSourceOwner {
     private final Map<TopicPartition, Set<PartitionGenerationId>> cleanupOutstanding = new LinkedHashMap<>();
     private long nextGenerationSequence;
     private boolean orderlyShutdownStarted;
+    private boolean orderlyShutdownClosing;
     private boolean orderlyShutdownClosed;
     private boolean protocolViolationDetected;
 
@@ -291,6 +292,7 @@ public final class KafkaSourceOwner {
         if (!isOrderlyShutdownReadyToClose()) {
             throw new IllegalStateException("orderly shutdown has not drained");
         }
+        orderlyShutdownClosing = true;
         for (var topicPartition : List.copyOf(partitions.keySet())) {
             retireGeneration(topicPartition, false);
         }
@@ -703,7 +705,7 @@ public final class KafkaSourceOwner {
                 recordId,
                 raw.logAppendTimeMillis(),
                 raw.serializedSizeBytes(),
-                raw.envelope(),
+                raw.encodedEnvelope(),
                 context
             );
         }).toList();
@@ -722,6 +724,9 @@ public final class KafkaSourceOwner {
      * {@link #runOnce()}, and only those with an outstanding request and no other reason to stay paused.
      */
     public void onPartitionsAssigned(Collection<TopicPartition> assigned) {
+        if (orderlyShutdownClosing || orderlyShutdownClosed) {
+            return;
+        }
         wakeupController.enterRebalanceCallback();
         try {
             for (var topicPartition : port.assignment()) {
@@ -783,6 +788,9 @@ public final class KafkaSourceOwner {
      * afterwards while the successor generation stays paused.
      */
     public void onPartitionsRevoked(Collection<TopicPartition> revoked) throws InterruptedException {
+        if (orderlyShutdownClosing || orderlyShutdownClosed) {
+            return;
+        }
         wakeupController.enterRebalanceCallback();
         try {
             if (orderlyShutdownStarted) {
@@ -886,6 +894,11 @@ public final class KafkaSourceOwner {
         if (recordRebalanceRetirement) {
             wakeupController.recordGenerationRetired(
                 state.generation().toString(),
+                state.recordsCommitted(),
+                state.recordsRead()
+            );
+        } else {
+            wakeupController.recordGenerationRetiredAfterOrderlyShutdown(
                 state.recordsCommitted(),
                 state.recordsRead()
             );
@@ -1094,6 +1107,9 @@ public final class KafkaSourceOwner {
      * position decides redelivery.
      */
     public void onPartitionsLost(Collection<TopicPartition> lost) {
+        if (orderlyShutdownClosing || orderlyShutdownClosed) {
+            return;
+        }
         wakeupController.enterRebalanceCallback();
         try {
             if (orderlyShutdownStarted) {

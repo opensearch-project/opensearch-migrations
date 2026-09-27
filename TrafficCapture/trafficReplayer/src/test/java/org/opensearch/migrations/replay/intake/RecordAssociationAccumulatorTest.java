@@ -21,6 +21,7 @@ import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
@@ -382,6 +383,39 @@ class RecordAssociationAccumulatorTest {
         );
     }
 
+    @Test
+    void anUnparseableKafkaValueIsAProtocolViolationRatherThanAnOwnerFailure() {
+        var generation = new RecordScript(TOPIC).generation(0);
+        var recordId = new KafkaRecordId(generation, 0);
+        var malformed = new ApplicationKafkaRecord(
+            recordId,
+            1_000,
+            1,
+            ByteString.copyFrom(new byte[] {(byte) 0xff}),
+            null
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(generation, 0),
+            List.of(malformed)
+        ));
+
+        var sourceEvents = drainSourceInputs();
+        var violation = Assertions.assertInstanceOf(
+            KafkaSourceInput.CaptureProtocolViolationDetected.class,
+            sourceEvents.stream()
+                .filter(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
+                .findFirst()
+                .orElseThrow()
+        );
+        Assertions.assertEquals(recordId, violation.recordId());
+        Assertions.assertTrue(violation.diagnostic().contains("not a CaptureRecord envelope"));
+        Assertions.assertTrue(
+            sourceEvents.stream().noneMatch(KafkaSourceInput.RecordProcessingFinished.class::isInstance)
+        );
+    }
+
     /** {@code §16}: only work admitted before a violation may drain; a later record is not applied. */
     @Test
     void aRecordAfterAProtocolViolationIsNotApplied() {
@@ -699,6 +733,51 @@ class RecordAssociationAccumulatorTest {
     }
 
     @Test
+    void finalizedArchiveEndExpiresIncompleteRequestAssembly() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, read(1, "GET /incomplete"))
+        );
+        assignAndApply(script);
+        var generation = script.generation(0);
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.FinalizedArchivePartitionEnd(generation));
+
+        Assertions.assertEquals(
+            List.of(script.records().get(0).recordId()),
+            sourceCompletions(),
+            "archive finality retires the incomplete source assembly and releases its record"
+        );
+        Assertions.assertTrue(sink.expirations.isEmpty(), "no target owner existed to expire");
+    }
+
+    @Test
+    void finalizedArchiveEndExpiresIncompleteResponseAndItsTargetOwner() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, read(1, "GET / HTTP/1.1\r\n\r\n"), endOfMessage(2))
+        );
+        assignAndApply(script);
+        var generation = script.generation(0);
+        var requestId = sink.reconstituted.get(0);
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.FinalizedArchivePartitionEnd(generation));
+
+        Assertions.assertEquals(List.of(requestId), sink.incompleteResponses);
+        Assertions.assertEquals(
+            List.of(requestId.connectionProcessingId()),
+            sink.expirations,
+            "archive finality reaches the target owner as the same connection expiration"
+        );
+    }
+
+    @Test
     void activeGenerationRejectsDuplicateAndImpossibleLifecycleInputs() {
         var script = new RecordScript(TOPIC).addTraffic(
             0,
@@ -854,6 +933,7 @@ class RecordAssociationAccumulatorTest {
         private final List<ConnectionProcessingId> gracefulCancellations = new ArrayList<>();
         private final List<CancellationGrace> graceModes = new ArrayList<>();
         private final List<ConnectionProcessingId> forceCancellations = new ArrayList<>();
+        private final List<ConnectionProcessingId> expirations = new ArrayList<>();
 
         @Override
         public void onRequestReconstituted(
@@ -908,6 +988,11 @@ class RecordAssociationAccumulatorTest {
         @Override
         public void onForceGenerationCancellation(ConnectionProcessingId connectionProcessingId) {
             forceCancellations.add(connectionProcessingId);
+        }
+
+        @Override
+        public void onCapturedConnectionExpired(ConnectionProcessingId connectionProcessingId) {
+            expirations.add(connectionProcessingId);
         }
 
         @Override

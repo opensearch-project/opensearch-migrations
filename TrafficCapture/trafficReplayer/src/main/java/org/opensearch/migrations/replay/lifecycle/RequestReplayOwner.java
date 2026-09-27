@@ -309,7 +309,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
         record Active() implements CancellationState {}
 
-        record Graceful(CancellationDeadline deadline) implements CancellationState {}
+        record Graceful(
+            CancellationDeadline deadline,
+            CancellationException cause
+        ) implements CancellationState {}
 
         record Forced(CancellationException cause) implements CancellationState {}
     }
@@ -397,6 +400,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         this.fatalHandler = fatalHandler;
         this.operations = new OutstandingOperationRegistry(
             "request " + requestId(),
+            replayContext.getLogicalEnclosingScope()
+                .getLogicalEnclosingScope()
+                .getRecordId(),
             eventLoop,
             clock,
             fatalHandler::onFatal,
@@ -508,8 +514,16 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         if (cancellationState instanceof CancellationState.Forced forced) {
             permit.close();
-            targetServerState = new TargetServerState.Cancelled<>(forced.cause());
-            tryEmitCleanup();
+            finishTargetTurnWithoutAnotherAttempt(forced.cause());
+            return;
+        }
+        if (cancellationState instanceof CancellationState.Graceful graceful) {
+            permit.close();
+            if (retryPermitRegistration != null) {
+                operations.complete(retryPermitRegistration);
+                retryPermitRegistration = null;
+            }
+            finishTargetTurnWithoutAnotherAttempt(graceful.cause());
             return;
         }
         if (!(targetServerState instanceof TargetServerState.NotStarted<R>)
@@ -602,13 +616,13 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         requireOwnerThread();
         switch (cancellationState) {
             case CancellationState.Active ignored ->
-                cancellationState = new CancellationState.Graceful(deadline);
+                cancellationState = new CancellationState.Graceful(deadline, cause);
             case CancellationState.Graceful graceful -> {
                 if (graceful.deadline().remainingNanos(nanoTime.getAsLong())
                     <= deadline.remainingNanos(nanoTime.getAsLong())) {
                     return;
                 }
-                cancellationState = new CancellationState.Graceful(deadline);
+                cancellationState = new CancellationState.Graceful(deadline, cause);
             }
             case CancellationState.Forced ignored -> {
                 return;
@@ -1117,8 +1131,11 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     // REBUILD-TRACE-END(G5,target)
     private void scheduleRetry() {
         if (cancellationState instanceof CancellationState.Forced forced) {
-            targetServerState = new TargetServerState.Cancelled<>(forced.cause());
-            tryEmitCleanup();
+            finishTargetTurnWithoutAnotherAttempt(forced.cause());
+            return;
+        }
+        if (cancellationState instanceof CancellationState.Graceful graceful) {
+            finishTargetTurnWithoutAnotherAttempt(graceful.cause());
             return;
         }
         final Duration delay;
@@ -1176,9 +1193,13 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         closeRetryTimerContext();
         if (cancellationState instanceof CancellationState.Forced forced) {
-            targetServerState = new TargetServerState.Cancelled<>(forced.cause());
             operations.complete(registration);
-            tryEmitCleanup();
+            finishTargetTurnWithoutAnotherAttempt(forced.cause());
+            return;
+        }
+        if (cancellationState instanceof CancellationState.Graceful graceful) {
+            operations.complete(registration);
+            finishTargetTurnWithoutAnotherAttempt(graceful.cause());
             return;
         }
         targetServerState = new TargetServerState.WaitingForPermit<>();
@@ -1217,6 +1238,18 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 ignoredFailure -> {}
             )
         );
+    }
+
+    private void finishTargetTurnWithoutAnotherAttempt(CancellationException cause) {
+        targetServerState = new TargetServerState.Cancelled<>(cause);
+        emitConnectionTurnFinished(
+            ConnectionTurnCompletion.CANCELLATION_ENDED_STARTED_TURN
+        );
+        if (cancellationState instanceof CancellationState.Forced) {
+            tryEmitCleanup();
+        } else {
+            forceCancel(cause);
+        }
     }
 
     private void sourceResponseChanged() {

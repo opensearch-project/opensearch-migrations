@@ -26,6 +26,47 @@ import org.junit.jupiter.api.Test;
 
 class ProcessSupervisorTest {
 
+    @Test
+    void protocolViolationDrainExpiryUsesTheBoundedFatalExitPath() {
+        var events = new ArrayList<String>();
+        var watchdogAction = new AtomicReference<Runnable>();
+        var supervisor = new ProcessSupervisor(
+            reason -> events.add("metric:" + reason.metricLabel()),
+            signal -> events.add("stop:" + signal.operation()),
+            exitCode -> events.add("exit:" + exitCode),
+            exitCode -> events.add("halt:" + exitCode),
+            (delay, action) -> {
+                Assertions.assertEquals(ProcessSupervisor.EXIT_WATCHDOG_LIMIT, delay);
+                watchdogAction.set(action);
+                events.add("watchdog");
+            },
+            ignored -> events.add("thread-dump"),
+            () -> events.add("diagnostic-flush"),
+            new PrintStream(new ByteArrayOutputStream(), false, StandardCharsets.UTF_8)
+        );
+
+        supervisor.captureProtocolViolationDrainExpired();
+
+        Assertions.assertEquals(
+            List.of(
+                "watchdog",
+                "stop:bounded drain expiry",
+                "metric:capture_protocol_violation",
+                "diagnostic-flush",
+                "exit:81"
+            ),
+            events
+        );
+        Assertions.assertEquals(
+            ProcessSupervisor.Reason.CAPTURE_PROTOCOL_VIOLATION,
+            supervisor.firstFatalSignal().orElseThrow().reason()
+        );
+        Assertions.assertTrue(supervisor.fatalTerminationStarted());
+
+        watchdogAction.get().run();
+        Assertions.assertEquals("halt:81", events.get(events.size() - 1));
+    }
+
 */
 // REBUILD-LIMBO-END(G11)
     /** Proves replayer LLD §8 and processing architecture §10.3's fatal-exit ladder. */

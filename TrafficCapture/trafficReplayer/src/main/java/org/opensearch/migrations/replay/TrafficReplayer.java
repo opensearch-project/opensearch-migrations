@@ -1498,6 +1498,7 @@ public class TrafficReplayer {
             configuration,
             DEFAULT_KAFKA_POLL_TIMEOUT,
             Duration.ofMillis(params.cancellationGraceMs),
+            ignored -> supervisor.captureProtocolViolationDrainExpired(),
             supervisor.failureSink()
         );
         topLevelReference.set(replayer);

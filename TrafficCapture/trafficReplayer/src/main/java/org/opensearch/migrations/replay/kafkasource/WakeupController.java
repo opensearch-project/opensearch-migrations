@@ -231,6 +231,21 @@ public final class WakeupController {
     }
 
     /**
+     * Records the same fixed-cardinality retirement totals during orderly close, when no rebalance callback
+     * span exists. The owner log carries the generation identity for that path.
+     */
+    public synchronized void recordGenerationRetiredAfterOrderlyShutdown(
+        long recordsCommitted,
+        long recordsRead
+    ) {
+        KafkaConsumerContexts.RebalanceCallbackScopeContext.recordGenerationRetiredMetrics(
+            rootContext.rebalanceCallbackInstruments,
+            recordsCommitted,
+            recordsRead
+        );
+    }
+
+    /**
      * Records how the revocation's grace wait ended, on the callback scope that is open while it waits.
      *
      * <p>The pair of counters is what makes the grace ceiling tunable: every revocation ending early says the

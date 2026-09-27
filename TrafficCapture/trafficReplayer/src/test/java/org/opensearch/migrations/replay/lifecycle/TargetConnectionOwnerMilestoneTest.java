@@ -10,14 +10,21 @@ package org.opensearch.migrations.replay.lifecycle;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
+import org.opensearch.migrations.replay.testing.FakeClock;
+import org.opensearch.migrations.replay.testing.TestEventLoop;
 
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -266,6 +273,163 @@ class TargetConnectionOwnerMilestoneTest {
             fixture.lifecycleEvents
         );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void heartbeatExpirationFinishesAdmittedWorkThenClosesAndRemovesTheOwner() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(14, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(14);
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.owner.submit(new TargetConnectionOwner.CapturedConnectionExpired<>(
+            TargetConnectionOwnerTestSupport.CONNECTION,
+            TargetConnectionOwnerTestSupport.GENERATION
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertTrue(
+            fixture.targetChannel.closes.isEmpty(),
+            "expiration must not interrupt an already-admitted target turn"
+        );
+        var rejectedAdmission = fixture.admit(15, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertInstanceOf(
+            TargetConnectionOwner.RequestAdmissionRejected.class,
+            rejectedAdmission.toCompletableFuture().join(),
+            "expiration rejects later source admissions for this lifetime"
+        );
+
+        fixture.completeSource(14, "source-response");
+        fixture.targetChannel.attempt(0).targetResponse("target-response");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            List.of(TargetConnectionOwnerTestSupport.CONNECTION),
+            fixture.targetChannel.closes,
+            "the target channel closes after the last admitted target turn"
+        );
+        Assertions.assertEquals(List.of("turn:14"), fixture.lifecycleEvents);
+
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            List.of("turn:14", "processing:14", "owner-finished"),
+            fixture.lifecycleEvents,
+            "owner removal waits for durable request processing after target close"
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void targetInitiatedCloseBetweenRequestsReconnectsWithoutRemovingTheOwner() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(16, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(16);
+        fixture.completeSource(16, "source-response-16");
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("target-response-16");
+        fixture.eventLoop.runUntilIdle();
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(1, fixture.targetChannel.connectionsOpened);
+        Assertions.assertEquals(
+            List.of("turn:16", "processing:16"),
+            fixture.lifecycleEvents
+        );
+
+        fixture.targetChannel.targetInitiatedClose();
+        fixture.admit(17, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(17);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            2,
+            fixture.targetChannel.connectionsOpened,
+            "the same owner asks its target port to reconnect for the later request"
+        );
+        Assertions.assertEquals(2, fixture.targetChannel.attempts.size());
+        Assertions.assertFalse(
+            fixture.lifecycleEvents.contains("owner-finished"),
+            "a target-initiated close does not end the captured connection lifetime"
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void manyConnectionsStayStickyAcrossSeveralLoopsAndOneStallDoesNotBlockAnother() {
+        var clock = new FakeClock();
+        var eventLoops = List.of(
+            new TestEventLoop(clock),
+            new TestEventLoop(clock),
+            new TestEventLoop(clock)
+        );
+        var fixtures = new ArrayList<TargetConnectionOwnerTestSupport.Fixture>();
+        for (var index = 0; index < 9; index++) {
+            var generation = new PartitionGenerationId(
+                new TopicPartition("traffic", index % 2),
+                index + 1
+            );
+            var connection = new ConnectionProcessingId(
+                generation,
+                new CapturedConnectionId("node", "connection-" + index),
+                index
+            );
+            fixtures.add(new TargetConnectionOwnerTestSupport.Fixture(
+                connection,
+                clock,
+                eventLoops.get(index % eventLoops.size())
+            ));
+        }
+
+        for (var index = 0; index < fixtures.size(); index++) {
+            fixtures.get(index).admit(index, Instant.EPOCH);
+        }
+        eventLoops.forEach(TestEventLoop::runUntilIdle);
+
+        for (var index = 1; index < fixtures.size(); index++) {
+            fixtures.get(index).preparer.ready(index);
+        }
+        eventLoops.forEach(TestEventLoop::runUntilIdle);
+
+        Assertions.assertTrue(
+            fixtures.getFirst().targetChannel.attempts.isEmpty(),
+            "connection zero remains independently stalled in preparation"
+        );
+        for (var index = 1; index < fixtures.size(); index++) {
+            Assertions.assertEquals(
+                1,
+                fixtures.get(index).targetChannel.attempts.size(),
+                "connection " + index + " must progress on its assigned loop"
+            );
+        }
+        Assertions.assertEquals(
+            1,
+            fixtures.get(3).targetChannel.attempts.size(),
+            "an unrelated owner sharing the stalled connection's loop still progresses"
+        );
+
+        var sameOwnerSecondAdmission = fixtures.get(4).admit(104, Instant.EPOCH);
+        eventLoops.get(0).runUntilIdle();
+        eventLoops.get(2).runUntilIdle();
+        Assertions.assertFalse(
+            sameOwnerSecondAdmission.toCompletableFuture().isDone(),
+            "another loop cannot apply an admission owned by connection four"
+        );
+        eventLoops.get(1).runUntilIdle();
+        Assertions.assertInstanceOf(
+            TargetConnectionOwner.RequestAdmissionAccepted.class,
+            sameOwnerSecondAdmission.toCompletableFuture().join(),
+            "later work for a connection remains sticky to its original event loop"
+        );
+        Assertions.assertTrue(
+            fixtures.stream().allMatch(fixture -> fixture.fatalFailures.isEmpty())
+        );
     }
 
     private static int registeredRequests(TargetConnectionOwnerTestSupport.Fixture fixture) {
