@@ -1,4 +1,4 @@
-f5753f261
+40289b70ef48ee1d3b68a4d5e16c8d77ae9fc449
 # The commit at which the authoritative designs were settled, before implementation began editing them.
 #
 # tools/verify-design-authorization.sh diffs the design corpus against this point, so that the designs' own
