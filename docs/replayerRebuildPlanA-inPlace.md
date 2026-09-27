@@ -860,7 +860,8 @@ guarded replacement. G10 cannot begin until the reviewed production commit is ac
 `procCommit §13.4:1640-1707` backpressure and Kafka tests. Background for scale and workload shape:
 `docs/LoadTestingBackground.md`.
 
-One small rig, topologically identical to the ship gate: **one proxy, two topics, one replayer**, a few
+One small rig, topologically identical to the ship gate: **one proxy, one Kafka traffic topic with two
+partitions, one replayer**, a few
 hundred requests per second, tens of seconds, docker compose rather than k8s or Argo, reusing the
 existing `TrafficCapture/trafficLoadTest` scenarios. G10 is the formal agent-driven E2E defect-resolution
 milestone. It consumes observations from the diagnostic late-G9 smoke, reproduces each real defect in the
@@ -880,7 +881,8 @@ target/tuple work, protocol/fatal termination, and orderly shutdown with admitte
 rig small enough that every source record, target request, tuple result, and terminal accounting event can be
 compared exactly.
 
-**Exit:** a clean deployed cold start brings up source, proxy, both Kafka topics, replayer, and target through
+**Exit:** a clean deployed cold start brings up source, proxy, the Kafka traffic topic with both partitions,
+replayer, and target through
 the shipping configuration with no pre-existing replay state; every generated source record has an exact
 expected replay disposition and exact record comparison passes; the record-accounting equations and sequence
 continuity reconcile with the per-record oracle; source and target document contents are equal, not merely
