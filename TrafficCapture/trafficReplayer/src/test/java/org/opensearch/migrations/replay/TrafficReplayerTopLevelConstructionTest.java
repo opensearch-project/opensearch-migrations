@@ -24,6 +24,9 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -653,6 +656,198 @@ class TrafficReplayerTopLevelConstructionTest {
         }
     }
 
+    @Test
+    void realTopLevelReconnectsAfterTargetIdleCloseWithoutReplacingConnectionOwner()
+        throws Exception {
+        var targetRequests = new AtomicInteger();
+        var firstDurable = new CountDownLatch(1);
+        try (
+            var server = SimpleNettyHttpServer.makeServer(
+                false,
+                Duration.ofMillis(100),
+                request -> {
+                    targetRequests.incrementAndGet();
+                    return okResponse();
+                }
+            );
+            var harness = new RealChannelTopLevelHarness(
+                server,
+                2,
+                sourceTime -> Instant.now().plus(
+                    Duration.between(Instant.EPOCH, sourceTime)
+                ),
+                2,
+                durable -> {
+                    if (durable.requestId().capturedRequestOrdinal() == 0) {
+                        firstDurable.countDown();
+                    }
+                }
+            )
+        ) {
+            var generation = harness.assignPartition();
+            harness.feedCaptureRecords(List.of(twoRequestConnection(
+                "reconnect",
+                "/first",
+                0,
+                "/second",
+                1
+            )));
+
+            await(firstDurable, "first tuple durability");
+            Assertions.assertEquals(
+                1,
+                harness.replayer.activeConnectionCount(),
+                "the captured connection owner must remain after its first durable tuple"
+            );
+            await(harness.allTuplesDurable, "both tuples to become durable");
+
+            var connectionId = new ConnectionProcessingId(
+                generation,
+                new CapturedConnectionId("writer", "reconnect"),
+                0
+            );
+            Assertions.assertAll(
+                () -> Assertions.assertEquals(1, harness.selectionCounts.get(connectionId)),
+                () -> Assertions.assertEquals(1, harness.targetFactoryCounts.get(connectionId)),
+                () -> Assertions.assertEquals(2, harness.durableRequestIds.size()),
+                () -> Assertions.assertEquals(2, targetRequests.get()),
+                () -> Assertions.assertEquals(
+                    2,
+                    harness.metric(IReplayContexts.MetricNames.CONNECTIONS_OPENED),
+                    "the target idle timeout must force the later request onto a second socket"
+                ),
+                () -> Assertions.assertTrue(harness.fatalFailures.isEmpty()),
+                () -> Assertions.assertTrue(harness.asynchronousFailures.isEmpty())
+            );
+        }
+    }
+
+    @Test
+    void realTopLevelHashSelectionSpreadsStickyConnectionsAndIsolatesBlockedResponse()
+        throws Exception {
+        final int eventLoopCount = 4;
+        final int connectionsPerLoop = 3;
+        final int connectionCount = eventLoopCount * connectionsPerLoop;
+        var blockedRequestEntered = new CountDownLatch(1);
+        var releaseBlockedResponse = new CountDownLatch(1);
+        var blockedPath = new AtomicReference<String>();
+        var blockedConnection = new AtomicReference<ConnectionProcessingId>();
+        var blockedDurable = new AtomicInteger();
+        var unrelatedDurable = new CountDownLatch((connectionCount - 1) * 2);
+        try (
+            var server = SimpleNettyHttpServer.makeServer(false, request -> {
+                if (request.getPath().getPath().equals(blockedPath.get())) {
+                    blockedRequestEntered.countDown();
+                    try {
+                        if (!releaseBlockedResponse.await(15, TimeUnit.SECONDS)) {
+                            throw new AssertionError(
+                                "blocked target response was not released"
+                            );
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(
+                            "blocked target response wait was interrupted",
+                            e
+                        );
+                    }
+                }
+                return okResponse();
+            });
+            var harness = new RealChannelTopLevelHarness(
+                server,
+                eventLoopCount,
+                ignored -> Instant.now(),
+                connectionCount * 2,
+                durable -> {
+                    if (durable.connectionId().equals(blockedConnection.get())) {
+                        blockedDurable.incrementAndGet();
+                    } else {
+                        unrelatedDurable.countDown();
+                    }
+                }
+            )
+        ) {
+            try {
+                var generation = harness.assignPartition();
+                var connections = connectionsForLoops(
+                    generation,
+                    eventLoopCount,
+                    connectionsPerLoop
+                );
+                var blocked = connections.getFirst();
+                blockedConnection.set(blocked.connectionId());
+                blockedPath.set("/" + blocked.name() + "/first");
+
+                var records = connections.stream()
+                    .map(connection -> twoRequestConnection(
+                        connection.name(),
+                        "/" + connection.name() + "/first",
+                        0,
+                        "/" + connection.name() + "/second",
+                        0
+                    ))
+                    .toList();
+                harness.feedCaptureRecords(records);
+
+                await(blockedRequestEntered, "blocked target request to reach the server");
+                await(
+                    unrelatedDurable,
+                    "every unrelated connection to become durable before release"
+                );
+                Assertions.assertEquals(
+                    0,
+                    blockedDurable.get(),
+                    "the blocked connection must still be waiting for its first response"
+                );
+
+                releaseBlockedResponse.countDown();
+                await(harness.allTuplesDurable, "all target responses and tuples");
+
+                Assertions.assertEquals(
+                    eventLoopCount,
+                    Set.copyOf(harness.ownerLoops.values()).size(),
+                    "the deployed hash policy must use every selected real event loop"
+                );
+                for (var connection : connections) {
+                    Assertions.assertSame(
+                        harness.eventLoops.get(connection.loopIndex()),
+                        harness.ownerLoops.get(connection.connectionId()),
+                        "target owner loop for " + connection.name()
+                    );
+                    Assertions.assertEquals(
+                        1,
+                        harness.selectionCounts.get(connection.connectionId()),
+                        "eventLoopFor must select once when the owner is created"
+                    );
+                    Assertions.assertEquals(
+                        1,
+                        harness.targetFactoryCounts.get(connection.connectionId()),
+                        "both requests must use one target-channel factory/owner"
+                    );
+                    Assertions.assertEquals(
+                        Set.of(connection.loopIndex()),
+                        harness.tupleWorkerIndices.get(connection.connectionId()),
+                        "both durable tuples must remain on the selected owner loop"
+                    );
+                    Assertions.assertEquals(
+                        2,
+                        harness.durableCounts.get(connection.connectionId()),
+                        "both requests must become durable for " + connection.name()
+                    );
+                }
+                Assertions.assertEquals(2, blockedDurable.get());
+                Assertions.assertTrue(harness.fatalFailures.isEmpty());
+                Assertions.assertTrue(
+                    harness.asynchronousFailures.isEmpty(),
+                    () -> "asynchronous failures=" + harness.asynchronousFailures
+                );
+            } finally {
+                releaseBlockedResponse.countDown();
+            }
+        }
+    }
+
     private static TargetAttemptOutcome<AggregatedRawResponse> runRealTargetAttempt(
         NettyPacketToHttpConsumer targetChannel,
         RootReplayerContext rootContext,
@@ -1233,6 +1428,118 @@ class TrafficReplayerTopLevelConstructionTest {
         replayer.intakeInputs().awaitPriorInputsHandled().toCompletableFuture().join();
     }
 
+    private static void await(CountDownLatch latch, String description)
+        throws InterruptedException {
+        Assertions.assertTrue(
+            latch.await(15, TimeUnit.SECONDS),
+            description + " did not complete before timeout"
+        );
+    }
+
+    private static SimpleHttpResponse okResponse() {
+        return new SimpleHttpResponse(
+            Map.of(HttpHeaderNames.CONTENT_LENGTH.toString(), "2"),
+            "OK".getBytes(StandardCharsets.UTF_8),
+            "OK",
+            200
+        );
+    }
+
+    private static List<ExpectedConnection> connectionsForLoops(
+        PartitionGenerationId generation,
+        int eventLoopCount,
+        int connectionsPerLoop
+    ) {
+        var result = new ArrayList<ExpectedConnection>();
+        var candidate = 0;
+        var connectionCount = Math.multiplyExact(
+            eventLoopCount,
+            connectionsPerLoop
+        );
+        for (var localSequence = 0; localSequence < connectionCount; localSequence++) {
+            var desiredLoop = localSequence % eventLoopCount;
+            while (true) {
+                var name = "fanout-" + candidate++;
+                var connectionId = new ConnectionProcessingId(
+                    generation,
+                    new CapturedConnectionId("writer", name),
+                    localSequence
+                );
+                var selected = Math.floorMod(
+                    connectionId.hashCode(),
+                    eventLoopCount
+                );
+                if (selected == desiredLoop) {
+                    result.add(new ExpectedConnection(
+                        name,
+                        connectionId,
+                        selected
+                    ));
+                    break;
+                }
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static CaptureRecord twoRequestConnection(
+        String connectionId,
+        String firstPath,
+        long firstTimestampSeconds,
+        String secondPath,
+        long secondTimestampSeconds
+    ) {
+        var stream = TrafficStream.newBuilder()
+            .setNodeId("writer")
+            .setConnectionId(connectionId)
+            .setNumber(0);
+        addRequestAndResponse(
+            stream,
+            0,
+            firstTimestampSeconds,
+            firstPath
+        );
+        addRequestAndResponse(
+            stream,
+            3,
+            secondTimestampSeconds,
+            secondPath
+        );
+        stream.addSubStream(observation(6, secondTimestampSeconds).setClose(
+            CloseObservation.getDefaultInstance()
+        ));
+        return CaptureRecord.newBuilder().setTrafficStream(stream).build();
+    }
+
+    private static void addRequestAndResponse(
+        TrafficStream.Builder stream,
+        long firstSequence,
+        long timestampSeconds,
+        String path
+    ) {
+        stream.addSubStream(observation(firstSequence, timestampSeconds).setRead(
+            ReadObservation.newBuilder().setData(ByteString.copyFromUtf8(
+                "GET " + path + " HTTP/1.1\r\n"
+                    + "Host: source\r\n"
+                    + "Connection: keep-alive\r\n"
+                    + "Content-Length: 0\r\n"
+                    + "\r\n"
+            ))
+        ));
+        stream.addSubStream(observation(firstSequence + 1, timestampSeconds)
+            .setEndOfMessageIndicator(
+                EndOfMessageIndication.getDefaultInstance()
+            ));
+        stream.addSubStream(observation(firstSequence + 2, timestampSeconds).setWrite(
+            WriteObservation.newBuilder().setData(ByteString.copyFromUtf8(
+                "HTTP/1.1 200 OK\r\n"
+                    + "Connection: keep-alive\r\n"
+                    + "Content-Length: 0\r\n"
+                    + "\r\n"
+            ))
+        ));
+    }
+
     private static CaptureRecord requestResponseAndClose() {
         var stream = TrafficStream.newBuilder()
             .setNodeId("writer")
@@ -1257,9 +1564,311 @@ class TrafficReplayerTopLevelConstructionTest {
     }
 
     private static TrafficObservation.Builder observation(long sequence) {
+        return observation(sequence, sequence);
+    }
+
+    private static TrafficObservation.Builder observation(
+        long sequence,
+        long timestampSeconds
+    ) {
         return TrafficObservation.newBuilder()
-            .setTs(Timestamp.newBuilder().setSeconds(sequence))
+            .setTs(Timestamp.newBuilder().setSeconds(timestampSeconds))
             .setConnectionObservationSequence(sequence);
+    }
+
+    private record DurableTuple(
+        ConnectionProcessingId connectionId,
+        ReplayRequestId requestId,
+        int workerIndex
+    ) {}
+
+    private record ExpectedConnection(
+        String name,
+        ConnectionProcessingId connectionId,
+        int loopIndex
+    ) {}
+
+    private static final class RealChannelTopLevelHarness implements AutoCloseable {
+        private final MockConsumer<String, byte[]> consumer =
+            new MockConsumer<>(OffsetResetStrategy.EARLIEST);
+        private final NioEventLoopGroup eventLoopGroup;
+        private final List<EventLoop> eventLoops;
+        private final InMemoryInstrumentationBundle telemetry;
+        private final TrafficReplayerTopLevel<
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            Map<String, Object>
+        > replayer;
+        private final CountDownLatch allTuplesDurable;
+        private final Set<ReplayRequestId> durableRequestIds =
+            ConcurrentHashMap.newKeySet();
+        private final Map<ConnectionProcessingId, Integer> selectionCounts =
+            new ConcurrentHashMap<>();
+        private final Map<ConnectionProcessingId, Integer> targetFactoryCounts =
+            new ConcurrentHashMap<>();
+        private final Map<ConnectionProcessingId, Integer> durableCounts =
+            new ConcurrentHashMap<>();
+        private final Map<ConnectionProcessingId, EventLoop> ownerLoops =
+            new ConcurrentHashMap<>();
+        private final Map<ConnectionProcessingId, Set<Integer>> tupleWorkerIndices =
+            new ConcurrentHashMap<>();
+        private final ConcurrentLinkedQueue<ProcessSupervisor.FatalSignal> fatalFailures =
+            new ConcurrentLinkedQueue<>();
+        private final ConcurrentLinkedQueue<Throwable> asynchronousFailures =
+            new ConcurrentLinkedQueue<>();
+        private final java.util.function.Consumer<DurableTuple> durableObserver;
+
+        private RealChannelTopLevelHarness(
+            SimpleNettyHttpServer server,
+            int eventLoopCount,
+            java.util.function.Function<Instant, Instant> replayTimeMapper,
+            int expectedDurableTuples,
+            java.util.function.Consumer<DurableTuple> durableObserver
+        ) {
+            eventLoopGroup = new NioEventLoopGroup(
+                eventLoopCount,
+                new DefaultThreadFactory("g95-real-target-owner")
+            );
+            var mutableEventLoops = new ArrayList<EventLoop>();
+            eventLoopGroup.forEach(executor ->
+                mutableEventLoops.add((EventLoop) executor)
+            );
+            eventLoops = List.copyOf(mutableEventLoops);
+            telemetry = new InMemoryInstrumentationBundle(false, true);
+            allTuplesDurable = new CountDownLatch(expectedDurableTuples);
+            this.durableObserver = durableObserver;
+            consumer.updateBeginningOffsets(Map.of(TOPIC_PARTITION, 0L));
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var configuration = new TrafficReplayerTopLevel.Configuration<
+                NettyPacketToHttpConsumer.PreparedRequest,
+                AggregatedRawResponse,
+                Map<String, Object>
+            >(
+                Clock.systemUTC(),
+                System::nanoTime,
+                replayTimeMapper,
+                connectionId -> {
+                    selectionCounts.merge(connectionId, 1, Integer::sum);
+                    return eventLoops.get(
+                        Math.floorMod(connectionId.hashCode(), eventLoops.size())
+                    );
+                },
+                eventLoops,
+                TrafficReplayerTopLevel.deployedOwnerTaskRunner(),
+                (connectionId, connectionContext) ->
+                    TrafficReplayerTopLevel.deployedRequestPreparer(
+                        () -> input -> input,
+                        null,
+                        Duration.ZERO
+                    ),
+                terminalRetryPolicy(),
+                (connectionId, eventLoop, connectionContext) -> {
+                    targetFactoryCounts.merge(connectionId, 1, Integer::sum);
+                    var previous = ownerLoops.putIfAbsent(connectionId, eventLoop);
+                    if (previous != null && previous != eventLoop) {
+                        asynchronousFailures.add(new AssertionError(
+                            connectionId + " moved between target event loops"
+                        ));
+                    }
+                    var expected = eventLoops.get(
+                        Math.floorMod(connectionId.hashCode(), eventLoops.size())
+                    );
+                    if (eventLoop != expected) {
+                        asynchronousFailures.add(new AssertionError(
+                            connectionId + " selected " + eventLoop
+                                + " instead of deployed hash loop " + expected
+                        ));
+                    }
+                    return NettyPacketToHttpConsumer.create(
+                        connectionId,
+                        eventLoop,
+                        Clock.systemUTC(),
+                        connectionContext,
+                        server.localhostEndpoint(),
+                        null,
+                        Duration.ofSeconds(5)
+                    );
+                },
+                (replayContext, result) -> {
+                    var connectionId = result.requestId().connectionProcessingId();
+                    var ownerLoop = ownerLoops.get(connectionId);
+                    if (ownerLoop == null || !ownerLoop.inEventLoop()) {
+                        asynchronousFailures.add(new AssertionError(
+                            "tuple creation left the selected owner loop for " + connectionId
+                        ));
+                    }
+                    return Map.of(
+                        "connectionId", connectionId,
+                        "requestId", result.requestId()
+                    );
+                },
+                noOpReleaser(),
+                workerIndex -> new ManagedTupleTransformer<>() {
+                    @Override
+                    public TupleWriter.TupleTransformation<Map<String, Object>> transform(
+                        IReplayContexts.ITupleHandlingContext replayContext,
+                        Map<String, Object> tuple
+                    ) {
+                        if (!eventLoops.get(workerIndex).inEventLoop()) {
+                            asynchronousFailures.add(new AssertionError(
+                                "tuple transformation left worker " + workerIndex
+                            ));
+                        }
+                        return new TupleWriter.TransformedTuple<>(tuple);
+                    }
+
+                    @Override
+                    public void close() {}
+                },
+                workerIndex -> new ManagedPhysicalTupleSink<>() {
+                    @Override
+                    public CompletionStage<Void> write(
+                        IReplayContexts.ITupleHandlingContext replayContext,
+                        Map<String, Object> tuple
+                    ) {
+                        if (!eventLoops.get(workerIndex).inEventLoop()) {
+                            asynchronousFailures.add(new AssertionError(
+                                "tuple durability left worker " + workerIndex
+                            ));
+                        }
+                        var connectionId =
+                            (ConnectionProcessingId) tuple.get("connectionId");
+                        var requestId = (ReplayRequestId) tuple.get("requestId");
+                        tupleWorkerIndices.computeIfAbsent(
+                            connectionId,
+                            ignored -> ConcurrentHashMap.newKeySet()
+                        ).add(workerIndex);
+                        durableCounts.merge(connectionId, 1, Integer::sum);
+                        durableRequestIds.add(requestId);
+                        try {
+                            RealChannelTopLevelHarness.this.durableObserver.accept(
+                                new DurableTuple(connectionId, requestId, workerIndex)
+                            );
+                        } catch (Throwable failure) {
+                            asynchronousFailures.add(failure);
+                        } finally {
+                            allTuplesDurable.countDown();
+                        }
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    @Override
+                    public void flush() {}
+
+                    @Override
+                    public void close() {}
+                },
+                ignored -> {},
+                Duration.ZERO,
+                new org.opensearch.migrations.replay.intake.PartitionIntakeState.BrokerTimeConfiguration(
+                    30_000,
+                    1_000,
+                    5_000
+                ),
+                4,
+                4,
+                64
+            );
+            replayer = new TrafficReplayerTopLevel<>(
+                consumer,
+                rootContext,
+                configuration,
+                Duration.ZERO,
+                Duration.ofSeconds(1),
+                exitCode -> asynchronousFailures.add(new AssertionError(
+                    "capture protocol terminated with exit " + exitCode
+                )),
+                fatalFailures::add
+            );
+        }
+
+        private PartitionGenerationId assignPartition() {
+            replayer.startIntake();
+            consumer.subscribe(
+                List.of(TOPIC_PARTITION.topic()),
+                replayer.rebalanceListener()
+            );
+            consumer.schedulePollTask(() ->
+                consumer.rebalance(List.of(TOPIC_PARTITION))
+            );
+            replayer.runSourceOnce();
+            intakeFence(replayer);
+            replayer.runSourceOnce();
+            return replayer.sourceOwner().partitionState(TOPIC_PARTITION)
+                .orElseThrow()
+                .generation();
+        }
+
+        private void feedCaptureRecords(List<CaptureRecord> records) {
+            consumer.schedulePollTask(() -> {
+                for (var offset = 0; offset < records.size(); offset++) {
+                    var value = records.get(offset).toByteArray();
+                    var key = "key-" + offset;
+                    consumer.addRecord(new ConsumerRecord<>(
+                        TOPIC_PARTITION.topic(),
+                        TOPIC_PARTITION.partition(),
+                        offset,
+                        offset,
+                        TimestampType.LOG_APPEND_TIME,
+                        key.length(),
+                        value.length,
+                        key,
+                        value,
+                        new RecordHeaders(),
+                        Optional.empty()
+                    ));
+                }
+            });
+            replayer.runSourceOnce();
+            intakeFence(replayer);
+        }
+
+        private long metric(String metricName) {
+            return InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                metricName
+            );
+        }
+
+        @Override
+        public void close() throws Exception {
+            Throwable failure = null;
+            try {
+                replayer.close();
+            } catch (Throwable closeFailure) {
+                failure = closeFailure;
+            } finally {
+                replayer.allowTargetEventLoopTermination();
+                try {
+                    eventLoopGroup.shutdownGracefully(
+                        0,
+                        5,
+                        TimeUnit.SECONDS
+                    ).syncUninterruptibly();
+                } catch (Throwable closeFailure) {
+                    if (failure == null) {
+                        failure = closeFailure;
+                    } else if (failure != closeFailure) {
+                        failure.addSuppressed(closeFailure);
+                    }
+                }
+                try {
+                    telemetry.close();
+                } catch (Throwable closeFailure) {
+                    if (failure == null) {
+                        failure = closeFailure;
+                    } else if (failure != closeFailure) {
+                        failure.addSuppressed(closeFailure);
+                    }
+                }
+            }
+            if (failure instanceof Exception exception) {
+                throw exception;
+            }
+            if (failure instanceof Error error) {
+                throw error;
+            }
+        }
     }
 
     private static final class TupleContextFixture implements AutoCloseable {
