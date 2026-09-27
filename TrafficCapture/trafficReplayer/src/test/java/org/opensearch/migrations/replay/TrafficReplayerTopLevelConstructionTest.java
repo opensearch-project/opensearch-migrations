@@ -1649,8 +1649,9 @@ class TrafficReplayerTopLevelConstructionTest {
                 replayTimeMapper,
                 connectionId -> {
                     selectionCounts.merge(connectionId, 1, Integer::sum);
-                    return eventLoops.get(
-                        Math.floorMod(connectionId.hashCode(), eventLoops.size())
+                    return TrafficReplayer.selectDeployedTargetEventLoop(
+                        eventLoops,
+                        connectionId
                     );
                 },
                 eventLoops,
@@ -1670,8 +1671,9 @@ class TrafficReplayerTopLevelConstructionTest {
                             connectionId + " moved between target event loops"
                         ));
                     }
-                    var expected = eventLoops.get(
-                        Math.floorMod(connectionId.hashCode(), eventLoops.size())
+                    var expected = TrafficReplayer.selectDeployedTargetEventLoop(
+                        eventLoops,
+                        connectionId
                     );
                     if (eventLoop != expected) {
                         asynchronousFailures.add(new AssertionError(

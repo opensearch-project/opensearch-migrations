@@ -9,6 +9,7 @@ import java.util.Base64;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
@@ -31,6 +32,7 @@ import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.intake.PartitionIntakeState;
 import org.opensearch.migrations.replay.kafka.KafkaConsumerProperties;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
@@ -1452,9 +1454,7 @@ public class TrafficReplayer {
                 timeShifter.setFirstTimestamp(sourceTime);
                 return timeShifter.transformSourceTimeToRealTime(sourceTime);
             },
-            connectionId -> eventLoops.get(
-                Math.floorMod(connectionId.hashCode(), eventLoops.size())
-            ),
+            connectionId -> selectDeployedTargetEventLoop(eventLoops, connectionId),
             eventLoops,
             TrafficReplayerTopLevel.deployedOwnerTaskRunner(),
             (connectionId, connectionContext) ->
@@ -1577,6 +1577,20 @@ public class TrafficReplayer {
             );
         }
         return List.copyOf(eventLoops);
+    }
+
+    static EventLoop selectDeployedTargetEventLoop(
+        List<EventLoop> eventLoops,
+        ConnectionProcessingId connectionId
+    ) {
+        Objects.requireNonNull(eventLoops, "eventLoops");
+        Objects.requireNonNull(connectionId, "connectionId");
+        if (eventLoops.isEmpty()) {
+            throw new IllegalArgumentException("eventLoops must not be empty");
+        }
+        return eventLoops.get(
+            Math.floorMod(connectionId.hashCode(), eventLoops.size())
+        );
     }
 
     private static SslContext loadTargetSslContext(

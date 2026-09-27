@@ -344,6 +344,16 @@ class TargetConnectionOwnerCancellationTest {
     @Test
     void permitGrantedBeforeForceButDeliveredAfterForceIsReleasedWithoutDuplicateTurn() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture(1);
+        fixture.retryPolicy.decisions.add(
+            new ReplayOutcomes.RetryDecision.RetryRequired()
+        );
+        fixture.admit(13, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(13);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).targetResponse("retryable");
+        fixture.eventLoop.runUntilIdle();
+
         var heldPermit = Assertions.assertInstanceOf(
             TargetAttemptPermitProvider.PermitAcquired.class,
             fixture.permitProvider.acquire(request(99))
@@ -351,11 +361,8 @@ class TargetConnectionOwnerCancellationTest {
                 .toCompletableFuture()
                 .join()
         );
-        fixture.admit(13, Instant.EPOCH);
-        fixture.eventLoop.runUntilIdle();
-        fixture.preparer.ready(13);
-        fixture.eventLoop.runUntilIdle();
-        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+        fixture.eventLoop.advance(Duration.ofSeconds(1));
+        Assertions.assertEquals(1, fixture.targetChannel.attempts.size());
 
         fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
             CONNECTION,
@@ -368,7 +375,11 @@ class TargetConnectionOwnerCancellationTest {
         fixture.eventLoop.runUntilIdle();
 
         Assertions.assertEquals(0, fixture.activePermits.get());
-        Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
+        Assertions.assertEquals(
+            1,
+            fixture.targetChannel.attempts.size(),
+            "force must prevent the queued retry permit from starting another attempt"
+        );
         Assertions.assertTrue(
             fixture.lifecycleEvents.stream().noneMatch(event ->
                 event.startsWith("turn:") || event.startsWith("processing:")
