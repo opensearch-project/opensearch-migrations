@@ -409,7 +409,7 @@ class TargetConnectionOwnerMilestoneTest {
     }
 
     @Test
-    void manyConnectionsStayStickyAcrossSeveralLoopsAndOneStallDoesNotBlockAnother() {
+    void pendingPreparationDoesNotGateAnotherOwnerSharingTheSameLoop() {
         var clock = new FakeClock();
         var eventLoops = List.of(
             new TestEventLoop(clock),

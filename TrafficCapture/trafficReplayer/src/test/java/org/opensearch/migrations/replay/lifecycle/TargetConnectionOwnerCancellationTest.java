@@ -386,6 +386,13 @@ class TargetConnectionOwnerCancellationTest {
             ),
             "a late permit must not replay the turn transition or emit normal processing"
         );
+        Assertions.assertEquals(
+            java.util.List.of("cleanup-finished"),
+            fixture.lifecycleEvents,
+            () -> "forced cleanup must finish after the late permit is released; history="
+                + fixture.transitionHistory
+        );
+        assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
@@ -501,7 +508,11 @@ class TargetConnectionOwnerCancellationTest {
         var cleanupIndex = fixture.transitionHistory.indexOf(
             "lifecycle:cleanup-finished"
         );
-        Assertions.assertTrue(cleanupIndex > 0);
+        Assertions.assertTrue(
+            cleanupIndex > 0,
+            () -> "cleanup milestone missing or unordered; history="
+                + fixture.transitionHistory
+        );
         Assertions.assertEquals(
             "operations:1",
             fixture.transitionHistory.get(cleanupIndex - 1),

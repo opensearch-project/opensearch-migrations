@@ -1070,6 +1070,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 expected.request.owner.forceCancel(cancelled.cause());
             }
         }
+        // Settling this acquisition is the only place pendingPermit clears, and both terminal
+        // predicates read it. A result that arrives after cancellation already evaluated them must
+        // re-evaluate here, or the channel never closes and ConnectionCleanupFinished never follows.
+        maybeCloseAfterSourceEnd();
+        tryFinishOwner();
     }
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.

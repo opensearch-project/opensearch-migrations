@@ -28,7 +28,6 @@ import com.google.protobuf.Timestamp;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.parallel.ResourceLock;
 import org.testcontainers.lifecycle.Startables;
 
 @Tag("isolatedTest")
@@ -51,7 +50,6 @@ class OpenSearch37ReplayTest {
     private record Request(String method, String path, String body, int expectedStatus) {}
 
     @Test
-    @ResourceLock("TrafficReplayerRunner")
     void replayElasticsearch68TypedRequestsToOpenSearch37() throws Throwable {
         try (
             var source = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
@@ -94,14 +92,21 @@ class OpenSearch37ReplayTest {
                     null
                 );
                 Assertions.assertTrue(result.fatalFailures().isEmpty(), result.fatalFailures()::toString);
+                Assertions.assertTrue(
+                    result.protocolViolationExitCodes().isEmpty(),
+                    result.protocolViolationExitCodes()::toString
+                );
                 Assertions.assertEquals(1, result.tuples().size());
+                Assertions.assertEquals(1, result.transformationStatuses().size());
+                Assertions.assertTrue(
+                    result.transformationStatuses().getFirst().isCompleted()
+                );
                 Assertions.assertEquals(
                     1L,
-                    result.committedOffsets().values().iterator().next().offset(),
+                    result.committedOffsets().get(FullTrafficReplayerTest.TOPIC_PARTITION).offset(),
                     "committed traffic record " + i
                 );
                 var tuple = MAPPER.valueToTree(result.tuples().getFirst());
-                Assertions.assertFalse(tuple.has("error"), tuple::toString);
                 Assertions.assertEquals(0, tuple.path("numErrors").asInt(), tuple::toString);
                 Assertions.assertEquals(1, tuple.path("numRequests").asInt(), tuple::toString);
                 var response = tuple.path("targetResponses").get(0);

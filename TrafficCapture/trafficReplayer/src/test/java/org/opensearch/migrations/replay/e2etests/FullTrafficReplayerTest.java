@@ -21,9 +21,11 @@ import org.opensearch.migrations.replay.ProcessSupervisor;
 import org.opensearch.migrations.replay.ResultsToLogsConsumer;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.intake.PartitionIntakeState;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -563,8 +565,10 @@ public class FullTrafficReplayerTest {
 
     protected record ReplayResult(
         List<Map<String, Object>> tuples,
+        List<HttpRequestTransformationStatus> transformationStatuses,
         int targetChannelsCreated,
         Map<TopicPartition, OffsetAndMetadata> committedOffsets,
+        List<Integer> protocolViolationExitCodes,
         List<ProcessSupervisor.FatalSignal> fatalFailures
     ) {}
 
@@ -594,10 +598,15 @@ public class FullTrafficReplayerTest {
             Assertions.assertEquals(1, targetRequests.get());
             Assertions.assertEquals(1, result.targetChannelsCreated());
             Assertions.assertEquals(1, result.tuples().size());
+            Assertions.assertEquals(1, result.transformationStatuses().size());
+            Assertions.assertTrue(
+                result.transformationStatuses().getFirst().isCompleted()
+            );
             Assertions.assertEquals(
                 1L,
                 result.committedOffsets().get(TOPIC_PARTITION).offset()
             );
+            Assertions.assertTrue(result.protocolViolationExitCodes().isEmpty());
             Assertions.assertTrue(result.fatalFailures().isEmpty());
         }
     }
@@ -672,7 +681,10 @@ public class FullTrafficReplayerTest {
                 org.opensearch.migrations.replay.identity.ConnectionProcessingId
             >();
         var tuples = new CopyOnWriteArrayList<Map<String, Object>>();
+        var transformationStatuses =
+            new CopyOnWriteArrayList<HttpRequestTransformationStatus>();
         var tupleWritten = new CompletableFuture<Void>();
+        var protocolViolationExitCodes = new CopyOnWriteArrayList<Integer>();
         var fatalFailures =
             new CopyOnWriteArrayList<ProcessSupervisor.FatalSignal>();
         var fatalObserved = new CompletableFuture<ProcessSupervisor.FatalSignal>();
@@ -715,7 +727,13 @@ public class FullTrafficReplayerTest {
                         Duration.ofSeconds(5)
                     );
                 },
-                resultsToLogs::createTupleAndReportProgress,
+                (replayContext, result) -> {
+                    transformationStatuses.add(result.transformationStatus());
+                    return resultsToLogs.createTupleAndReportProgress(
+                        replayContext,
+                        result
+                    );
+                },
                 resourceReleaser(),
                 ignored -> TrafficReplayerTopLevel.deployedTupleTransformer(
                     () -> input -> input,
@@ -756,6 +774,8 @@ public class FullTrafficReplayerTest {
                 rootContext,
                 configuration,
                 Duration.ZERO,
+                KafkaSourceOwner.DEFAULT_REVOCATION_GRACE,
+                protocolViolationExitCodes::add,
                 signal -> {
                     fatalFailures.add(signal);
                     fatalObserved.complete(signal);
@@ -809,6 +829,8 @@ public class FullTrafficReplayerTest {
                                 : activitySnapshot(replayer, connectionId))
                             + " source="
                             + replayer.sourceOwner().partitionState(TOPIC_PARTITION)
+                            + " protocolViolationExitCodes="
+                            + protocolViolationExitCodes
                             + " fatal="
                             + fatalFailures,
                         timeout
@@ -850,8 +872,10 @@ public class FullTrafficReplayerTest {
         }
         return new ReplayResult(
             List.copyOf(tuples),
+            List.copyOf(transformationStatuses),
             targetChannelsCreated.get(),
             consumer.lastCommit,
+            List.copyOf(protocolViolationExitCodes),
             List.copyOf(fatalFailures)
         );
     }
