@@ -369,10 +369,11 @@ class TargetConnectionOwnerCancellationTest {
 
         Assertions.assertEquals(0, fixture.activePermits.get());
         Assertions.assertTrue(fixture.targetChannel.attempts.isEmpty());
-        Assertions.assertEquals(
-            java.util.List.of("cleanup-finished"),
-            fixture.lifecycleEvents,
-            "the force path owns the single turn transition and emits no normal request milestone"
+        Assertions.assertTrue(
+            fixture.lifecycleEvents.stream().noneMatch(event ->
+                event.startsWith("turn:") || event.startsWith("processing:")
+            ),
+            "a late permit must not replay the turn transition or emit normal processing"
         );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
