@@ -19,7 +19,7 @@ from console_link.models.factories import (
     UnsupportedBackfillTypeError,
     UnsupportedMetricsSourceError,
 )
-from console_link.models.snapshot import GcsSnapshot
+from console_link.models.snapshot import AzureSnapshot, GcsSnapshot
 from tests.utils import create_valid_cluster
 
 
@@ -44,6 +44,14 @@ class TestGetSnapshotFactory:
         }
         result = get_snapshot(config, create_valid_cluster())
         assert isinstance(result, GcsSnapshot)
+
+    def test_get_azure_snapshot(self):
+        config = {
+            "snapshot_name": "test_snapshot",
+            "azure": {"repo_uri": "azure://account/container/path"}
+        }
+        result = get_snapshot(config, create_valid_cluster())
+        assert isinstance(result, AzureSnapshot)
 
 
 class TestGetReplayerFactory:

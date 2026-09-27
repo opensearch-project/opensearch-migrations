@@ -5,7 +5,7 @@ import subprocess
 
 from console_link.models.cluster import AuthMethod
 from console_link.models.metadata import generate_tmp_dir, MAX_FILENAME_LEN, Metadata
-from console_link.models.snapshot import FileSystemSnapshot, GcsSnapshot, S3Snapshot
+from console_link.models.snapshot import AzureSnapshot, FileSystemSnapshot, GcsSnapshot, S3Snapshot
 from tests.utils import create_valid_cluster
 
 MOCK_SOURCE_VERSION = "ES_5.6"
@@ -32,6 +32,17 @@ def gcs_snapshot():
         }
     }
     return GcsSnapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+
+
+@pytest.fixture()
+def azure_snapshot():
+    snapshot_config = {
+        "snapshot_name": "reindex_from_snapshot",
+        "azure": {
+            "repo_uri": "azure://myaccount/my-container/path",
+        }
+    }
+    return AzureSnapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
 
 
 @pytest.fixture()
@@ -661,6 +672,126 @@ def test_metadata_with_gcs_snapshot_and_endpoint_passes_endpoint_flag(mocker):
     assert "--endpoint" in actual_args
     endpoint_idx = actual_args.index("--endpoint")
     assert actual_args[endpoint_idx + 1] == "http://fake-gcs-server:4443"
+
+
+def test_metadata_init_with_fully_specified_azure_config_succeeds():
+    config = {
+        "from_snapshot": {
+            "local_dir": "/tmp/azure",
+            "snapshot_name": "reindex_from_snapshot",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert metadata._config == config
+    assert metadata._snapshot_location == "azure"
+    assert metadata._azure_uri == "azure://myaccount/my-container/path"
+
+
+def test_metadata_init_with_minimal_azure_config_succeeds():
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert metadata._snapshot_location == "azure"
+    assert metadata._azure_uri == "azure://myaccount/my-container/path"
+    # This is the only difference from the fully specified config above: with no local_dir given,
+    # a temporary one is generated, because the azure read path still needs --local-dir.
+    assert config["from_snapshot"].get("local_dir") is None
+    assert metadata._local_dir
+
+
+def test_metadata_init_with_partial_azure_config_fails():
+    config = {
+        "from_snapshot": {
+            "azure": {
+                "container": "my-container"
+            },
+        }
+    }
+    with pytest.raises(ValueError) as excinfo:
+        Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert 'snapshot_name' in excinfo.value.args[0]['from_snapshot'][0]
+    assert 'repo_uri' in excinfo.value.args[0]['from_snapshot'][0]['azure'][0]
+
+
+def test_metadata_init_with_azure_config_rejects_endpoint():
+    # The azure block has no `endpoint` field, so supplying one must be rejected as an unknown
+    # field rather than silently ignored. MetadataMigration would accept an azure endpoint on
+    # the CLI; the omission is because nothing in this release can produce one. See the azure
+    # block in Metadata's schema.
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+                "endpoint": "http://azurite:10000",
+            },
+        }
+    }
+    with pytest.raises(ValueError) as excinfo:
+        Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert 'endpoint' in excinfo.value.args[0]['from_snapshot'][0]['azure'][0]
+
+
+def test_metadata_init_with_azure_external_snapshot_succeeds(azure_snapshot):
+    config = {
+        "from_snapshot": None,
+    }
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION),
+                        azure_snapshot)
+    assert metadata._snapshot_location == "azure"
+    assert metadata._snapshot_name == azure_snapshot.snapshot_name
+    assert metadata._azure_uri == azure_snapshot.azure_repo_uri
+
+
+def test_metadata_with_azure_snapshot_makes_correct_subprocess_call(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/azure",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+            },
+        },
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
+    }
+    target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    mock.assert_called_once_with([
+        "/root/metadataMigration/bin/MetadataMigration",
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
+        "migrate",
+        "--snapshot-name", config["from_snapshot"]["snapshot_name"],
+        "--target-host", target.endpoint,
+        "--cluster-awareness-attributes", '0',
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["azure"]["repo_uri"],
+        "--target-insecure",
+        "--source-version", MOCK_SOURCE_VERSION,
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
+    )
+    # Neither the endpoint nor the region flag belongs on the azure path. Both are real flags
+    # that _add_s3_args emits, so an azure config picking up either would mean the dispatch in
+    # _add_snapshot_args sent it down the wrong branch.
+    actual_args = mock.call_args.args[0]
+    assert "--endpoint" not in actual_args
+    assert "--s3-region" not in actual_args
 
 
 def test_generate_tmp_dir_truncates_long_name():
