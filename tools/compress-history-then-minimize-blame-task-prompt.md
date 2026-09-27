@@ -1,5 +1,7 @@
 # History compression and blame-cleanup task prompt
 
+**Inactive as of 2026-09-27. Do not use this prompt unless the owner explicitly reopens history rewriting.**
+
 Paste this into a fresh task:
 
 ```text

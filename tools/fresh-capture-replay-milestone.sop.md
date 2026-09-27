@@ -20,8 +20,8 @@ file. It does not summarize the designs or plans.
   that Codex owns.
 - **base_ref** (optional, default: milestone-start `HEAD`): Commit immediately before the milestone's
   first implementation change; use it to bound diffs and evidence.
-- **production_complete_ref** (optional, default for `G9.5`: the exact minimal-delta candidate produced
-  from the G9 production checkpoint): Commit reviewed by every G9.5 lane.
+- **production_complete_ref** (optional, default for `G9.5`: the exact current
+  `stableAndScalableLiveReplay` tip after G9 completion): Commit reviewed by every G9.5 lane.
 
 **Constraints for parameter acquisition:**
 
@@ -58,27 +58,10 @@ Read the execution contract and only the source material needed for the selected
 - For `G9.5`, You MUST resolve and record the full SHAs for `production_complete_ref`, baseline
   `2fe4538aef16eafa098545e76545873335bf2d11`, and the current upstream-main ref before launching
   reviews because all lane comparisons must identify immutable inputs.
-- For `G9.5`, before resolving the review commit, You MUST run
-  `tools/compress-history-then-minimize-blame.sop.md` from the exact completed G9 commit. You MUST complete
-  its compression phase and stop for owner confirmation. Only after the owner approves the exact compressed
-  candidate SHA may You run its repository-wide minimal-delta phase. The resulting blame-cleaned candidate
-  becomes `production_complete_ref`; owner acceptance is required before replacing the active branch, not
-  before reviewing the candidate.
-- That sweep MUST enumerate every surviving added or replaced hunk in every changed Java file repository-wide,
-  including replayer and proxy production code, tests, Java fixtures, and Java tooling, against the exact
-  current upstream-main SHA. Proxy Java is included only for source shaping and history preservation; the
-  sweep MUST NOT implement PA work, change proxy behavior, or make proxy design or contract decisions because
-  those remain owned by their assigned milestones. It MUST enable rename and copy detection and use the
-  added-line ranges as a completeness index rather than proof of net-new code. For each hunk, it MUST
-  search the same file,
-  limbo, deleted or moved rebuild code, other files, and history for an inherited method or coherent method
-  slice that should have been the starting point. When one exists, it MUST move, copy, or promote that
-  predecessor before the narrow adaptation; it MUST split a combined target into coherent methods when
-  needed to retain each inherited source. It MUST NOT inventory unchanged members because they have no added
-  or replaced lines to reconstruct. Pinning MUST be implemented through reconstructed Git ancestry and
-  ordinary blame, not only through a trace comment. Baseline
-  `2fe4538aef16eafa098545e76545873335bf2d11` remains the trace boundary, and post-baseline upstream-main
-  drift must be preserved or explicitly dispositioned.
+- For `G9.5`, You MUST use the ordinary current `stableAndScalableLiveReplay` tip as
+  `production_complete_ref`. You MUST NOT squash, reconstruct, minimize, or otherwise rewrite Git history
+  because the owner has explicitly removed history rewriting from this milestone. History and ordinary blame
+  MAY be inspected as evidence, but attribution-only findings MUST NOT gate G9.5 or authorize a rewrite.
 - You MUST NOT read the whole plan, design corpus, or status register because broad rereading wastes
   context and creates an unofficial derived interpretation.
 - If the selected milestone lacks a design citation needed to implement its scope, You MUST stop
@@ -119,21 +102,9 @@ Codex owns implementation, integration, register updates, and final commit messa
 **Constraints:**
 
 - You MUST implement only the selected milestone and its complete usable chains.
-- For `G9.5`, You MUST complete the minimal-delta and history-reconstruction sweep before launching any
-  review lane. You MUST NOT edit the candidate before all three initial read-only lanes have reported because
-  their first pass must independently evaluate the same minimized artifact. Afterward, Codex MUST verify and
-  repair only findings owned by G9.5.
-- For `G9.5`, You MUST freeze a commit list with explicit lower and upper bounds, precompute hunk provenance
-  once, and replay the candidate from oldest to newest in one isolated tree. You MUST NOT rescan the complete
-  preceding history at every commit because that creates quadratic work and inconsistent source choices.
-- After every candidate commit, You MUST run `tools/java-structural-equalizer.py compare-commit-pair` without
-  `--root` against the cumulative original endpoint mapped to that commit. The comparison MUST cover the
-  repository-wide union of changed Java paths. You MUST stop before creating the next commit when canonical
-  structures differ because final-tree equality cannot detect an incorrect intermediate rewrite.
-- You MUST compare intentionally unparseable `.java` fixtures through the equalizer's exact-content digest
-  fallback because repository-wide Java validation may not silently omit parser fixtures.
-- You MUST treat a cleanup-only method split or merge that changes canonical structure as a blocker requiring
-  explicit owner direction and separate behavioral proof; the equalizer may not silently waive it.
+- For `G9.5`, You MUST NOT edit production before all three initial read-only lanes have reported because
+  their first pass must independently evaluate the same exact production-complete commit. Afterward, Codex
+  MUST verify and repair only findings owned by G9.5 through ordinary forward commits.
 - You MUST preserve inherited files, paths, blame, authorship, author dates, committers, and commit
   dates whenever carrying or rewriting history.
 - You MUST restore and refactor a limbo predecessor before creating a parallel implementation unless
@@ -203,9 +174,6 @@ Commit genuine, independently reviewable progress without splitting one coherent
 - You MUST include `Signed-off-by: Greg Schohn <schohn@amazon.com>` in every applicable commit.
 - You MUST write detailed commit messages that explain the design obligation, implementation,
   evidence, and any durable register disposition.
-- For `G9.5`, You MUST record the mapped original endpoint and passing structural-equalizer digest for every
-  candidate commit. A contiguous group of temporary-fix commits MAY map to one candidate commit only when the
-  equalizer compares against the final original endpoint of that complete group.
 - You MUST run `tools/verify-design-authorization.sh` and `tools/verify-commit-scope.sh` before the
   milestone handoff.
 - An isolated worker MUST NOT push, merge, force-update a branch, or rewrite shared history. The coordinator
@@ -228,9 +196,8 @@ for G9.5. Resume each lane in its own original named session.
 - For `G9.5`, You MUST create three separate read-only worktrees under `/private/tmp`, pin all of them
   to the same exact `production_complete_ref`, and launch the three direct Claude CLI processes in
   parallel. You MUST NOT use API subagents because the execution contract requires direct CLI review.
-- You MUST NOT launch those G9.5 lanes against the original noisy G9 commit when the minimal-delta sweep
-  produced a different accepted candidate. The purpose of the sweep is to reduce duplicated inherited code
-  and blame churn before reviewers spend context on the implementation.
+- You MUST NOT create or select a rewritten candidate for G9.5 because the owner has chosen to review the
+  current branch tip without further Git rewriting.
 - The bounded migration/disposition prompt MUST independently reconstruct carried, dropped, refactored,
   unchanged, retired, and net-new responsibilities from
   `2fe4538aef16eafa098545e76545873335bf2d11`; reconcile trace, limbo, and register claims with live
@@ -347,9 +314,9 @@ fresh session named for `G5`.
 - production_complete_ref: exact G9 production checkpoint
 
 **Expected behavior:** Codex remains coordinator, launches the bounded migration/disposition, bounded
-test-evidence delta, and sole unbounded whole-design Claude lanes in parallel against the exact minimal-delta
-candidate, repairs verified findings, resumes affected lane sessions, updates the register, commits and pushes
-the candidate branch, supplies the guarded active-branch replacement command, and stops before G10.
+test-evidence delta, and sole unbounded whole-design Claude lanes in parallel against the exact current
+`stableAndScalableLiveReplay` tip, repairs verified findings through ordinary forward commits, resumes
+affected lane sessions, updates the register, commits and pushes the reviewed branch, and stops before G10.
 
 ### Proxy milestone
 

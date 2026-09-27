@@ -2,6 +2,10 @@
 
 ## Overview
 
+**Inactive:** the owner declined further history/blame rewriting on 2026-09-27. You MUST NOT run this SOP
+unless the owner gives a new explicit instruction to resume history rewriting, because G9.5 now reviews the
+ordinary `stableAndScalableLiveReplay` tip.
+
 Use this SOP after production implementation is complete and before G9.5 review. It first creates a
 behavior- and tree-preserving candidate commit stack that removes abandoned implementation churn, folds
 fixups into the commits they repair, and corrects DCO trailers. It then stops for owner approval. Only after

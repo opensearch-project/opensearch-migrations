@@ -1,3 +1,6 @@
+**Inactive as of 2026-09-27. Do not execute this task unless the owner explicitly reopens history
+rewriting. G9.5 no longer runs or depends on this sweep.**
+
 Perform the Plan A minimal-delta and history-reconstruction sweep.
 
 Read AGENTS.md completely before acting. Do not use Brazil or API subagents. Do not edit authoritative files under docs/captureAndReplay/.

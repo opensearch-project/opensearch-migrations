@@ -801,55 +801,22 @@ proof the implementation must not have invalidated. Also `captureAndReplayArchit
 for the ten system-level arguments. The obligation and required-test inventories to check against are the
 `Defined in` and `Required tests` columns of `replayerRebuildStatus.md`.
 
-The first G9.5 activity is the two-stage history preparation defined by
-`../tools/compress-history-then-minimize-blame.sop.md`. It first creates a byte-identical compressed candidate
-stack that folds abandoned implementation churn and fixups into coherent commits, preserves blame-sensitive
-carry/move commits, and corrects DCO trailers. It then stops for owner confirmation. Only after the owner
-approves the exact compressed candidate SHA does the task run the minimal-delta and history-reconstruction
-sweep defined by `../TrafficCapture/trafficReplayer/tools/minimizeBlameChangesTask.md`, while every retained
-source body and trace record still exists. The sweep replaces recreated inherited code
-with the narrowest design-correct adaptation of its predecessor and prepares a candidate commit stack with
-temporary fixes folded into the commits they repair. It does not change behavior to reduce a diff, preserve a
-legacy concept to improve blame, or force-update the active branch without owner approval.
-The sweep enumerates every surviving added line or replaced line range in every changed Java file in the
-repository, including replayer and proxy production code, tests, Java fixtures, and Java tooling, against one
-exact current upstream-main commit. Proxy Java is included only for source shaping and history preservation;
-this G9.5 activity does not implement PA work, change proxy behavior, or make proxy design or contract
-decisions. For each changed hunk, it asks whether an inherited method or coherent method slice in the same
-file, limbo, deleted rebuild code, another file, or history should have been its starting point. When so, it
-moves, copies, or promotes that predecessor into the design-correct live location before applying the narrow
-adaptation; a hunk combining multiple predecessors is split into coherent methods where needed to preserve
-each source. It does not inventory unchanged members.
-The diff is generated with rename and copy detection and supplies a completeness index, not proof that its
-added lines are net-new. Pinning means reconstructed Git ancestry and ordinary blame, not a trace comment.
-Baseline `2fe4538a` owns trace eligibility; current upstream main supplies the latest inherited code and
-history whose post-baseline drift must be preserved or explicitly dispositioned.
-
-The coordinator freezes one explicitly bounded original commit list and builds one isolated candidate tree
-from oldest to newest. Hunk provenance is computed once and reused; the full history is not rescanned for
-each commit in the approved compressed stack. After every candidate commit,
-`../tools/java-structural-equalizer.py compare-commit-pair` compares the
-repository-wide union of changed Java paths with the cumulative original endpoint represented by that commit
-before replay may continue. G9.5 does not pass `--root`; a narrowed comparison could omit proxy or another
-changed Java area. Syntactically invalid `.java` fixtures use an exact-content digest fallback rather than
-being omitted. The equalizer
-removes comments, normalizes tokens, and sorts order-insensitive imports, methods, uninitialized fields, and
-nested types while retaining order-sensitive initialization, enum, record, and method-body structure. A
-mismatch blocks the next commit. When several temporary-fix commits are folded into one candidate commit, the
-gate compares that candidate with the endpoint of the contiguous original range.
-
-After the candidate exists, the coordinator records its exact production-complete commit and launches three
-independent direct-Claude CLI, read-only review lanes in parallel. Every lane is pinned to that same minimized
-commit in its own read-only `/private/tmp` worktree and has its own fresh named session. The active branch is
-not force-updated while these reviews run. The sweep and the following reviews are activities inside G9.5,
-not additional milestones:
+G9.5 begins from the ordinary current tip of `stableAndScalableLiveReplay` after G9 completion. The
+coordinator records that exact production-complete commit and launches three
+independent direct-Claude CLI, read-only review lanes in parallel. Every lane is pinned to that same
+production-complete commit in its own read-only `/private/tmp` worktree and has its own fresh named session.
+G9.5 does not squash,
+reconstruct, minimize, or otherwise rewrite Git history. History and ordinary blame may be inspected as
+evidence for responsibility disposition, but attribution quality is not a G9.5 exit criterion and does not
+authorize a history rewrite. The following reviews are lanes inside G9.5, not additional milestones:
 
 1. **Bounded migration/disposition audit.** Independently reconstruct responsibility disposition from
    baseline `2fe4538aef16eafa098545e76545873335bf2d11`, rather than accepting trace comments or the register as
    proof. Classify carried, dropped, refactored, unchanged, retired, and genuinely net-new responsibilities;
    reconcile the reconstruction with every relevant `REBUILD-TRACE`, `REBUILD-LIMBO`, and status row; trace
    live reachability with limbo omitted; and inspect move/copy history plus ordinary and copy-diagnostic blame
-   for lost attribution, duplicated inherited implementations, missing dispositions, or misleading mappings.
+   only as supporting evidence for duplicated inherited implementations, missing dispositions, or misleading
+   mappings. Report attribution-only concerns as non-gating observations without rewriting history.
 2. **Bounded test-evidence delta audit.** Compare the production-complete test assertions and behaviors with
    both baseline `2fe4538aef16eafa098545e76545873335bf2d11` and the exact current upstream-main commit. Map the
    finite required-test cases in the cited designs and the live-register test obligations to executable
@@ -867,16 +834,13 @@ invalidates every lane whose scope it touches. Before G9.5 exits, all three fina
 exact corrected production commit; resume an otherwise stale lane at least far enough to verify that the
 intervening production diff does not affect its bounded scope.
 
-**Exit:** the reviewed minimal-delta candidate and old-to-new commit mapping are recorded; ordinary blame
-retains inherited attribution wherever the design permits; the three lane reports and dispositions are
-recorded; every verified design-conformance defect is closed; non-conformance findings are triaged once;
-every silence or contract decision is escalated; and all three final verdicts are pinned to one identical
-production-complete candidate. The sweep report accounts for every surviving added or replaced Java hunk
-repository-wide, names its inherited starting point or explicit net-new disposition, and accounts for every applicable
-post-baseline upstream-main change. Every candidate commit has a passing structural-equalizer result against
-its mapped original cumulative endpoint. The coordinator pushes the candidate branch and supplies the exact
-guarded replacement command, but only the owner may approve replacing the active branch. G10 cannot begin
-until the reviewed candidate is accepted.
+**Exit:** the three lane reports and dispositions are recorded; every verified design-conformance defect is
+closed; non-conformance findings are triaged once; every silence or contract decision is escalated; and all
+three final verdicts are pinned to one identical production-complete commit on
+`stableAndScalableLiveReplay`. Corrections are ordinary forward commits with focused evidence and resumed
+affected review lanes. The coordinator pushes the reviewed branch through the normal guarded workflow.
+No history rewrite, replacement branch, structural-equalizer replay, or force-update is part of G9.5.
+G10 cannot begin until the reviewed production commit is accepted.
 
 ### G10 — The fuse
 
