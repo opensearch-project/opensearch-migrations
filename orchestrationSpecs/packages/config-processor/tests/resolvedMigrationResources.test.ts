@@ -255,6 +255,22 @@ describe("resolved migration resources", () => {
         expect(snapshotMigration.parameters.metadataMigrationTransformerConfigFile).toBe("");
     });
 
+    it("preserves explicit metrics collector opt-out through transformed resources", async () => {
+        const config = sampleConfig();
+        config.traffic!.proxies!["source-proxy"].proxyConfig.otelMetricsCollectorEndpoint = "";
+        config.traffic!.replayers!.replay.replayerConfig!.otelMetricsCollectorEndpoint = "";
+
+        const {workflowConfig, resource} = await transformAndResolve(config);
+
+        expect(workflowConfig.proxies[0].proxyConfig.otelMetricsCollectorEndpoint).toBe("");
+        expect(workflowConfig.trafficReplays[0].replayerConfig.otelMetricsCollectorEndpoint).toBe("");
+        expect(resource("CaptureProxy", "source-proxy").parameters.otelMetricsCollectorEndpoint).toBe("");
+        expect(
+            resource("TrafficReplay", "source-proxy-target-replay")
+                .parameters.otelMetricsCollectorEndpoint
+        ).toBe("");
+    });
+
     it("omits capture proxy workflow-only file source fields from generated custom resources", async () => {
         const config = sampleConfig();
         config.traffic!.proxies!["source-proxy"].proxyConfig.tls = {

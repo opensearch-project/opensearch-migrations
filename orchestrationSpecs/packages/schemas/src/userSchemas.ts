@@ -315,6 +315,7 @@ function validatePipelineRawConfigConflict(
 const blankStringAsDisabled = (value: unknown) =>
     typeof value === "string" && value.trim().length === 0 ? "" : value;
 
+const OPTIONAL_ENDPOINT_VALUE = z.union([z.literal(""), z.string()]);
 const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.string()]);
 
 const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
@@ -328,7 +329,7 @@ const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDP
 const optionalEndpointWithDefault = (defaultValue: string) =>
     z.preprocess(
         (value) => value === undefined ? defaultValue : blankStringAsDisabled(value),
-        OPTIONAL_ENDPOINT.optional()
+        OPTIONAL_ENDPOINT_VALUE.optional()
     ).meta({default: defaultValue});
 
 const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
