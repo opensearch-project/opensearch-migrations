@@ -50,6 +50,8 @@ import lombok.extern.slf4j.Slf4j;
 public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsumer<TransformedOutputAndResult<R>> {
     public static final int HTTP_MESSAGE_NUM_SEGMENTS = 2;
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
+    private static final String FILTERED_REQUEST_FUTURE_LABEL =
+        "HttpJsonTransformingConsumer.filteredRequest";
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
     private final IReplayContexts.IRequestTransformationContext transformationContext;
@@ -134,7 +136,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             transformationContext.onTransformSkip();
             return TextTrackedFuture.completedFuture(
                 new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped()),
-                () -> "HttpJsonTransformingConsumer.filteredRequest"
+                () -> FILTERED_REQUEST_FUTURE_LABEL
             );
         } catch (Exception e) {
             if (hasRequestFilteredCause(e)) {
@@ -144,7 +146,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 transformationContext.onTransformSkip();
                 return TextTrackedFuture.completedFuture(
                     new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped()),
-                    () -> "HttpJsonTransformingConsumer.filteredRequest"
+                    () -> FILTERED_REQUEST_FUTURE_LABEL
                 );
             }
             this.transformationContext.addCaughtException(e);
@@ -229,7 +231,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             new NettyJsonToByteBufHandler(Collections.unmodifiableList(chunkSizes))
         );
         ch.writeInbound(signedHeaders);
-        ch.writeInbound(io.netty.handler.codec.http.LastHttpContent.EMPTY_LAST_CONTENT);
         ch.finish();
 
         var packets = new ByteBufList();
@@ -284,7 +285,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                             null,
                             HttpRequestTransformationStatus.skipped()
                         ),
-                        () -> "HttpJsonTransformingConsumer.filteredRequest"
+                        () -> FILTERED_REQUEST_FUTURE_LABEL
                     );
                 }
                 transformationContext.onTransformFailure();

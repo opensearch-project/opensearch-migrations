@@ -33,6 +33,7 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
     private final Supplier<String> kafkaUriSupplier;
     private final List<String> extraArgs;
     private final CompletableFuture<Integer> fatalExitCode = new CompletableFuture<>();
+    private final CompletableFuture<Integer> listeningPortReady = new CompletableFuture<>();
     private final AtomicBoolean stopRequested = new AtomicBoolean();
     private Integer listeningPort;
     private Thread serverThread;
@@ -68,6 +69,7 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
     @Override
     public void start() {
         this.listeningPort = PortFinder.findOpenPort();
+        listeningPortReady.complete(listeningPort);
         serverThread = new Thread(() -> {
             try {
                 List<String> argsList = new ArrayList<>();
@@ -111,6 +113,14 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
 
         serverThread.start();
         new HttpWaitStrategy().forPort(listeningPort).withStartupTimeout(TIMEOUT_DURATION).waitUntilReady(this);
+    }
+
+    public int waitForListeningPort(Duration timeout) throws InterruptedException, TimeoutException {
+        try {
+            return listeningPortReady.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new IllegalStateException("Listening-port observation failed", e.getCause());
+        }
     }
 
     @Override

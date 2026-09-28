@@ -13,10 +13,33 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
+import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
+import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Timestamp;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -33,6 +56,109 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("isolatedTest")
 class KafkaTopicDumperEvidenceTest {
+
+    @Test
+    void protocolViolationIsPrimaryWhenOwnerFailureIsAlsoPending() {
+        var generation = new PartitionGenerationId(new TopicPartition("traffic", 0), 0);
+        var demand = new KafkaTopicDumper.DumpBatchDemand(Set.of(generation));
+        var ownerFailure = new AtomicReference<Error>();
+
+        try (var telemetry = new InMemoryInstrumentationBundle(false, false)) {
+            var sourceInputs = new KafkaSourceInputQueue(
+                new WakeupController(
+                    () -> {},
+                    new RootReplayerContext(telemetry.openTelemetrySdk)
+                )
+            );
+            Assertions.assertEquals(
+                new PartitionBatchRequestId(generation, 0),
+                Assertions.assertTimeoutPreemptively(
+                    Duration.ofSeconds(5),
+                    () -> demand.awaitNextRequestId(generation, sourceInputs, ownerFailure)
+                )
+            );
+
+            var internalFailure = new Error("simultaneous intake failure");
+            ownerFailure.set(internalFailure);
+            var violatingRecord = new KafkaRecordId(generation, 42);
+            sourceInputs.submit(new KafkaSourceInput.CaptureProtocolViolationDetected(
+                violatingRecord,
+                "payload is absent"
+            ));
+
+            var thrown = Assertions.assertThrows(
+                CaptureRecordProtocolViolationException.class,
+                () -> demand.awaitNextRequestId(generation, sourceInputs, ownerFailure)
+            );
+            Assertions.assertTrue(thrown.getMessage().contains(violatingRecord.toString()));
+            Assertions.assertArrayEquals(new Throwable[] { internalFailure }, thrown.getSuppressed());
+        }
+    }
+
+    @Test
+    void successorBatchWaitsForTheExactPerPartitionDemandIdentity() throws Exception {
+        var first = new PartitionGenerationId(new TopicPartition("traffic", 0), 0);
+        var second = new PartitionGenerationId(new TopicPartition("traffic", 1), 0);
+        var demand = new KafkaTopicDumper.DumpBatchDemand(Set.of(first, second));
+        var ownerFailure = new AtomicReference<Error>();
+
+        try (var telemetry = new InMemoryInstrumentationBundle(false, false)) {
+            var executor = Executors.newSingleThreadExecutor();
+            var sourceInputs = new KafkaSourceInputQueue(
+                new WakeupController(
+                    () -> {},
+                    new RootReplayerContext(telemetry.openTelemetrySdk)
+                )
+            );
+
+            Assertions.assertEquals(
+                new PartitionBatchRequestId(first, 0),
+                Assertions.assertTimeoutPreemptively(
+                    Duration.ofSeconds(5),
+                    () -> demand.awaitNextRequestId(first, sourceInputs, ownerFailure)
+                )
+            );
+            Assertions.assertEquals(
+                new PartitionBatchRequestId(second, 0),
+                Assertions.assertTimeoutPreemptively(
+                    Duration.ofSeconds(5),
+                    () -> demand.awaitNextRequestId(second, sourceInputs, ownerFailure)
+                )
+            );
+
+            try {
+                var waiterStarted = new CountDownLatch(1);
+                var firstSuccessor = executor.submit(() -> {
+                    waiterStarted.countDown();
+                    return demand.awaitNextRequestId(first, sourceInputs, ownerFailure);
+                });
+                Assertions.assertTrue(waiterStarted.await(5, TimeUnit.SECONDS));
+
+                var secondRequest = new PartitionBatchRequestId(second, 1);
+                sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(secondRequest));
+                Assertions.assertThrows(
+                    TimeoutException.class,
+                    () -> firstSuccessor.get(100, TimeUnit.MILLISECONDS),
+                    "another partition's demand must not release this partition"
+                );
+
+                var firstRequest = new PartitionBatchRequestId(first, 1);
+                sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(firstRequest));
+                Assertions.assertEquals(firstRequest, firstSuccessor.get(5, TimeUnit.SECONDS));
+                Assertions.assertEquals(
+                    secondRequest,
+                    Assertions.assertTimeoutPreemptively(
+                        Duration.ofSeconds(5),
+                        () -> demand.awaitNextRequestId(second, sourceInputs, ownerFailure)
+                    ),
+                    "the other partition's exact request must remain pending"
+                );
+            } finally {
+                executor.shutdownNow();
+                Assertions.assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            }
+        }
+    }
 
     @Test
     void dumpRawRendersEveryEnvelopeCaseFromARealProxyTopic() throws Exception {
@@ -140,6 +266,88 @@ class KafkaTopicDumperEvidenceTest {
                 );
             }
         }
+    }
+
+    /**
+     * HTTP dumping must consume the explicit demand entitlement before delivering a successor batch.
+     *
+     * <p>More than one Kafka poll is forced on each partition with capability probes, which create no
+     * connection state. The former dumper synthesized successor batch IDs and raced ahead of replay intake;
+     * the second batch then failed because no matching explicit request had been observed.
+     */
+    @Test
+    void dumpBothWaitsForExplicitDemandAcrossPartitionsAndPolls() throws Exception {
+        try (var supply = ProxyWrittenTopic.start("g10-dump-demand", 2)) {
+            Assertions.assertEquals(200, supply.sendGet("/demand-one"));
+            Assertions.assertEquals(200, supply.sendGet("/demand-two"));
+            Assertions.assertFalse(supply.readTrafficStreamValues(2).isEmpty());
+            var probe = supply.readAllRecordValues().stream()
+                .filter(value -> {
+                    try {
+                        return CaptureRecord.parseFrom(value).hasCaptureCapabilityProbe();
+                    } catch (Exception notAnEnvelope) {
+                        return false;
+                    }
+                })
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("the proxy startup probe was not durable"));
+            // Kafka's default max.poll.records is 500. More than two polls ensures the request-bearing
+            // bootstrap can close ordinary request supply before a later probe-only successor batch arrives.
+            // Without the dump-mode ConnectionRequestFinished lifecycle input, intake issues no successor
+            // demand and this test waits rather than completing.
+            var probes = java.util.Collections.nCopies(1_200, probe);
+            for (var partition = 0; partition < 2; partition++) {
+                var demandClosingRecords = new java.util.ArrayList<byte[]>();
+                for (var request = 0; request < 2; request++) {
+                    demandClosingRecords.add(completeTransaction(partition, request));
+                }
+                demandClosingRecords.addAll(probes);
+                supply.produceDirectly(partition, demandClosingRecords);
+            }
+            var expected = supply.readRecordMetadata();
+
+            var output = captureStdout(() -> TrafficReplayer.main(new String[] {
+                "--mode", "dump-both",
+                "--kafka-traffic-brokers", supply.brokers(),
+                "--kafka-traffic-topic", supply.topic()
+            }));
+
+            var withoutSpacing = output.replaceAll("\\s", "");
+            for (var location : expected) {
+                var rendered = ("p:" + location.partition() + " o:" + location.offset())
+                    .replaceAll("\\s", "");
+                Assertions.assertTrue(
+                    withoutSpacing.contains(rendered),
+                    () -> "dump-both omitted " + location + " after crossing a poll boundary"
+                );
+            }
+        }
+    }
+
+    private static byte[] completeTransaction(int partition, int request) {
+        var path = "/partition-" + partition + "/request-" + request;
+        var stream = TrafficStream.newBuilder()
+            .setNodeId("synthetic-dump-demand-" + partition)
+            .setConnectionId("request-" + request)
+            .setNumber(0)
+            .addSubStream(observation(1).setRead(ReadObservation.newBuilder().setData(
+                ByteString.copyFromUtf8("GET " + path + " HTTP/1.1\r\nHost: source\r\n\r\n")
+            )))
+            .addSubStream(observation(2).setEndOfMessageIndicator(
+                EndOfMessageIndication.getDefaultInstance()
+            ))
+            .addSubStream(observation(3).setWrite(WriteObservation.newBuilder().setData(
+                ByteString.copyFromUtf8("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+            )))
+            .addSubStream(observation(4).setClose(CloseObservation.getDefaultInstance()))
+            .build();
+        return CaptureRecord.newBuilder().setTrafficStream(stream).build().toByteArray();
+    }
+
+    private static TrafficObservation.Builder observation(long sequence) {
+        return TrafficObservation.newBuilder()
+            .setTs(Timestamp.newBuilder().setSeconds(1_700_000_000L + sequence))
+            .setConnectionObservationSequence(sequence);
     }
 
     /**

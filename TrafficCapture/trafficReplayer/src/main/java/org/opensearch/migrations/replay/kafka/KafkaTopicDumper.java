@@ -18,6 +18,7 @@ import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
+import org.opensearch.migrations.replay.intake.RequestLifecycleInput;
 import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
@@ -128,6 +129,7 @@ public class KafkaTopicDumper {
      *
      * @param emitRaw also print the per-record raw line, which is what {@code dump-both} is
      */
+    @SuppressWarnings("java:S1181") // Preserve Error while the intake owner is stopped and awaited.
     private void runHttpFromKafka(
         KafkaConsumer<String, byte[]> consumer,
         java.util.List<TopicPartition> partitions,
@@ -137,14 +139,85 @@ public class KafkaTopicDumper {
         boolean emitRaw,
         RootReplayerContext rootContext
     ) throws Exception {
-        var dumper = new HttpTransactionDumper(System.out, "msg ");
         var wakeupController = new WakeupController(consumer::wakeup, rootContext);
         var sourceInputs = new KafkaSourceInputQueue(
             wakeupController
         );
         var intakeInputs = new ReplayIntakeInputQueue();
+        var dumper = new HttpTransactionDumper(
+            System.out,
+            "msg ",
+            requestId -> submitRequired(
+                intakeInputs,
+                new RequestLifecycleInput.ConnectionRequestFinished(
+                    requestId.connectionProcessingId().generation(),
+                    requestId
+                )
+            )
+        );
         var ownerFailure = new AtomicReference<Error>();
-        var intake = new ReplayIntakeOwner(
+        var intake = createReplayIntake(
+            consumer,
+            emitRaw,
+            previewBytesRead,
+            previewBytesWrite,
+            rootContext,
+            dumper,
+            sourceInputs,
+            intakeInputs,
+            ownerFailure
+        );
+        intake.start();
+
+        Throwable primaryFailure = null;
+        DumpBatchDemand batchDemand;
+        try {
+            batchDemand = runHttpDumpLoop(
+                consumer,
+                partitions,
+                endOffsets,
+                endOffset,
+                endTime,
+                dumper,
+                wakeupController,
+                sourceInputs,
+                intakeInputs,
+                ownerFailure
+            );
+            awaitSubmittedBatchesHandled(intakeInputs);
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            stopAndAwaitReplayIntake(intakeInputs, intake, primaryFailure);
+        }
+        failOnDumpFailure(ownerFailure, sourceInputs, batchDemand);
+    }
+
+    private static void awaitSubmittedBatchesHandled(
+        ReplayIntakeInputQueue intakeInputs
+    ) throws Exception {
+        intakeInputs.awaitPriorInputsHandled().toCompletableFuture().get(30, TimeUnit.SECONDS);
+    }
+
+    private ReplayIntakeOwner createReplayIntake(
+        KafkaConsumer<String, byte[]> consumer,
+        boolean emitRaw,
+        int previewBytesRead,
+        int previewBytesWrite,
+        RootReplayerContext rootContext,
+        HttpTransactionDumper dumper,
+        KafkaSourceInputQueue sourceInputs,
+        ReplayIntakeInputQueue intakeInputs,
+        AtomicReference<Error> ownerFailure
+    ) {
+        ReplayIntakeOwner.RecordObserver recordObserver = applicationRecord -> emitRawRecordIfRequested(
+            emitRaw,
+            applicationRecord,
+            previewBytesRead,
+            previewBytesWrite
+        );
+        return new ReplayIntakeOwner(
             intakeInputs,
             sourceInputs,
             dumper,
@@ -153,109 +226,275 @@ public class KafkaTopicDumper {
                 consumer.wakeup();
             },
             rootContext.replayIntakeMetrics,
-            record -> {
-                if (emitRaw && record.envelope().getPayloadCase() != CaptureRecord.PayloadCase.PAYLOAD_NOT_SET) {
-                    System.out.println(TrafficStreamDumper.format(
-                        record.envelope(),
-                        record.recordId().generation().topicPartition().partition(),
-                        record.recordId().offset(),
-                        previewBytesRead,
-                        previewBytesWrite,
-                        baseEpoch
-                    ));
-                }
-            }
+            recordObserver
         );
-        intake.start();
+    }
 
-        Throwable primaryFailure = null;
-        try {
-            // One local generation per assigned partition, allocated once: a dump never rebalances, so a
-            // partition is read by exactly one generation from start to end.
-            var generations = new LinkedHashMap<TopicPartition, PartitionGenerationId>();
-            for (var partition : partitions) {
-                var generation = new PartitionGenerationId(partition, 0);
-                generations.put(partition, generation);
-                submitRequired(intakeInputs, new ReplayIntakeInput.PartitionGenerationAssigned(generation));
-            }
+    private void emitRawRecordIfRequested(
+        boolean emitRaw,
+        ApplicationKafkaRecord applicationRecord,
+        int previewBytesRead,
+        int previewBytesWrite
+    ) {
+        if (!emitRaw
+            || applicationRecord.envelope().getPayloadCase() == CaptureRecord.PayloadCase.PAYLOAD_NOT_SET) {
+            return;
+        }
+        System.out.println(TrafficStreamDumper.format(
+            applicationRecord.envelope(),
+            applicationRecord.recordId().generation().topicPartition().partition(),
+            applicationRecord.recordId().offset(),
+            previewBytesRead,
+            previewBytesWrite,
+            baseEpoch
+        ));
+    }
 
-            var nextBatchSequence = new LinkedHashMap<TopicPartition, Long>();
-            partitions.forEach(partition -> nextBatchSequence.put(partition, 0L));
-            var finishedPartitions = new HashSet<TopicPartition>();
-            while (finishedPartitions.size() < endOffsets.size() && !isAtEnd(consumer, endOffsets)) {
-                failOnOwnerFailure(ownerFailure);
-                failOnProtocolViolation(sourceInputs);
-                var polled = pollForDump(consumer, sourceInputs, wakeupController);
-                failOnOwnerFailure(ownerFailure);
-                failOnProtocolViolation(sourceInputs);
-                var byPartition = new LinkedHashMap<TopicPartition, List<ApplicationKafkaRecord>>();
-                for (var rec : polled) {
-                    var recordPartition = new TopicPartition(rec.topic(), rec.partition());
-                    if (finishedPartitions.contains(recordPartition)) {
-                        continue;
-                    }
-                    if (pastEnd(rec, endOffset, endTime, endOffsets)) {
-                        finishedPartitions.add(recordPartition);
-                        consumer.pause(Set.of(recordPartition));
-                        continue;
-                    }
-                    CaptureRecord captureRecord;
-                    try {
-                        captureRecord = CaptureRecord.parseFrom(rec.value());
-                    } catch (InvalidProtocolBufferException e) {
-                        throw protocolViolation(rec, e);
-                    }
-                    if (captureRecord.hasTrafficStream()) {
-                        dumper.setBaseEpochSeconds(getBaseEpoch(captureRecord.getTrafficStream()));
-                    }
-                    byPartition.computeIfAbsent(recordPartition, ignored -> new ArrayList<>())
-                        .add(new ApplicationKafkaRecord(
-                            new KafkaRecordId(generations.get(recordPartition), rec.offset()),
-                            rec.timestamp(),
-                            rec.serializedValueSize() < 0 ? 0 : rec.serializedValueSize(),
-                            captureRecord
-                        ));
-                }
-                for (var entry : byPartition.entrySet()) {
-                    var sequence = nextBatchSequence.compute(
-                        entry.getKey(),
-                        (ignored, next) -> {
-                            if (next == null) {
-                                throw new IllegalStateException("no generation for " + entry.getKey());
-                            }
-                            return next + 1;
-                        }
-                    ) - 1;
-                    submitRequired(
-                        intakeInputs,
-                        new ReplayIntakeInput.PartitionRecordBatch(
-                            new PartitionBatchRequestId(generations.get(entry.getKey()), sequence),
-                            entry.getValue()
-                        )
-                    );
-                }
-            }
-        } catch (Throwable failure) {
-            primaryFailure = failure;
-            throw failure;
-        } finally {
-            intakeInputs.requestStopAfterDraining();
-            try {
-                intake.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
-            } catch (Exception shutdownFailure) {
-                if (primaryFailure != null) {
-                    primaryFailure.addSuppressed(shutdownFailure);
+    private DumpBatchDemand runHttpDumpLoop(
+        KafkaConsumer<String, byte[]> consumer,
+        List<TopicPartition> partitions,
+        Map<TopicPartition, Long> endOffsets,
+        Long endOffset,
+        Long endTime,
+        HttpTransactionDumper dumper,
+        WakeupController wakeupController,
+        KafkaSourceInputQueue sourceInputs,
+        ReplayIntakeInputQueue intakeInputs,
+        AtomicReference<Error> ownerFailure
+    ) {
+        // One local generation per assigned partition, allocated once: a dump never rebalances, so a
+        // partition is read by exactly one generation from start to end.
+        var generations = initializeGenerations(partitions, intakeInputs);
+        var batchDemand = new DumpBatchDemand(generations.values());
+        var finishedPartitions = new HashSet<TopicPartition>();
+        while (finishedPartitions.size() < endOffsets.size() && !isAtEnd(consumer, endOffsets)) {
+            failOnDumpFailure(ownerFailure, sourceInputs, batchDemand);
+            var polled = pollForDump(consumer, sourceInputs, wakeupController);
+            failOnDumpFailure(ownerFailure, sourceInputs, batchDemand);
+            var byPartition = collectHttpRecords(
+                consumer,
+                polled,
+                endOffsets,
+                endOffset,
+                endTime,
+                dumper,
+                generations,
+                finishedPartitions
+            );
+            submitHttpBatches(
+                intakeInputs,
+                generations,
+                batchDemand,
+                sourceInputs,
+                ownerFailure,
+                byPartition
+            );
+        }
+        failOnDumpFailure(ownerFailure, sourceInputs, batchDemand);
+        return batchDemand;
+    }
+
+    private static Map<TopicPartition, PartitionGenerationId> initializeGenerations(
+        List<TopicPartition> partitions,
+        ReplayIntakeInputQueue intakeInputs
+    ) {
+        var generations = new LinkedHashMap<TopicPartition, PartitionGenerationId>();
+        for (var partition : partitions) {
+            var generation = new PartitionGenerationId(partition, 0);
+            generations.put(partition, generation);
+            submitRequired(intakeInputs, new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+        }
+        return generations;
+    }
+
+    private Map<TopicPartition, List<ApplicationKafkaRecord>> collectHttpRecords(
+        KafkaConsumer<String, byte[]> consumer,
+        ConsumerRecords<String, byte[]> polled,
+        Map<TopicPartition, Long> endOffsets,
+        Long endOffset,
+        Long endTime,
+        HttpTransactionDumper dumper,
+        Map<TopicPartition, PartitionGenerationId> generations,
+        Set<TopicPartition> finishedPartitions
+    ) {
+        var byPartition = new LinkedHashMap<TopicPartition, List<ApplicationKafkaRecord>>();
+        for (var consumerRecord : polled) {
+            var recordPartition = new TopicPartition(consumerRecord.topic(), consumerRecord.partition());
+            if (!finishedPartitions.contains(recordPartition)) {
+                if (pastEnd(consumerRecord, endOffset, endTime, endOffsets)) {
+                    finishedPartitions.add(recordPartition);
+                    consumer.pause(Set.of(recordPartition));
                 } else {
-                    throw shutdownFailure;
+                    addHttpRecord(byPartition, generations, recordPartition, consumerRecord, dumper);
                 }
             }
         }
-        failOnOwnerFailure(ownerFailure);
-        failOnProtocolViolation(sourceInputs);
+        return byPartition;
     }
 
-    private static void failOnOwnerFailure(AtomicReference<Error> ownerFailure) {
+    private void addHttpRecord(
+        Map<TopicPartition, List<ApplicationKafkaRecord>> byPartition,
+        Map<TopicPartition, PartitionGenerationId> generations,
+        TopicPartition recordPartition,
+        ConsumerRecord<String, byte[]> consumerRecord,
+        HttpTransactionDumper dumper
+    ) {
+        var captureRecord = parseCaptureRecord(consumerRecord);
+        if (captureRecord.hasTrafficStream()) {
+            dumper.setBaseEpochSeconds(getBaseEpoch(captureRecord.getTrafficStream()));
+        }
+        byPartition.computeIfAbsent(recordPartition, ignored -> new ArrayList<>())
+            .add(new ApplicationKafkaRecord(
+                new KafkaRecordId(generations.get(recordPartition), consumerRecord.offset()),
+                consumerRecord.timestamp(),
+                consumerRecord.serializedValueSize() < 0 ? 0 : consumerRecord.serializedValueSize(),
+                captureRecord
+            ));
+    }
+
+    private static CaptureRecord parseCaptureRecord(ConsumerRecord<String, byte[]> consumerRecord) {
+        try {
+            return CaptureRecord.parseFrom(consumerRecord.value());
+        } catch (InvalidProtocolBufferException e) {
+            throw protocolViolation(consumerRecord, e);
+        }
+    }
+
+    private static void submitHttpBatches(
+        ReplayIntakeInputQueue intakeInputs,
+        Map<TopicPartition, PartitionGenerationId> generations,
+        DumpBatchDemand batchDemand,
+        KafkaSourceInputQueue sourceInputs,
+        AtomicReference<Error> ownerFailure,
+        Map<TopicPartition, List<ApplicationKafkaRecord>> byPartition
+    ) {
+        for (var entry : byPartition.entrySet()) {
+            var partition = entry.getKey();
+            var generation = generations.get(partition);
+            if (generation == null) {
+                throw new IllegalStateException("no generation for " + partition);
+            }
+            submitRequired(
+                intakeInputs,
+                new ReplayIntakeInput.PartitionRecordBatch(
+                    batchDemand.awaitNextRequestId(generation, sourceInputs, ownerFailure),
+                    entry.getValue()
+                )
+            );
+        }
+    }
+
+    /**
+     * Adapts dump-mode polling to replay intake's real batch-demand protocol.
+     *
+     * <p>The first nonempty poll for a partition consumes its source-local bootstrap entitlement. Every
+     * successor waits for the exact request identity emitted by replay intake; the dumper never synthesizes
+     * an explicit identity or weakens intake's equality check. Requests for other partitions are retained
+     * until that partition next has a nonempty batch.
+     */
+    static final class DumpBatchDemand {
+        private static final long OWNER_FAILURE_CHECK_NANOS = TimeUnit.SECONDS.toNanos(1);
+
+        private final Set<PartitionGenerationId> bootstrapEntitlements = new HashSet<>();
+        private final Map<PartitionGenerationId, PartitionBatchRequestId> explicitRequests =
+            new LinkedHashMap<>();
+
+        DumpBatchDemand(Iterable<PartitionGenerationId> generations) {
+            generations.forEach(bootstrapEntitlements::add);
+        }
+
+        PartitionBatchRequestId awaitNextRequestId(
+            PartitionGenerationId generation,
+            KafkaSourceInputQueue sourceInputs,
+            AtomicReference<Error> ownerFailure
+        ) {
+            if (bootstrapEntitlements.remove(generation)) {
+                return new PartitionBatchRequestId(generation, 0);
+            }
+            while (true) {
+                failOnDumpFailure(ownerFailure, sourceInputs, this);
+                var requestId = explicitRequests.remove(generation);
+                if (requestId != null) {
+                    return requestId;
+                }
+                try {
+                    sourceInputs.awaitInput(OWNER_FAILURE_CHECK_NANOS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                        "Interrupted while waiting for replay-intake batch demand for " + generation,
+                        e
+                    );
+                }
+            }
+        }
+
+        void drain(KafkaSourceInputQueue sourceInputs) {
+            sourceInputs.drain().forEach(this::accept);
+        }
+
+        private void accept(KafkaSourceInput input) {
+            switch (input) {
+                case KafkaSourceInput.RequestNextPartitionBatch request -> {
+                    var previous = explicitRequests.putIfAbsent(request.generation(), request.requestId());
+                    if (previous != null) {
+                        throw new IllegalStateException(
+                            "Replay intake issued overlapping dump batch requests "
+                                + previous + " and " + request.requestId()
+                        );
+                    }
+                }
+                case KafkaSourceInput.RecordProcessingFinished ignored -> {
+                    // A dump has no commit authority. Completion is terminal bookkeeping to discard.
+                }
+                case KafkaSourceInput.CaptureProtocolViolationDetected violation ->
+                    throw new CaptureRecordProtocolViolationException(
+                        "Capture protocol violation at "
+                            + violation.recordId() + ": " + violation.diagnostic()
+                    );
+                case KafkaSourceInput.GenerationCleanupFinished cleanup ->
+                    throw new IllegalStateException(
+                        "Replay intake unexpectedly cleaned dump generation " + cleanup.generation()
+                    );
+            }
+        }
+    }
+
+    private static void stopAndAwaitReplayIntake(
+        ReplayIntakeInputQueue intakeInputs,
+        ReplayIntakeOwner intake,
+        Throwable primaryFailure
+    ) throws Exception {
+        intakeInputs.requestStopAfterDraining();
+        try {
+            intake.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        } catch (Exception shutdownFailure) {
+            if (primaryFailure != null) {
+                primaryFailure.addSuppressed(shutdownFailure);
+            } else {
+                throw shutdownFailure;
+            }
+        }
+    }
+
+    private static void failOnDumpFailure(
+        AtomicReference<Error> ownerFailure,
+        KafkaSourceInputQueue sourceInputs,
+        DumpBatchDemand batchDemand
+    ) {
+        CaptureRecordProtocolViolationException protocolViolation = null;
+        try {
+            batchDemand.drain(sourceInputs);
+        } catch (CaptureRecordProtocolViolationException violation) {
+            protocolViolation = violation;
+        }
         var failure = ownerFailure.get();
+        if (protocolViolation != null) {
+            if (failure != null) {
+                protocolViolation.addSuppressed(failure);
+            }
+            throw protocolViolation;
+        }
         if (failure != null) {
             throw failure;
         }
@@ -283,23 +522,6 @@ public class KafkaTopicDumper {
         }
     }
 
-    /**
-     * Fails a dump on anything intake reported as invalid capture input and discards record completions.
-     *
-     * <p>Record completions are discarded deliberately: a dump holds no commit authority, so completion is the
-     * one message it has nothing to do with. Draining rather than ignoring matters because the queue would
-     * otherwise grow by one entry per record for the length of the topic.
-     */
-    private static void failOnProtocolViolation(KafkaSourceInputQueue sourceInputs) {
-        for (var input : sourceInputs.drain()) {
-            if (input instanceof KafkaSourceInput.CaptureProtocolViolationDetected violation) {
-                throw new CaptureRecordProtocolViolationException(
-                    "Capture protocol violation at " + violation.recordId() + ": " + violation.diagnostic()
-                );
-            }
-        }
-    }
-
     private static void submitRequired(ReplayIntakeInputQueue inputQueue, ReplayIntakeInput input) {
         if (!inputQueue.submit(input)) {
             throw new IllegalStateException(
@@ -321,34 +543,53 @@ public class KafkaTopicDumper {
         var finishedPartitions = new HashSet<TopicPartition>();
         while (finishedPartitions.size() < endOffsets.size() && !isAtEnd(consumer, endOffsets)) {
             var polled = consumer.poll(Duration.ofSeconds(2));
-            for (var rec : polled) {
-                var recordPartition = new TopicPartition(rec.topic(), rec.partition());
-                if (finishedPartitions.contains(recordPartition)) {
-                    continue;
-                }
-                if (pastEnd(rec, endOffset, endTime, endOffsets)) {
-                    finishedPartitions.add(recordPartition);
-                    consumer.pause(Set.of(recordPartition));
-                    continue;
-                }
-                try {
-                    var captureRecord = CaptureRecord.parseFrom(rec.value());
-                    if (captureRecord.hasTrafficStream()) {
-                        getBaseEpoch(captureRecord.getTrafficStream());
-                    }
-                    System.out.println(TrafficStreamDumper.format(
-                        captureRecord,
-                        rec.partition(),
-                        rec.offset(),
+            for (var consumerRecord : polled) {
+                var recordPartition = new TopicPartition(consumerRecord.topic(), consumerRecord.partition());
+                if (!finishedPartitions.contains(recordPartition)) {
+                    processRawRecord(
+                        consumer,
+                        consumerRecord,
+                        recordPartition,
+                        endOffsets,
+                        endOffset,
+                        endTime,
                         previewBytesRead,
                         previewBytesWrite,
-                        baseEpoch
-                    ));
-                } catch (InvalidProtocolBufferException e) {
-                    throw protocolViolation(rec, e);
+                        finishedPartitions
+                    );
                 }
             }
         }
+    }
+
+    private void processRawRecord(
+        KafkaConsumer<String, byte[]> consumer,
+        ConsumerRecord<String, byte[]> consumerRecord,
+        TopicPartition recordPartition,
+        Map<TopicPartition, Long> endOffsets,
+        Long endOffset,
+        Long endTime,
+        int previewBytesRead,
+        int previewBytesWrite,
+        Set<TopicPartition> finishedPartitions
+    ) {
+        if (pastEnd(consumerRecord, endOffset, endTime, endOffsets)) {
+            finishedPartitions.add(recordPartition);
+            consumer.pause(Set.of(recordPartition));
+            return;
+        }
+        var captureRecord = parseCaptureRecord(consumerRecord);
+        if (captureRecord.hasTrafficStream()) {
+            getBaseEpoch(captureRecord.getTrafficStream());
+        }
+        System.out.println(TrafficStreamDumper.format(
+            captureRecord,
+            consumerRecord.partition(),
+            consumerRecord.offset(),
+            previewBytesRead,
+            previewBytesWrite,
+            baseEpoch
+        ));
     }
 
     /**
@@ -373,16 +614,16 @@ public class KafkaTopicDumper {
     }
 
     private static CaptureRecordProtocolViolationException protocolViolation(
-        ConsumerRecord<String, byte[]> record,
+        ConsumerRecord<String, byte[]> consumerRecord,
         InvalidProtocolBufferException cause
     ) {
         return new CaptureRecordProtocolViolationException(
             "Kafka record at "
-                + record.topic()
+                + consumerRecord.topic()
                 + "-"
-                + record.partition()
+                + consumerRecord.partition()
                 + "@"
-                + record.offset()
+                + consumerRecord.offset()
                 + " is not a CaptureRecord envelope",
             cause
         );

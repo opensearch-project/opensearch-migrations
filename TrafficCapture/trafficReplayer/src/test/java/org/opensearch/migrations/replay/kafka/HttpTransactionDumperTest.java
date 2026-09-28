@@ -12,6 +12,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
@@ -37,7 +39,8 @@ class HttpTransactionDumperTest {
     @Test
     void testCompleteRequestResponse() {
         var baos = new ByteArrayOutputStream();
-        var dumper = new HttpTransactionDumper(new PrintStream(baos));
+        var finishedRequests = new ArrayList<ReplayRequestId>();
+        var dumper = new HttpTransactionDumper(new PrintStream(baos), "", finishedRequests::add);
         var request = new HttpMessageAndTimestamp.Request(Instant.ofEpochSecond(100));
         request.add("GET /_cat/indices HTTP/1.1\r\nHost: localhost\r\n\r\n"
             .getBytes(StandardCharsets.UTF_8));
@@ -94,6 +97,7 @@ class HttpTransactionDumperTest {
         Assertions.assertTrue(hasInterim, "Missing INT line");
         Assertions.assertTrue(hasRsp, "Missing RSP line");
         Assertions.assertTrue(hasClose, "Missing CLOSED line");
+        Assertions.assertEquals(List.of(requestId), finishedRequests);
     }
 
     @Test

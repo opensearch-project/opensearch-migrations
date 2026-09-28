@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -44,6 +45,8 @@ import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
+import org.opensearch.migrations.replay.kafka.KafkaConsumerProperties;
+import org.opensearch.migrations.replay.kafka.ProxyWrittenTopic;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
@@ -85,19 +88,382 @@ import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class TrafficReplayerTopLevelConstructionTest {
     private static final TopicPartition TOPIC_PARTITION = new TopicPartition("traffic", 0);
+
+    @Test
+    @Tag("isolatedTest")
+    @Timeout(value = 110, unit = TimeUnit.SECONDS)
+    void twoLiveCaptureProxiesAndReplayersProcessDistinctPartitionsExactlyOnce()
+        throws Exception {
+        final int requestsPerProxy = 20;
+        final int expectedRequestCount = requestsPerProxy * 2;
+        final String topic = "g10-two-proxies-two-replayers";
+        final String groupId = "g10-two-replayers";
+        final String firstClientId = "g10-replayer-a";
+        final String secondClientId = "g10-replayer-b";
+        // CaptureProxyContainer.start() proves the listener is up with an HTTP GET through the proxy, so
+        // every proxy contributes one genuinely captured readiness request that the replayers are correct
+        // to replay. Classifying by the generated document namespace keeps that expected fixture traffic
+        // out of the document oracle without filtering anything out of the exact assertions below.
+        final String documentPathPrefix = "/documents/_doc/";
+        final TargetDocument startupReadinessProbe = new TargetDocument("GET", "/", "");
+        var targetRequests = new ConcurrentLinkedQueue<TargetDocument>();
+        var allDocumentsReplayed = new CountDownLatch(expectedRequestCount);
+        var expected = new java.util.LinkedHashSet<TargetDocument>();
+
+        try (
+            var supply = ProxyWrittenTopic.start(topic, 2, 2);
+            var target = SimpleNettyHttpServer.makeNettyServer(false, request -> {
+                var observed = new TargetDocument(
+                    request.method().name(),
+                    URI.create(request.uri()).getPath(),
+                    request.content().toString(StandardCharsets.UTF_8)
+                );
+                targetRequests.add(observed);
+                if (observed.path().startsWith(documentPathPrefix)) {
+                    allDocumentsReplayed.countDown();
+                }
+                return okResponse();
+            });
+            var firstReplayer = LiveDeployedReplayer.start(
+                firstClientId,
+                supply,
+                groupId,
+                target.localhostEndpoint()
+            );
+            var secondReplayer = LiveDeployedReplayer.start(
+                secondClientId,
+                supply,
+                groupId,
+                target.localhostEndpoint()
+            )
+        ) {
+            var assignmentByClient = awaitDistinctAssignments(
+                supply.brokers(),
+                groupId,
+                Set.of(firstClientId, secondClientId),
+                Set.of(new TopicPartition(topic, 0), new TopicPartition(topic, 1))
+            );
+
+            for (var proxyIndex = 0; proxyIndex < 2; proxyIndex++) {
+                var proxyName = proxyIndex == 0 ? "a" : "b";
+                for (var documentIndex = 0; documentIndex < requestsPerProxy; documentIndex++) {
+                    var documentId = "proxy-" + proxyName + "-" + documentIndex;
+                    var path = documentPathPrefix + documentId;
+                    var body = "{\"proxy\":\"" + proxyName + "\",\"document\":" + documentIndex + "}";
+                    expected.add(new TargetDocument("PUT", path, body));
+                    Assertions.assertEquals(
+                        200,
+                        supply.sendPutDocument(proxyIndex, path, body),
+                        "source request failed for " + documentId
+                    );
+                }
+            }
+
+            var capturedTraffic = supply.readTrafficStreamValues(
+                expectedRequestCount,
+                Duration.ofSeconds(30)
+            );
+            Assertions.assertTrue(
+                capturedTraffic.size() >= expectedRequestCount,
+                () -> "expected at least one captured TrafficStream per document, got "
+                    + capturedTraffic.size()
+            );
+            Assertions.assertEquals(
+                Set.of(0, 1),
+                supply.readTrafficStreamMetadata().stream()
+                    .map(ProxyWrittenTopic.RecordLocation::partition)
+                    .collect(java.util.stream.Collectors.toSet()),
+                "the two live proxies must put captured traffic on both topic partitions"
+            );
+
+            Assertions.assertTrue(
+                allDocumentsReplayed.await(45, TimeUnit.SECONDS),
+                () -> "target received "
+                    + targetRequests.stream()
+                        .filter(request -> request.path().startsWith(documentPathPrefix))
+                        .count()
+                    + " of " + expectedRequestCount + " generated documents; every target request"
+                    + " observed was " + targetRequests
+            );
+            Assertions.assertAll(
+                () -> Assertions.assertEquals(
+                    1,
+                    assignmentByClient.get(firstClientId).size(),
+                    "first replayer partition ownership"
+                ),
+                () -> Assertions.assertEquals(
+                    1,
+                    assignmentByClient.get(secondClientId).size(),
+                    "second replayer partition ownership"
+                ),
+                () -> Assertions.assertNotEquals(
+                    assignmentByClient.get(firstClientId),
+                    assignmentByClient.get(secondClientId),
+                    "the live replayers must own distinct partitions"
+                ),
+                () -> Assertions.assertTrue(
+                    firstReplayer.metric(IReplayContexts.MetricNames.TRAFFIC_STREAMS_READ) > 0,
+                    "the first replayer owned a partition but processed no captured traffic"
+                ),
+                () -> Assertions.assertTrue(
+                    secondReplayer.metric(IReplayContexts.MetricNames.TRAFFIC_STREAMS_READ) > 0,
+                    "the second replayer owned a partition but processed no captured traffic"
+                ),
+                firstReplayer::assertHealthy,
+                secondReplayer::assertHealthy
+            );
+        }
+
+        // The replayers have completed orderly shutdown before this snapshot, so no late duplicate can
+        // arrive after the exactly-once assertions.
+        var actual = List.copyOf(targetRequests);
+        var documents = actual.stream()
+            .filter(request -> request.path().startsWith(documentPathPrefix))
+            .collect(java.util.stream.Collectors.toList());
+        var nonDocumentTraffic = actual.stream()
+            .filter(request -> !request.path().startsWith(documentPathPrefix))
+            .collect(java.util.stream.Collectors.toList());
+        Assertions.assertEquals(
+            List.of(),
+            nonDocumentTraffic.stream()
+                .filter(request -> !startupReadinessProbe.equals(request))
+                .collect(java.util.stream.Collectors.toList()),
+            () -> "the target received traffic that is neither a generated document nor the fixture"
+                + " proxy readiness probe " + startupReadinessProbe
+                + "; all non-document traffic observed was " + nonDocumentTraffic
+        );
+        Assertions.assertEquals(
+            expectedRequestCount,
+            documents.size(),
+            () -> "the target must receive exactly one request per source document;"
+                + " non-document traffic observed was " + nonDocumentTraffic
+        );
+        Assertions.assertEquals(
+            expected,
+            Set.copyOf(documents),
+            "target method, path, or document body differed from the exact source request set"
+        );
+        Assertions.assertEquals(
+            documents.size(),
+            Set.copyOf(documents).size(),
+            "a target document was replayed more than once"
+        );
+    }
+
+    private record TargetDocument(String method, String path, String body) {}
+
+    private static Map<String, Set<TopicPartition>> awaitDistinctAssignments(
+        String brokers,
+        String groupId,
+        Set<String> expectedClientIds,
+        Set<TopicPartition> expectedPartitions
+    ) throws Exception {
+        var properties = new Properties();
+        properties.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, brokers);
+        var deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        Map<String, Set<TopicPartition>> lastAssignments = Map.of();
+        Throwable lastFailure = null;
+        try (var admin = AdminClient.create(properties)) {
+            while (System.nanoTime() < deadline) {
+                try {
+                    var description = admin.describeConsumerGroups(List.of(groupId))
+                        .all()
+                        .get(2, TimeUnit.SECONDS)
+                        .get(groupId);
+                    var assignments = new LinkedHashMap<String, Set<TopicPartition>>();
+                    for (var member : description.members()) {
+                        if (expectedClientIds.contains(member.clientId())) {
+                            assignments.put(
+                                member.clientId(),
+                                Set.copyOf(member.assignment().topicPartitions())
+                            );
+                        }
+                    }
+                    lastAssignments = Map.copyOf(assignments);
+                    var assignedPartitions = assignments.values().stream()
+                        .flatMap(Set::stream)
+                        .collect(java.util.stream.Collectors.toSet());
+                    if (assignments.keySet().equals(expectedClientIds)
+                        && assignments.values().stream().allMatch(assignment -> assignment.size() == 1)
+                        && assignedPartitions.equals(expectedPartitions)) {
+                        return lastAssignments;
+                    }
+                } catch (Exception notStableYet) {
+                    lastFailure = notStableYet;
+                }
+            }
+        }
+        var failure = new AssertionError(
+            "consumer group did not settle with one distinct partition per live replayer; assignments="
+                + lastAssignments
+        );
+        if (lastFailure != null) {
+            failure.addSuppressed(lastFailure);
+        }
+        throw failure;
+    }
+
+    private static final class LiveDeployedReplayer implements AutoCloseable {
+        private final TrafficReplayer.DeployedReplayApplication deployed;
+        private final InMemoryInstrumentationBundle telemetry;
+        private final Thread thread;
+
+        private LiveDeployedReplayer(
+            TrafficReplayer.DeployedReplayApplication deployed,
+            InMemoryInstrumentationBundle telemetry,
+            String clientId
+        ) {
+            this.deployed = deployed;
+            this.telemetry = telemetry;
+            thread = new Thread(deployed.application()::run, clientId + "-source-owner");
+        }
+
+        private static LiveDeployedReplayer start(
+            String clientId,
+            ProxyWrittenTopic supply,
+            String groupId,
+            URI targetUri
+        ) throws Exception {
+            var parameters = new TrafficReplayer.Parameters();
+            parameters.kafkaTrafficBrokers = supply.brokers();
+            parameters.kafkaTrafficTopic = supply.topic();
+            parameters.kafkaTrafficGroupId = groupId;
+            parameters.kafkaTrafficAuthType = TrafficReplayer.KAFKA_AUTH_TYPE_NONE;
+            parameters.numClientThreads = 1;
+            parameters.maxConcurrentRequests = 8;
+            parameters.targetServerResponseTimeoutSeconds = 5;
+
+            var kafkaProperties = KafkaConsumerProperties.buildKafkaProperties(
+                supply.brokers(),
+                groupId,
+                TrafficReplayer.KAFKA_AUTH_TYPE_NONE,
+                null,
+                null,
+                null
+            );
+            kafkaProperties.setProperty(ConsumerConfig.CLIENT_ID_CONFIG, clientId);
+            var consumer = new KafkaConsumer<String, byte[]>(kafkaProperties);
+            var targetEventLoops = new NioEventLoopGroup(
+                1,
+                new DefaultThreadFactory(clientId + "-target")
+            );
+            var telemetry = new InMemoryInstrumentationBundle(false, true);
+            try {
+                var deployed = TrafficReplayer.createDeployedReplayApplication(
+                    parameters,
+                    targetUri,
+                    new org.opensearch.migrations.replay.intake.PartitionIntakeState.BrokerTimeConfiguration(
+                        30_000,
+                        5_000,
+                        5_000
+                    ),
+                    TupleWriter.fixedRetryDelay(Duration.ZERO),
+                    new RootReplayerContext(telemetry.openTelemetrySdk),
+                    consumer,
+                    targetEventLoops,
+                    IAuthTransformerFactory.NullAuthTransformerFactory.instance,
+                    Optional.empty(),
+                    Clock.systemUTC(),
+                    System::nanoTime,
+                    (metrics, inputStopper) -> new ProcessSupervisor(
+                        metrics,
+                        inputStopper,
+                        ignored -> {},
+                        ignored -> {},
+                        (delay, action) -> {},
+                        ignored -> {},
+                        () -> {},
+                        System.err
+                    )
+                );
+                var live = new LiveDeployedReplayer(deployed, telemetry, clientId);
+                live.thread.start();
+                return live;
+            } catch (Throwable constructionFailure) {
+                consumer.close();
+                targetEventLoops.shutdownGracefully().syncUninterruptibly();
+                telemetry.close();
+                if (constructionFailure instanceof Exception exception) {
+                    throw exception;
+                }
+                if (constructionFailure instanceof Error error) {
+                    throw error;
+                }
+                throw new AssertionError(
+                    "unexpected throwable while constructing live replayer",
+                    constructionFailure
+                );
+            }
+        }
+
+        private long metric(String metricName) {
+            return InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                metricName
+            );
+        }
+
+        private void assertHealthy() {
+            Assertions.assertTrue(
+                thread.isAlive(),
+                "live replayer source loop stopped before orderly shutdown"
+            );
+            Assertions.assertTrue(
+                deployed.supervisor().firstFatalSignal().isEmpty(),
+                () -> "live replayer failed: " + deployed.supervisor().firstFatalSignal()
+            );
+        }
+
+        @Override
+        public void close() throws Exception {
+            Throwable failure = null;
+            try {
+                deployed.application().requestAndAwaitOrderlyShutdown();
+                thread.join(TimeUnit.SECONDS.toMillis(20));
+                if (thread.isAlive()) {
+                    failure = new AssertionError(
+                        "live replayer did not stop within 20 seconds"
+                    );
+                }
+            } catch (Throwable shutdownFailure) {
+                failure = shutdownFailure;
+            }
+            try {
+                telemetry.close();
+            } catch (Throwable telemetryFailure) {
+                if (failure == null) {
+                    failure = telemetryFailure;
+                } else if (failure != telemetryFailure) {
+                    failure.addSuppressed(telemetryFailure);
+                }
+            }
+            if (failure instanceof Exception exception) {
+                throw exception;
+            }
+            if (failure instanceof Error error) {
+                throw error;
+            }
+        }
+    }
 
     @Test
     void deployedApplicationFactorySelectsThePreservedMetricAndOwnerChain()
@@ -106,7 +472,7 @@ class TrafficReplayerTopLevelConstructionTest {
         parameters.kafkaTrafficTopic = TOPIC_PARTITION.topic();
         parameters.numClientThreads = 2;
         parameters.readyRequestsBufferPerThread = 3;
-        parameters.maxConcurrentTargetAttempts = 7;
+        parameters.maxConcurrentRequests = 7;
         var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var targetEventLoops = new NioEventLoopGroup(
             parameters.numClientThreads,

@@ -311,6 +311,8 @@ class ReplayerFixtureSelfTest {
             .addTraffic(4, 100, Instant.ofEpochMilli(1_700_000_000_000L), "writer-a", traffic, "request-1")
             .addHeartbeat(4, 101, Instant.ofEpochMilli(1_700_000_005_000L), "writer-a", 5_000)
             .addProbe(4, 102, Instant.ofEpochMilli(1_700_000_010_000L), "writer-a", "probe-1");
+        var followupScript = new RecordScript("traffic", 7)
+            .addProbe(4, 103, Instant.ofEpochMilli(1_700_000_015_000L), "writer-a", "probe-2");
         var topicPartition = script.generation(4).topicPartition();
 
         var telemetry = new InMemoryInstrumentationBundle(false, false);
@@ -355,18 +357,27 @@ class ReplayerFixtureSelfTest {
 
             // Assignment queued a PartitionGenerationAssigned first, so select the batch rather than
             // assuming it is at the head.
-            PartitionRecordBatch batch = null;
+            PartitionRecordBatch bootstrapBatch = null;
             while (intakeInputs.size() > 0) {
                 var queued = intakeInputs.take();
                 if (queued instanceof PartitionRecordBatch delivered) {
-                    batch = delivered;
+                    bootstrapBatch = delivered;
                 }
             }
-            Assertions.assertNotNull(batch, "no PartitionRecordBatch reached intake");
-            Assertions.assertEquals(requestId, batch.requestId());
+            Assertions.assertNotNull(bootstrapBatch, "no bootstrap PartitionRecordBatch reached intake");
+            Assertions.assertEquals(
+                new PartitionBatchRequestId(generation, 0),
+                bootstrapBatch.requestId(),
+                "assignment's source-local bootstrap entitlement must satisfy the first nonempty poll"
+            );
+            Assertions.assertEquals(
+                requestId,
+                owner.partitionState(topicPartition).orElseThrow().outstandingRequest().orElseThrow(),
+                "the overlapping explicit request must remain outstanding after bootstrap delivery"
+            );
             Assertions.assertEquals(
                 List.of(1_700_000_000_000L, 1_700_000_005_000L, 1_700_000_010_000L),
-                batch.records().stream().map(ApplicationKafkaRecord::logAppendTimeMillis).toList(),
+                bootstrapBatch.records().stream().map(ApplicationKafkaRecord::logAppendTimeMillis).toList(),
                 "broker timestamps must survive the trip to intake exactly"
             );
             Assertions.assertEquals(
@@ -375,17 +386,40 @@ class ReplayerFixtureSelfTest {
                     CaptureRecord.PayloadCase.WRITERPARTITIONHEARTBEAT,
                     CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE
                 ),
-                batch.records().stream().map(r -> r.envelope().getPayloadCase()).toList(),
+                bootstrapBatch.records().stream().map(r -> r.envelope().getPayloadCase()).toList(),
                 "every envelope case must arrive, in order"
             );
 
-            // Finishing every record commits the contiguous prefix once, at the last offset plus one.
-            batch.records().forEach(r -> sourceInputs.submit(new RecordProcessingFinished(r.recordId())));
+            port.scriptPoll(Map.of(topicPartition, asPolled(followupScript)));
             port.clearHistory();
             owner.runOnce();
 
             Assertions.assertEquals(
-                List.of("commitAsync{traffic-4=103}"),
+                List.of("resume(traffic-4)", "poll->[traffic-4]", "pause(traffic-4)"),
+                port.history(),
+                "the outstanding explicit request must resume the partition for the following batch"
+            );
+            var explicitBatch = (PartitionRecordBatch) intakeInputs.take();
+            Assertions.assertEquals(
+                requestId,
+                explicitBatch.requestId(),
+                "the second nonempty poll must satisfy the overlapping explicit request"
+            );
+            Assertions.assertEquals(
+                List.of(1_700_000_015_000L),
+                explicitBatch.records().stream().map(ApplicationKafkaRecord::logAppendTimeMillis).toList()
+            );
+
+            // Finishing every record commits the contiguous prefix once, at the last offset plus one.
+            bootstrapBatch.records().forEach(r ->
+                sourceInputs.submit(new RecordProcessingFinished(r.recordId())));
+            explicitBatch.records().forEach(r ->
+                sourceInputs.submit(new RecordProcessingFinished(r.recordId())));
+            port.clearHistory();
+            owner.runOnce();
+
+            Assertions.assertEquals(
+                List.of("commitAsync{traffic-4=104}"),
                 port.history().stream().filter(call -> call.startsWith("commit")).toList(),
                 () -> "one contiguous commit expected, submitted asynchronously because the ordinary loop must"
                     + " not block on it; history: " + port.history()

@@ -43,6 +43,7 @@ dependencies {
     implementation libs.jackson.core
     implementation libs.jackson.databind
     implementation libs.slf4j.api
+    implementation libs.disruptor
     implementation libs.log4j.api
     implementation libs.log4j.core
     implementation libs.log4j.slf4j2.impl
@@ -56,6 +57,9 @@ dependencies {
     // production does.
     testFixturesImplementation project(':TrafficCapture:captureProtobufs')
     testFixturesImplementation project(':coreUtilities')
+    testFixturesImplementation project(
+        ':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface'
+    )
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
     testFixturesImplementation testFixtures(project(path: ':testHelperFixtures'))
 
@@ -86,6 +90,7 @@ dependencies {
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformerProvider')
+    runtimeOnly libs.aws.msk.iam.auth
 
     testImplementation testFixtures(project(path: ':RFS'))
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
@@ -109,6 +114,9 @@ jar {
 tasks.withType(Test).configureEach {
     // Allow lenient line parsing for compatibility with older clients and tests
     systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
+    doFirst {
+        systemProperty 'trafficReplayerMainRuntimeClasspath', sourceSets.main.runtimeClasspath.asPath
+    }
 }
 
 // Scaffolding for the replayer rebuild: carried-but-not-yet-refactored code is marked in place, at the

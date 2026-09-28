@@ -20,6 +20,7 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_MESSAGE_TIMESTAMP_TYPE: LogAppendTime
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       # Allow large messages (8MB) on the broker
       KAFKA_MESSAGE_MAX_BYTES: 8388608

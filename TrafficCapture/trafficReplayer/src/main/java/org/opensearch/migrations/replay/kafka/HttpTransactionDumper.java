@@ -10,6 +10,7 @@ package org.opensearch.migrations.replay.kafka;
 
 import java.io.PrintStream;
 import java.time.Instant;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
@@ -39,9 +40,10 @@ public class HttpTransactionDumper implements SourceAssemblySink {
 
     private final PrintStream out;
     private final String linePrefix;
+    private final Consumer<ReplayRequestId> connectionRequestFinishedSink;
 
     public HttpTransactionDumper(PrintStream out) {
-        this(out, "");
+        this(out, "", ignored -> {});
     }
 
     @Override
@@ -59,8 +61,17 @@ public class HttpTransactionDumper implements SourceAssemblySink {
     }
 
     public HttpTransactionDumper(PrintStream out, String linePrefix) {
+        this(out, linePrefix, ignored -> {});
+    }
+
+    HttpTransactionDumper(
+        PrintStream out,
+        String linePrefix,
+        Consumer<ReplayRequestId> connectionRequestFinishedSink
+    ) {
         this.out = out;
         this.linePrefix = linePrefix;
+        this.connectionRequestFinishedSink = connectionRequestFinishedSink;
     }
 
     @Override
@@ -79,6 +90,7 @@ public class HttpTransactionDumper implements SourceAssemblySink {
                 request.getLastPacketTimestamp())
             + " REQ[" + messageSize(request) + "] #" + capturedRequestOrdinal
             + " " + extractFirstLine(request));
+        connectionRequestFinishedSink.accept(replayRequestId);
     }
 
     /**

@@ -8,6 +8,7 @@
 
 package org.opensearch.migrations.replay.kafka;
 
+import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -47,9 +48,9 @@ import org.apache.kafka.common.config.TopicConfig;
  * detect that belief drifting from the producer.
  *
  * <p>Three things start, in dependency order: a Kafka broker, an in-process destination server, and
- * {@code CaptureProxyContainer}, which runs the actual {@code CaptureProxy.main} on a thread. Traffic
- * driven through {@link #sendGet} reaches the destination and is captured to the topic as a side
- * effect, exactly as in production.
+ * one or more {@code CaptureProxyContainer} instances, each of which runs the actual
+ * {@code CaptureProxy.main} on a thread. Traffic driven through {@link #sendGet} reaches the
+ * destination and is captured to the topic as a side effect, exactly as in production.
  *
  * <p>It deliberately stops at raw record bytes. Decoding is the dumper's job, and a fixture that also
  * decoded would be a second implementation of the thing under test — so a test asserting the envelope
@@ -64,18 +65,18 @@ public final class ProxyWrittenTopic implements AutoCloseable {
 
     private final org.testcontainers.kafka.ConfluentKafkaContainer kafka;
     private final SimpleNettyHttpServer destination;
-    private final CaptureProxyContainer proxy;
+    private final List<CaptureProxyContainer> proxies;
     private final String topic;
 
     private ProxyWrittenTopic(
         org.testcontainers.kafka.ConfluentKafkaContainer kafka,
         SimpleNettyHttpServer destination,
-        CaptureProxyContainer proxy,
+        List<CaptureProxyContainer> proxies,
         String topic
     ) {
         this.kafka = kafka;
         this.destination = destination;
-        this.proxy = proxy;
+        this.proxies = List.copyOf(proxies);
         this.topic = topic;
     }
 
@@ -92,10 +93,23 @@ public final class ProxyWrittenTopic implements AutoCloseable {
      * @param partitions more than one is what G2 needs to exercise per-partition demand and revocation
      */
     public static ProxyWrittenTopic start(String topic, int partitions) throws Exception {
+        return start(topic, partitions, 1);
+    }
+
+    /**
+     * Starts several real proxies against one broker, destination, and traffic topic.
+     *
+     * @param proxyCount number of live capture proxy instances
+     */
+    public static ProxyWrittenTopic start(String topic, int partitions, int proxyCount) throws Exception {
+        if (proxyCount < 1) {
+            throw new IllegalArgumentException("proxyCount must be positive");
+        }
         var body = DESTINATION_BODY.getBytes(StandardCharsets.UTF_8);
         return start(
             topic,
             partitions,
+            proxyCount,
             List.of(new SimpleHttpResponse(
                 Map.of("Content-Type", "text/plain", "Content-Length", String.valueOf(body.length)),
                 body,
@@ -110,18 +124,19 @@ public final class ProxyWrittenTopic implements AutoCloseable {
         String topic,
         List<SimpleHttpResponse> sourceResponses
     ) throws Exception {
-        return start(topic, 1, List.copyOf(sourceResponses));
+        return start(topic, 1, 1, List.copyOf(sourceResponses));
     }
 
     private static ProxyWrittenTopic start(
         String topic,
         int partitions,
+        int proxyCount,
         List<SimpleHttpResponse> sourceResponses
     ) throws Exception {
         var kafka = new org.testcontainers.kafka.ConfluentKafkaContainer(SharedDockerImageNames.KAFKA);
         kafka.start();
         SimpleNettyHttpServer destination = null;
-        CaptureProxyContainer proxy = null;
+        var proxies = new ArrayList<CaptureProxyContainer>();
         try {
             createTrafficTopic(stripScheme(kafka.getBootstrapServers()), topic, partitions);
             destination = SimpleNettyHttpServer.makeServerWithResponses(
@@ -130,18 +145,22 @@ public final class ProxyWrittenTopic implements AutoCloseable {
             );
             var destinationUri = destination.localhostEndpoint().toString();
             var brokers = stripScheme(kafka.getBootstrapServers());
-            proxy = new CaptureProxyContainer(
-                () -> destinationUri,
-                () -> brokers,
-                // A one-second heartbeat, so a test can wait for a WriterPartitionHeartbeat without sitting out
-                // the production interval. The heartbeat is one of the three payload cases the replayer must
-                // decode, so it has to be observable here rather than assumed.
-                Stream.of("--kafkaTopic", topic, "--heartbeat-interval-seconds", "1")
-            );
-            proxy.start();
-            return new ProxyWrittenTopic(kafka, destination, proxy, topic);
+            for (var i = 0; i < proxyCount; i++) {
+                var proxy = new CaptureProxyContainer(
+                    () -> destinationUri,
+                    () -> brokers,
+                    // A one-second heartbeat, so a test can wait for a WriterPartitionHeartbeat without sitting
+                    // out the production interval. The heartbeat is one of the three payload cases the replayer
+                    // must decode, so it has to be observable here rather than assumed.
+                    Stream.of("--kafkaTopic", topic, "--heartbeat-interval-seconds", "1")
+                );
+                proxy.start();
+                proxies.add(proxy);
+            }
+            return new ProxyWrittenTopic(kafka, destination, proxies, topic);
         } catch (Exception | Error startupFailure) {
-            closeQuietly(proxy, destination, kafka);
+            closeQuietly(proxies);
+            closeQuietly(destination, kafka);
             throw startupFailure;
         }
     }
@@ -177,7 +196,11 @@ public final class ProxyWrittenTopic implements AutoCloseable {
     }
 
     public URI proxyEndpoint() {
-        return URI.create(CaptureProxyContainer.getUriFromContainer(proxy));
+        return proxyEndpoint(0);
+    }
+
+    public URI proxyEndpoint(int proxyIndex) {
+        return URI.create(CaptureProxyContainer.getUriFromContainer(proxies.get(proxyIndex)));
     }
 
     /**
@@ -186,8 +209,27 @@ public final class ProxyWrittenTopic implements AutoCloseable {
      * failure.
      */
     public int sendGet(String path) throws Exception {
+        return sendGet(0, path);
+    }
+
+    public int sendGet(int proxyIndex, String path) throws Exception {
         try (var client = new SimpleHttpClientForTesting()) {
-            var response = client.makeGetRequest(proxyEndpoint().resolve(path), Stream.empty());
+            var response = client.makeGetRequest(proxyEndpoint(proxyIndex).resolve(path), Stream.empty());
+            return response.statusCode;
+        }
+    }
+
+    /** Sends one JSON document request through a selected live proxy. */
+    public int sendPutDocument(int proxyIndex, String path, String document) throws Exception {
+        try (var client = new SimpleHttpClientForTesting()) {
+            var response = client.makePutRequest(
+                proxyEndpoint(proxyIndex).resolve(path),
+                Stream.empty(),
+                new SimpleHttpClientForTesting.PayloadAndContentType(
+                    new ByteArrayInputStream(document.getBytes(StandardCharsets.UTF_8)),
+                    "application/json"
+                )
+            );
             return response.statusCode;
         }
     }
@@ -315,6 +357,11 @@ public final class ProxyWrittenTopic implements AutoCloseable {
      * which depends on who produced the bytes.
      */
     public void produceDirectly(int partition, byte[] value) throws Exception {
+        produceDirectly(partition, List.of(value));
+    }
+
+    /** Writes several values through one producer so a test can deterministically cross a poll boundary. */
+    public void produceDirectly(int partition, List<byte[]> values) throws Exception {
         var props = new Properties();
         props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers());
         props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
@@ -322,7 +369,10 @@ public final class ProxyWrittenTopic implements AutoCloseable {
         props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
             "org.apache.kafka.common.serialization.ByteArraySerializer");
         try (var producer = new KafkaProducer<String, byte[]>(props)) {
-            producer.send(new ProducerRecord<>(topic, partition, null, value)).get(30, TimeUnit.SECONDS);
+            for (var value : values) {
+                producer.send(new ProducerRecord<>(topic, partition, null, value));
+            }
+            producer.flush();
         }
     }
 
@@ -348,6 +398,24 @@ public final class ProxyWrittenTopic implements AutoCloseable {
         readToEnd((partition, record) ->
             locations.add(new RecordLocation(record.partition(), record.offset()))
         );
+        return locations;
+    }
+
+    /** Kafka-reported locations for records carrying captured traffic, excluding probes and heartbeats. */
+    public List<RecordLocation> readTrafficStreamMetadata() {
+        var locations = new ArrayList<RecordLocation>();
+        readToEnd((partition, record) -> {
+            try {
+                if (CaptureRecord.parseFrom(record.value()).hasTrafficStream()) {
+                    locations.add(new RecordLocation(record.partition(), record.offset()));
+                }
+            } catch (InvalidProtocolBufferException notAnEnvelope) {
+                throw new IllegalStateException(
+                    "the proxy wrote a value that is not a CaptureRecord envelope",
+                    notAnEnvelope
+                );
+            }
+        });
         return locations;
     }
 
@@ -392,7 +460,8 @@ public final class ProxyWrittenTopic implements AutoCloseable {
 
     @Override
     public void close() {
-        closeQuietly(proxy, destination, kafka);
+        closeQuietly(proxies);
+        closeQuietly(destination, kafka);
     }
 
     /**
@@ -417,6 +486,12 @@ public final class ProxyWrittenTopic implements AutoCloseable {
                 // Nothing useful to do while tearing a fixture down; the test's own assertions decide the
                 // outcome, and masking them with a cleanup failure would be worse.
             }
+        }
+    }
+
+    private static void closeQuietly(Iterable<? extends AutoCloseable> resources) {
+        for (var resource : resources) {
+            closeQuietly(resource);
         }
     }
 }
