@@ -29,7 +29,44 @@ public final class CaptureRoutingState {
         RETIRED
     }
 
-    record WriterPartition(String writerNodeId, int partition) {}
+    static final class WriterPartition {
+        private final String writerNodeId;
+        private final int partition;
+
+        WriterPartition(String writerNodeId, int partition) {
+            this.writerNodeId = writerNodeId;
+            this.partition = partition;
+        }
+
+        String writerNodeId() {
+            return writerNodeId;
+        }
+
+        int partition() {
+            return partition;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof WriterPartition that)) {
+                return false;
+            }
+            return partition == that.partition && Objects.equals(writerNodeId, that.writerNodeId);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(writerNodeId, partition);
+        }
+
+        @Override
+        public String toString() {
+            return "WriterPartition[writerNodeId=" + writerNodeId + ", partition=" + partition + "]";
+        }
+    }
 
     static final class ConnectionRoute {
         private final String writerNodeId;
@@ -106,7 +143,41 @@ public final class CaptureRoutingState {
         }
     }
 
-    private record ConnectionKey(String writerNodeId, String connectionId) {}
+    private static final class ConnectionKey {
+        private final String writerNodeId;
+        private final String connectionId;
+
+        private ConnectionKey(String writerNodeId, String connectionId) {
+            this.writerNodeId = writerNodeId;
+            this.connectionId = connectionId;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ConnectionKey that)) {
+                return false;
+            }
+            return Objects.equals(writerNodeId, that.writerNodeId)
+                && Objects.equals(connectionId, that.connectionId);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(writerNodeId, connectionId);
+        }
+
+        @Override
+        public String toString() {
+            return "ConnectionKey[writerNodeId="
+                + writerNodeId
+                + ", connectionId="
+                + connectionId
+                + "]";
+        }
+    }
 
     private static final class WriterPartitionState {
         private final String writerNodeId;
@@ -125,7 +196,49 @@ public final class CaptureRoutingState {
         }
     }
 
-    private record CurrentAssignment(String writerNodeId, List<Integer> partitions) {}
+    private static final class CurrentAssignment {
+        private final String writerNodeId;
+        private final List<Integer> partitions;
+
+        private CurrentAssignment(String writerNodeId, List<Integer> partitions) {
+            this.writerNodeId = writerNodeId;
+            this.partitions = partitions;
+        }
+
+        private String writerNodeId() {
+            return writerNodeId;
+        }
+
+        private List<Integer> partitions() {
+            return partitions;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof CurrentAssignment that)) {
+                return false;
+            }
+            return Objects.equals(writerNodeId, that.writerNodeId)
+                && Objects.equals(partitions, that.partitions);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(writerNodeId, partitions);
+        }
+
+        @Override
+        public String toString() {
+            return "CurrentAssignment[writerNodeId="
+                + writerNodeId
+                + ", partitions="
+                + partitions
+                + "]";
+        }
+    }
 
     private static final Comparator<WriterPartitionState> WRITER_PARTITION_ORDER =
         Comparator.comparing((WriterPartitionState state) -> state.writerNodeId)

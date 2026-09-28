@@ -14,7 +14,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.RetriableException;
-import org.apache.kafka.common.errors.WakeupException;
 
 /**
  * Owns the Kafka consumer used only for proxy membership and partition assignment.
@@ -109,62 +108,58 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private void runPollLoop() {
         try {
             consumer.subscribe(List.of(topic), this);
-            while (!closed.get()) {
-                try {
-                    var records = consumer.poll(POLL_INTERVAL);
-                    if (!records.isEmpty()) {
-                        handleMembershipFailure(new IllegalStateException(
-                            "Paused capture membership consumer unexpectedly fetched traffic records"
-                        ));
-                        return;
-                    }
-                } catch (WakeupException e) {
-                    if (!closed.get()) {
-                        handleMembershipFailure(e);
-                    }
-                    return;
-                } catch (RetriableException e) {
-                    log.atWarn()
-                        .setCause(e)
-                        .setMessage(
-                            "Transient Kafka membership poll failure; "
-                                + "continuing with the last usable assignment while polling retries"
-                        )
-                        .log();
-                } catch (Error e) {
-                    if (!closed.get()) {
-                        handleUnstableProcessFailure(e);
-                    }
-                    return;
-                } catch (RuntimeException e) {
-                    if (!closed.get()) {
-                        handleMembershipFailure(e);
-                    }
-                    return;
-                }
-            }
-        } catch (WakeupException e) {
-            if (!closed.get()) {
-                handleMembershipFailure(e);
+            while (!closed.get() && pollOnce()) {
+                // Continue Kafka group maintenance until closure or a terminal poll result.
             }
         } catch (Throwable t) {
-            if (!closed.get()) {
-                if (t instanceof Error) {
-                    handleUnstableProcessFailure(t);
-                } else {
-                    handleMembershipFailure(t);
-                }
-            }
+            handlePollLoopFailure(t);
         } finally {
-            try {
-                consumer.close(CLOSE_TIMEOUT);
-                stopped.complete(null);
-            } catch (Throwable t) {
-                if (t instanceof Error) {
-                    unstableProcessFailureCallback.accept(t);
-                }
-                stopped.completeExceptionally(t);
+            closeConsumerAfterPollLoop();
+        }
+    }
+
+    private boolean pollOnce() {
+        try {
+            var records = consumer.poll(POLL_INTERVAL);
+            if (!records.isEmpty()) {
+                handleMembershipFailure(new IllegalStateException(
+                    "Paused capture membership consumer unexpectedly fetched traffic records"
+                ));
+                return false;
             }
+            return true;
+        } catch (RetriableException e) {
+            log.atWarn()
+                .setCause(e)
+                .setMessage(
+                    "Transient Kafka membership poll failure; "
+                        + "continuing with the last usable assignment while polling retries"
+                )
+                .log();
+            return true;
+        }
+    }
+
+    private void handlePollLoopFailure(Throwable failure) {
+        if (closed.get()) {
+            return;
+        }
+        if (failure instanceof Error) {
+            handleUnstableProcessFailure(failure);
+        } else {
+            handleMembershipFailure(failure);
+        }
+    }
+
+    private void closeConsumerAfterPollLoop() {
+        try {
+            consumer.close(CLOSE_TIMEOUT);
+            stopped.complete(null);
+        } catch (Throwable t) {
+            if (t instanceof Error) {
+                unstableProcessFailureCallback.accept(t);
+            }
+            stopped.completeExceptionally(t);
         }
     }
 

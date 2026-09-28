@@ -9,6 +9,7 @@ import java.util.stream.IntStream;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
+import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.PartitionInfo;
 
@@ -61,6 +62,45 @@ public final class TrafficTopicMetadata {
         var partitionMetadata = Objects.requireNonNull(discoveredPartitions)
             .stream()
             .sorted(java.util.Comparator.comparingInt(PartitionInfo::partition))
+            .toList();
+        if (partitionMetadata.isEmpty()) {
+            throw new IllegalStateException("Kafka returned no partitions for topic " + topic);
+        }
+        var representativeByLeader = new TreeMap<Integer, Integer>();
+        for (int i = 0; i < partitionMetadata.size(); ++i) {
+            var partitionInfo = partitionMetadata.get(i);
+            if (partitionInfo.partition() != i) {
+                throw new IllegalStateException(
+                    "Expected contiguous Kafka partitions 0.."
+                        + (partitionMetadata.size() - 1)
+                        + " for "
+                        + topic
+                );
+            }
+            var leader = partitionInfo.leader();
+            if (leader == null || leader.id() < 0) {
+                throw new IllegalStateException(
+                    "Kafka returned no current leader for " + topic + " partition " + partitionInfo.partition()
+                );
+            }
+            representativeByLeader.putIfAbsent(leader.id(), partitionInfo.partition());
+        }
+        return new TrafficTopicMetadata(
+            partitionMetadata.size(),
+            List.copyOf(representativeByLeader.values()),
+            Set.copyOf(representativeByLeader.keySet())
+        );
+    }
+
+    static TrafficTopicMetadata fromTopicDescription(
+        String topic,
+        TopicDescription topicDescription
+    ) {
+        Objects.requireNonNull(topic);
+        var partitionMetadata = Objects.requireNonNull(topicDescription)
+            .partitions()
+            .stream()
+            .sorted(java.util.Comparator.comparingInt(partition -> partition.partition()))
             .toList();
         if (partitionMetadata.isEmpty()) {
             throw new IllegalStateException("Kafka returned no partitions for topic " + topic);

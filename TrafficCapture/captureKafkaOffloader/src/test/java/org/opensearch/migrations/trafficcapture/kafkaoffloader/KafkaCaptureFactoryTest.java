@@ -37,6 +37,7 @@ import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.InvalidPartitionsException;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
@@ -99,6 +100,80 @@ class KafkaCaptureFactoryTest {
                 2,
                 recordsOfType(producer, CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE).size()
             );
+        } finally {
+            factory.close();
+        }
+    }
+
+    @Test
+    void startupWaitsForTheConfiguredTopicPartitionMinimum() throws Exception {
+        var producer = new ProtocolProducer(partitionInfo(TOPIC, 2));
+        producer.reportPartitions(partitionInfo(TOPIC, 1));
+        var consumer = configuredConsumer(TOPIC, 2);
+        var provisioner = new ControllableTopicPartitionProvisioner();
+        var factory = newFactory(
+            producer,
+            consumer,
+            2,
+            provisioner,
+            ignored -> {},
+            ignored -> {}
+        );
+        try {
+            assertEquals(
+                new PartitionIncrease(TOPIC, 2),
+                provisioner.request.get(TEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+            );
+            assertEquals(List.of(), producer.history());
+            assertEquals(Set.of(), consumer.subscription());
+
+            provisioner.reportMetadata(TrafficTopicMetadata.forTopic(2));
+            provisioner.completion.complete(null);
+
+            factory.readyForConnections().get(TEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            assertEquals(1, provisioner.closeCalls.get());
+            assertEquals(2, provisioner.discoveryCalls.get());
+            assertEquals(1, producer.partitionsFor(TOPIC).size());
+            assertEquals(
+                List.of(0, 1),
+                recordsOfType(producer, CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE)
+                    .stream()
+                    .map(ProducerRecord::partition)
+                    .sorted()
+                    .toList()
+            );
+        } finally {
+            factory.close();
+        }
+    }
+
+    @Test
+    void concurrentTopicPartitionIncreaseIsVerifiedBeforeStartupContinues() throws Exception {
+        var producer = new ProtocolProducer(partitionInfo(TOPIC, 2));
+        producer.reportPartitions(partitionInfo(TOPIC, 1));
+        var consumer = configuredConsumer(TOPIC, 2);
+        var provisioner = new ControllableTopicPartitionProvisioner();
+        var factory = newFactory(
+            producer,
+            consumer,
+            2,
+            provisioner,
+            ignored -> {},
+            ignored -> {}
+        );
+        try {
+            assertEquals(
+                new PartitionIncrease(TOPIC, 2),
+                provisioner.request.get(TEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+            );
+            provisioner.reportMetadata(TrafficTopicMetadata.forTopic(2));
+            provisioner.completion.completeExceptionally(
+                new InvalidPartitionsException("another proxy already increased the topic")
+            );
+
+            factory.readyForConnections().get(TEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            assertEquals(1, provisioner.closeCalls.get());
+            assertEquals(2, provisioner.discoveryCalls.get());
         } finally {
             factory.close();
         }
@@ -492,6 +567,32 @@ class KafkaCaptureFactoryTest {
         );
     }
 
+    private static KafkaCaptureFactory newFactory(
+        ProtocolProducer producer,
+        TrackingMockConsumer consumer,
+        int minimumTopicPartitionCount,
+        KafkaCaptureFactory.TopicPartitionProvisioner topicPartitionProvisioner,
+        Consumer<Throwable> captureFailureCallback,
+        Consumer<Throwable> unstableProcessFailureCallback
+    ) {
+        return new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            ACTIVATION_ID,
+            producer,
+            consumer,
+            TOPIC,
+            MAXIMUM_KAFKA_MESSAGE_SIZE,
+            KafkaCaptureFactory.DEFAULT_TRAFFIC_STREAM_FLUSH_INTERVAL,
+            KafkaCaptureFactory.DEFAULT_HEARTBEAT_INTERVAL,
+            KafkaCaptureFactory.DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL,
+            Duration.ofMillis(1),
+            minimumTopicPartitionCount,
+            () -> topicPartitionProvisioner,
+            captureFailureCallback,
+            unstableProcessFailureCallback
+        );
+    }
+
     private static TrackingMockConsumer configuredConsumer(String topic, int partitionCount) {
         var consumer = new TrackingMockConsumer();
         var partitions = java.util.stream.IntStream.range(0, partitionCount)
@@ -637,6 +738,39 @@ class KafkaCaptureFactoryTest {
         }
     }
 
+    private record PartitionIncrease(String topic, int partitionCount) {}
+
+    private static final class ControllableTopicPartitionProvisioner
+        implements KafkaCaptureFactory.TopicPartitionProvisioner {
+
+        private final CompletableFuture<PartitionIncrease> request = new CompletableFuture<>();
+        private final CompletableFuture<Void> completion = new CompletableFuture<>();
+        private final AtomicInteger closeCalls = new AtomicInteger();
+        private final AtomicInteger discoveryCalls = new AtomicInteger();
+        private volatile TrafficTopicMetadata metadata = TrafficTopicMetadata.forTopic(1);
+
+        @Override
+        public CompletableFuture<Void> increaseTo(String topic, int partitionCount) {
+            request.complete(new PartitionIncrease(topic, partitionCount));
+            return completion;
+        }
+
+        @Override
+        public CompletableFuture<TrafficTopicMetadata> discoverMetadata(String topic) {
+            discoveryCalls.incrementAndGet();
+            return CompletableFuture.completedFuture(metadata);
+        }
+
+        private void reportMetadata(TrafficTopicMetadata topicMetadata) {
+            metadata = topicMetadata;
+        }
+
+        @Override
+        public void close() {
+            closeCalls.incrementAndGet();
+        }
+    }
+
     private static final class ProtocolProducer extends MockProducer<String, byte[]> {
         private record PendingSend(
             ProducerRecord<String, byte[]> record,
@@ -658,6 +792,7 @@ class KafkaCaptureFactoryTest {
         private volatile boolean holdTraffic;
         private volatile RuntimeException nextTrafficFailure;
         private volatile Error nextTrafficError;
+        private volatile List<PartitionInfo> reportedPartitions;
 
         private ProtocolProducer(List<PartitionInfo> partitions) {
             super(
@@ -667,6 +802,16 @@ class KafkaCaptureFactoryTest {
                 new StringSerializer(),
                 new ByteArraySerializer()
             );
+            reportedPartitions = List.copyOf(partitions);
+        }
+
+        @Override
+        public List<PartitionInfo> partitionsFor(String topic) {
+            return reportedPartitions;
+        }
+
+        private void reportPartitions(List<PartitionInfo> partitions) {
+            reportedPartitions = List.copyOf(partitions);
         }
 
         @Override

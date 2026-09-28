@@ -55,7 +55,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     private static final class AcknowledgementDeadline {
         private final AtomicReference<AcknowledgementDeadlineStatus> status =
             new AtomicReference<>(AcknowledgementDeadlineStatus.PENDING);
-        private volatile ScheduledFuture<?> expirationTask;
+        private final AtomicReference<ScheduledFuture<?>> expirationTask = new AtomicReference<>();
 
         private boolean acknowledge() {
             if (!status.compareAndSet(
@@ -84,7 +84,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         }
 
         private void setExpirationTask(ScheduledFuture<?> expirationTask) {
-            this.expirationTask = expirationTask;
+            this.expirationTask.set(expirationTask);
             if (status.get() != AcknowledgementDeadlineStatus.PENDING) {
                 expirationTask.cancel(false);
             }
@@ -95,7 +95,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         }
 
         private void cancelExpirationTask() {
-            var task = expirationTask;
+            var task = expirationTask.get();
             if (task != null) {
                 task.cancel(false);
             }
@@ -116,10 +116,26 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         }
     }
 
-    private record AssignmentInstallation(
-        List<Integer> partitions,
-        CompletableFuture<String> result
-    ) {}
+    private static final class AssignmentInstallation {
+        private final List<Integer> partitions;
+        private final CompletableFuture<String> result;
+
+        private AssignmentInstallation(
+            List<Integer> partitions,
+            CompletableFuture<String> result
+        ) {
+            this.partitions = partitions;
+            this.result = result;
+        }
+
+        private List<Integer> partitions() {
+            return partitions;
+        }
+
+        private CompletableFuture<String> result() {
+            return result;
+        }
+    }
 
     private final Producer<String, byte[]> producer;
     private final String topic;
@@ -297,22 +313,22 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         Objects.requireNonNull(trafficStream);
         if (!route.writerNodeId().equals(trafficStream.getNodeId())
             || !route.connectionId().equals(trafficStream.getConnectionId())) {
-            var failure = new CorruptedCaptureStateException(
+            var identityFailure = new CorruptedCaptureStateException(
                 "TrafficStream identity does not match its immutable connection route"
             );
-            failUnstableProcess(failure);
-            return CompletableFuture.failedFuture(failure);
+            failUnstableProcess(identityFailure);
+            return CompletableFuture.failedFuture(identityFailure);
         }
         var payload = CaptureRecord.newBuilder()
             .setTrafficStream(trafficStream)
             .build()
             .toByteArray();
         if (payload.length > payloadSizeLimit) {
-            var failure = new IllegalArgumentException(
+            var payloadFailure = new IllegalArgumentException(
                 "CaptureRecord exceeds the configured Kafka payload limit"
             );
-            failPublisher(failure);
-            return CompletableFuture.failedFuture(failure);
+            failPublisher(payloadFailure);
+            return CompletableFuture.failedFuture(payloadFailure);
         }
         var producerRecord = new ProducerRecord<>(
             topic,
@@ -366,7 +382,10 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
 
     private void beginOrderlyWriterRetirement(CompletableFuture<Void> result) {
         if (orderlyRetirement != null) {
-            orderlyRetirement.whenComplete((ignored, failure) -> completeFrom(null, failure, result));
+            orderlyRetirement.whenComplete(
+                (ignored, existingRetirementFailure) ->
+                    completeFrom(null, existingRetirementFailure, result)
+            );
             return;
         }
         orderlyRetirement = result;
@@ -392,11 +411,11 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         if (retirementFailure != null) {
             result.completeExceptionally(unwrapCompletionFailure(retirementFailure));
         } else if (!routingState.allWriterPartitionsRetired()) {
-            var failure = new CorruptedCaptureStateException(
+            var retirementStateFailure = new CorruptedCaptureStateException(
                 "Orderly proxy retirement completed without retiring every writer partition"
             );
-            result.completeExceptionally(failure);
-            failUnstableProcess(failure);
+            result.completeExceptionally(retirementStateFailure);
+            failUnstableProcess(retirementStateFailure);
         } else {
             result.complete(null);
         }
@@ -418,8 +437,10 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
             );
         }
         lane.heartbeatInFlight = true;
+        var startAcknowledgementDeadlineAfterSubmission = false;
         if (routingState.lastAcceptedHeartbeatLogAppendTime(lane.writerPartition) == null) {
-            renewAcknowledgementDeadline(lane);
+            replaceAcknowledgementDeadline(lane);
+            startAcknowledgementDeadlineAfterSubmission = true;
         } else if (lane.acknowledgementDeadline == null) {
             throw new CorruptedCaptureStateException(
                 "An active heartbeat lane has no acknowledgement deadline for "
@@ -448,6 +469,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
             lane,
             producerRecord,
             lane.acknowledgementDeadline,
+            startAcknowledgementDeadlineAfterSubmission,
             metadata -> acceptHeartbeatAcknowledgement(lane, metadata)
         );
     }
@@ -490,9 +512,21 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     private void renewAcknowledgementDeadline(PublisherLane lane) {
+        var deadline = replaceAcknowledgementDeadline(lane);
+        startAcknowledgementDeadline(lane, deadline);
+    }
+
+    private AcknowledgementDeadline replaceAcknowledgementDeadline(PublisherLane lane) {
         cancelAcknowledgementDeadline(lane);
         var deadline = new AcknowledgementDeadline();
         lane.acknowledgementDeadline = deadline;
+        return deadline;
+    }
+
+    private void startAcknowledgementDeadline(
+        PublisherLane lane,
+        AcknowledgementDeadline deadline
+    ) {
         deadline.setExpirationTask(acknowledgementDeadlineExecutor.schedule(
             () -> expireAcknowledgementDeadline(lane, deadline),
             heartbeatExpirationInterval.toNanos(),
@@ -569,7 +603,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
             try {
                 routingState.acceptTrafficSubmission(route, finalRecord);
                 var lane = requirePublisherLane(route.writerPartition());
-                sendFromPublisherThread(lane, producerRecord, null, acknowledgedAction)
+                sendFromPublisherThread(lane, producerRecord, null, false, acknowledgedAction)
                     .whenComplete((metadata, throwable) -> completeFrom(metadata, throwable, result));
             } catch (RuntimeException e) {
                 result.completeExceptionally(e);
@@ -583,6 +617,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         PublisherLane lane,
         ProducerRecord<String, byte[]> producerRecord,
         AcknowledgementDeadline acknowledgementDeadline,
+        boolean startAcknowledgementDeadlineAfterSubmission,
         Consumer<RecordMetadata> acknowledgedAction
     ) {
         var result = new CompletableFuture<RecordMetadata>();
@@ -608,6 +643,9 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
                             acknowledgedAction
                         )
                 );
+                if (startAcknowledgementDeadlineAfterSubmission) {
+                    startAcknowledgementDeadline(lane, acknowledgementDeadline);
+                }
             });
         } catch (Throwable t) {
             removeInFlight(lane, result);
@@ -715,6 +753,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         return lane;
     }
 
+    @SuppressWarnings("java:S1181") // Errors must cross this executor boundary into unstable-process handling.
     private void executeOnPublisher(Runnable action, CompletableFuture<?> result) {
         var currentFailure = failure.get();
         if (currentFailure == null) {

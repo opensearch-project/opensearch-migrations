@@ -3,13 +3,17 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
@@ -27,9 +31,13 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.NewPartitions;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.errors.InvalidPartitionsException;
+import org.apache.kafka.common.errors.RetriableException;
 
 @Slf4j
 public class KafkaCaptureFactory implements
@@ -59,20 +67,24 @@ public class KafkaCaptureFactory implements
     private final Duration heartbeatInterval;
     private final Duration heartbeatExpirationInterval;
     private final Duration topicMetadataDiscoveryRetryDelay;
+    private final int minimumTopicPartitionCount;
+    private final TopicPartitionProvisioner topicPartitionProvisioner;
     private final java.util.function.Consumer<Throwable> captureFailureCallback;
     private final java.util.function.Consumer<Throwable> unstableProcessFailureCallback;
     private final ScheduledThreadPoolExecutor initializer;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean untransferredKafkaResourcesClosed = new AtomicBoolean();
     private final AtomicBoolean unstableFailureReported = new AtomicBoolean();
+    private final AtomicBoolean topicPartitionProvisionerClosed = new AtomicBoolean();
     private volatile CaptureKafkaPublisher publisher;
     private volatile CaptureKafkaPublisher initializingPublisher;
     private volatile CaptureKafkaMembership membership;
-    private volatile CompletableFuture<Void> orderlyRetirement;
+    private final AtomicReference<CompletableFuture<Void>> orderlyRetirement = new AtomicReference<>();
     private volatile boolean producerLifecycleTransferredToPublisher;
     private final AtomicReference<CaptureKafkaWriteGate> writeGate = new AtomicReference<>();
     private final AtomicReference<Throwable> initializationFailure = new AtomicReference<>();
     private int topicMetadataDiscoveryFailures;
+    private int topicPartitionProvisioningFailures;
 
     public KafkaCaptureFactory(
         IRootKafkaOffloaderContext rootScope,
@@ -98,6 +110,41 @@ public class KafkaCaptureFactory implements
             heartbeatInterval,
             heartbeatExpirationInterval,
             DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
+            0,
+            TopicPartitionProvisioner::disabled,
+            captureFailureCallback,
+            unstableProcessFailureCallback
+        );
+    }
+
+    public KafkaCaptureFactory(
+        IRootKafkaOffloaderContext rootScope,
+        String captureActivationId,
+        Producer<String, byte[]> producer,
+        Consumer<String, byte[]> membershipConsumer,
+        String topicNameForTraffic,
+        int messageSize,
+        Duration trafficStreamFlushInterval,
+        Duration heartbeatInterval,
+        Duration heartbeatExpirationInterval,
+        Properties kafkaAdminProperties,
+        int minimumTopicPartitionCount,
+        java.util.function.Consumer<Throwable> captureFailureCallback,
+        java.util.function.Consumer<Throwable> unstableProcessFailureCallback
+    ) {
+        this(
+            rootScope,
+            captureActivationId,
+            producer,
+            membershipConsumer,
+            topicNameForTraffic,
+            messageSize,
+            trafficStreamFlushInterval,
+            heartbeatInterval,
+            heartbeatExpirationInterval,
+            DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
+            minimumTopicPartitionCount,
+            () -> provisioner(kafkaAdminProperties, minimumTopicPartitionCount),
             captureFailureCallback,
             unstableProcessFailureCallback
         );
@@ -124,6 +171,8 @@ public class KafkaCaptureFactory implements
             DEFAULT_HEARTBEAT_INTERVAL,
             DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL,
             DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
+            0,
+            TopicPartitionProvisioner::disabled,
             captureFailureCallback,
             unstableProcessFailureCallback
         );
@@ -140,6 +189,40 @@ public class KafkaCaptureFactory implements
         Duration heartbeatInterval,
         Duration heartbeatExpirationInterval,
         Duration topicMetadataDiscoveryRetryDelay,
+        java.util.function.Consumer<Throwable> captureFailureCallback,
+        java.util.function.Consumer<Throwable> unstableProcessFailureCallback
+    ) {
+        this(
+            rootScope,
+            captureActivationId,
+            producer,
+            membershipConsumer,
+            topicNameForTraffic,
+            messageSize,
+            trafficStreamFlushInterval,
+            heartbeatInterval,
+            heartbeatExpirationInterval,
+            topicMetadataDiscoveryRetryDelay,
+            0,
+            TopicPartitionProvisioner::disabled,
+            captureFailureCallback,
+            unstableProcessFailureCallback
+        );
+    }
+
+    KafkaCaptureFactory(
+        IRootKafkaOffloaderContext rootScope,
+        String captureActivationId,
+        Producer<String, byte[]> producer,
+        Consumer<String, byte[]> membershipConsumer,
+        String topicNameForTraffic,
+        int messageSize,
+        Duration trafficStreamFlushInterval,
+        Duration heartbeatInterval,
+        Duration heartbeatExpirationInterval,
+        Duration topicMetadataDiscoveryRetryDelay,
+        int minimumTopicPartitionCount,
+        Supplier<TopicPartitionProvisioner> topicPartitionProvisionerSupplier,
         java.util.function.Consumer<Throwable> captureFailureCallback,
         java.util.function.Consumer<Throwable> unstableProcessFailureCallback
     ) {
@@ -165,6 +248,13 @@ public class KafkaCaptureFactory implements
         this.topicMetadataDiscoveryRetryDelay = requirePositive(
             topicMetadataDiscoveryRetryDelay,
             "topicMetadataDiscoveryRetryDelay"
+        );
+        if (minimumTopicPartitionCount < 0) {
+            throw new IllegalArgumentException("minimumTopicPartitionCount must not be negative");
+        }
+        this.minimumTopicPartitionCount = minimumTopicPartitionCount;
+        this.topicPartitionProvisioner = Objects.requireNonNull(
+            Objects.requireNonNull(topicPartitionProvisionerSupplier).get()
         );
         this.captureFailureCallback = Objects.requireNonNull(captureFailureCallback);
         this.unstableProcessFailureCallback = Objects.requireNonNull(unstableProcessFailureCallback);
@@ -205,7 +295,7 @@ public class KafkaCaptureFactory implements
             if (closed.get()) {
                 throw new IllegalStateException("Kafka capture factory is closed");
             }
-            if (orderlyRetirement != null) {
+            if (orderlyRetirement.get() != null) {
                 throw new IllegalStateException("Kafka capture factory is retiring for orderly shutdown");
             }
             var terminalFailure = initializationFailure.get();
@@ -258,12 +348,19 @@ public class KafkaCaptureFactory implements
     }
 
     private void discoverTopicMetadata() {
-        if (closed.get() || orderlyRetirement != null) {
+        if (closed.get() || orderlyRetirement.get() != null) {
             return;
         }
         try {
             var topicMetadata = TrafficTopicMetadata.discover(producer, topicNameForTraffic);
-            publishStartupCapabilityProbes(topicMetadata);
+            if (topicMetadata.getTopicPartitionCount() < minimumTopicPartitionCount) {
+                increaseTopicPartitionCount(topicMetadata);
+            } else {
+                if (minimumTopicPartitionCount > 0) {
+                    logConfiguredTopicPartitionMinimum(topicMetadata);
+                }
+                publishStartupCapabilityProbes(topicMetadata);
+            }
         } catch (IllegalArgumentException e) {
             failCapture(e);
         } catch (RuntimeException e) {
@@ -273,6 +370,183 @@ public class KafkaCaptureFactory implements
         }
     }
 
+    @SuppressWarnings("java:S1181") // Kafka ownership errors must reach the process-fatal policy.
+    private void increaseTopicPartitionCount(TrafficTopicMetadata topicMetadata) {
+        log.atInfo()
+            .setMessage(
+                "Kafka traffic topic {} has {} partition(s); "
+                    + "increasing to configured minimum {} before proxy-group membership"
+            )
+            .addArgument(topicNameForTraffic)
+            .addArgument(topicMetadata.getTopicPartitionCount())
+            .addArgument(minimumTopicPartitionCount)
+            .log();
+        final CompletableFuture<Void> increase;
+        try {
+            increase = topicPartitionProvisioner.increaseTo(
+                topicNameForTraffic,
+                minimumTopicPartitionCount
+            );
+        } catch (RuntimeException e) {
+            handleTopicPartitionProvisioningFailure(e);
+            return;
+        } catch (Error e) {
+            failUnstable(e);
+            return;
+        }
+        increase.whenComplete((ignored, failure) -> {
+            if (closed.get() || orderlyRetirement.get() != null) {
+                return;
+            }
+            if (failure != null) {
+                handleTopicPartitionProvisioningFailure(unwrapCompletionFailure(failure));
+                return;
+            }
+            discoverProvisionedTopicMetadataAndProbe();
+        });
+    }
+
+    private void handleTopicPartitionProvisioningFailure(Throwable failure) {
+        if (failure instanceof InvalidPartitionsException) {
+            log.atInfo()
+                .setCause(failure)
+                .setMessage(
+                    "Kafka traffic-topic partition increase raced with another proxy; "
+                        + "refreshing metadata before continuing startup"
+                )
+                .log();
+            discoverProvisionedTopicMetadataAndProbe();
+        } else if (failure instanceof RetriableException retriableFailure) {
+            retryTopicPartitionProvisioning(retriableFailure);
+        } else {
+            handleKafkaFailure(failure);
+        }
+    }
+
+    private void retryTopicPartitionProvisioning(RuntimeException failure) {
+        if (closed.get() || orderlyRetirement.get() != null) {
+            return;
+        }
+        topicPartitionProvisioningFailures++;
+        if (topicPartitionProvisioningFailures == 1) {
+            log.atWarn()
+                .setCause(failure)
+                .setMessage("Kafka traffic-topic partition increase is unavailable; capture initialization will retry")
+                .log();
+        } else {
+            log.atDebug()
+                .setCause(failure)
+                .setMessage("Kafka traffic-topic partition increase remains unavailable; retry={}")
+                .addArgument(topicPartitionProvisioningFailures)
+                .log();
+        }
+        scheduleInitializerAction(this::discoverTopicMetadata);
+    }
+
+    @SuppressWarnings("java:S1181") // Kafka ownership errors must reach the process-fatal policy.
+    private void discoverProvisionedTopicMetadataAndProbe() {
+        final CompletableFuture<TrafficTopicMetadata> discovery;
+        try {
+            discovery = topicPartitionProvisioner.discoverMetadata(topicNameForTraffic);
+        } catch (RuntimeException e) {
+            retryTopicMetadataDiscovery(e, this::discoverProvisionedTopicMetadataAndProbe);
+            return;
+        } catch (Error e) {
+            failUnstable(e);
+            return;
+        }
+        discovery.whenComplete((topicMetadata, failure) ->
+            executeInitializerAction(
+                () -> finishProvisionedTopicMetadataDiscovery(topicMetadata, failure)
+            )
+        );
+    }
+
+    private void finishProvisionedTopicMetadataDiscovery(
+        TrafficTopicMetadata topicMetadata,
+        Throwable failure
+    ) {
+        if (failure != null) {
+            handleTopicMetadataDiscoveryFailure(
+                unwrapCompletionFailure(failure),
+                this::discoverProvisionedTopicMetadataAndProbe
+            );
+            return;
+        }
+        try {
+            var discoveredMetadata = Objects.requireNonNull(
+                topicMetadata,
+                "Kafka Admin returned no traffic-topic metadata"
+            );
+            if (discoveredMetadata.getTopicPartitionCount() < minimumTopicPartitionCount) {
+                retryTopicMetadataDiscovery(
+                    new IllegalStateException(
+                        "Kafka traffic topic "
+                            + topicNameForTraffic
+                            + " still reports "
+                            + discoveredMetadata.getTopicPartitionCount()
+                            + " partition(s) after increasing to "
+                            + minimumTopicPartitionCount
+                    ),
+                    this::discoverProvisionedTopicMetadataAndProbe
+                );
+                return;
+            }
+            logConfiguredTopicPartitionMinimum(discoveredMetadata);
+            publishStartupCapabilityProbes(discoveredMetadata);
+        } catch (RuntimeException e) {
+            retryTopicMetadataDiscovery(e, this::discoverProvisionedTopicMetadataAndProbe);
+        } catch (Error e) {
+            failUnstable(e);
+        }
+    }
+
+    private void scheduleInitializerAction(Runnable action) {
+        if (closed.get() || orderlyRetirement.get() != null || initializer.isShutdown()) {
+            return;
+        }
+        try {
+            initializer.schedule(
+                action,
+                topicMetadataDiscoveryRetryDelay.toMillis(),
+                TimeUnit.MILLISECONDS
+            );
+        } catch (RejectedExecutionException e) {
+            if (!closed.get()
+                && orderlyRetirement.get() == null
+                && initializationFailure.get() == null) {
+                failUnstable(e);
+            }
+        }
+    }
+
+    private void executeInitializerAction(Runnable action) {
+        if (closed.get() || orderlyRetirement.get() != null || initializer.isShutdown()) {
+            return;
+        }
+        try {
+            initializer.execute(action);
+        } catch (RejectedExecutionException e) {
+            if (!closed.get()
+                && orderlyRetirement.get() == null
+                && initializationFailure.get() == null) {
+                failUnstable(e);
+            }
+        }
+    }
+
+    private void logConfiguredTopicPartitionMinimum(TrafficTopicMetadata topicMetadata) {
+        log.atInfo()
+            .setMessage(
+                "Kafka traffic topic {} satisfies the configured partition minimum; "
+                    + "actual={}, minimum={}"
+            )
+            .addArgument(topicNameForTraffic)
+            .addArgument(topicMetadata.getTopicPartitionCount())
+            .addArgument(minimumTopicPartitionCount)
+            .log();
+    }
+
     private void publishStartupCapabilityProbes(TrafficTopicMetadata topicMetadata) {
         CaptureKafkaCapabilityProbe.publish(
             producer,
@@ -280,7 +554,7 @@ public class KafkaCaptureFactory implements
             captureActivationId,
             topicMetadata.getRepresentativePartitionsByLeader()
         ).whenComplete((ignored, failure) -> {
-            if (closed.get() || orderlyRetirement != null) {
+            if (closed.get() || orderlyRetirement.get() != null) {
                 return;
             }
             if (failure != null) {
@@ -290,7 +564,9 @@ public class KafkaCaptureFactory implements
             try {
                 initializer.execute(() -> refreshTopicMetadataAfterProbe(topicMetadata));
             } catch (RejectedExecutionException e) {
-                if (!closed.get() && orderlyRetirement == null && initializationFailure.get() == null) {
+                if (!closed.get()
+                    && orderlyRetirement.get() == null
+                    && initializationFailure.get() == null) {
                     failUnstable(e);
                 }
             }
@@ -298,22 +574,16 @@ public class KafkaCaptureFactory implements
     }
 
     private void refreshTopicMetadataAfterProbe(TrafficTopicMetadata probedMetadata) {
-        if (closed.get() || orderlyRetirement != null) {
+        if (closed.get() || orderlyRetirement.get() != null) {
+            return;
+        }
+        if (minimumTopicPartitionCount > 0) {
+            refreshProvisionedTopicMetadataAfterProbe(probedMetadata);
             return;
         }
         try {
             var refreshedMetadata = TrafficTopicMetadata.discover(producer, topicNameForTraffic);
-            if (probedMetadata.getLeaderIds().containsAll(refreshedMetadata.getLeaderIds())) {
-                startMembershipInitialization(refreshedMetadata);
-            } else {
-                log.atInfo()
-                    .setMessage(
-                        "Kafka traffic-topic leadership changed during startup probing; "
-                            + "probing the newly current leaders before joining the capture group"
-                    )
-                    .log();
-                publishStartupCapabilityProbes(refreshedMetadata);
-            }
+            finishTopicMetadataRefreshAfterProbe(probedMetadata, refreshedMetadata);
         } catch (IllegalArgumentException e) {
             failCapture(e);
         } catch (RuntimeException e) {
@@ -323,10 +593,112 @@ public class KafkaCaptureFactory implements
         }
     }
 
+    @SuppressWarnings("java:S1181") // Kafka ownership errors must reach the process-fatal policy.
+    private void refreshProvisionedTopicMetadataAfterProbe(
+        TrafficTopicMetadata probedMetadata
+    ) {
+        final CompletableFuture<TrafficTopicMetadata> discovery;
+        try {
+            discovery = topicPartitionProvisioner.discoverMetadata(topicNameForTraffic);
+        } catch (RuntimeException e) {
+            retryTopicMetadataDiscovery(
+                e,
+                () -> refreshTopicMetadataAfterProbe(probedMetadata)
+            );
+            return;
+        } catch (Error e) {
+            failUnstable(e);
+            return;
+        }
+        discovery.whenComplete((refreshedMetadata, failure) ->
+            executeInitializerAction(
+                () -> finishProvisionedTopicMetadataRefresh(
+                    probedMetadata,
+                    refreshedMetadata,
+                    failure
+                )
+            )
+        );
+    }
+
+    private void finishProvisionedTopicMetadataRefresh(
+        TrafficTopicMetadata probedMetadata,
+        TrafficTopicMetadata refreshedMetadata,
+        Throwable failure
+    ) {
+        if (failure != null) {
+            handleTopicMetadataDiscoveryFailure(
+                unwrapCompletionFailure(failure),
+                () -> refreshTopicMetadataAfterProbe(probedMetadata)
+            );
+            return;
+        }
+        try {
+            var discoveredMetadata = Objects.requireNonNull(
+                refreshedMetadata,
+                "Kafka Admin returned no traffic-topic metadata after startup probing"
+            );
+            if (discoveredMetadata.getTopicPartitionCount() < minimumTopicPartitionCount) {
+                retryTopicMetadataDiscovery(
+                    new IllegalStateException(
+                        "Kafka traffic topic "
+                            + topicNameForTraffic
+                            + " reports fewer than the configured minimum "
+                            + minimumTopicPartitionCount
+                            + " partition(s) after startup probing"
+                    ),
+                    () -> refreshTopicMetadataAfterProbe(probedMetadata)
+                );
+                return;
+            }
+            finishTopicMetadataRefreshAfterProbe(probedMetadata, discoveredMetadata);
+        } catch (RuntimeException e) {
+            retryTopicMetadataDiscovery(
+                e,
+                () -> refreshTopicMetadataAfterProbe(probedMetadata)
+            );
+        } catch (Error e) {
+            failUnstable(e);
+        }
+    }
+
+    private void handleTopicMetadataDiscoveryFailure(
+        Throwable failure,
+        Runnable retryAction
+    ) {
+        if (failure instanceof Error) {
+            failUnstable(failure);
+        } else if (failure instanceof RuntimeException runtimeFailure) {
+            retryTopicMetadataDiscovery(runtimeFailure, retryAction);
+        } else {
+            failCapture(new IllegalStateException("Kafka topic metadata discovery failed", failure));
+        }
+    }
+
+    private void finishTopicMetadataRefreshAfterProbe(
+        TrafficTopicMetadata probedMetadata,
+        TrafficTopicMetadata refreshedMetadata
+    ) {
+        if (probedMetadata.getLeaderIds().containsAll(refreshedMetadata.getLeaderIds())) {
+            closeTopicPartitionProvisioner();
+            startMembershipInitialization(refreshedMetadata);
+        } else {
+            log.atInfo()
+                .setMessage(
+                    "Kafka traffic-topic leadership changed during startup probing; "
+                        + "probing the newly current leaders before joining the capture group"
+                )
+                .log();
+            publishStartupCapabilityProbes(refreshedMetadata);
+        }
+    }
+
     private void startMembershipInitialization(TrafficTopicMetadata topicMetadata) {
         CaptureKafkaMembership initializedMembership;
         synchronized (initializationLock) {
-            if (closed.get() || orderlyRetirement != null || initializationFailure.get() != null) {
+            if (closed.get()
+                || orderlyRetirement.get() != null
+                || initializationFailure.get() != null) {
                 return;
             }
             var routingState = new CaptureRoutingState(
@@ -377,7 +749,7 @@ public class KafkaCaptureFactory implements
             }
             synchronized (initializationLock) {
                 if (closed.get()
-                    || orderlyRetirement != null
+                    || orderlyRetirement.get() != null
                     || initializationFailure.get() != null
                     || publisher != null) {
                     return;
@@ -399,7 +771,7 @@ public class KafkaCaptureFactory implements
     }
 
     private void retryTopicMetadataDiscovery(RuntimeException failure, Runnable retryAction) {
-        if (closed.get() || orderlyRetirement != null) {
+        if (closed.get() || orderlyRetirement.get() != null) {
             return;
         }
         topicMetadataDiscoveryFailures++;
@@ -423,7 +795,9 @@ public class KafkaCaptureFactory implements
                     TimeUnit.MILLISECONDS
                 );
             } catch (RejectedExecutionException e) {
-                if (!closed.get() && orderlyRetirement == null && initializationFailure.get() == null) {
+                if (!closed.get()
+                    && orderlyRetirement.get() == null
+                    && initializationFailure.get() == null) {
                     failUnstable(e);
                 }
             }
@@ -441,8 +815,9 @@ public class KafkaCaptureFactory implements
         final CaptureKafkaMembership membershipToClose;
         final CaptureKafkaPublisher publisherToRetire;
         synchronized (initializationLock) {
-            if (orderlyRetirement != null) {
-                return orderlyRetirement;
+            var existingRetirement = orderlyRetirement.get();
+            if (existingRetirement != null) {
+                return existingRetirement;
             }
             if (closed.get()) {
                 return CompletableFuture.failedFuture(
@@ -454,7 +829,7 @@ public class KafkaCaptureFactory implements
                 return CompletableFuture.failedFuture(terminalFailure);
             }
             result = new CompletableFuture<>();
-            orderlyRetirement = result;
+            orderlyRetirement.set(result);
             membershipToClose = membership;
             publisherToRetire = publisher == null ? initializingPublisher : publisher;
         }
@@ -595,6 +970,146 @@ public class KafkaCaptureFactory implements
         return value;
     }
 
+    private static TopicPartitionProvisioner provisioner(
+        Properties kafkaAdminProperties,
+        int minimumTopicPartitionCount
+    ) {
+        if (minimumTopicPartitionCount == 0) {
+            return TopicPartitionProvisioner.disabled();
+        }
+        return new KafkaAdminTopicPartitionProvisioner(
+            Admin.create(Objects.requireNonNull(kafkaAdminProperties))
+        );
+    }
+
+    private void closeTopicPartitionProvisioner() {
+        if (!topicPartitionProvisionerClosed.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            topicPartitionProvisioner.close();
+        } catch (RuntimeException e) {
+            log.atWarn()
+                .setCause(e)
+                .setMessage("Kafka traffic-topic partition provisioner did not close cleanly")
+                .log();
+        }
+    }
+
+    interface TopicPartitionProvisioner extends AutoCloseable {
+        CompletableFuture<Void> increaseTo(String topic, int partitionCount);
+
+        CompletableFuture<TrafficTopicMetadata> discoverMetadata(String topic);
+
+        @Override
+        void close();
+
+        static TopicPartitionProvisioner disabled() {
+            return DisabledTopicPartitionProvisioner.INSTANCE;
+        }
+    }
+
+    private enum DisabledTopicPartitionProvisioner implements TopicPartitionProvisioner {
+        INSTANCE;
+
+        @Override
+        public CompletableFuture<Void> increaseTo(String topic, int partitionCount) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<TrafficTopicMetadata> discoverMetadata(String topic) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Kafka topic partition provisioning is disabled")
+            );
+        }
+
+        @Override
+        public void close() {
+            // The disabled singleton owns no Kafka Admin client or other closeable resource.
+        }
+    }
+
+    private static final class KafkaAdminTopicPartitionProvisioner
+        implements TopicPartitionProvisioner {
+
+        private final Admin admin;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private KafkaAdminTopicPartitionProvisioner(Admin admin) {
+            this.admin = Objects.requireNonNull(admin);
+        }
+
+        @Override
+        public CompletableFuture<Void> increaseTo(String topic, int partitionCount) {
+            Objects.requireNonNull(topic);
+            if (partitionCount <= 0) {
+                throw new IllegalArgumentException("partitionCount must be positive");
+            }
+            if (closed.get()) {
+                return CompletableFuture.failedFuture(
+                    new IllegalStateException("Kafka topic partition provisioner is closed")
+                );
+            }
+            var result = new CompletableFuture<Void>();
+            try {
+                admin.createPartitions(
+                    Map.of(topic, NewPartitions.increaseTo(partitionCount))
+                ).all().whenComplete((ignored, failure) -> {
+                    if (failure == null) {
+                        result.complete(null);
+                    } else {
+                        result.completeExceptionally(failure);
+                    }
+                });
+            } catch (Throwable t) {
+                result.completeExceptionally(t);
+            }
+            return result;
+        }
+
+        @Override
+        public CompletableFuture<TrafficTopicMetadata> discoverMetadata(String topic) {
+            Objects.requireNonNull(topic);
+            if (closed.get()) {
+                return CompletableFuture.failedFuture(
+                    new IllegalStateException("Kafka topic partition provisioner is closed")
+                );
+            }
+            var result = new CompletableFuture<TrafficTopicMetadata>();
+            try {
+                admin.describeTopics(List.of(topic))
+                    .allTopicNames()
+                    .whenComplete((descriptions, failure) -> {
+                        if (failure != null) {
+                            result.completeExceptionally(failure);
+                            return;
+                        }
+                        try {
+                            result.complete(
+                                TrafficTopicMetadata.fromTopicDescription(
+                                    topic,
+                                    descriptions.get(topic)
+                                )
+                            );
+                        } catch (Throwable t) {
+                            result.completeExceptionally(t);
+                        }
+                    });
+            } catch (Throwable t) {
+                result.completeExceptionally(t);
+            }
+            return result;
+        }
+
+        @Override
+        public void close() {
+            if (closed.compareAndSet(false, true)) {
+                admin.close(Duration.ZERO);
+            }
+        }
+    }
+
     @AllArgsConstructor
     static class CodedOutputStreamWrapper implements CodedOutputStreamHolder {
         private final CodedOutputStream codedOutputStream;
@@ -611,65 +1126,6 @@ public class KafkaCaptureFactory implements
         }
     }
 
-    private byte[] payload(CodedOutputStreamHolder outputStreamHolder) {
-        if (!(outputStreamHolder instanceof CodedOutputStreamWrapper osh)) {
-            throw new IllegalArgumentException(
-                "Unknown outputStreamHolder sent back to StreamManager: " + outputStreamHolder
-            );
-        }
-        return Arrays.copyOfRange(osh.byteBuffer.array(), 0, osh.byteBuffer.position());
-    }
-
-    private boolean isTerminalRecord(TrafficStream record) {
-        var finalChunk = record.hasNumberOfThisLastChunk();
-        var closeCount = record.getSubStreamList()
-            .stream()
-            .filter(observation -> observation.hasClose())
-            .count();
-        var closeIsLast = closeCount == 1
-            && record.getSubStream(record.getSubStreamCount() - 1).hasClose();
-        if (finalChunk != closeIsLast) {
-            var failure = new IllegalStateException(
-                "A connection's final Kafka record must contain exactly one terminal CloseObservation as its last observation"
-            );
-            failUnstable(failure);
-            throw failure;
-        }
-        return finalChunk;
-    }
-
-    private CompletableFuture<RecordMetadata> publishPayload(
-        IConnectionContext telemetryContext,
-        CaptureRoutingState.ConnectionRoute route,
-        TrafficStream trafficStream,
-        boolean finalRecord,
-        int index,
-        CaptureKafkaPublisher readyPublisher
-    ) {
-        String recordId = String.format("%s.%d", route.connectionId(), index);
-        var flushContext = rootScope.createKafkaRecordContext(
-            telemetryContext,
-            topicNameForTraffic,
-            recordId,
-            trafficStream.getSerializedSize()
-        );
-        return readyPublisher.publishTraffic(route, trafficStream, finalRecord)
-            .whenComplete((recordMetadata, throwable) -> {
-                if (throwable != null) {
-                    flushContext.addTraceException(throwable, true);
-                    log.error("Error sending producer record: {}", recordId, throwable);
-                } else {
-                    log.debug(
-                        "Kafka producer record: {} has finished sending for topic: {} and partition {}",
-                        recordId,
-                        recordMetadata.topic(),
-                        recordMetadata.partition()
-                    );
-                }
-                flushContext.close();
-            });
-    }
-
     class StreamManager extends OrderedStreamLifecyleManager<RecordMetadata> {
         IConnectionContext telemetryContext;
         CaptureRoutingState.ConnectionRoute route;
@@ -681,6 +1137,67 @@ public class KafkaCaptureFactory implements
             // TODO - add https://opentelemetry.io/blog/2022/instrument-kafka-clients/
             this.telemetryContext = ctx;
             this.route = route;
+        }
+
+        private byte[] payload(CodedOutputStreamHolder outputStreamHolder) {
+            if (!(outputStreamHolder instanceof CodedOutputStreamWrapper outputStream)) {
+                throw new IllegalArgumentException(
+                    "Unknown outputStreamHolder sent back to StreamManager: " + outputStreamHolder
+                );
+            }
+            return Arrays.copyOfRange(
+                outputStream.byteBuffer.array(),
+                0,
+                outputStream.byteBuffer.position()
+            );
+        }
+
+        private boolean isTerminalRecord(TrafficStream trafficStream) {
+            var finalChunk = trafficStream.hasNumberOfThisLastChunk();
+            var closeCount = trafficStream.getSubStreamList()
+                .stream()
+                .filter(observation -> observation.hasClose())
+                .count();
+            var closeIsLast = closeCount == 1
+                && trafficStream.getSubStream(trafficStream.getSubStreamCount() - 1).hasClose();
+            if (finalChunk != closeIsLast) {
+                var terminalRecordFailure = new IllegalStateException(
+                    "A connection's final Kafka record must contain exactly one terminal CloseObservation as its last observation"
+                );
+                failUnstable(terminalRecordFailure);
+                throw terminalRecordFailure;
+            }
+            return finalChunk;
+        }
+
+        private CompletableFuture<RecordMetadata> publishPayload(
+            TrafficStream trafficStream,
+            boolean finalRecord,
+            int index,
+            CaptureKafkaPublisher readyPublisher
+        ) {
+            String recordId = String.format("%s.%d", route.connectionId(), index);
+            var flushContext = rootScope.createKafkaRecordContext(
+                telemetryContext,
+                topicNameForTraffic,
+                recordId,
+                trafficStream.getSerializedSize()
+            );
+            return readyPublisher.publishTraffic(route, trafficStream, finalRecord)
+                .whenComplete((recordMetadata, throwable) -> {
+                    if (throwable != null) {
+                        flushContext.addTraceException(throwable, true);
+                        log.error("Error sending producer record: {}", recordId, throwable);
+                    } else {
+                        log.debug(
+                            "Kafka producer record: {} has finished sending for topic: {} and partition {}",
+                            recordId,
+                            recordMetadata.topic(),
+                            recordMetadata.partition()
+                        );
+                    }
+                    flushContext.close();
+                });
         }
 
         @Override
@@ -700,8 +1217,6 @@ public class KafkaCaptureFactory implements
                 var recordPayload = payload(outputStreamHolder);
                 var trafficStream = TrafficStream.parseFrom(recordPayload);
                 return publishPayload(
-                    telemetryContext,
-                    route,
                     trafficStream,
                     isTerminalRecord(trafficStream),
                     index,
@@ -760,7 +1275,11 @@ public class KafkaCaptureFactory implements
         try {
             membershipConsumer.close(Duration.ZERO);
         } finally {
-            producer.close(Duration.ZERO);
+            try {
+                producer.close(Duration.ZERO);
+            } finally {
+                closeTopicPartitionProvisioner();
+            }
         }
     }
 }

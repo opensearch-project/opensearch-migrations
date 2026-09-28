@@ -36,6 +36,7 @@ export interface MigrationStackProps extends StackPropsExt {
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
     readonly mskBrokersPerAZCount?: number,
+    readonly captureProxyDesiredCount?: number,
     readonly replayerOutputEFSRemovalPolicy?: string
     readonly artifactBucketRemovalPolicy?: string
 }
@@ -55,7 +56,11 @@ export class MigrationAssistanceStack extends Stack {
         // Create MSK cluster config
         const mskClusterConfig = new CfnConfiguration(this, "migrationMSKClusterConfig", {
             name: `migration-msk-config-${props.stage}`,
-            serverProperties: "auto.create.topics.enable=true"
+            serverProperties: [
+                "auto.create.topics.enable=true",
+                `num.partitions=${Math.max((props.captureProxyDesiredCount ?? 0) + 1, 1)}`,
+                "log.message.timestamp.type=LogAppendTime"
+            ].join("\n")
         })
 
         const mskLogGroup = new LogGroup(this, 'migrationMSKBrokerLogGroup',  {
@@ -79,8 +84,7 @@ export class MigrationAssistanceStack extends Stack {
             },
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
-                // Current limitation of alpha construct, would like to get latest revision dynamically
-                revision: 1
+                revision: mskClusterConfig.attrLatestRevisionRevision
             },
             encryptionInTransit: {
                 clientBroker: ClientBrokerEncryption.TLS,

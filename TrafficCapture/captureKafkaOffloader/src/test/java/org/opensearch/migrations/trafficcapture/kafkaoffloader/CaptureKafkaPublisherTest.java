@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -152,12 +153,16 @@ class CaptureKafkaPublisherTest {
     }
 
     @Test
-    void heartbeatDeadlineExpiresWhileThePublisherLaneIsBlocked() throws Exception {
-        var producer = new BlockedSendProducer(Duration.ofMillis(200));
+    void heartbeatDeadlineStartsAfterTheProducerAcceptsTheSubmission() throws Exception {
+        var producer = new BlockedSendProducer();
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
         var writeGate = new CaptureKafkaWriteGate();
         var terminalFailure = new AtomicReference<Throwable>();
-        writeGate.addTerminalFailureListener(terminalFailure::set);
+        var terminalFailureObserved = new CountDownLatch(1);
+        writeGate.addTerminalFailureListener(failure -> {
+            terminalFailure.set(failure);
+            terminalFailureObserved.countDown();
+        });
         try (var publisher = new CaptureKafkaPublisher(
             producer,
             TOPIC,
@@ -169,18 +174,29 @@ class CaptureKafkaPublisherTest {
             writeGate,
             ignored -> {}
         )) {
-            var assignment = publisher.installAssignment(List.of(0));
-            awaitValue(terminalFailure, 150, TimeUnit.MILLISECONDS);
+            try {
+                var assignment = publisher.installAssignment(List.of(0));
+                assertTrue(producer.sendEntered.await(1, TimeUnit.SECONDS));
+                assertFalse(
+                    terminalFailureObserved.await(150, TimeUnit.MILLISECONDS),
+                    "the acknowledgement deadline must not run while Producer.send() is still blocked"
+                );
 
-            assertInstanceOf(TimeoutException.class, terminalFailure.get());
-            assertSame(terminalFailure.get(), writeGate.failureIfNotWritable());
-            assertEquals(List.of(), routingState.assignedPartitions());
+                producer.allowSendToReturn.countDown();
+                assertTrue(terminalFailureObserved.await(1, TimeUnit.SECONDS));
 
-            var failure = assertThrows(
-                ExecutionException.class,
-                () -> assignment.get(1, TimeUnit.SECONDS)
-            ).getCause();
-            assertInstanceOf(TimeoutException.class, failure);
+                assertInstanceOf(TimeoutException.class, terminalFailure.get());
+                assertSame(terminalFailure.get(), writeGate.failureIfNotWritable());
+                assertEquals(List.of(), routingState.assignedPartitions());
+
+                var failure = assertThrows(
+                    ExecutionException.class,
+                    () -> assignment.get(1, TimeUnit.SECONDS)
+                ).getCause();
+                assertInstanceOf(TimeoutException.class, failure);
+            } finally {
+                producer.allowSendToReturn.countDown();
+            }
         }
     }
 
@@ -216,7 +232,7 @@ class CaptureKafkaPublisherTest {
 
     @Test
     void heartbeatBrokerTimeAtExpirationBoundaryCompromisesCapture() throws Exception {
-        var producer = new TimestampingProducer(sendIndex -> sendIndex == 0 ? 1_000L : 1_030L);
+        var producer = new TimestampingProducer(sendIndex -> sendIndex == 0 ? 1_000L : 6_000L);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
         var writeGate = new CaptureKafkaWriteGate();
         var terminalFailure = new AtomicReference<Throwable>();
@@ -227,7 +243,7 @@ class CaptureKafkaPublisherTest {
             routingState,
             MESSAGE_SIZE,
             Duration.ofMillis(10),
-            Duration.ofMillis(30),
+            Duration.ofSeconds(5),
             Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
             writeGate,
             ignored -> {}
@@ -619,11 +635,11 @@ class CaptureKafkaPublisherTest {
     }
 
     private static final class BlockedSendProducer extends MockProducer<String, byte[]> {
-        private final Duration publisherThreadBlock;
+        private final CountDownLatch sendEntered = new CountDownLatch(1);
+        private final CountDownLatch allowSendToReturn = new CountDownLatch(1);
 
-        private BlockedSendProducer(Duration publisherThreadBlock) {
+        private BlockedSendProducer() {
             super(false, null, new StringSerializer(), new ByteArraySerializer());
-            this.publisherThreadBlock = publisherThreadBlock;
         }
 
         @Override
@@ -632,8 +648,11 @@ class CaptureKafkaPublisherTest {
             Callback callback
         ) {
             super.send(record, (ignoredMetadata, ignoredFailure) -> {});
+            sendEntered.countDown();
             try {
-                Thread.sleep(publisherThreadBlock.toMillis());
+                if (!allowSendToReturn.await(2, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("test did not release the blocked producer send");
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException(e);

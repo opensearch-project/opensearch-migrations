@@ -437,6 +437,7 @@ export class StackComposer {
                 streamingSourceType: streamingSourceType,
                 mskImportARN: mskARN,
                 mskBrokersPerAZCount: mskBrokersPerAZCount,
+                captureProxyDesiredCount: captureProxyDesiredCount,
                 replayerOutputEFSRemovalPolicy: replayerOutputEFSRemovalPolicy,
                 artifactBucketRemovalPolicy: artifactBucketRemovalPolicy,
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
@@ -465,6 +466,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
+                captureProxyDesiredCount: captureProxyDesiredCount,
                 env: props.env
             })
             this.addDependentStacks(kafkaBrokerStack, [migrationStack])

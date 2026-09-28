@@ -166,6 +166,52 @@ class CaptureKafkaMembershipKafkaTest {
         }
     }
 
+    @Test
+    void startupIncreasesAnExistingTrafficTopicToTheConfiguredMinimum() throws Exception {
+        var bootstrapServers = KAFKA.getContainer().getBootstrapServers();
+        var topic = "proxy-partition-minimum-" + UUID.randomUUID();
+        createTopic(bootstrapServers, topic, "LogAppendTime", 1);
+
+        var parameters = new KafkaConfig.KafkaParameters();
+        parameters.kafkaBrokers = bootstrapServers;
+        parameters.kafkaClientId = "partition-minimum-test";
+        parameters.kafkaAuthType = KafkaConfig.AUTH_TYPE_NONE;
+        var captureFailure = new AtomicReference<Throwable>();
+        var unstableFailure = new AtomicReference<Throwable>();
+        var factory = new KafkaCaptureFactory(
+            rootContext(),
+            "partition-minimum-activation",
+            new KafkaProducer<String, byte[]>(KafkaConfig.buildKafkaProperties(parameters)),
+            new KafkaConsumer<String, byte[]>(
+                KafkaConfig.buildMembershipConsumerProperties(parameters, topic)
+            ),
+            topic,
+            1024 * 1024,
+            TEST_TRAFFIC_FLUSH_INTERVAL,
+            TEST_HEARTBEAT_INTERVAL,
+            TEST_HEARTBEAT_EXPIRATION,
+            KafkaConfig.buildAdminProperties(parameters),
+            2,
+            captureFailure::set,
+            unstableFailure::set
+        );
+        try {
+            factory.readyForConnections().get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            try (var admin = AdminClient.create(adminProperties(bootstrapServers))) {
+                var description = admin.describeTopics(List.of(topic))
+                    .allTopicNames()
+                    .get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+                    .get(topic);
+                Assertions.assertEquals(2, description.partitions().size());
+            }
+            Assertions.assertNull(captureFailure.get());
+            Assertions.assertNull(unstableFailure.get());
+        } finally {
+            factory.close();
+            deleteTopic(bootstrapServers, topic);
+        }
+    }
+
     private static ManualFactoryHarness startFactoryWithManualAcknowledgements(
         RootCaptureContext rootContext,
         String bootstrapServers,
@@ -440,9 +486,18 @@ class CaptureKafkaMembershipKafkaTest {
         String topic,
         String timestampType
     ) throws Exception {
+        createTopic(bootstrapServers, topic, timestampType, 4);
+    }
+
+    private static void createTopic(
+        String bootstrapServers,
+        String topic,
+        String timestampType,
+        int partitionCount
+    ) throws Exception {
         try (var admin = AdminClient.create(adminProperties(bootstrapServers))) {
             admin.createTopics(List.of(
-                new NewTopic(topic, 4, (short) 1).configs(
+                new NewTopic(topic, partitionCount, (short) 1).configs(
                     Map.of("message.timestamp.type", timestampType)
                 )
             )).all().get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);

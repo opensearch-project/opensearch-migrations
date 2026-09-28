@@ -168,6 +168,27 @@ public class KafkaConfig {
         return kafkaProps;
     }
 
+    public static Properties buildAdminProperties(KafkaParameters params) throws IOException {
+        var kafkaProps = loadKafkaProperties(params.kafkaPropertyFile);
+        kafkaProps.remove(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
+        kafkaProps.remove(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG);
+        kafkaProps.remove(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG);
+        kafkaProps.remove(ProducerConfig.MAX_BLOCK_MS_CONFIG);
+        kafkaProps.remove(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG);
+        kafkaProps.remove(ProducerConfig.ACKS_CONFIG);
+        kafkaProps.remove(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION);
+
+        kafkaProps.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, params.kafkaBrokers);
+        kafkaProps.put(CommonClientConfigs.CLIENT_ID_CONFIG, params.kafkaClientId + "-topic-admin");
+        applySaslAuthProperties(
+            kafkaProps,
+            params.getEffectiveKafkaAuthType(),
+            params.kafkaUserName,
+            params.kafkaPassword
+        );
+        return kafkaProps;
+    }
+
     private static Properties loadKafkaProperties(String kafkaPropertiesFile) throws IOException {
         var kafkaProps = new Properties();
         if (kafkaPropertiesFile == null) {

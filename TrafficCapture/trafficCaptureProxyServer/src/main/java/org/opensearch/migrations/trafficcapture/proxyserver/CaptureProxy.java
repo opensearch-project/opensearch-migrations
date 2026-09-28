@@ -227,6 +227,11 @@ public class CaptureProxy {
             description = "Name of the topic to write captured traffic to.")
         public String kafakTopicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
         @Parameter(required = false,
+            names = { "--minimumKafkaTopicPartitions" },
+            arity = 1,
+            description = "Minimum Kafka traffic-topic partition count to establish before accepting traffic.")
+        public int minimumKafkaTopicPartitions;
+        @Parameter(required = false,
             names = { "--traffic-stream-flush-interval-seconds" },
             arity = 1,
             description = "Fixed maximum age of each nonempty connection-local TrafficStream before detachment.")
@@ -378,8 +383,9 @@ public class CaptureProxy {
         if (params.kafkaParameters.kafkaBrokers != null) {
             KafkaProducer<String, byte[]> producer = null;
             try {
+                var kafkaProperties = KafkaConfig.buildKafkaProperties(params.kafkaParameters);
                 producer = new KafkaProducer<>(
-                    KafkaConfig.buildKafkaProperties(params.kafkaParameters)
+                    kafkaProperties
                 );
                 var membershipConsumer = new KafkaConsumer<String, byte[]>(
                     KafkaConfig.buildMembershipConsumerProperties(
@@ -397,6 +403,10 @@ public class CaptureProxy {
                     Duration.ofSeconds(params.trafficStreamFlushIntervalSeconds),
                     Duration.ofSeconds(params.heartbeatIntervalSeconds),
                     Duration.ofSeconds(params.heartbeatExpirationIntervalSeconds),
+                    params.minimumKafkaTopicPartitions > 0
+                        ? KafkaConfig.buildAdminProperties(params.kafkaParameters)
+                        : null,
+                    params.minimumKafkaTopicPartitions,
                     captureProcessState::requiredCaptureFailed,
                     captureProcessState::unstableProcessFailed
                 );
