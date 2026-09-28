@@ -31,6 +31,8 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Owns Kafka reading, per-partition demand, and commit authority. Runs on the dedicated Kafka thread and
@@ -43,7 +45,8 @@ import org.apache.kafka.common.errors.WakeupException;
 @Slf4j
 public final class KafkaSourceOwner {
     public static final Duration DEFAULT_REVOCATION_GRACE = Duration.ofSeconds(1);
-
+    public static final Duration DEFAULT_HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
+    private static final Logger HEARTBEAT_LOGGER = LoggerFactory.getLogger("KafkaHeartbeat");
 
     public enum AbandonmentCause {
         REJECTED,
@@ -99,10 +102,12 @@ public final class KafkaSourceOwner {
     private final Metrics metrics;
     private final RecordContextFactory recordContextFactory;
     private final ProtocolViolationHandler protocolViolationHandler;
+    private final long heartbeatIntervalNanos;
 
     private final Map<TopicPartition, PartitionSourceState> partitions = new LinkedHashMap<>();
     private final Map<KafkaRecordId, IReplayContexts.IKafkaRecordContext> recordContexts =
         new LinkedHashMap<>();
+    private final Map<KafkaRecordId, Long> recordObservedAtNanos = new LinkedHashMap<>();
     private final Map<TopicPartition, Long> stagedCommitPositions = new LinkedHashMap<>();
     /**
      * The one accepted asynchronous operation that has not resolved.
@@ -129,6 +134,13 @@ public final class KafkaSourceOwner {
     private boolean orderlyShutdownClosing;
     private boolean orderlyShutdownClosed;
     private boolean protocolViolationDetected;
+    private long nextHeartbeatNanos;
+    private long pollsSinceLastHeartbeat;
+    private long emptyPollsSinceLastHeartbeat;
+    private long commitsSinceLastHeartbeat;
+    private long recordsRead;
+    private long recordsCommitted;
+    private long recordsOutstanding;
 
     public KafkaSourceOwner(
         KafkaSourcePort port,
@@ -220,6 +232,34 @@ public final class KafkaSourceOwner {
         RecordContextFactory recordContextFactory,
         ProtocolViolationHandler protocolViolationHandler
     ) {
+        this(
+            port,
+            sourceInputs,
+            intakeInputs,
+            wakeupController,
+            cancellationGrace,
+            monotonicNanos,
+            graceWait,
+            metrics,
+            recordContextFactory,
+            protocolViolationHandler,
+            DEFAULT_HEARTBEAT_INTERVAL
+        );
+    }
+
+    KafkaSourceOwner(
+        KafkaSourcePort port,
+        KafkaSourceInputQueue sourceInputs,
+        ReplayIntakeInputQueue intakeInputs,
+        WakeupController wakeupController,
+        Duration cancellationGrace,
+        LongSupplier monotonicNanos,
+        GraceIntervalWait graceWait,
+        Metrics metrics,
+        RecordContextFactory recordContextFactory,
+        ProtocolViolationHandler protocolViolationHandler,
+        Duration heartbeatInterval
+    ) {
         this.port = Objects.requireNonNull(port, "port");
         this.sourceInputs = Objects.requireNonNull(sourceInputs, "sourceInputs");
         this.intakeInputs = Objects.requireNonNull(intakeInputs, "intakeInputs");
@@ -236,9 +276,15 @@ public final class KafkaSourceOwner {
             protocolViolationHandler,
             "protocolViolationHandler"
         );
+        Objects.requireNonNull(heartbeatInterval, "heartbeatInterval");
         if (cancellationGrace.isNegative()) {
             throw new IllegalArgumentException("cancellationGrace must not be negative");
         }
+        if (heartbeatInterval.isZero() || heartbeatInterval.isNegative()) {
+            throw new IllegalArgumentException("heartbeatInterval must be positive");
+        }
+        heartbeatIntervalNanos = heartbeatInterval.toNanos();
+        nextHeartbeatNanos = monotonicNanos.getAsLong() + heartbeatIntervalNanos;
     }
 
     /**
@@ -247,10 +293,14 @@ public final class KafkaSourceOwner {
      * might interrupt, and resume happens last so it reflects every state change this iteration made.
      */
     public void runOnce() {
-        applyQueuedInputs();
-        submitLoopCommitIfEligible();
-        applyPauseAndResumeDecisions();
-        pollAndDeliver();
+        try {
+            applyQueuedInputs();
+            submitLoopCommitIfEligible();
+            applyPauseAndResumeDecisions();
+            pollAndDeliver();
+        } finally {
+            logHeartbeatIfDue();
+        }
     }
 
     /**
@@ -358,6 +408,7 @@ public final class KafkaSourceOwner {
             return;
         }
         var completion = state.commitQueue().recordProcessingFinished(finished.recordId());
+        completion.newlyContiguousRecords().forEach(recordObservedAtNanos::remove);
         // Counted as records, not as an offset delta: physical offset gaps exist and §17.1 requires that they
         // not block advancement, so offset arithmetic would over-count by every gap.
         state.countRecordsAwaitingCommit(completion.newlyContiguousRecords().size());
@@ -407,7 +458,7 @@ public final class KafkaSourceOwner {
                 IReplayContexts.RecordDisposition.COMMIT_INELIGIBLE
             );
             metrics.recordsCommitIneligible(1);
-            metrics.recordsOutstandingChanged(-1);
+            changeRecordsOutstanding(-1);
             // A position already staged is necessarily before the violating record, because only
             // RecordProcessingFinished advances the prefix. Preserve that valid progress; the ineligible entry
             // remains in the deque and blocks every position at or beyond itself.
@@ -562,6 +613,9 @@ public final class KafkaSourceOwner {
             metrics.commitResolved(CommitResolution.REJECTED);
         } else {
             metrics.commitResolved(resolutionOf(outcome));
+            if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
+                commitsSinceLastHeartbeat++;
+            }
         }
         operation.submitted.forEach((topicPartition, detail) -> {
             var state = partitions.get(topicPartition);
@@ -584,7 +638,8 @@ public final class KafkaSourceOwner {
                 state.creditRecordsCommitted(detail.recordsCovered());
                 completeCommittedRecordContexts(detail.generation(), detail.nextPosition());
                 metrics.recordsCommitted(detail.recordsCovered().total());
-                metrics.recordsOutstandingChanged(-detail.recordsCovered().total());
+                recordsCommitted = Math.addExact(recordsCommitted, detail.recordsCovered().total());
+                changeRecordsOutstanding(-detail.recordsCovered().total());
                 // A still-owned partition restores records after an unknown outcome. An acknowledgement of the
                 // re-offered position covers those restored records, so the earlier uncertainty no longer
                 // explains its retirement count.
@@ -673,6 +728,10 @@ public final class KafkaSourceOwner {
             // cannot land on the next Kafka operation.
             wakeupController.leavePollAndConsumeWakeup();
         }
+        pollsSinceLastHeartbeat++;
+        if (polled.values().stream().allMatch(List::isEmpty)) {
+            emptyPollsSinceLastHeartbeat++;
+        }
         polled.forEach(this::deliver);
     }
 
@@ -709,10 +768,15 @@ public final class KafkaSourceOwner {
                 context
             );
         }).toList();
-        stamped.forEach(record -> state.commitQueue().register(record.recordId()));
+        var observedAtNanos = monotonicNanos.getAsLong();
+        stamped.forEach(record -> {
+            state.commitQueue().register(record.recordId());
+            recordObservedAtNanos.put(record.recordId(), observedAtNanos);
+        });
         state.countRecordsRead(stamped.size());
         metrics.recordsRead(stamped.size());
-        metrics.recordsOutstandingChanged(stamped.size());
+        recordsRead = Math.addExact(recordsRead, stamped.size());
+        changeRecordsOutstanding(stamped.size());
         submitRequired(new ReplayIntakeInput.PartitionRecordBatch(requestId, stamped));
     }
 
@@ -884,6 +948,9 @@ public final class KafkaSourceOwner {
         }
         recordRetirementConservation(state, activeSubmission);
         completeGenerationRecordContexts(state.generation());
+        recordObservedAtNanos.keySet().removeIf(
+            recordId -> recordId.generation().equals(state.generation())
+        );
         log.atInfo()
             .setMessage("Retiring generation {}: committed {} of {} records read, commitUncertainty={}")
             .addArgument(state::generation)
@@ -947,8 +1014,131 @@ public final class KafkaSourceOwner {
             Math.addExact(abandonedRejected, Math.addExact(abandonedUnknown, abandonedUnsubmitted))
         );
         if (newlyTerminal > 0) {
-            metrics.recordsOutstandingChanged(-newlyTerminal);
+            changeRecordsOutstanding(-newlyTerminal);
         }
+    }
+
+    private void changeRecordsOutstanding(long delta) {
+        recordsOutstanding = Math.addExact(recordsOutstanding, delta);
+        if (recordsOutstanding < 0) {
+            throw new IllegalStateException(
+                "Kafka source records outstanding became negative: " + recordsOutstanding
+            );
+        }
+        metrics.recordsOutstandingChanged(delta);
+    }
+
+    private void logHeartbeatIfDue() {
+        var nowNanos = monotonicNanos.getAsLong();
+        if (nowNanos - nextHeartbeatNanos < 0) {
+            return;
+        }
+        nextHeartbeatNanos = nowNanos + heartbeatIntervalNanos;
+
+        var generations = new LinkedHashMap<Integer, Long>();
+        var commitHeads = new LinkedHashMap<Integer, String>();
+        var commitTails = new LinkedHashMap<Integer, Long>();
+        var partitionStates = new ArrayList<String>();
+        var queueSize = 0;
+        for (var state : partitions.values()) {
+            var snapshot = state.commitQueue().snapshot();
+            var partition = state.topicPartition().partition();
+            generations.put(partition, state.generation().localSequence());
+            queueSize = Math.addExact(queueSize, snapshot.size());
+            if (snapshot.greatestObservedOffset() >= 0) {
+                commitTails.put(partition, snapshot.greatestObservedOffset());
+            }
+            snapshot.headRecord().ifPresent(headRecord -> {
+                var observedAt = recordObservedAtNanos.get(headRecord);
+                var age = observedAt == null
+                    ? "unknown"
+                    : formatDurationNanos(Math.max(0, nowNanos - observedAt));
+                commitHeads.put(
+                    partition,
+                    "{offset=" + headRecord.offset() + ", age=" + age + "}"
+                );
+            });
+            partitionStates.add(
+                "{partition="
+                    + partition
+                    + ", generation="
+                    + state.generation().localSequence()
+                    + ", paused="
+                    + state.isKafkaPaused()
+                    + ", readable="
+                    + state.isReadable()
+                    + ", queueSize="
+                    + snapshot.size()
+                    + ", unfinished="
+                    + snapshot.unfinishedCount()
+                    + ", awaitingCommit="
+                    + state.recordsAwaitingCommit().total()
+                    + ", commitUncertainty="
+                    + state.commitUncertainty()
+                    + "}"
+            );
+        }
+
+        var pendingCommitPartitions = new LinkedHashSet<>(stagedCommitPositions.keySet());
+        if (inFlightCommitOperation != null) {
+            pendingCommitPartitions.addAll(inFlightCommitOperation.submitted.keySet());
+        }
+        var polls = pollsSinceLastHeartbeat;
+        var emptyPolls = emptyPollsSinceLastHeartbeat;
+        var commits = commitsSinceLastHeartbeat;
+        pollsSinceLastHeartbeat = 0;
+        emptyPollsSinceLastHeartbeat = 0;
+        commitsSinceLastHeartbeat = 0;
+
+        HEARTBEAT_LOGGER.atInfo()
+            .setMessage(
+                "generation={} partitions={} inflight={} commitHead={} commitTail={} queueSize={} "
+                    + "polls={} emptyPolls={} commits={} readyToCommit={} pendingCommitPartitions={} "
+                    + "recordsRead={} recordsCommitted={} partitionStates={} shutdown={}"
+            )
+            .addArgument(generations)
+            .addArgument(() -> partitions.keySet().stream().map(TopicPartition::partition).toList())
+            .addArgument(recordsOutstanding)
+            .addArgument(commitHeads)
+            .addArgument(commitTails)
+            .addArgument(queueSize)
+            .addArgument(polls)
+            .addArgument(emptyPolls)
+            .addArgument(commits)
+            .addArgument(() -> !stagedCommitPositions.isEmpty())
+            .addArgument(pendingCommitPartitions.size())
+            .addArgument(recordsRead)
+            .addArgument(recordsCommitted)
+            .addArgument(partitionStates)
+            .addArgument(this::shutdownState)
+            .log();
+    }
+
+    private String shutdownState() {
+        if (orderlyShutdownClosed) {
+            return "closed";
+        }
+        if (orderlyShutdownClosing) {
+            return "closing";
+        }
+        if (orderlyShutdownStarted) {
+            return "draining";
+        }
+        if (protocolViolationDetected) {
+            return "protocol-fatal";
+        }
+        return "running";
+    }
+
+    private static String formatDurationNanos(long nanos) {
+        var totalSeconds = Duration.ofNanos(nanos).toSeconds();
+        if (totalSeconds < 60) {
+            return totalSeconds + "s";
+        }
+        if (totalSeconds < 3_600) {
+            return (totalSeconds / 60) + "m" + (totalSeconds % 60) + "s";
+        }
+        return (totalSeconds / 3_600) + "h" + ((totalSeconds % 3_600) / 60) + "m";
     }
 
     private void recordAbandonment(AbandonmentCause cause, long count) {

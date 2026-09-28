@@ -652,7 +652,11 @@ class Test0003ApprovalGateIntegration(MATestBase):
             self._approve_step_gate(gate_name)
             self._wait_for_step_gate(gate_name, "approved", timeout_seconds)
             if gate_name.startswith("captureproxysetup."):
-                wait_for_proxy_ready(self.argo_service.namespace, timeout_seconds)
+                wait_for_proxy_ready(
+                    self.argo_service.namespace,
+                    timeout_seconds,
+                    workflow_name=self.workflow_name,
+                )
 
     def _assert_gate_prerequisite_completed(self, gate_name: str):
         if gate_name == "begin":

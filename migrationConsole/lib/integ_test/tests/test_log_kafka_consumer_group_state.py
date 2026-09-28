@@ -123,6 +123,28 @@ def test_max_lag_omits_group_when_unspecified(mock_run):
     assert invoked_cmd == ["console", "kafka", "describe-consumer-group"]
 
 
+@patch.object(cdc_base.subprocess, "run")
+def test_consumer_group_probe_allows_slow_eks_console_startup(mock_run):
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_NEAR_DRAINED)
+
+    assert cdc_base._consumer_group_has_active_assignment() is True
+
+    assert mock_run.call_args.kwargs["timeout"] == cdc_base.CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS
+    assert cdc_base.CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS >= 30
+    assignment_timeout = cdc_base.CONSUMER_GROUP_ASSIGNMENT_TIMEOUT_SECONDS
+    probe_timeout = cdc_base.CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS
+    assert assignment_timeout > probe_timeout
+
+
+@patch.object(cdc_base.subprocess, "run")
+def test_consumer_group_assignment_requires_a_live_consumer(mock_run):
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_NEAR_DRAINED)
+    assert cdc_base._consumer_group_has_active_assignment() is True
+
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_FULLY_DRAINED)
+    assert cdc_base._consumer_group_has_active_assignment() is False
+
+
 # --- Caught-up bounded poll --------------------------------------------------
 
 @patch.object(cdc_base, "_consumer_group_max_lag")
@@ -203,13 +225,15 @@ def test_assert_replay_drained_returns_when_drain_succeeds(mock_wait, mock_snaps
 
 
 @patch.object(cdc_base, "_emit_describe_snapshot")
+@patch.object(cdc_base, "_dump_topic_on_drain_failure")
 @patch.object(cdc_base, "_wait_for_consumer_group_caught_up", return_value=(False, 348))
-def test_assert_replay_drained_raises_on_timeout(mock_wait, mock_snapshot):
+def test_assert_replay_drained_raises_on_timeout(mock_wait, mock_dump, mock_snapshot):
     with pytest.raises(cdc_base.ReplayLagDrainTimeout) as excinfo:
         cdc_base.assert_replay_drained(label="replay-end")
 
     # Snapshot must be emitted BEFORE the raise so the lag table is in CI logs.
     mock_snapshot.assert_called_once()
+    mock_dump.assert_called_once()
     assert "348" in str(excinfo.value)
     assert "LAG<=1" in str(excinfo.value)
 

@@ -1,8 +1,27 @@
+import re
+from pathlib import Path
+
 import pytest
+import yaml
 
 import integ_test.test_cases.cdc_base as cdc_base
 from console_link.models.cluster import AuthMethod, Cluster
 from integ_test.test_cases.cdc_base import PROXY_ENDPOINT, make_proxy_cluster
+
+
+WORKFLOW_FIXTURES = Path(__file__).resolve().parents[1] / "testWorkflows"
+
+
+def _workflow_template(filename: str, template_name: str) -> dict:
+    workflow = yaml.safe_load((WORKFLOW_FIXTURES / filename).read_text())
+    templates = workflow["spec"]["templates"]
+    template = next((item for item in templates if item["name"] == template_name), None)
+    assert template, f"Template {template_name!r} not found in {filename}"
+    return template
+
+
+def _workflow_template_body(filename: str, template_name: str) -> str:
+    return _workflow_template(filename, template_name)["container"]["args"][0]
 
 
 def test_make_proxy_cluster_signs_sigv4_requests_with_source_endpoint():
@@ -24,24 +43,93 @@ def test_make_proxy_cluster_signs_sigv4_requests_with_source_endpoint():
     assert proxy.config["sigv4_signing_endpoint"] == source.endpoint
 
 
+@pytest.mark.parametrize(
+    ("filename", "template_name", "expected_proxy_replicas", "expected_partitions"),
+    (
+        ("cdcOverlay.yaml", "add-traffic-config", 1, 2),
+        ("cdcOverlay.yaml", "add-proxy-only-traffic-config", 1, 2),
+        ("cdcOnlyImportedClusters.yaml", "build-cdc-only-config", 2, 3),
+    ),
+)
+def test_capture_workflows_reserve_a_rollout_partition(
+    filename,
+    template_name,
+    expected_proxy_replicas,
+    expected_partitions,
+):
+    template = _workflow_template(filename, template_name)
+    body = template["container"]["args"][0]
+    defaults = {
+        parameter["name"]: parameter.get("default")
+        for parameter in template.get("inputs", {}).get("parameters", [])
+    }
+
+    if "captureProxyPodReplicas" in defaults:
+        assert '"podReplicas": $captureProxyPodReplicas' in body
+        assert '"partitions": $trafficTopicPartitions' in body
+        proxy_replicas = int(defaults["captureProxyPodReplicas"])
+        topic_partitions = int(defaults["trafficTopicPartitions"])
+    else:
+        proxy_matches = re.findall(r'"podReplicas"\s*:\s*(\d+)', body)
+        partition_matches = re.findall(r'"partitions"\s*:\s*(\d+)', body)
+        assert len(proxy_matches) == 1
+        assert len(partition_matches) == 1
+        proxy_replicas = int(proxy_matches[0])
+        topic_partitions = int(partition_matches[0])
+
+    assert proxy_replicas == expected_proxy_replicas
+    assert topic_partitions == expected_partitions
+    assert topic_partitions >= proxy_replicas + 1
+
+
+def test_wait_for_proxy_ready_fails_on_outer_workflow_before_polling_again(monkeypatch):
+    monkeypatch.setattr(cdc_base, "load_k8s_config", lambda: None)
+    monkeypatch.setattr(
+        cdc_base,
+        "_get_capture_proxy_readiness_status",
+        lambda namespace: ("NotFound", "Not Found", "", ""),
+    )
+    monkeypatch.setattr(cdc_base, "_get_kafka_cluster_errors", lambda namespace: [])
+    monkeypatch.setattr(cdc_base, "_get_migration_resource_errors", lambda namespace: [])
+    monkeypatch.setattr(
+        cdc_base,
+        "_get_argo_workflow_errors",
+        lambda namespace, workflow_names: [
+            ("outer-workflow", "Failed", "configuration validation failed")
+        ] if workflow_names == ["outer-workflow"] else [],
+    )
+    monkeypatch.setattr(cdc_base, "_dump_argo_workflow_diagnostics", lambda namespace: None)
+    monkeypatch.setattr(
+        cdc_base.time,
+        "sleep",
+        lambda seconds: pytest.fail("readiness polling slept after the owning workflow failed"),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="CDC dependency workflow failed.*outer-workflow.*configuration validation failed",
+    ):
+        cdc_base.wait_for_proxy_ready(
+            "ma",
+            timeout_seconds=3600,
+            workflow_name="outer-workflow",
+        )
+
+
 def test_wait_for_replayer_consuming_waits_for_pod_ready_first(monkeypatch):
     ready_calls = []
+    assignment_checks = []
 
     def fake_wait_for_pod_ready(namespace, label_selector, timeout_seconds, dependency_error_check=None):
         ready_calls.append((namespace, label_selector, timeout_seconds, dependency_error_check))
 
-    class FakeCompletedProcess:
-        stdout = "KafkaHeartbeat partitions=[0]\n"
-
-    run_calls = []
-
-    def fake_run(args, **kwargs):
-        run_calls.append((args, kwargs))
-        return FakeCompletedProcess()
+    def fake_has_active_assignment():
+        assignment_checks.append(True)
+        return True
 
     monkeypatch.setattr(cdc_base, "wait_for_pod_ready", fake_wait_for_pod_ready)
     monkeypatch.setattr(cdc_base, "_raise_if_cdc_dependency_error", lambda *args, **kwargs: None)
-    monkeypatch.setattr(cdc_base.subprocess, "run", fake_run)
+    monkeypatch.setattr(cdc_base, "_consumer_group_has_active_assignment", fake_has_active_assignment)
 
     cdc_base.wait_for_replayer_consuming(
         namespace="ma",
@@ -52,7 +140,7 @@ def test_wait_for_replayer_consuming_waits_for_pod_ready_first(monkeypatch):
     assert len(ready_calls) == 1
     assert ready_calls[0][:3] == ("ma", cdc_base.REPLAYER_LABEL_SELECTOR, 42)
     assert ready_calls[0][3] is not None
-    assert run_calls
+    assert assignment_checks == [True]
 
 
 def test_wait_for_replayer_consuming_default_pod_ready_timeout_covers_dependencies(monkeypatch):
@@ -61,12 +149,9 @@ def test_wait_for_replayer_consuming_default_pod_ready_timeout_covers_dependenci
     def fake_wait_for_pod_ready(namespace, label_selector, timeout_seconds, dependency_error_check=None):
         ready_calls.append((namespace, label_selector, timeout_seconds, dependency_error_check))
 
-    class FakeCompletedProcess:
-        stdout = "KafkaHeartbeat partitions=[0]\n"
-
     monkeypatch.setattr(cdc_base, "wait_for_pod_ready", fake_wait_for_pod_ready)
     monkeypatch.setattr(cdc_base, "_raise_if_cdc_dependency_error", lambda *args, **kwargs: None)
-    monkeypatch.setattr(cdc_base.subprocess, "run", lambda *args, **kwargs: FakeCompletedProcess())
+    monkeypatch.setattr(cdc_base, "_consumer_group_has_active_assignment", lambda: True)
 
     cdc_base.wait_for_replayer_consuming(namespace="ma", timeout_seconds=1)
 
@@ -88,12 +173,9 @@ def test_wait_for_replayer_consuming_passes_workflow_name_to_dependency_check(mo
     def fake_dependency_check(namespace, workflow_names=None, parked_gate_watcher=None):
         dependency_calls.append((namespace, workflow_names, parked_gate_watcher))
 
-    class FakeCompletedProcess:
-        stdout = "KafkaHeartbeat partitions=[0]\n"
-
     monkeypatch.setattr(cdc_base, "wait_for_pod_ready", fake_wait_for_pod_ready)
     monkeypatch.setattr(cdc_base, "_raise_if_cdc_dependency_error", fake_dependency_check)
-    monkeypatch.setattr(cdc_base.subprocess, "run", lambda *args, **kwargs: FakeCompletedProcess())
+    monkeypatch.setattr(cdc_base, "_consumer_group_has_active_assignment", lambda: True)
 
     cdc_base.wait_for_replayer_consuming(namespace="ma", timeout_seconds=1, workflow_name="outer-workflow")
 

@@ -81,6 +81,88 @@ class KafkaSourceOwnerTest {
         );
     }
 
+    @Test
+    void kafkaHeartbeatReportsPeriodicProgressWithCompatibleFields() {
+        try (var logs = new CloseableLogSetup("KafkaHeartbeat")) {
+            var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
+            var owner = ownerFor(
+                port,
+                GRACE,
+                KafkaSourceOwner.RecordContextFactory.NONE,
+                violation -> {
+                    throw new KafkaSourceOwner.CaptureProtocolViolation(violation);
+                },
+                Duration.ofSeconds(30)
+            );
+            assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+            drainIntake();
+            var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
+            var generation1 = owner.partitionState(PARTITION_1).orElseThrow().generation();
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation0, 1)
+            ));
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation1, 1)
+            ));
+            port.scriptPoll(Map.of(
+                PARTITION_0, List.of(record(10)),
+                PARTITION_1, List.of(record(20))
+            ));
+            owner.runOnce();
+            drainIntake();
+
+            clockNanos.set(Duration.ofSeconds(29).toNanos());
+            owner.runOnce();
+            Assertions.assertTrue(logs.getLogEvents().isEmpty(), "heartbeat must not run before its cadence");
+
+            clockNanos.set(Duration.ofSeconds(30).toNanos());
+            owner.runOnce();
+
+            Assertions.assertEquals(1, logs.getLogEvents().size());
+            var firstHeartbeat = logs.getLogEvents().get(0);
+            Assertions.assertAll(
+                () -> Assertions.assertTrue(firstHeartbeat.contains("generation={")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("partitions=[0, 1]")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("inflight=2")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("commitHead={")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("0={offset=10, age=30s}")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("1={offset=20, age=30s}")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("commitTail={0=10, 1=20}")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("queueSize=2")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("polls=4")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("emptyPolls=3")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("commits=0")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("readyToCommit=false")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("pendingCommitPartitions=0")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("recordsRead=2")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("recordsCommitted=0")),
+                () -> Assertions.assertTrue(firstHeartbeat.contains("shutdown=running"))
+            );
+
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation0, 10)
+            ));
+            owner.runOnce();
+            Assertions.assertEquals(1, logs.getLogEvents().size(), "cadence resets after a heartbeat");
+
+            clockNanos.set(Duration.ofSeconds(60).toNanos());
+            owner.runOnce();
+
+            Assertions.assertEquals(2, logs.getLogEvents().size());
+            var secondHeartbeat = logs.getLogEvents().get(1);
+            Assertions.assertAll(
+                () -> Assertions.assertTrue(secondHeartbeat.contains("inflight=1")),
+                () -> Assertions.assertTrue(secondHeartbeat.contains("commitHead={1={offset=20, age=1m0s}}")),
+                () -> Assertions.assertTrue(secondHeartbeat.contains("queueSize=1")),
+                () -> Assertions.assertTrue(secondHeartbeat.contains("polls=2")),
+                () -> Assertions.assertTrue(secondHeartbeat.contains("emptyPolls=2")),
+                () -> Assertions.assertTrue(secondHeartbeat.contains("commits=1")),
+                () -> Assertions.assertTrue(secondHeartbeat.contains("recordsRead=2")),
+                () -> Assertions.assertTrue(secondHeartbeat.contains("recordsCommitted=1"))
+            );
+        }
+    }
+
     @AfterEach
     void closeTelemetry() {
         telemetry.close();
@@ -115,6 +197,22 @@ class KafkaSourceOwnerTest {
         KafkaSourceOwner.RecordContextFactory recordContextFactory,
         KafkaSourceOwner.ProtocolViolationHandler protocolViolationHandler
     ) {
+        return ownerFor(
+            port,
+            cancellationGrace,
+            recordContextFactory,
+            protocolViolationHandler,
+            KafkaSourceOwner.DEFAULT_HEARTBEAT_INTERVAL
+        );
+    }
+
+    private KafkaSourceOwner ownerFor(
+        PumpedKafkaSource port,
+        Duration cancellationGrace,
+        KafkaSourceOwner.RecordContextFactory recordContextFactory,
+        KafkaSourceOwner.ProtocolViolationHandler protocolViolationHandler,
+        Duration heartbeatInterval
+    ) {
         return new KafkaSourceOwner(
             port,
             sourceInputs,
@@ -146,7 +244,8 @@ class KafkaSourceOwnerTest {
             },
             commitMetrics,
             recordContextFactory,
-            protocolViolationHandler
+            protocolViolationHandler,
+            heartbeatInterval
         );
     }
 
