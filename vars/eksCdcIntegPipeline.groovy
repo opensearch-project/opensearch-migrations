@@ -12,6 +12,23 @@ def call(Map config = [:]) {
     def traceTestIds = config.traceTestIds ?: ""
     def traceValuesFile = config.traceValuesFile ?: "../../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesTraceXray.yaml"
     def traceBackend = config.traceBackend ?: "xray"
+    // general-work-pool overrides, verified after the tests; eksCdcAossIntegPipeline covers arm64.
+    // Fields differ from the chart defaults so a dropped override shows up, except two kept on
+    // purpose: on-demand (spot interruptions kill migration work mid-test) and WhenEmpty (the
+    // other policies move running pods).
+    def workloadsNodePool = config.workloadsNodePool ?: [
+        architectures     : ["amd64"],
+        capacityTypes     : ["on-demand"],
+        instanceCategories: ["m", "r"],
+        minInstanceGeneration: 6,
+        instanceSizes     : ["large", "xlarge", "2xlarge", "4xlarge"],
+        limits            : [cpu: "96000m", memory: "192Gi"],
+        disruption        : [consolidationPolicy: "WhenEmpty", consolidateAfter: "20m"],
+    ]
+    // Only the source chart wires every workloadsNodePool field; a release chart (BUILD=false or
+    // USE_RELEASE_BOOTSTRAP) hardcodes most of them, so overriding and verifying there would fail
+    // on the chart version rather than on a real problem.
+    def overrideNodePool = { -> params.BUILD && !params.USE_RELEASE_BOOTSTRAP }
     def clusterContextFilePath = "tmp/cluster-context-cdc-integ-${currentBuild.number}.json"
     // Reserved test ID range for the k6 load-test cases. Keep it equal to
     // LOAD_TEST_ID_PREFIX in libraries/testAutomation/testAutomation/test_runner.py.
@@ -108,6 +125,7 @@ def call(Map config = [:]) {
     Target:                 ${params.TARGET_VERSION}
     Build:                  ${params.BUILD}
     Load-test images:       ${env.needsLoadTestImages}
+    Workload NodePool:      ${overrideNodePool() ? workloadsNodePool : 'chart defaults (release artifacts)'}
     Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
     Version:                ${params.VERSION}
     ================================================================
@@ -181,7 +199,8 @@ def call(Map config = [:]) {
                                             kubectlContext: "migration-eks-${maStageName}",
                                             tlsMode: tlsMode != 'none' ? tlsMode : null,
                                             resourceTags: env.MA_RESOURCE_TAGS,
-                                            enforceTagsOnCreateForTests: true
+                                            enforceTagsOnCreateForTests: true,
+                                            workloadsNodePool: overrideNodePool() ? workloadsNodePool : null
                                         )
                                     }
                                 }
@@ -300,6 +319,19 @@ def call(Map config = [:]) {
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
                                     sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --k6-runner-image='${k6RunnerImage}' --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}' --verify-resource-tags --ma-stack-name='${env.MA_STACK_NAME}' --aws-region=${params.REGION} --eks-cluster-name='${env.eksClusterName}'"
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Verify Workload NodePool') {
+                when { expression { overrideNodePool() } }
+                steps {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        script {
+                            withMigrationsTestAccount(region: params.REGION, duration: 900) { accountId ->
+                                verifyWorkloadNodePool(kubectlContext: env.eksKubeContext, workloadsNodePool: workloadsNodePool)
                             }
                         }
                     }

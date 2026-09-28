@@ -145,6 +145,11 @@ default list. For example, overriding `workloadsNodePool.limits.cpu` alone
 keeps the default memory limit, while overriding `instanceSizes` requires
 supplying the full desired size list.
 
+To check an override file without deploying, run
+[`examples/check-nodepool-overrides.sh`](./examples/check-nodepool-overrides.sh)
+with it. The script runs the same schema validation the bootstrap does and
+prints the NodePool that would be rendered. It only needs `helm`.
+
 ## Common subcommands
 
 ```bash
