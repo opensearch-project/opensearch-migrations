@@ -22,6 +22,8 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Real {@link DocumentSource} adapter that reads documents from a Lucene snapshot
@@ -63,6 +65,11 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final boolean useRecoverySource;
 
     private final LuceneAdapter luceneAdapter;
+
+    // Unpacking waits for work on the shared bounded-elastic pool. Keep its caller on
+    // a separately owned blocking scheduler, serializing initialization of the source caches.
+    private final Scheduler initializationScheduler = Schedulers.newBoundedElastic(
+        1, Schedulers.DEFAULT_BOUNDED_ELASTIC_QUEUESIZE, "snapshot-initialization", 60, true);
 
 
     private LuceneSnapshotSource(Builder builder) {
@@ -208,7 +215,8 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     @Override
     public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
-        return Flux.defer(() -> readPartition(partition, startingDocOffset));
+        return Flux.defer(() -> readPartition(partition, startingDocOffset))
+            .subscribeOn(initializationScheduler);
     }
 
     private Flux<Document> readPartition(Partition partition, long startingDocOffset) {
@@ -281,6 +289,7 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     @Override
     public void close() {
+        initializationScheduler.dispose();
         shardEntryCache.clear();
         previousShardEntryCache.clear();
         snapshotIndices.clear();

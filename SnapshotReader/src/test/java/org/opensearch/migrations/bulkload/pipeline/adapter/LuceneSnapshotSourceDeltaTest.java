@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -13,6 +14,7 @@ import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -36,17 +38,28 @@ import static org.mockito.Mockito.when;
 class LuceneSnapshotSourceDeltaTest {
     private static final Path WORK_DIR = Path.of("work");
     private final SnapshotExtractor extractor = mock(SnapshotExtractor.class);
+    private final List<LuceneSnapshotSource> sources = new ArrayList<>();
 
     @BeforeEach
     void snapshotsExist() {
         when(extractor.listSnapshots()).thenReturn(List.of("previous", "current"));
     }
 
+    @AfterEach
+    void closeSources() {
+        sources.forEach(LuceneSnapshotSource::close);
+    }
+
     private LuceneSnapshotSource source(DeltaMode mode) {
-        return LuceneSnapshotSource.builder(extractor, "current", WORK_DIR)
+        return trackSource(LuceneSnapshotSource.builder(extractor, "current", WORK_DIR)
             .delta("previous", mode, () -> mock(IRfsContexts.IDeltaStreamContext.class))
             .emitDocType(true)
-            .build();
+            .build());
+    }
+
+    private LuceneSnapshotSource trackSource(LuceneSnapshotSource source) {
+        sources.add(source);
+        return source;
     }
 
     private SnapshotExtractor.ShardEntry shard(String snapshot, String index, int number) {
@@ -79,7 +92,7 @@ class LuceneSnapshotSourceDeltaTest {
                 IntStream.range(0, 15).mapToObj(i -> shard("previous", "shared", i)).toList());
         }
         var source = delta ? source(DeltaMode.UPDATES_ONLY)
-            : LuceneSnapshotSource.builder(extractor, "current", WORK_DIR).build();
+            : trackSource(LuceneSnapshotSource.builder(extractor, "current", WORK_DIR).build());
 
         assertEquals(IntStream.range(0, delta ? 15 : 12)
             .mapToObj(i -> new EsShardPartition("current", "shared", i)).toList(), source.listPartitions("shared"));
