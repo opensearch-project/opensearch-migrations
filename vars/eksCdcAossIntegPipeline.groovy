@@ -17,6 +17,7 @@ def call(Map config = [:]) {
     def clusterContextFilePath = "tmp/cluster-context-cdc-aoss-${currentBuild.number}.json"
     // general-work-pool overrides, verified after the tests: Graviton only (eksCdcIntegPipeline
     // covers amd64). Kept wide -- every Graviton generation (6 = Graviton2 onward) across c/m/r --
+    // so arm64 capacity is not the thing that fails.
     def workloadsNodePool = config.workloadsNodePool ?: [
         architectures     : ["arm64"],
         capacityTypes     : ["on-demand"],
