@@ -229,23 +229,30 @@ public class LuceneSnapshotSource implements DocumentSource {
         }
 
         if (isDeltaMode()) {
-            if (previousEntry == null) {
-                return deltaMode == DeltaMode.DELETES_ONLY ? Flux.empty()
-                    : readRegularDocuments(entry, partition, startingDocOffset);
-            }
-            if (entry == null) {
-                return deltaMode == DeltaMode.UPDATES_ONLY ? Flux.empty()
-                    : readRegularDocuments(previousEntry, partition, startingDocOffset)
-                        .map(doc -> new Document(doc.id(), null, Document.Operation.DELETE,
-                            doc.hints(), doc.sourceMetadata()));
-            }
-            log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
-            return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
-                .skip(startingDocOffset)
-                .map(luceneAdapter::fromLucene);
+            return readDeltaDocuments(entry, previousEntry, partition, startingDocOffset);
         }
 
         return readRegularDocuments(entry, partition, startingDocOffset);
+    }
+
+    private Flux<Document> readDeltaDocuments(
+        SnapshotExtractor.ShardEntry entry, SnapshotExtractor.ShardEntry previousEntry,
+        Partition partition, long startingDocOffset
+    ) {
+        if (previousEntry == null) {
+            return deltaMode == DeltaMode.DELETES_ONLY ? Flux.empty()
+                : readRegularDocuments(entry, partition, startingDocOffset);
+        }
+        if (entry == null) {
+            return deltaMode == DeltaMode.UPDATES_ONLY ? Flux.empty()
+                : readRegularDocuments(previousEntry, partition, startingDocOffset)
+                    .map(doc -> new Document(doc.id(), null, Document.Operation.DELETE,
+                        doc.hints(), doc.sourceMetadata()));
+        }
+        log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
+        return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
+            .skip(startingDocOffset)
+            .map(luceneAdapter::fromLucene);
     }
 
     private Flux<Document> readRegularDocuments(
