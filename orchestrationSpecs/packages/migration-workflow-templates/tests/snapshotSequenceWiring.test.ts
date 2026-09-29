@@ -41,7 +41,8 @@ describe("successive snapshot workflow execution", () => {
     it("serializes snapshot creation, backfill, approval, and durable completion before recursing", () => {
         const sequence = getTemplate("runsnapshotsequence");
         expect(sequence.steps?.map(group => group.map(step => step.name))).toEqual([
-            ["createSnapshot"], ["backfill"], ["readCheckpoint"], ["approveBackfill"], ["saveCheckpoint"], ["next"],
+            ["createSnapshot"], ["backfill"], ["readCheckpoint"], ["approveBackfill"], ["saveCheckpoint"],
+            ["evaluateRepeat"], ["next"],
         ]);
         const next = getStep(sequence.name, "next");
         expect(next.template).toBe(sequence.name);
@@ -49,9 +50,20 @@ describe("successive snapshot workflow execution", () => {
         expect(getStep(sequence.name, "createSnapshot").when).toContain("'snapshotCreation' in");
         expect(getStep(sequence.name, "backfill").arguments?.parameters.find(p => p.name === "snapshotMigrationConfig")?.value)
             .toContain("['snapshotMigrations'][asInt(");
-        // withParam already serializes nested arrays; a second toJSON would pass a string.
-        expect(getStep("main", "performSnapshotSequence").arguments?.parameters.find(p => p.name === "sequenceSteps")?.value)
-            .toBe("{{=item['steps']}}");
+        // Pass the complete typed plan once; do not serialize withParam's item twice.
+        expect(getStep("main", "performSnapshotSequence").arguments?.parameters.find(p => p.name === "sequencePlan")?.value)
+            .toBe("{{item}}");
+    });
+
+    it("checks policy decisions only after a complete round and gates recursion on the recorded result", () => {
+        expect(getStep("runsnapshotsequence", "evaluateRepeat").when).toContain("'completedRun' in");
+        expect(getStep("runsnapshotsequence", "next").when).toContain(
+            "steps.evaluateRepeat.outputs.parameters.action == 'continue'");
+        expect(getTemplate("runsnapshotsequenceandreplays").steps?.map(group => group.map(step => step.name)))
+            .toEqual([["sequence"], ["replay"]]);
+        expect(getStep("runindependentreplay", "replay").when).toContain("'snapshotSequenceName' in");
+        expect(getStep("createsinglesnapshot", "createOrGetSnapshot").arguments?.parameters
+            .find(p => p.name === "uniqueRunNonce")?.value).toContain("['resourceUid']");
     });
 
     it("keeps sequence resources out of the independent concurrent loops", () => {

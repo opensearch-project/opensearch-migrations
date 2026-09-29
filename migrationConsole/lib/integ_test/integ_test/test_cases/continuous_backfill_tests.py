@@ -1,5 +1,4 @@
 """Successive snapshot backfills through the production workflow on EKS."""
-import copy
 import json
 import logging
 import subprocess
@@ -24,6 +23,8 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
     """
     requires_explicit_selection = True
     SNAPSHOTS = ("initial", "updated", "merged", "unchanged")
+    MAX_RUNS = 4
+    SNAPSHOT_LAG = None
 
     def __init__(self, user_args: MATestUserArguments):
         super().__init__(
@@ -52,9 +53,9 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
         self.versions_before_noop = None
         self.keep_workflows = False
 
-    @staticmethod
-    def _gate_name(snapshot: str) -> str:
-        return f"documentbackfill.source1-target1-{snapshot}-migration-0"
+    def _gate_name(self, snapshot: str) -> str:
+        run = self.SNAPSHOTS.index(snapshot) + 1
+        return f"documentbackfill.source1-target1-backfill-{run}-migration-0"
 
     def import_existing_clusters(self):
         super().import_existing_clusters()
@@ -85,13 +86,6 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
         source = self._cluster_config(self.source_cluster.config, source=True)
         source["snapshotInfo"] = {
             "repos": {self.repo_name: repo},
-            "snapshots": {
-                name: {
-                    "repoName": self.repo_name,
-                    "config": {"createSnapshotConfig": {"indexAllowlist": [f"{self.index_name}*"]}},
-                }
-                for name in self.SNAPSHOTS
-            },
         }
         backfill = {
             "skipApproval": False,
@@ -111,10 +105,17 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
             "snapshotMigrationConfigs": [{
                 "fromSource": "source1",
                 "toTarget": "target1",
-                "snapshotSequence": list(self.SNAPSHOTS),
-                "perSnapshotConfig": {
-                    name: [{"metadataMigrationConfig": {}, "documentBackfillConfig": copy.deepcopy(backfill)}]
-                    for name in self.SNAPSHOTS
+                "backfill": {
+                    "snapshot": {
+                        "repoName": self.repo_name,
+                        "createSnapshotConfig": {"indexAllowlist": [f"{self.index_name}*"]},
+                    },
+                    "metadataMigrationConfig": {},
+                    "documentBackfillConfig": backfill,
+                    "repeat": {
+                        "maxRuns": self.MAX_RUNS,
+                        **({"until": {"snapshotLag": self.SNAPSHOT_LAG}} if self.SNAPSHOT_LAG else {}),
+                    },
                 },
             }],
         }
@@ -178,6 +179,26 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
         assert result.returncode == 0, (args, result.stdout, result.stderr)
         return result.stdout
 
+    @staticmethod
+    def _resource(kind: str, name: str) -> dict:
+        result = subprocess.run(
+            ["kubectl", "get", kind, name, "-o", "json"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    def _assert_repeat_decision(self, run: int, reason: str):
+        resource = self._resource("snapshotmigration", f"source1-target1-backfill-{run}-migration-0")
+        decision = resource["status"]["backfillRepeat"]
+        assert decision["run"] == run, decision
+        assert decision["maxRuns"] == self.MAX_RUNS, decision
+        assert decision["reason"] == reason, decision
+        assert decision["snapshotLagSeconds"] > 0, decision
+        snapshot = self._resource("datasnapshot", f"source1-backfill-{run}")
+        assert snapshot["status"]["snapshotName"] == f"source1_backfill-{run}_{snapshot['metadata']['uid']}"
+        logger.info("Verified backfill repeat decision: %s", json.dumps(decision, sort_keys=True))
+
     def _wait_for_gate(self, snapshot: str, timeout_seconds: int):
         deadline = time.monotonic() + timeout_seconds
         watcher = self.argo_service.parked_gate_watcher_for(self.workflow_name)
@@ -239,6 +260,7 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
             logger.info("Verified successive snapshot round %s", snapshot)
             self._workflow_cli("approve", "step", self._gate_name(snapshot))
         self.argo_service.wait_for_ending_phase(self.workflow_name, timeout_seconds=900)
+        self._assert_repeat_decision(self.MAX_RUNS, "runLimitReached")
 
     def verify_clusters(self):
         self._verify_current_round()
@@ -246,3 +268,48 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
     def cleanup(self):
         if not self.keep_workflows:
             self.argo_service.delete_workflow(workflow_name="migration-workflow")
+
+
+class Test0091BackfillStopsAtLagTarget(Test0090SuccessiveSnapshotBackfills):
+    """A reachable lag target stops before creating unused planned snapshots."""
+
+    SNAPSHOTS = ("initial",)
+    MAX_RUNS = 3
+    SNAPSHOT_LAG = "1d"
+
+    def workflow_perform_migrations(self, timeout_seconds: int = 3600):
+        self._wait_for_gate("initial", timeout_seconds)
+        self._verify_current_round()
+        self._workflow_cli("approve", "step", self._gate_name("initial"))
+        self.argo_service.wait_for_ending_phase(self.workflow_name, timeout_seconds=900)
+        self._assert_repeat_decision(1, "lagTargetMet")
+        snapshots = execute_api_call(self.source_cluster, f"/_snapshot/{self.repo_name}/_all").json()["snapshots"]
+        assert len(snapshots) == 1, snapshots
+        logger.info("Verified lag target stopped the policy after one of three allowed backfills")
+
+
+class Test0092BackfillReportsUnmetLagTarget(Test0090SuccessiveSnapshotBackfills):
+    """Hitting the run budget must not report that an unmet lag target succeeded."""
+
+    SNAPSHOTS = ("initial", "updated")
+    MAX_RUNS = 2
+    SNAPSHOT_LAG = "1s"
+
+    def workflow_perform_migrations(self, timeout_seconds: int = 3600):
+        for snapshot in self.SNAPSHOTS:
+            self._wait_for_gate(snapshot, timeout_seconds)
+            self._verify_current_round()
+            self._workflow_cli("approve", "step", self._gate_name(snapshot))
+        self.argo_service.wait_for_ending_phase(self.workflow_name, timeout_seconds=900)
+        self._assert_repeat_decision(2, "lagTargetNotMet")
+        snapshots = execute_api_call(self.source_cluster, f"/_snapshot/{self.repo_name}/_all").json()["snapshots"]
+        assert len(snapshots) == self.MAX_RUNS, snapshots
+
+    def test_after(self):
+        status = self.argo_service.get_workflow_status(self.workflow_name).value
+        assert status["phase"] == "Failed", status
+        resource = self._resource("snapshotmigration", "source1-target1-backfill-2-migration-0")
+        decision = resource["status"]["backfillRepeat"]
+        assert decision["action"] == "fail", decision
+        assert decision["snapshotLagSeconds"] > 1, decision
+        logger.info("Verified the workflow failed explicitly when its run limit was reached before the lag target")
