@@ -7,6 +7,8 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -30,11 +32,9 @@ class ES8VectorFieldMappingsTransformationTest extends BaseMigrationTest {
     protected File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        // Transformations are differentiated only by source, so lock to a specific target.
-        var source = SearchClusterContainer.ES_V8_17;
-        var target = SearchClusterContainer.OS_LATEST;
-
-        return Stream.of(Arguments.of(source, target));
+        // Verify explicit SQ bits against targets before and after the 3.6 encoder change.
+        return Stream.of(SearchClusterContainer.OS_V3_5_0, SearchClusterContainer.OS_LATEST)
+            .map(target -> Arguments.of(SearchClusterContainer.ES_V8_17, target));
     }
 
     @ParameterizedTest(name = "Custom Transformation From {0} to {1}")
@@ -115,5 +115,26 @@ class ES8VectorFieldMappingsTransformationTest extends BaseMigrationTest {
         var res = targetOperations.get("/" + indexName);
         assertThat(res.getKey(), equalTo(200));
         assertThat(res.getValue(), containsString(indexName));
+        var index = new ObjectMapper().readTree(res.getValue()).path(indexName);
+        Assertions.assertTrue(index.path("settings").path("index").path("knn").asBoolean());
+        var properties = index.path("mappings").path("properties");
+        assertVectorMapping(properties.path("my_vector_field"), 38, "cosinesimil", 100);
+        assertVectorMapping(properties.path("my_vector_field_2"), 25, "innerproduct", 50);
+    }
+
+    private static void assertVectorMapping(
+        JsonNode field, int dimension, String spaceType, int efConstruction
+    ) {
+        Assertions.assertEquals("knn_vector", field.path("type").asText());
+        Assertions.assertEquals(dimension, field.path("dimension").asInt());
+        var method = field.path("method");
+        Assertions.assertEquals("hnsw", method.path("name").asText());
+        Assertions.assertEquals("lucene", method.path("engine").asText());
+        Assertions.assertEquals(spaceType, method.path("space_type").asText());
+        var parameters = method.path("parameters");
+        Assertions.assertEquals(16, parameters.path("m").asInt());
+        Assertions.assertEquals(efConstruction, parameters.path("ef_construction").asInt());
+        Assertions.assertEquals("sq", parameters.path("encoder").path("name").asText());
+        Assertions.assertEquals(7, parameters.path("encoder").path("parameters").path("bits").asInt());
     }
 }

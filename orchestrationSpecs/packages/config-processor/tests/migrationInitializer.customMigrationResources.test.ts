@@ -5,7 +5,7 @@ import { z } from "zod";
 
 describe('migration initializer CRD resource generation', () => {
     it('generates CR resources and UID enrichment script entries with expected names', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
@@ -168,7 +168,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('generates S3 captured traffic resources without creating a capture proxy', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
@@ -253,7 +253,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('labels approval gates with workflow name and generates cleanup script', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
@@ -341,7 +341,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('creates the opt-in begin approval gate for the migration run', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             requireBeginApproval: true,
             sourceClusters: {
                 source: {
@@ -395,7 +395,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('omits labels and label-based cleanup when no workflow name provided', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
@@ -443,7 +443,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('generates snapshot migration UID enrichment script even without kafka, proxies, or replays', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
