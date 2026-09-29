@@ -1,5 +1,10 @@
 import {MigrationConfigTransformer} from "../src/migrationConfigTransformer";
+import {MigrationInitializer} from "../src/migrationInitializer";
 import {evaluateBackfillRepeat, evaluateBackfillRepeatRequest} from "../src/evaluateBackfillRepeat";
+import * as fs from "node:fs/promises";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {parse} from "yaml";
 
 function policyConfig(maxRuns = 3, snapshotLag?: string) {
     return {
@@ -46,6 +51,34 @@ describe("declarative repeated backfills", () => {
         expect(once.snapshotSequences![0].steps).toHaveLength(1);
         expect(more.snapshotMigrations[0]).toEqual(once.snapshotMigrations[0]);
         expect(more.snapshots[0].createSnapshotConfig[0]).toEqual(once.snapshots[0].createSnapshotConfig[0]);
+    });
+
+    it("preserves resource identities and checksums for omitted versus empty snapshot options", async () => {
+        const config = policyConfig();
+        const migration = config.snapshotMigrationConfigs[0];
+        const withoutOptions = {
+            ...migration,
+            backfill: {
+                ...migration.backfill,
+                snapshot: {repoName: migration.backfill.snapshot.repoName},
+            },
+        };
+        const transformer = new MigrationConfigTransformer();
+        const omitted = await transformer.processFromObject({
+            ...config, snapshotMigrationConfigs: [withoutOptions],
+        });
+        const explicit = await transformer.processFromObject({
+            ...config,
+            snapshotMigrationConfigs: [{
+                ...withoutOptions,
+                backfill: {
+                    ...withoutOptions.backfill,
+                    snapshot: {...withoutOptions.backfill.snapshot, createSnapshotConfig: {}},
+                },
+            }],
+        });
+
+        expect(explicit).toEqual(omitted);
     });
 
     it("automatically runs a target's replay after its backfill policy, without a generated snapshot reference", async () => {
@@ -104,6 +137,79 @@ describe("declarative repeated backfills", () => {
         config.snapshotMigrationConfigs[0].backfill.snapshot.repoName = "missing";
         await expect(new MigrationConfigTransformer().processFromObject(config)).rejects.toThrow(/repo/);
     });
+});
+
+describe("repeated backfill initialization", () => {
+    const runOptions = {runNumber: 1, timestamp: new Date("2026-09-29T12:00:00Z")};
+    const parallelKeys = [
+        "snapshot-modern-source-backfill-1",
+        "snapshot-modern-source-backfill-2",
+        "snapshot-modern-source-backfill-3",
+    ];
+
+    it.each([
+        {version: "ES 7.10", maxRuns: 3, serialize: undefined, keys: ["snapshot-legacy-source"]},
+        {version: "OS 2.19", maxRuns: 4, serialize: undefined, keys: [...parallelKeys, "snapshot-modern-source-backfill-4"]},
+        {version: "ES 7.10", maxRuns: 3, serialize: false, keys: parallelKeys},
+        {version: "OS 2.19", maxRuns: 4, serialize: true, keys: ["snapshot-legacy-source"]},
+    ])("initializes $maxRuns runs for $version (serialize=$serialize)", async ({version, maxRuns, serialize, keys}) => {
+        const config = policyConfig(maxRuns);
+        const source = config.sourceClusters.source;
+        const bundle = await new MigrationInitializer().generateMigrationBundle({
+            ...config,
+            sourceClusters: {source: {
+                ...source,
+                version,
+                snapshotInfo: {...source.snapshotInfo, serializeSnapshotCreation: serialize},
+            }},
+        }, "policy-test", runOptions);
+
+        expect(bundle.concurrencyConfigMaps.items[0].data)
+            .toEqual(Object.fromEntries(keys.map(key => [key, "1"])));
+        expect(bundle.workflows.snapshotSequences![0].steps.filter(step => step.completedRun !== undefined))
+            .toHaveLength(maxRuns);
+        const migrationRun = bundle.customMigrationResources.items.find(item => item.kind === "MigrationRun");
+        expect(migrationRun).toBeDefined();
+        expect(Buffer.byteLength(JSON.stringify(migrationRun), "utf8")).toBeLessThan(1024 * 1024);
+    });
+
+    it("writes generated semaphore keys when only the transformed configuration is supplied", async () => {
+        const workflows = await new MigrationConfigTransformer().processFromObject(policyConfig(4));
+        const outputDir = await fs.mkdtemp(join(tmpdir(), "backfill-initializer-"));
+        try {
+            await new MigrationInitializer().generateOutputFiles(
+                workflows, outputDir, null, "policy-test", runOptions,
+            );
+            const resourceDir = join(outputDir, "resources");
+            const file = (await fs.readdir(resourceDir))
+                .find(name => name.endsWith("-configmap-concurrency-config.yaml"));
+            expect(file).toBeDefined();
+            const configMap = parse(await fs.readFile(join(resourceDir, file!), "utf8"));
+            expect(configMap.data).toEqual({"snapshot-legacy-source": "1"});
+        } finally {
+            await fs.rm(outputDir, {recursive: true, force: true});
+        }
+    });
+
+    it("rejects an oversized budget with instructions to reduce maxRuns", async () => {
+        await expect(new MigrationInitializer()
+            .generateMigrationBundle(policyConfig(1000), "policy-test", runOptions)
+            .then(() => undefined))
+            .rejects.toThrow(/MigrationRun.*1 MiB.*[Rr]educe.*backfill\.repeat\.maxRuns/);
+    });
+
+    it("rejects oversized transformed plans before writing manifests or apply scripts", async () => {
+        const workflows = await new MigrationConfigTransformer().processFromObject(policyConfig(128));
+        const parentDir = await fs.mkdtemp(join(tmpdir(), "backfill-size-limit-"));
+        try {
+            await expect(new MigrationInitializer().generateOutputFiles(
+                workflows, join(parentDir, "bundle"), null, "policy-test", runOptions,
+            )).rejects.toThrow(/MigrationRun.*1 MiB.*[Rr]educe.*backfill\.repeat\.maxRuns/);
+            expect(await fs.readdir(parentDir)).toEqual([]);
+        } finally {
+            await fs.rm(parentDir, {recursive: true, force: true});
+        }
+    }, 15000);
 });
 
 const started = Date.parse("2026-09-29T12:00:00Z");

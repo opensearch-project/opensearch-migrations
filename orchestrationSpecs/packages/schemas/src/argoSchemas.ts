@@ -455,6 +455,7 @@ export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({
 
 export const DENORMALIZED_REPLAY_CONFIG = z.object({
     name: z.string(),
+    snapshotSequenceName: z.string().optional(),
     sourceLabel: z.string(),
     dependsOn: z.array(z.string()),
     dependsOnSnapshotMigrations: z.array(ENRICHED_SNAPSHOT_MIGRATION_FILTER),
@@ -505,10 +506,17 @@ export const SNAPSHOT_CREATION_REFERENCE = z.object({
 export const SNAPSHOT_SEQUENCE_STEP = z.object({
     snapshotCreation: SNAPSHOT_CREATION_REFERENCE.optional(),
     migrationIndex: z.number().int().nonnegative(),
+    completedRun: z.number().int().positive().optional(),
+});
+export const RESOLVED_BACKFILL_REPEAT_POLICY = z.object({
+    maxRuns: z.number().int().min(1).max(1000),
+    snapshotLagTargetSeconds: z.number().int().positive().optional(),
 });
 export const SNAPSHOT_SEQUENCE_PLAN = z.object({
     name: z.string(),
     steps: z.array(SNAPSHOT_SEQUENCE_STEP).min(1),
+    repeat: RESOLVED_BACKFILL_REPEAT_POLICY.optional(),
+    replayIndices: z.array(z.number().int().nonnegative()).optional(),
 });
 
 export const ARGO_MIGRATION_CONFIG = z.object({

@@ -20,6 +20,7 @@ import {
     DEPLOYMENT_DEFAULTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
     CLUSTER_CONNECTION_IDENTITY,
+    snapshotLagDurationSeconds,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -30,6 +31,7 @@ import { crdName } from './crdNaming';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 import {FileSourceRegistry} from "./fileSourceUtils";
 import {planSnapshotSequences} from "./snapshotSequencePlanner";
+import {expandBackfillPolicies} from "./expandBackfillPolicies";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
@@ -216,9 +218,9 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
             // Prioritize extra key errors over parse errors
             throw extraKeyError || parseError || new Error('No valid union option found');
         }
-    } else if (schemaType === 'ZodOptional' || schemaType === 'ZodDefault') {
+    } else if (schemaType === 'ZodOptional' || schemaType === 'ZodDefault' || schemaType === 'ZodPrefault') {
         if (data !== undefined) {
-            validateNoExtraKeys(data, (schema as z.ZodOptional<any> | z.ZodDefault<any>).unwrap(), path);
+            validateNoExtraKeys(data, (schema as z.ZodOptional<any> | z.ZodDefault<any> | z.ZodPrefault<any>).unwrap(), path);
         }
     } else if (schemaType === 'ZodRecord' && typeof data === 'object' && data !== null) {
         Object.values(data).forEach((value, index) => {
@@ -710,7 +712,7 @@ function normalizeUserConfigForValidation(userConfig: InputConfig): InputConfig 
 }
 
 export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConfig {
-    const validationNormalized = normalizeUserConfigForValidation(userConfig);
+    const validationNormalized = expandBackfillPolicies(normalizeUserConfigForValidation(userConfig));
     return {
         ...validationNormalized,
         kafkaClusterConfiguration: validationNormalized.kafkaClusterConfiguration ?? {},
@@ -1046,17 +1048,38 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             };
         });
 
-        const replaysWithChecksums = trafficReplays.map(r => {
+        const repeatPolicies = new Map(userConfig.snapshotMigrationConfigs.flatMap(migration =>
+            migration.backfill ? [[crdName(migration.fromSource, migration.toTarget), {
+                maxRuns: migration.backfill.repeat.maxRuns,
+                ...(migration.backfill.repeat.until ? {
+                    snapshotLagTargetSeconds: snapshotLagDurationSeconds(migration.backfill.repeat.until.snapshotLag),
+                } : {}),
+            }] as const] : [],
+        ));
+        const sequencePlan = planSnapshotSequences(snapshotsWithChecksums, migrationsWithChecksums, repeatPolicies);
+
+        const replaysWithChecksums = trafficReplays.map((r, replayIndex) => {
             // Resolve the upstream checksum from either the proxy or the s3 loader.
             // (One and only one will exist; super-refine guarantees no name collisions.)
             const fromCapturedTrafficChecksum =
                 proxyChecksumForReplayer.get(r.fromCapturedTraffic) ??
                 s3LoaderChecksumForReplayer.get(r.fromCapturedTraffic) ??
                 '';
+            const policyMigration = userConfig.snapshotMigrationConfigs.find(
+                migration => migration.backfill && migration.toTarget === r.toTarget.label,
+            );
+            const snapshotSequenceName = policyMigration
+                ? crdName(policyMigration.fromSource, policyMigration.toTarget) : undefined;
+            const sequence = sequencePlan.snapshotSequences?.find(plan => plan.name === snapshotSequenceName);
+            if (sequence) sequence.replayIndices = [...(sequence.replayIndices ?? []), replayIndex];
             return ({
                 ...r,
+                ...(snapshotSequenceName ? {snapshotSequenceName} : {}),
                 dependsOn: [
                     r.fromCapturedTraffic,
+                    ...migrationsWithChecksums
+                        .filter(migration => snapshotSequenceName && migration.sequenceName === snapshotSequenceName)
+                        .map(migration => migration.resourceName),
                     ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
                         migrationsWithChecksums
                             .filter(m =>
@@ -1092,7 +1115,6 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             configChecksum: kafkaChecksums.get(k.name),
         }));
 
-        const sequencePlan = planSnapshotSequences(snapshotsWithChecksums, migrationsWithChecksums);
         const output = {
             requireBeginApproval: userConfig.requireBeginApproval ?? false,
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),

@@ -1,14 +1,72 @@
 # Successive snapshot backfills
 
-Use `snapshotSequence` to migrate a baseline snapshot and then apply the changes
-from successive snapshots to the same target. Each snapshot is created after the
-preceding backfill and its approval have finished. The source can continue
-accepting writes between snapshots.
+Declare a `backfill` with a `repeat` policy to create a baseline snapshot and then
+apply changes from successive snapshots to the same target. Declare snapshot and
+migration options once; the workflow generates the names and takes each new
+snapshot after the preceding backfill and its approval finish.
 
 The [complete example](../orchestrationSpecs/examples/successive-snapshots.yaml)
-declares a baseline and two catch-up rounds. Configure its endpoints, snapshot
+allows up to three rounds, stopping when snapshot lag is at most two minutes.
+Configure its endpoints, snapshot
 repository, authentication, and index selection for your deployment, then use the
 usual workflow configuration and start commands.
+
+```yaml
+snapshotMigrationConfigs:
+  - fromSource: source
+    toTarget: target
+    backfill:
+      snapshot:
+        repoName: migration
+        createSnapshotConfig:
+          indexAllowlist: [orders]
+      metadataMigrationConfig: {}
+      documentBackfillConfig:
+        indexAllowlist: [orders]
+      repeat:
+        maxRuns: 3
+        until:
+          snapshotLag: 2m
+```
+
+`repoName` refers to `sourceClusters.source.snapshotInfo.repos.migration`. No
+snapshot names or `perSnapshotConfig` entries are needed.
+
+- `maxRuns` includes the initial full backfill. Later rounds apply deltas.
+  Without `until`, the workflow performs exactly that many rounds.
+- `until.snapshotLag` accepts a positive duration such as `30s`, `2m`, `1h`, or
+  `1d`. The workflow checks it after each complete backfill, never between a
+  delta's delete and add phases.
+- Snapshot lag is the recorded backfill completion time minus the source's
+  recorded snapshot start time. Completion is observed by the backfill monitor,
+  so its polling delay is included. Approval delays and subsequent restarts do
+  not change the measurement. Snapshots are not transactions across shards;
+  this metric does not guarantee that every source write has reached the target.
+- If the lag target is met, later snapshots are not created. If `maxRuns` is
+  exhausted first, the workflow records `lagTargetNotMet` and fails before
+  starting replay. A run limit without a lag target completes normally.
+- The workflow records the run number, measured lag, and stop reason on the
+  round's `SnapshotMigration` status. Logical labels are `backfill-1`,
+  `backfill-2`, and so on; actual snapshot names include the durable
+  `DataSnapshot` UID, so a retry uses the same snapshot.
+- Increase `maxRuns` to continue an existing policy while preserving completed
+  rounds. Decreasing a started budget or changing its lag target requires a
+  reset. `maxRuns` is a finite budget between 1 and 1,000; the size of the generated
+  plan also limits how many rounds can be deployed.
+- A traffic replayer for this target automatically waits for successful policy
+  completion. It needs no reference to a generated final snapshot. Once replay
+  or other target writes have started, do not extend the backfill policy.
+
+Approval gates use the normal `workflow approve step` commands. Set
+`documentBackfillConfig.skipApproval: true` to skip the backfill gate. For
+unattended execution, also set `metadataMigrationConfig.skipEvaluateApproval`
+and `metadataMigrationConfig.skipMigrateApproval` to `true`, or set the top-level
+`skipApprovals: true` to disable approval gates by default.
+
+## Explicit snapshot sequences
+
+Use `snapshotSequence` when choosing specific snapshots, including snapshots
+created outside the workflow:
 
 ```yaml
 snapshotMigrationConfigs:
@@ -42,12 +100,9 @@ The workflow performs:
    metadata and apply additions and updates. Wait for approval.
 4. Create `final` and repeat the delete, metadata, add, and approval stages.
 
-Approval gates use the normal `workflow approve step` commands. Setting
-`documentBackfillConfig.skipApproval: true` skips the backfill gate for that round.
-For unattended execution, also set `metadataMigrationConfig.skipEvaluateApproval`
-and `metadataMigrationConfig.skipMigrateApproval` to `true`, or set the top-level
-`skipApprovals: true` to disable approval gates by default.
-Without `snapshotSequence`, snapshot migrations retain their
+Use either `backfill` or `perSnapshotConfig` in a migration block. A `backfill`
+policy owns its source's snapshots; use `snapshotSequence` to manage explicit
+labels instead. Without either repetition form, snapshot migrations retain their
 independent execution behavior.
 
 ## Correctness and restart behavior
@@ -76,6 +131,13 @@ the target from the baseline.
 
 ## Requirements and limits
 
+- For repeat policies, the initializer rejects a generated `MigrationRun` larger
+  than 1 MiB of serialized JSON before writing manifests or apply scripts. This conservative
+  budget leaves room for Kubernetes metadata below storage and request limits.
+  The plan includes every possible round, so an `until` condition does not reduce
+  its initial size. A `maxRuns` value at or below 1,000 does not guarantee the plan
+  fits: reduce `backfill.repeat.maxRuns` or the configuration size if validation
+  rejects it.
 - Preserve source document IDs and complete stored `_source`. Sequences reject
   server-generated IDs, source reconstruction, and document transformations.
   Both snapshots are checked for disabled or filtered `_source`.
@@ -86,9 +148,10 @@ the target from the baseline.
   backfill. Do not modify or delete those documents outside the sequence. This
   assumption is not a remote content comparison. Target-only documents are
   preserved.
-- Use one migration configuration for the sequence's source and target. A
-  traffic replayer targeting the same cluster must depend on the final snapshot;
-  it starts after that snapshot's successful backfill and approval.
+- Use one migration configuration for the sequence's source and target. For an
+  explicit `snapshotSequence`, a traffic replayer targeting the same cluster
+  must depend on the final snapshot. For a `backfill` policy this ordering is
+  automatic. Replay starts after the successful backfill and approval.
 - Adding and removing source indices is supported. Removing an index removes
   its migrated documents; it leaves the target index and any target-only
   documents in place. Metadata migration remains optional per round and follows
@@ -105,7 +168,9 @@ experimental flag aliases remain accepted. The legacy `UPDATES_AND_DELETES`
 option orders batches within one shard; it does not provide the workflow's
 barrier across workers.
 
-Jenkins's EKS integration suite includes Test0090. It verifies multiple rounds
+Jenkins's EKS integration suite includes Test0090. It verifies generated rounds
 against real source and target clusters, including inserts, updates, deletes,
 nested documents, added/removed/recreated indices, segment merges, target-only
 data, and an unchanged snapshot that must not rewrite target documents.
+Tests0091 and 0092 verify early completion on a lag target and explicit failure
+when the run budget is exhausted before meeting that target.

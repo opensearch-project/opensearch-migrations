@@ -274,176 +274,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 ],
                                 "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                               },
-                              "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
-                            },
-                            "snapshots": {
-                              "type": "object",
-                              "additionalProperties": {
-                                "type": "object",
-                                "properties": {
-                                  "config": {
-                                    "anyOf": [
-                                      {
-                                        "type": "object",
-                                        "properties": {
-                                          "externallyManagedSnapshotName": {
-                                            "type": "string",
-                                            "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
-                                          }
-                                        },
-                                        "required": [
-                                          "externallyManagedSnapshotName"
-                                        ],
-                                        "description": "Reference to an Elasticsearch/OpenSearch snapshot that was created outside of this migration workflow."
-                                      },
-                                      {
-                                        "type": "object",
-                                        "properties": {
-                                          "createSnapshotConfig": {
-                                            "type": "object",
-                                            "properties": {
-                                              "snapshotPrefix": {
-                                                "type": "string",
-                                                "default": "",
-                                                "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
-                                                "changeRestriction": "impossible"
-                                              },
-                                              "jvmArgs": {
-                                                "type": "string",
-                                                "default": "",
-                                                "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
-                                              },
-                                              "loggingConfigurationOverrideConfigMap": {
-                                                "type": "string",
-                                                "default": "",
-                                                "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
-                                              },
-                                              "otelTraceCollectorEndpoint": {
-                                                "anyOf": [
-                                                  {
-                                                    "type": "string",
-                                                    "enum": [
-                                                      ""
-                                                    ]
-                                                  },
-                                                  {
-                                                    "type": "string"
-                                                  }
-                                                ],
-                                                "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
-                                              },
-                                              "otelMetricsCollectorEndpoint": {
-                                                "anyOf": [
-                                                  {
-                                                    "type": "string",
-                                                    "enum": [
-                                                      ""
-                                                    ]
-                                                  },
-                                                  {
-                                                    "type": "string"
-                                                  }
-                                                ],
-                                                "default": "http://otel-collector:4317",
-                                                "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
-                                              },
-                                              "indexAllowlist": {
-                                                "type": "array",
-                                                "items": {
-                                                  "type": "string"
-                                                },
-                                                "default": [],
-                                                "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
-                                                "changeRestriction": "impossible"
-                                              },
-                                              "maxSnapshotRateMbPerNode": {
-                                                "type": "number",
-                                                "default": 0,
-                                                "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
-                                              },
-                                              "compressionEnabled": {
-                                                "type": "boolean",
-                                                "default": false,
-                                                "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
-                                                "changeRestriction": "impossible"
-                                              },
-                                              "includeGlobalState": {
-                                                "type": "boolean",
-                                                "default": true,
-                                                "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
-                                                "changeRestriction": "impossible"
-                                              }
-                                            },
-                                            "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."
-                                          }
-                                        },
-                                        "required": [
-                                          "createSnapshotConfig"
-                                        ],
-                                        "description": "Configuration to create a new Elasticsearch/OpenSearch snapshot of the source cluster as part of the migration workflow."
-                                      }
-                                    ],
-                                    "description": "Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
-                                  },
-                                  "repoName": {
-                                    "type": "string",
-                                    "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
-                                  }
-                                },
-                                "required": [
-                                  "config",
-                                  "repoName"
-                                ],
-                                "description": "An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository."
-                              },
-                              "description": "Elasticsearch/OpenSearch snapshots to use or create for this source cluster."
-                            },
-                            "serializeSnapshotCreation": {
-                              "type": "boolean",
-                              "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
-                            }
-                          },
-                          "required": [
-                            "snapshots"
-                          ],
-                          "description": "Elasticsearch/OpenSearch snapshot repository and snapshot configuration for a source cluster."
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "repos": {
-                              "type": "object",
-                              "additionalProperties": {
-                                "type": "object",
-                                "properties": {
-                                  "repoPathUri": {
-                                    "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
-                                  },
-                                  "awsRegion": {
-                                    "type": "string",
-                                    "default": "",
-                                    "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
-                                  },
-                                  "endpoint": {
-                                    "type": "string",
-                                    "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
-                                    "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
-                                  },
-                                  "s3RoleArn": {
-                                    "type": "string",
-                                    "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                                    "default": "",
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
-                                  }
-                                },
-                                "required": [
-                                  "repoPathUri"
-                                ],
-                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
-                              },
                               "description": "Solr backup repositories registered with the source cluster."
                             },
                             "backups": {
@@ -617,6 +447,174 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "backups"
                           ],
                           "description": "Solr backup repository and backup configuration for a source cluster."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "repos": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "repoPathUri": {
+                                    "type": "string",
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                  },
+                                  "awsRegion": {
+                                    "type": "string",
+                                    "default": "",
+                                    "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
+                                  },
+                                  "endpoint": {
+                                    "type": "string",
+                                    "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
+                                    "default": "",
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                  },
+                                  "s3RoleArn": {
+                                    "type": "string",
+                                    "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                                    "default": "",
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  }
+                                },
+                                "required": [
+                                  "repoPathUri"
+                                ],
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                              },
+                              "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
+                            },
+                            "snapshots": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "config": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "externallyManagedSnapshotName": {
+                                            "type": "string",
+                                            "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+                                          }
+                                        },
+                                        "required": [
+                                          "externallyManagedSnapshotName"
+                                        ],
+                                        "description": "Reference to an Elasticsearch/OpenSearch snapshot that was created outside of this migration workflow."
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "createSnapshotConfig": {
+                                            "type": "object",
+                                            "properties": {
+                                              "snapshotPrefix": {
+                                                "type": "string",
+                                                "default": "",
+                                                "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
+                                                "changeRestriction": "impossible"
+                                              },
+                                              "jvmArgs": {
+                                                "type": "string",
+                                                "default": "",
+                                                "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                                              },
+                                              "loggingConfigurationOverrideConfigMap": {
+                                                "type": "string",
+                                                "default": "",
+                                                "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                              },
+                                              "otelTraceCollectorEndpoint": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      ""
+                                                    ]
+                                                  },
+                                                  {
+                                                    "type": "string"
+                                                  }
+                                                ],
+                                                "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                              },
+                                              "otelMetricsCollectorEndpoint": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      ""
+                                                    ]
+                                                  },
+                                                  {
+                                                    "type": "string"
+                                                  }
+                                                ],
+                                                "default": "http://otel-collector:4317",
+                                                "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                              },
+                                              "indexAllowlist": {
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                },
+                                                "default": [],
+                                                "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                                                "changeRestriction": "impossible"
+                                              },
+                                              "maxSnapshotRateMbPerNode": {
+                                                "type": "number",
+                                                "default": 0,
+                                                "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
+                                              },
+                                              "compressionEnabled": {
+                                                "type": "boolean",
+                                                "default": false,
+                                                "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                                                "changeRestriction": "impossible"
+                                              },
+                                              "includeGlobalState": {
+                                                "type": "boolean",
+                                                "default": true,
+                                                "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                                                "changeRestriction": "impossible"
+                                              }
+                                            },
+                                            "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."
+                                          }
+                                        },
+                                        "required": [
+                                          "createSnapshotConfig"
+                                        ],
+                                        "description": "Configuration to create a new Elasticsearch/OpenSearch snapshot of the source cluster as part of the migration workflow."
+                                      }
+                                    ],
+                                    "description": "Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
+                                  },
+                                  "repoName": {
+                                    "type": "string",
+                                    "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
+                                  }
+                                },
+                                "required": [
+                                  "config",
+                                  "repoName"
+                                ],
+                                "description": "An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository."
+                              },
+                              "default": {},
+                              "description": "Elasticsearch/OpenSearch snapshots to use or create for this source cluster."
+                            },
+                            "serializeSnapshotCreation": {
+                              "type": "boolean",
+                              "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
+                            }
+                          },
+                          "description": "Elasticsearch/OpenSearch snapshot repository and snapshot configuration for a source cluster."
                         }
                       ],
                       "description": "Source-specific snapshot or backup configuration for this source cluster. Required if any snapshot-based migrations reference this source."
@@ -3056,6 +3054,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "migrationIndex": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "completedRun": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "exclusiveMinimum": true
                       }
                     },
                     "required": [
@@ -3063,6 +3066,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     ]
                   },
                   "minItems": 1
+                },
+                "repeat": {
+                  "type": "object",
+                  "properties": {
+                    "maxRuns": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000
+                    },
+                    "snapshotLagTargetSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    }
+                  },
+                  "required": [
+                    "maxRuns"
+                  ]
+                },
+                "replayIndices": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
                 }
               },
               "required": [
@@ -3077,6 +3105,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "type": "object",
               "properties": {
                 "name": {
+                  "type": "string"
+                },
+                "snapshotSequenceName": {
                   "type": "string"
                 },
                 "sourceLabel": {
@@ -4060,176 +4091,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       ],
                       "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                     },
-                    "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
-                  },
-                  "snapshots": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "type": "object",
-                      "properties": {
-                        "config": {
-                          "anyOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "externallyManagedSnapshotName": {
-                                  "type": "string",
-                                  "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
-                                }
-                              },
-                              "required": [
-                                "externallyManagedSnapshotName"
-                              ],
-                              "description": "Reference to an Elasticsearch/OpenSearch snapshot that was created outside of this migration workflow."
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "createSnapshotConfig": {
-                                  "type": "object",
-                                  "properties": {
-                                    "snapshotPrefix": {
-                                      "type": "string",
-                                      "default": "",
-                                      "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
-                                      "changeRestriction": "impossible"
-                                    },
-                                    "jvmArgs": {
-                                      "type": "string",
-                                      "default": "",
-                                      "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
-                                    },
-                                    "loggingConfigurationOverrideConfigMap": {
-                                      "type": "string",
-                                      "default": "",
-                                      "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
-                                    },
-                                    "otelTraceCollectorEndpoint": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            ""
-                                          ]
-                                        },
-                                        {
-                                          "type": "string"
-                                        }
-                                      ],
-                                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
-                                    },
-                                    "otelMetricsCollectorEndpoint": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            ""
-                                          ]
-                                        },
-                                        {
-                                          "type": "string"
-                                        }
-                                      ],
-                                      "default": "http://otel-collector:4317",
-                                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
-                                    },
-                                    "indexAllowlist": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      },
-                                      "default": [],
-                                      "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
-                                      "changeRestriction": "impossible"
-                                    },
-                                    "maxSnapshotRateMbPerNode": {
-                                      "type": "number",
-                                      "default": 0,
-                                      "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
-                                    },
-                                    "compressionEnabled": {
-                                      "type": "boolean",
-                                      "default": false,
-                                      "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
-                                      "changeRestriction": "impossible"
-                                    },
-                                    "includeGlobalState": {
-                                      "type": "boolean",
-                                      "default": true,
-                                      "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
-                                      "changeRestriction": "impossible"
-                                    }
-                                  },
-                                  "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."
-                                }
-                              },
-                              "required": [
-                                "createSnapshotConfig"
-                              ],
-                              "description": "Configuration to create a new Elasticsearch/OpenSearch snapshot of the source cluster as part of the migration workflow."
-                            }
-                          ],
-                          "description": "Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
-                        },
-                        "repoName": {
-                          "type": "string",
-                          "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
-                        }
-                      },
-                      "required": [
-                        "config",
-                        "repoName"
-                      ],
-                      "description": "An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository."
-                    },
-                    "description": "Elasticsearch/OpenSearch snapshots to use or create for this source cluster."
-                  },
-                  "serializeSnapshotCreation": {
-                    "type": "boolean",
-                    "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
-                  }
-                },
-                "required": [
-                  "snapshots"
-                ],
-                "description": "Elasticsearch/OpenSearch snapshot repository and snapshot configuration for a source cluster."
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "repos": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "type": "object",
-                      "properties": {
-                        "repoPathUri": {
-                          "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
-                        },
-                        "awsRegion": {
-                          "type": "string",
-                          "default": "",
-                          "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
-                        },
-                        "endpoint": {
-                          "type": "string",
-                          "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
-                          "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
-                        },
-                        "s3RoleArn": {
-                          "type": "string",
-                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                          "default": "",
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
-                        }
-                      },
-                      "required": [
-                        "repoPathUri"
-                      ],
-                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
-                    },
                     "description": "Solr backup repositories registered with the source cluster."
                   },
                   "backups": {
@@ -4403,6 +4264,174 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "backups"
                 ],
                 "description": "Solr backup repository and backup configuration for a source cluster."
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "repos": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "repoPathUri": {
+                          "type": "string",
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                        },
+                        "awsRegion": {
+                          "type": "string",
+                          "default": "",
+                          "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
+                          "default": "",
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                        },
+                        "s3RoleArn": {
+                          "type": "string",
+                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "default": "",
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                        }
+                      },
+                      "required": [
+                        "repoPathUri"
+                      ],
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                    },
+                    "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
+                  },
+                  "snapshots": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "config": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "externallyManagedSnapshotName": {
+                                  "type": "string",
+                                  "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+                                }
+                              },
+                              "required": [
+                                "externallyManagedSnapshotName"
+                              ],
+                              "description": "Reference to an Elasticsearch/OpenSearch snapshot that was created outside of this migration workflow."
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "createSnapshotConfig": {
+                                  "type": "object",
+                                  "properties": {
+                                    "snapshotPrefix": {
+                                      "type": "string",
+                                      "default": "",
+                                      "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
+                                      "changeRestriction": "impossible"
+                                    },
+                                    "jvmArgs": {
+                                      "type": "string",
+                                      "default": "",
+                                      "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                                    },
+                                    "loggingConfigurationOverrideConfigMap": {
+                                      "type": "string",
+                                      "default": "",
+                                      "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                                    },
+                                    "otelTraceCollectorEndpoint": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            ""
+                                          ]
+                                        },
+                                        {
+                                          "type": "string"
+                                        }
+                                      ],
+                                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                    },
+                                    "otelMetricsCollectorEndpoint": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            ""
+                                          ]
+                                        },
+                                        {
+                                          "type": "string"
+                                        }
+                                      ],
+                                      "default": "http://otel-collector:4317",
+                                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                    },
+                                    "indexAllowlist": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "default": [],
+                                      "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                                      "changeRestriction": "impossible"
+                                    },
+                                    "maxSnapshotRateMbPerNode": {
+                                      "type": "number",
+                                      "default": 0,
+                                      "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
+                                    },
+                                    "compressionEnabled": {
+                                      "type": "boolean",
+                                      "default": false,
+                                      "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                                      "changeRestriction": "impossible"
+                                    },
+                                    "includeGlobalState": {
+                                      "type": "boolean",
+                                      "default": true,
+                                      "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                                      "changeRestriction": "impossible"
+                                    }
+                                  },
+                                  "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."
+                                }
+                              },
+                              "required": [
+                                "createSnapshotConfig"
+                              ],
+                              "description": "Configuration to create a new Elasticsearch/OpenSearch snapshot of the source cluster as part of the migration workflow."
+                            }
+                          ],
+                          "description": "Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
+                        },
+                        "repoName": {
+                          "type": "string",
+                          "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
+                        }
+                      },
+                      "required": [
+                        "config",
+                        "repoName"
+                      ],
+                      "description": "An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository."
+                    },
+                    "default": {},
+                    "description": "Elasticsearch/OpenSearch snapshots to use or create for this source cluster."
+                  },
+                  "serializeSnapshotCreation": {
+                    "type": "boolean",
+                    "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
+                  }
+                },
+                "description": "Elasticsearch/OpenSearch snapshot repository and snapshot configuration for a source cluster."
               }
             ],
             "description": "Source-specific snapshot or backup configuration for this source cluster. Required if any snapshot-based migrations reference this source."
@@ -4542,6 +4571,1297 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "minItems": 2,
             "description": "Ordered snapshot labels for successive backfills. The first snapshot is fully backfilled. Each later snapshot is created only after the preceding backfill and approval finish, then all deletes finish before additions begin. Include every perSnapshotConfig label exactly once, with one document migration per snapshot, using the same repository and index allowlist. Keep both snapshots until their delta completes. The source and target must be exclusive to this sequence."
+          },
+          "backfill": {
+            "type": "object",
+            "properties": {
+              "snapshot": {
+                "type": "object",
+                "properties": {
+                  "repoName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Repository in the source cluster's snapshotInfo.repos. Snapshot names are generated and persisted."
+                  },
+                  "createSnapshotConfig": {
+                    "type": "object",
+                    "properties": {
+                      "snapshotPrefix": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.",
+                        "changeRestriction": "impossible"
+                      },
+                      "jvmArgs": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                      },
+                      "loggingConfigurationOverrideConfigMap": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                      },
+                      "otelTraceCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      },
+                      "otelMetricsCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
+                        "default": "http://otel-collector:4317",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      },
+                      "indexAllowlist": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": [],
+                        "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices.",
+                        "changeRestriction": "impossible"
+                      },
+                      "maxSnapshotRateMbPerNode": {
+                        "type": "number",
+                        "default": 0,
+                        "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
+                      },
+                      "compressionEnabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version.",
+                        "changeRestriction": "impossible"
+                      },
+                      "includeGlobalState": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
+                        "changeRestriction": "impossible"
+                      }
+                    },
+                    "default": {},
+                    "description": "Snapshot creation options reused for every round."
+                  }
+                },
+                "required": [
+                  "repoName"
+                ]
+              },
+              "metadataMigrationConfig": {
+                "type": "object",
+                "properties": {
+                  "jvmArgs": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                  },
+                  "loggingConfigurationOverrideConfigMap": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                  },
+                  "resources": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "limits": {
+                        "type": "object",
+                        "properties": {
+                          "cpu": {
+                            "type": "string",
+                            "pattern": "^[0-9]+m$",
+                            "description": "CPU allocation for the container in Kubernetes millicores."
+                          },
+                          "memory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Memory allocation for the container."
+                          },
+                          "ephemeral-storage": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
+                          }
+                        },
+                        "required": [
+                          "cpu",
+                          "memory"
+                        ],
+                        "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
+                      },
+                      "requests": {
+                        "type": "object",
+                        "properties": {
+                          "cpu": {
+                            "type": "string",
+                            "pattern": "^[0-9]+m$",
+                            "description": "CPU allocation for the container in Kubernetes millicores."
+                          },
+                          "memory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Memory allocation for the container."
+                          },
+                          "ephemeral-storage": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
+                          }
+                        },
+                        "required": [
+                          "cpu",
+                          "memory"
+                        ],
+                        "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                      }
+                    },
+                    "default": {
+                      "limits": {
+                        "cpu": "500m",
+                        "memory": "1800Mi"
+                      },
+                      "requests": {
+                        "cpu": "500m",
+                        "memory": "1800Mi"
+                      }
+                    },
+                    "required": [
+                      "limits",
+                      "requests"
+                    ],
+                    "description": "Kubernetes resource limits and requests for the metadata migration container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
+                  },
+                  "skipEvaluateApproval": {
+                    "type": "boolean",
+                    "description": "When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
+                  },
+                  "skipMigrateApproval": {
+                    "type": "boolean",
+                    "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
+                  },
+                  "componentTemplateAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "List of component template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system component templates."
+                  },
+                  "indexAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "Filters which indices are migrated at the metadata stage — evaluated client-side on the snapshot contents after the snapshot has been taken. Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. An empty list includes all non-system indices."
+                  },
+                  "indexTemplateAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "List of index template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system index templates."
+                  },
+                  "allowLooseVersionMatching": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "[Expert] Allows migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). Only disable if metadata has parsing issues on snapshots that require strict version matching."
+                  },
+                  "clusterAwarenessAttributes": {
+                    "type": "number",
+                    "default": 1,
+                    "description": "Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."
+                  },
+                  "otelTraceCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                  },
+                  "otelMetricsCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "default": "http://otel-collector:4317",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                  },
+                  "output": {
+                    "type": "string",
+                    "enum": [
+                      "HUMAN_READABLE",
+                      "JSON"
+                    ],
+                    "default": "HUMAN_READABLE",
+                    "description": "Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."
+                  },
+                  "transformerConfigBase64": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration."
+                  },
+                  "transformerConfig": {
+                    "type": "string",
+                    "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                  },
+                  "transformerConfigFile": {
+                    "type": "string",
+                    "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                  },
+                  "metadataTransforms": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "entryPoint": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "javascript": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "javascript"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "javascriptFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                }
+                              },
+                              "required": [
+                                "javascriptFile"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "python": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "python"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "pythonFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                }
+                              },
+                              "required": [
+                                "pythonFile"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "transformName": {
+                          "type": "string"
+                        },
+                        "context": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "valueDirectories": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "configMap": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "configMap"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "image": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "pullPolicy": {
+                                            "type": "string",
+                                            "enum": [
+                                              "Always",
+                                              "Never",
+                                              "IfNotPresent"
+                                            ],
+                                            "default": "IfNotPresent"
+                                          },
+                                          "path": {
+                                            "type": "string",
+                                            "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                            "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                          }
+                                        },
+                                        "required": [
+                                          "image"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ],
+                                    "description": "Directory whose immediate files become transform context values."
+                                  },
+                                  "default": []
+                                },
+                                "values": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": [
+                                              "string",
+                                              "number",
+                                              "boolean",
+                                              "object",
+                                              "array",
+                                              "null"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "fromFile": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "image": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                  },
+                                                  "pullPolicy": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "Always",
+                                                      "Never",
+                                                      "IfNotPresent"
+                                                    ],
+                                                    "default": "IfNotPresent",
+                                                    "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                                    "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                                  }
+                                                },
+                                                "required": [
+                                                  "image",
+                                                  "path"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "configMap": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                                    "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                                  }
+                                                },
+                                                "required": [
+                                                  "configMap",
+                                                  "path"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ],
+                                            "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                          }
+                                        },
+                                        "required": [
+                                          "fromFile"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "default": {}
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ],
+                          "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "description": "Metadata transform pipeline. Generates the existing transformerConfig inline JSON option.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "enableSourcelessMigrations": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable migration of indices that have _source disabled or partially filtered (includes/excludes). When enabled, document backfill will reconstruct documents from stored fields and doc_values. Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered.",
+                    "changeRestriction": "impossible"
+                  },
+                  "useRecoverySource": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots with soft-deletes) as _source. This field is transient and may not be present for all documents, so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.",
+                    "changeRestriction": "impossible"
+                  }
+                },
+                "description": "Optional metadata migration options reused for every round."
+              },
+              "documentBackfillConfig": {
+                "type": "object",
+                "properties": {
+                  "podReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1,
+                    "description": "Number of RFS worker pod replicas. Each replica independently acquires and processes snapshot shards in parallel — throughput scales linearly up to the total number of source shards."
+                  },
+                  "minPodReplicas": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Minimum number of pods that must remain available during voluntary Kubernetes disruptions. This renders a PodDisruptionBudget minAvailable value for the RFS document backfill service. The default is 0 so single-replica and single-node dev deployments can still drain; set to 1 or higher for disruption protection, and never above podReplicas."
+                  },
+                  "jvmArgs": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                  },
+                  "loggingConfigurationOverrideConfigMap": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                  },
+                  "skipApproval": {
+                    "type": "boolean",
+                    "description": "When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."
+                  },
+                  "useTargetClusterForWorkCoordination": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster."
+                  },
+                  "resources": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "limits": {
+                        "type": "object",
+                        "properties": {
+                          "cpu": {
+                            "type": "string",
+                            "pattern": "^[0-9]+m$",
+                            "description": "CPU allocation for the container in Kubernetes millicores."
+                          },
+                          "memory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Memory allocation for the container."
+                          },
+                          "ephemeral-storage": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
+                          }
+                        },
+                        "required": [
+                          "cpu",
+                          "memory"
+                        ],
+                        "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
+                      },
+                      "requests": {
+                        "type": "object",
+                        "properties": {
+                          "cpu": {
+                            "type": "string",
+                            "pattern": "^[0-9]+m$",
+                            "description": "CPU allocation for the container in Kubernetes millicores."
+                          },
+                          "memory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Memory allocation for the container."
+                          },
+                          "ephemeral-storage": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
+                          }
+                        },
+                        "required": [
+                          "cpu",
+                          "memory"
+                        ],
+                        "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                      }
+                    },
+                    "default": {
+                      "limits": {
+                        "cpu": "3300m",
+                        "memory": "7000Mi"
+                      },
+                      "requests": {
+                        "cpu": "3300m",
+                        "memory": "7000Mi"
+                      }
+                    },
+                    "required": [
+                      "limits",
+                      "requests"
+                    ],
+                    "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
+                  },
+                  "indexAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. An empty list includes all non-system indices from the snapshot.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "allowLooseVersionMatching": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "[Expert] Allows document migration between clusters with non-exact version compatibility. Only disable if snapshot parsing issues require strict version matching.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "docTransformerConfigBase64": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Base64-encoded JSON transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "docTransformerConfig": {
+                    "type": "string",
+                    "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "docTransformerConfigFile": {
+                    "type": "string",
+                    "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "documentTransforms": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "entryPoint": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "javascript": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "javascript"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "javascriptFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                }
+                              },
+                              "required": [
+                                "javascriptFile"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "python": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "python"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "pythonFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                }
+                              },
+                              "required": [
+                                "pythonFile"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "transformName": {
+                          "type": "string"
+                        },
+                        "context": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "valueDirectories": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "configMap": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "configMap"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "image": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "pullPolicy": {
+                                            "type": "string",
+                                            "enum": [
+                                              "Always",
+                                              "Never",
+                                              "IfNotPresent"
+                                            ],
+                                            "default": "IfNotPresent"
+                                          },
+                                          "path": {
+                                            "type": "string",
+                                            "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                            "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                          }
+                                        },
+                                        "required": [
+                                          "image"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ],
+                                    "description": "Directory whose immediate files become transform context values."
+                                  },
+                                  "default": []
+                                },
+                                "values": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": [
+                                              "string",
+                                              "number",
+                                              "boolean",
+                                              "object",
+                                              "array",
+                                              "null"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "fromFile": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "image": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                  },
+                                                  "pullPolicy": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "Always",
+                                                      "Never",
+                                                      "IfNotPresent"
+                                                    ],
+                                                    "default": "IfNotPresent",
+                                                    "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                                    "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                                  }
+                                                },
+                                                "required": [
+                                                  "image",
+                                                  "path"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "configMap": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                                    "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                                  }
+                                                },
+                                                "required": [
+                                                  "configMap",
+                                                  "path"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ],
+                                            "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                          }
+                                        },
+                                        "required": [
+                                          "fromFile"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "default": {}
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ],
+                          "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "description": "Document transform pipeline. Generates the existing docTransformerConfig inline JSON option.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "documentsPerBulkRequest": {
+                    "type": "number",
+                    "default": 2147483647,
+                    "description": "Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."
+                  },
+                  "documentsSizePerBulkRequest": {
+                    "type": "number",
+                    "default": 10485760,
+                    "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."
+                  },
+                  "initialLeaseDuration": {
+                    "type": "string",
+                    "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                    "default": "PT1H",
+                    "description": "[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.",
+                    "changeRestriction": "gated"
+                  },
+                  "maxConnections": {
+                    "type": "number",
+                    "default": 10,
+                    "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.",
+                    "changeRestriction": "gated"
+                  },
+                  "maxShardSizeBytes": {
+                    "type": "number",
+                    "default": 85899345920,
+                    "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.",
+                    "changeRestriction": "gated"
+                  },
+                  "otelTraceCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                  },
+                  "otelMetricsCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "default": "http://otel-collector:4317",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                  },
+                  "serverGeneratedIds": {
+                    "type": "string",
+                    "enum": [
+                      "AUTO",
+                      "ALWAYS",
+                      "NEVER"
+                    ],
+                    "default": "AUTO",
+                    "description": "Controls document ID generation on the target. 'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. 'ALWAYS': always use server-generated IDs (discards source IDs). 'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."
+                  },
+                  "emitDocType": {
+                    "type": "string",
+                    "enum": [
+                      "AUTO",
+                      "ON",
+                      "OFF"
+                    ],
+                    "default": "AUTO",
+                    "description": "Controls whether the ES _type field is propagated into bulk action-line metadata. 'AUTO' (default): emit _type only when the source is ES 6 or older AND a document transformer is configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). 'ON': always emit _type. 'OFF': never emit _type.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "allowedDocExceptionTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "List of document-level exception types to treat as successful operations during bulk migration. Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. Use this for idempotent migrations where certain errors are expected and harmless. For example, set to ['version_conflict_engine_exception'] when migrating into a data stream where backing index writes may conflict with existing documents. Defaults to empty (all errors are treated as failures). See BulkDocErrorTypes for common OpenSearch exception type strings."
+                  },
+                  "coordinatorRetryMaxRetries": {
+                    "type": "number",
+                    "default": 7,
+                    "description": "[Expert] Maximum number of retries when marking work items as completed on the coordinator."
+                  },
+                  "coordinatorRetryInitialDelayMs": {
+                    "type": "number",
+                    "default": 1000,
+                    "description": "[Expert] Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."
+                  },
+                  "coordinatorRetryMaxDelayMs": {
+                    "type": "number",
+                    "default": 64000,
+                    "description": "[Expert] Maximum delay in milliseconds for any single coordinator completion retry."
+                  },
+                  "enableSourcelessMigrations": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable migration of indices that have _source disabled or partially filtered (includes/excludes). When enabled, documents are reconstructed from stored fields and doc_values instead of _source. Without this flag, migration of sourceless indices will fail with an error.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "useRecoverySource": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots with soft-deletes) as _source. This field is transient and may not be present for all documents, so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  },
+                  "failedDocumentStreamS3Prefix": {
+                    "type": "string",
+                    "default": "rfs-failed-document-stream/",
+                    "description": "S3 key prefix for the failed document stream where terminal document failures are persisted. Each RFS run writes under <prefix>/session=<workflow-uid>/. Defaults to 'rfs-failed-document-stream/'."
+                  },
+                  "failedDocumentStreamS3Bucket": {
+                    "type": "string",
+                    "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
+                  },
+                  "failedDocumentStreamS3Region": {
+                    "type": "string",
+                    "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region, else the deployment default). Ignored without a bucket."
+                  },
+                  "failedDocumentStreamS3Endpoint": {
+                    "type": "string",
+                    "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint, else the deployment default). Ignored without a bucket."
+                  },
+                  "failedDocumentStreamMaxBufferBytes": {
+                    "type": "number",
+                    "default": 67108864,
+                    "description": "Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates to a new S3 object. Bounds heap use when a shard produces a very large number of terminal failures. Default 67108864 (64 MiB)."
+                  },
+                  "positionGapStopword": {
+                    "type": "string",
+                    "default": "a",
+                    "description": "Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes at positions 0,1,3 — position 2 is consumed by 'the' but the term itself is dropped). Without filler the reconstructor joins on spaces and OS re-tokenizes the document at consecutive positions [0,1,2], silently changing slop / proximity / phrase semantics on migrated documents. The reconstructor splices this token into the gap so OS — assumed to have the same token configured as a stopword — re-creates the original [0,1,3] postings while indexing. The token MUST be on the target's stopword list or it leaks into search results; 'a' is a safe default for the english / standard analyzers. Pass an empty string to opt out and fall back to the legacy multi-space behaviour. Default: 'a'.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
+                  }
+                },
+                "default": {},
+                "description": "Document backfill options reused for every round."
+              },
+              "repeat": {
+                "type": "object",
+                "properties": {
+                  "maxRuns": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "Maximum number of snapshot/backfill rounds, including the initial full backfill. Later rounds apply deltas. Increase this budget to continue a completed policy without redoing prior rounds."
+                  },
+                  "until": {
+                    "type": "object",
+                    "properties": {
+                      "snapshotLag": {
+                        "type": "string",
+                        "pattern": "^([1-9][0-9]*)(s|m|h|d)$",
+                        "description": "Stop when the backfill completion time minus the source snapshot start time is at most this duration (for example '2m'). This measures snapshot age, not transactional replication lag. If maxRuns is reached first, report the unmet target and fail before starting replay."
+                      }
+                    },
+                    "required": [
+                      "snapshotLag"
+                    ]
+                  }
+                },
+                "default": {
+                  "maxRuns": 1
+                },
+                "required": [
+                  "maxRuns"
+                ],
+                "description": "A bounded repetition policy. With no until condition, perform exactly maxRuns rounds."
+              }
+            },
+            "required": [
+              "snapshot"
+            ],
+            "description": "Automatically create and backfill snapshots using one reusable configuration and a repeat policy. Use this instead of perSnapshotConfig and snapshotSequence."
           },
           "perSnapshotConfig": {
             "type": "object",
@@ -5726,8 +7046,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         },
         "required": [
           "fromSource",
-          "toTarget",
-          "perSnapshotConfig"
+          "toTarget"
         ],
         "description": "A snapshot-based migration configuration binding a source cluster to a target cluster with per-snapshot migration settings."
       },

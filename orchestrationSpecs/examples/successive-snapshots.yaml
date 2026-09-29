@@ -9,39 +9,21 @@ sourceClusters:
         migration:
           repoPathUri: s3://migration-snapshots/successive
           awsRegion: us-east-1
-      snapshots:
-        baseline:
-          repoName: migration
-          config:
-            createSnapshotConfig:
-              indexAllowlist: [orders]
-        catchup:
-          repoName: migration
-          config:
-            createSnapshotConfig:
-              indexAllowlist: [orders]
-        final:
-          repoName: migration
-          config:
-            createSnapshotConfig:
-              indexAllowlist: [orders]
 targetClusters:
   target:
     endpoint: https://target.example.com:9200
 snapshotMigrationConfigs:
   - fromSource: source
     toTarget: target
-    snapshotSequence: [baseline, catchup, final]
-    perSnapshotConfig:
-      baseline:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig:
-            indexAllowlist: [orders]
-      catchup:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig:
-            indexAllowlist: [orders]
-      final:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig:
-            indexAllowlist: [orders]
+    backfill:
+      snapshot:
+        repoName: migration
+        createSnapshotConfig:
+          indexAllowlist: [orders]
+      metadataMigrationConfig: {}
+      documentBackfillConfig:
+        indexAllowlist: [orders]
+      repeat:
+        maxRuns: 3
+        until:
+          snapshotLag: 2m

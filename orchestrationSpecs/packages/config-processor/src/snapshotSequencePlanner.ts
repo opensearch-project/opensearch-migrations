@@ -1,4 +1,6 @@
-import {ARGO_MIGRATION_CONFIG_PRE_ENRICH, SNAPSHOT_SEQUENCE_PLAN} from "@opensearch-migrations/schemas";
+import {
+    ARGO_MIGRATION_CONFIG_PRE_ENRICH, RESOLVED_BACKFILL_REPEAT_POLICY, SNAPSHOT_SEQUENCE_PLAN,
+} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
@@ -8,6 +10,7 @@ type SequencePlan = z.infer<typeof SNAPSHOT_SEQUENCE_PLAN>;
 export function planSnapshotSequences(
     snapshots: WorkflowConfig["snapshots"],
     migrations: WorkflowConfig["snapshotMigrations"],
+    repeatPolicies: ReadonlyMap<string, z.infer<typeof RESOLVED_BACKFILL_REPEAT_POLICY>> = new Map(),
 ): {snapshots: WorkflowConfig["snapshots"]; snapshotSequences?: SequencePlan[]} {
     const plans = new Map<string, SequencePlan>();
     const snapshotOwners = new Map<string, string>();
@@ -17,7 +20,8 @@ export function planSnapshotSequences(
         if (!name) return;
         let plan = plans.get(name);
         if (!plan) {
-            plan = {name, steps: []};
+            const repeat = repeatPolicies.get(name);
+            plan = {name, steps: [], ...(repeat ? {repeat} : {})};
             plans.set(name, plan);
         }
         const snapshotKey = `${migration.sourceLabel}/${migration.label}`;
@@ -32,6 +36,9 @@ export function planSnapshotSequences(
         plan.steps.push({
             migrationIndex,
             ...(createSnapshot ? {snapshotCreation: {sourceIndex, snapshotIndex}} : {}),
+            ...(plan.repeat && migration.delta?.mode !== "DELETES_ONLY" ? {
+                completedRun: plan.steps.filter(step => step.completedRun !== undefined).length + 1,
+            } : {}),
         });
         snapshotOwners.set(snapshotKey, name);
     });

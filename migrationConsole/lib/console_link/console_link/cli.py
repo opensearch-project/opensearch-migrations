@@ -790,6 +790,9 @@ def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node, extra_args):
 @click.pass_obj
 def status_snapshot_cmd(ctx, deep_check):
     """Check the status of the snapshot"""
+    if ctx.json:
+        click.echo(json.dumps(ctx.env.snapshot.status_json(deep_check=deep_check)))
+        return
     result = snapshot_.status(ctx.env.snapshot, deep_check=deep_check)
     click.echo(result.value)
 
