@@ -56,6 +56,7 @@ final class CaptureFailureTerminator implements Consumer<Throwable> {
         terminationThread.start();
     }
 
+    @SuppressWarnings("java:S1181") // A log-backend Error must not prevent the required process halt.
     private void flushLogsAndHalt(Throwable failure) {
         var flushComplete = new CountDownLatch(1);
         var flushThread = new Thread(

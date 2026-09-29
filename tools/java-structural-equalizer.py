@@ -19,6 +19,7 @@ from typing import Iterable
 TOOL_DIR = Path(__file__).resolve().parent
 JAVA_SOURCE = TOOL_DIR / "JavaStructuralEqualizer.java"
 DEFAULT_ROOT = "."
+PRIVATE_TMP = "/private/tmp"
 
 
 class EqualizerError(RuntimeError):
@@ -36,7 +37,7 @@ def run(command: list[str], cwd: Path | None = None, check: bool = True) -> subp
 def compiled_helper() -> Path:
     source = JAVA_SOURCE.read_bytes()
     digest = hashlib.sha256(source).hexdigest()[:16]
-    cache = Path("/private/tmp") / f"java-structural-equalizer-{digest}"
+    cache = Path(PRIVATE_TMP) / f"java-structural-equalizer-{digest}"
     class_file = cache / "JavaStructuralEqualizer.class"
     if not class_file.is_file():
         cache.mkdir(parents=True, exist_ok=True)
@@ -83,7 +84,7 @@ def java_paths_changed(repo: Path, parent: str, commit: str, root: str) -> set[s
         path_count = 2 if status.startswith(("R", "C")) else 1
         if index + path_count > len(fields):
             raise EqualizerError(f"malformed git name-status output after {status}")
-        for value in fields[index : index + path_count]:
+        for value in fields[index:index + path_count]:
             if value.endswith(".java"):
                 paths.add(value)
         index += path_count
@@ -121,7 +122,7 @@ def compare_bytes(left: bytes, right: bytes, report_root: Path | None) -> int:
         print(f"PASS: structurally equivalent Java digest={digest}")
         return 0
 
-    output = report_root or Path(tempfile.mkdtemp(prefix="java-structural-equalizer.", dir="/private/tmp"))
+    output = report_root or Path(tempfile.mkdtemp(prefix="java-structural-equalizer.", dir=PRIVATE_TMP))
     output.mkdir(parents=True, exist_ok=True)
     (output / "original.canonical").write_bytes(left)
     (output / "candidate.canonical").write_bytes(right)
@@ -135,7 +136,7 @@ def compare_directories(left: Path, right: Path, report_root: Path | None) -> in
 
 
 def compare_files(left: Path, right: Path, report_root: Path | None) -> int:
-    with tempfile.TemporaryDirectory(prefix="java-equalizer-files.", dir="/private/tmp") as temporary:
+    with tempfile.TemporaryDirectory(prefix="java-equalizer-files.", dir=PRIVATE_TMP) as temporary:
         root = Path(temporary)
         left_root = root / "original"
         right_root = root / "candidate"
@@ -155,7 +156,7 @@ def compare_commit_pair(arguments: argparse.Namespace) -> int:
     paths = java_paths_changed(repo, original_parent, original, arguments.root)
     paths.update(java_paths_changed(repo, candidate_parent, candidate, arguments.root))
 
-    with tempfile.TemporaryDirectory(prefix="java-equalizer-commits.", dir="/private/tmp") as temporary:
+    with tempfile.TemporaryDirectory(prefix="java-equalizer-commits.", dir=PRIVATE_TMP) as temporary:
         root = Path(temporary)
         original_root = root / "original"
         candidate_root = root / "candidate"

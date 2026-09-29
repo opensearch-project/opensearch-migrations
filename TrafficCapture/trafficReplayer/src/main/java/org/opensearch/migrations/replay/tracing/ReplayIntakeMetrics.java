@@ -23,6 +23,11 @@ import lombok.NonNull;
 /** Fixed-cardinality observability for replay intake and source assembly. */
 public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
 
+    private static final String UNIT_RECORDS = "records";
+    private static final String UNIT_REQUESTS = "requests";
+    private static final String UNIT_RESPONSES = "responses";
+    private static final String UNIT_GENERATIONS = "generations";
+
     public static final AttributeKey<String> INPUT_KIND_ATTRIBUTE = AttributeKey.stringKey("inputKind");
     public static final AttributeKey<String> INCOMPLETE_REASON_ATTRIBUTE =
         AttributeKey.stringKey("incompleteReason");
@@ -121,44 +126,44 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         ownerStarted = counter(meter, MetricNames.OWNER_STARTED, "owners");
         ownerStoppedAfterDraining = counter(meter, MetricNames.OWNER_STOPPED_AFTER_DRAINING, "owners");
         inputsApplied = counter(meter, MetricNames.INPUTS_APPLIED, "inputs");
-        recordsApplied = counter(meter, MetricNames.RECORDS_APPLIED, "records");
+        recordsApplied = counter(meter, MetricNames.RECORDS_APPLIED, UNIT_RECORDS);
         activeRecordTrackers = meter.upDownCounterBuilder(MetricNames.ACTIVE_RECORD_TRACKERS)
-            .setUnit("records")
+            .setUnit(UNIT_RECORDS)
             .build();
-        recordTrackersRetired = counter(meter, MetricNames.RECORD_TRACKERS_RETIRED, "records");
-        requestsReconstituted = counter(meter, MetricNames.REQUESTS_RECONSTITUTED, "requests");
-        interimResponsesObserved = counter(meter, MetricNames.INTERIM_RESPONSES_OBSERVED, "responses");
-        responsesProvenComplete = counter(meter, MetricNames.RESPONSES_PROVEN_COMPLETE, "responses");
-        responsesUnprovenComplete = counter(meter, MetricNames.RESPONSES_UNPROVEN_COMPLETE, "responses");
-        responsesIncomplete = counter(meter, MetricNames.RESPONSES_INCOMPLETE, "responses");
+        recordTrackersRetired = counter(meter, MetricNames.RECORD_TRACKERS_RETIRED, UNIT_RECORDS);
+        requestsReconstituted = counter(meter, MetricNames.REQUESTS_RECONSTITUTED, UNIT_REQUESTS);
+        interimResponsesObserved = counter(meter, MetricNames.INTERIM_RESPONSES_OBSERVED, UNIT_RESPONSES);
+        responsesProvenComplete = counter(meter, MetricNames.RESPONSES_PROVEN_COMPLETE, UNIT_RESPONSES);
+        responsesUnprovenComplete = counter(meter, MetricNames.RESPONSES_UNPROVEN_COMPLETE, UNIT_RESPONSES);
+        responsesIncomplete = counter(meter, MetricNames.RESPONSES_INCOMPLETE, UNIT_RESPONSES);
         retrySourceResponsesComplete =
-            counter(meter, MetricNames.RETRY_SOURCE_RESPONSES_COMPLETE, "responses");
+            counter(meter, MetricNames.RETRY_SOURCE_RESPONSES_COMPLETE, UNIT_RESPONSES);
         retrySourceResponsesUnavailable =
-            counter(meter, MetricNames.RETRY_SOURCE_RESPONSES_UNAVAILABLE, "responses");
+            counter(meter, MetricNames.RETRY_SOURCE_RESPONSES_UNAVAILABLE, UNIT_RESPONSES);
         writerTimeTransitions = counter(meter, MetricNames.WRITER_TIME_TRANSITIONS, "transitions");
         sourceConnectionsExpired = counter(meter, MetricNames.SOURCE_CONNECTIONS_EXPIRED, "connections");
         targetConnectionExpirationsSent =
             counter(meter, MetricNames.TARGET_CONNECTION_EXPIRATIONS_SENT, "commands");
         brokerTimeViolations = counter(meter, MetricNames.BROKER_TIME_VIOLATIONS, "violations");
-        batchRequestsSubmitted = counter(meter, MetricNames.BATCH_REQUESTS_SUBMITTED, "requests");
+        batchRequestsSubmitted = counter(meter, MetricNames.BATCH_REQUESTS_SUBMITTED, UNIT_REQUESTS);
         batchEntitlementsResolved =
             counter(meter, MetricNames.BATCH_ENTITLEMENTS_RESOLVED, "batches");
         retryReadyRequestSupply = meter.upDownCounterBuilder(MetricNames.RETRY_READY_REQUEST_SUPPLY)
-            .setUnit("requests")
+            .setUnit(UNIT_REQUESTS)
             .build();
         retryReadySupplyAdditions =
-            counter(meter, MetricNames.RETRY_READY_SUPPLY_ADDITIONS, "requests");
+            counter(meter, MetricNames.RETRY_READY_SUPPLY_ADDITIONS, UNIT_REQUESTS);
         retryReadySupplyRemovals =
-            counter(meter, MetricNames.RETRY_READY_SUPPLY_REMOVALS, "requests");
+            counter(meter, MetricNames.RETRY_READY_SUPPLY_REMOVALS, UNIT_REQUESTS);
         demandEvaluations = counter(meter, MetricNames.DEMAND_EVALUATIONS, "evaluations");
         capturedClosesAccepted = counter(meter, MetricNames.CAPTURED_CLOSES_ACCEPTED, "closes");
         captureProtocolViolations = counter(meter, MetricNames.CAPTURE_PROTOCOL_VIOLATIONS, "violations");
         recordBatchesRejectedAfterProtocolViolation =
             counter(meter, MetricNames.RECORD_BATCHES_REJECTED_AFTER_PROTOCOL_VIOLATION, "batches");
-        generationGraceStarted = counter(meter, MetricNames.GENERATION_GRACE_STARTED, "generations");
-        generationForceStarted = counter(meter, MetricNames.GENERATION_FORCE_STARTED, "generations");
+        generationGraceStarted = counter(meter, MetricNames.GENERATION_GRACE_STARTED, UNIT_GENERATIONS);
+        generationForceStarted = counter(meter, MetricNames.GENERATION_FORCE_STARTED, UNIT_GENERATIONS);
         generationCleanupFinished =
-            counter(meter, MetricNames.GENERATION_CLEANUP_FINISHED, "generations");
+            counter(meter, MetricNames.GENERATION_CLEANUP_FINISHED, UNIT_GENERATIONS);
         staleGenerationInputsIgnored =
             counter(meter, MetricNames.STALE_GENERATION_INPUTS_IGNORED, "inputs");
     }

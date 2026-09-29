@@ -2,8 +2,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Runs Gradle with the rebuild's mandatory Spotless exclusions. Full output remains in /private/tmp;
-# stdout/stderr contain only a concise result or useful failure excerpts.
+# Runs Gradle with the rebuild's mandatory Spotless exclusions unless the caller explicitly requests a
+# Spotless task. Full output remains in /private/tmp; stdout/stderr contain only a concise result or useful
+# failure excerpts.
 
 set -u -o pipefail
 umask 077
@@ -12,13 +13,25 @@ cd -- "${BASH_SOURCE[0]%/*}/.." || exit 2
 
 GRADLE_RUNNER="${GRADLE_EVIDENCE_GRADLEW:-./gradlew}"
 LOG_FILE="/private/tmp/gradle-evidence.$$.$RANDOM.log"
+INJECT_SPOTLESS_EXCLUSIONS=true
+
+for argument in "$@"; do
+    if [[ "$argument" == *spotless*Apply || "$argument" == *spotless*Check ]]; then
+        INJECT_SPOTLESS_EXCLUSIONS=false
+        break
+    fi
+done
 
 if ! (set -o noclobber; : > "$LOG_FILE") 2>/dev/null; then
     echo "ERROR: refusing to overwrite existing evidence log $LOG_FILE" >&2
     exit 2
 fi
 
-"$GRADLE_RUNNER" -x spotlessJavaCheck -x spotlessJavaApply "$@" > "$LOG_FILE" 2>&1
+if "$INJECT_SPOTLESS_EXCLUSIONS"; then
+    "$GRADLE_RUNNER" -x spotlessJavaCheck -x spotlessJavaApply "$@" > "$LOG_FILE" 2>&1
+else
+    "$GRADLE_RUNNER" "$@" > "$LOG_FILE" 2>&1
+fi
 gradle_status=$?
 
 if [ "$gradle_status" -eq 0 ]; then

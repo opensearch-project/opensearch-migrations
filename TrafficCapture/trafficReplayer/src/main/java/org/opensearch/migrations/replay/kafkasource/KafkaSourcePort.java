@@ -80,6 +80,8 @@ public interface KafkaSourcePort {
      * unknown. Keeping acceptance separate from {@link CommitOutcome} is what prevents a local refusal from
      * being conflated with an operation that may already have reached the broker.
      */
+    // The warning targets the compiler-generated canonical constructor of this public contract record.
+    @SuppressWarnings("java:S100")
     record AsyncCommitSubmission(boolean accepted, CommitOutcome rejectionOutcome) {
         public AsyncCommitSubmission {
             if (accepted == (rejectionOutcome != null)) {

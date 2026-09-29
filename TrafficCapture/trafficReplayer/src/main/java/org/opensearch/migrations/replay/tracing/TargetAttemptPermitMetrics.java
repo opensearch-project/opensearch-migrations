@@ -20,6 +20,9 @@ import lombok.NonNull;
 
 /** Fixed-cardinality telemetry for the application target-attempt limit. */
 public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProvider.Metrics {
+    private static final String UNIT_REQUESTS = "requests";
+    private static final String UNIT_PERMITS = "permits";
+
     public static final class MetricNames {
         private MetricNames() {}
 
@@ -49,25 +52,25 @@ public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProv
 
     public TargetAttemptPermitMetrics(@NonNull Meter meter) {
         acquisitionRequests = meter.counterBuilder(MetricNames.ACQUISITION_REQUESTS)
-            .setUnit("requests")
+            .setUnit(UNIT_REQUESTS)
             .build();
         acquisitionsPending = meter.upDownCounterBuilder(MetricNames.ACQUISITIONS_PENDING)
-            .setUnit("requests")
+            .setUnit(UNIT_REQUESTS)
             .build();
         acquisitionsCancelled = meter.counterBuilder(MetricNames.ACQUISITIONS_CANCELLED)
-            .setUnit("requests")
+            .setUnit(UNIT_REQUESTS)
             .build();
         acquisitionsFailed = meter.counterBuilder(MetricNames.ACQUISITIONS_FAILED)
-            .setUnit("requests")
+            .setUnit(UNIT_REQUESTS)
             .build();
         permitsAcquired = meter.counterBuilder(MetricNames.PERMITS_ACQUIRED)
-            .setUnit("permits")
+            .setUnit(UNIT_PERMITS)
             .build();
         permitsActive = meter.upDownCounterBuilder(MetricNames.PERMITS_ACTIVE)
-            .setUnit("permits")
+            .setUnit(UNIT_PERMITS)
             .build();
         permitsReleased = meter.counterBuilder(MetricNames.PERMITS_RELEASED)
-            .setUnit("permits")
+            .setUnit(UNIT_PERMITS)
             .build();
         permitHeldDuration = meter.histogramBuilder(MetricNames.PERMIT_HELD_DURATION)
             .setUnit("ms")

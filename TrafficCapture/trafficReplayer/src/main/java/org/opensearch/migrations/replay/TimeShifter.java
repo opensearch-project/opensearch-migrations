@@ -14,6 +14,8 @@ import org.slf4j.event.Level;
 @Slf4j
 public class TimeShifter {
 
+    // The warnings target compiler-generated record members rather than authored methods.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     private record Baseline(Instant sourceTimeStart, Instant systemTimeStart) {}
 
     private final AtomicReference<Baseline> baseline = new AtomicReference<>();
@@ -35,7 +37,7 @@ public class TimeShifter {
     }
 
     public TimeShifter(double rateMultiplier, Duration realtimeOffset, Clock clock) {
-        if (!(rateMultiplier > 0.0) || !Double.isFinite(rateMultiplier)) {
+        if (rateMultiplier <= 0.0 || !Double.isFinite(rateMultiplier)) {
             throw new IllegalArgumentException("rateMultiplier must be finite and positive");
         }
         this.rateMultiplier = rateMultiplier;

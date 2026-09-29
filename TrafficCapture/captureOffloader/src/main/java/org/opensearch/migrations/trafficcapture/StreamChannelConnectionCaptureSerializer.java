@@ -368,6 +368,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         );
     }
 
+    @SuppressWarnings("java:S1181") // Any event-loop failure, including Error, must reach the async failure owner.
     private void runPeriodicFlush(long generation) {
         requireConnectionEventLoopOwner();
         if (generation != periodicFlushGeneration

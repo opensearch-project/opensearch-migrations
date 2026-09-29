@@ -197,6 +197,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     failOpenCaptureState()
                 )
             );
+            channel.freezeTime();
 
             channel.writeInbound(Unpooled.copiedBuffer(
                 "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nx",

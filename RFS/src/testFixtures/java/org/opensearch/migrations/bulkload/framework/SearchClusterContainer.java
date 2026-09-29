@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.Version;
@@ -372,7 +373,11 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
         if (version instanceof OverrideFile) {
             var overrideFile = (OverrideFile) version;
-            builder = builder.withCopyToContainer(Transferable.of(overrideFile.getContents()), overrideFile.getFilePath());
+            var isolatedClusterName = "test-cluster-" + UUID.randomUUID();
+            log.info("Assigning isolated cluster name {} to {}", isolatedClusterName, version.version);
+            var isolatedConfig = overrideFile.getContents() + "\ncluster.name: " + isolatedClusterName + "\n";
+            builder = builder.withCopyToContainer(
+                Transferable.of(isolatedConfig), overrideFile.getFilePath());
         }
 
         builder.withStartupAttempts(STARTUP_ATTEMPTS)

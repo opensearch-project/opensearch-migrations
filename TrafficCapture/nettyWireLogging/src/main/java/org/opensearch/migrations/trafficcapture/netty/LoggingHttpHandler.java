@@ -47,7 +47,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @FunctionalInterface
     private interface RequiredCaptureOperation {
-        void run() throws Exception;
+        void run() throws IOException;
     }
 
     static class CaptureIgnoreState {
@@ -322,20 +322,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         cancelConnectionDeadline();
         cancelRequestAssemblyDeadline();
         try {
-            try {
-                reportRemainingBytesWrittenToClient();
-            } catch (Exception telemetryFailure) {
-                // The connection's final client byte count is diagnostic, so losing it must not skip
-                // the terminal CloseObservation below. An Error deliberately stays with the
-                // required-capture handler, which reports it as process instability.
-                log.atWarn()
-                    .setCause(telemetryFailure)
-                    .setMessage(
-                        "Unable to report the bytes written to the client while ending the "
-                            + "connection; continuing with terminal capture"
-                    )
-                    .log();
-            }
+            reportRemainingBytesWrittenToClientWhileClosing();
             if (!captureProcessState.shouldCapture()) {
                 pendingSourceResponseBytes.reset();
                 captureCloseFuture = CompletableFuture.completedFuture(null);
@@ -353,6 +340,23 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             }
         });
         return captureCloseFuture;
+    }
+
+    private void reportRemainingBytesWrittenToClientWhileClosing() {
+        try {
+            reportRemainingBytesWrittenToClient();
+        } catch (Exception telemetryFailure) {
+            // The connection's final client byte count is diagnostic, so losing it must not skip
+            // the terminal CloseObservation below. An Error deliberately stays with the
+            // required-capture handler, which reports it as process instability.
+            log.atWarn()
+                .setCause(telemetryFailure)
+                .setMessage(
+                    "Unable to report the bytes written to the client while ending the "
+                        + "connection; continuing with terminal capture"
+                )
+                .log();
+        }
     }
 
     private void reportCaptureFinalizationFailure(Throwable failure) {
@@ -435,44 +439,105 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
 
         var timestamp = Instant.now();
-        IWireCaptureContexts.IRequestContext requestContext;
-        if (!(messageContext instanceof IWireCaptureContexts.IRequestContext)) {
-            if (!finishResponseBeforeNextRequest(ctx, timestamp)) {
-                rejectSourceTraffic(ctx, msg);
-                return;
-            }
-            messageContext = requestContext = messageContext.createNextRequestContext();
-        } else {
-            requestContext = (IWireCaptureContexts.IRequestContext) messageContext;
+        var requestContext = requestContextForRead(ctx, timestamp);
+        if (requestContext == null) {
+            rejectSourceTraffic(ctx, msg);
+            return;
         }
 
         var requestParsingHandler = getHandlerThatHoldsParsedHttpRequest();
-        var requestDecoder = (SimpleHttpRequestDecoder) httpDecoderChannel.pipeline().first();
         var bb = ((ByteBuf) msg);
+        var requestDecoder = decodeRequestBytes(ctx, bb);
+        var captureResult = captureReadIfRequired(
+            ctx,
+            timestamp,
+            bb,
+            requestContext,
+            requestParsingHandler.captureState
+        );
+        if (!captureResult.proceed()) {
+            ReferenceCountUtil.release(msg);
+            return;
+        }
+
+        requestContext.onBytesRead(bb.readableBytes());
+
+        if (closeForRequestLimitViolation(ctx, msg, requestDecoder)) {
+            return;
+        }
+
+        if (requestParsingHandler.haveParsedFullRequest) {
+            if (!finishParsedRequest(
+                ctx,
+                msg,
+                timestamp,
+                requestContext,
+                requestParsingHandler,
+                captureResult.shouldCapture()
+            )) {
+                ReferenceCountUtil.release(msg);
+            }
+        } else {
+            forwardSourceTrafficOrClose(ctx, msg);
+        }
+    }
+
+    private IWireCaptureContexts.IRequestContext requestContextForRead(
+        ChannelHandlerContext ctx,
+        Instant timestamp
+    ) {
+        if (messageContext instanceof IWireCaptureContexts.IRequestContext requestContext) {
+            return requestContext;
+        }
+        if (!finishResponseBeforeNextRequest(ctx, timestamp)) {
+            return null;
+        }
+        var requestContext = messageContext.createNextRequestContext();
+        messageContext = requestContext;
+        return requestContext;
+    }
+
+    private SimpleHttpRequestDecoder decodeRequestBytes(ChannelHandlerContext ctx, ByteBuf buffer) {
+        var requestDecoder = (SimpleHttpRequestDecoder) httpDecoderChannel.pipeline().first();
         var requestWasInProgress = requestDecoder.isRequestInProgress();
         var completedRequestCountBeforeRead = requestDecoder.getCompletedRequestCount();
-        if (!requestWasInProgress && bb.isReadable()) {
+        if (!requestWasInProgress && buffer.isReadable()) {
             startRequestAssemblyDeadline(ctx);
         }
-        httpDecoderChannel.writeInbound(bb.retainedDuplicate()); // the ByteBuf is consumed/release by this method
+        httpDecoderChannel.writeInbound(
+            buffer.retainedDuplicate()
+        ); // the ByteBuf is consumed/released by this method
         updateRequestAssemblyDeadline(
             ctx,
             requestDecoder,
             requestWasInProgress,
             completedRequestCountBeforeRead
         );
+        return requestDecoder;
+    }
 
-        var captureState = requestParsingHandler.captureState;
+    private record CaptureReadResult(boolean proceed, boolean shouldCapture) {
+        private static CaptureReadResult stop() {
+            return new CaptureReadResult(false, false);
+        }
+    }
+
+    private CaptureReadResult captureReadIfRequired(
+        ChannelHandlerContext ctx,
+        Instant timestamp,
+        ByteBuf buffer,
+        IWireCaptureContexts.IRequestContext requestContext,
+        CaptureState captureState
+    ) {
         var processCaptureEnabled = captureProcessState.shouldCapture();
         var shouldCapture = processCaptureEnabled && captureState.shouldCapture();
         if (shouldCapture) {
             captureState.liveReadObservationsInOffloader = true;
             if (!runRequiredCaptureOperation(
                 ctx,
-                () -> trafficOffloader.addReadEvent(timestamp, bb)
+                () -> trafficOffloader.addReadEvent(timestamp, buffer)
             )) {
-                ReferenceCountUtil.release(msg);
-                return;
+                return CaptureReadResult.stop();
             }
             if (!captureProcessState.shouldCapture()) {
                 shouldCapture = false;
@@ -480,61 +545,79 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             }
         } else if (captureState.liveReadObservationsInOffloader) {
             requestContext.onCaptureSuppressed();
-            if (processCaptureEnabled) {
-                if (!runRequiredCaptureOperation(
-                    ctx,
-                    () -> trafficOffloader.cancelCaptureForCurrentRequest(timestamp)
-                )) {
-                    ReferenceCountUtil.release(msg);
-                    return;
-                }
+            if (processCaptureEnabled && !runRequiredCaptureOperation(
+                ctx,
+                () -> trafficOffloader.cancelCaptureForCurrentRequest(timestamp)
+            )) {
+                return CaptureReadResult.stop();
             }
             captureState.liveReadObservationsInOffloader = false;
         }
+        return new CaptureReadResult(true, shouldCapture);
+    }
 
-        requestContext.onBytesRead(bb.readableBytes());
-
-        if (requestDecoder.getLimitViolation() != null) {
-            log.atWarn()
-                .setMessage("Closing connection because an incomplete request exceeded its {} limit")
-                .addArgument(requestDecoder.getLimitViolation())
-                .log();
-            ReferenceCountUtil.release(msg);
-            ctx.close();
-            return;
+    private boolean closeForRequestLimitViolation(
+        ChannelHandlerContext ctx,
+        Object msg,
+        SimpleHttpRequestDecoder requestDecoder
+    ) {
+        if (requestDecoder.getLimitViolation() == null) {
+            return false;
         }
+        log.atWarn()
+            .setMessage("Closing connection because an incomplete request exceeded its {} limit")
+            .addArgument(requestDecoder.getLimitViolation())
+            .log();
+        ReferenceCountUtil.release(msg);
+        ctx.close();
+        return true;
+    }
 
-        if (requestParsingHandler.haveParsedFullRequest) {
-            requestContext.onFullyParsedRequest();
-            var httpRequest = requestParsingHandler.resetCurrentRequest();
-            captureState.liveReadObservationsInOffloader = false;
-            captureState.advanceStateModelIntoResponseGather();
+    private boolean finishParsedRequest(
+        ChannelHandlerContext ctx,
+        Object msg,
+        Instant timestamp,
+        IWireCaptureContexts.IRequestContext requestContext,
+        SimpleDecodedHttpRequestHandler requestParsingHandler,
+        boolean shouldCapture
+    ) throws Exception {
+        requestContext.onFullyParsedRequest();
+        var httpRequest = requestParsingHandler.resetCurrentRequest();
+        var captureState = requestParsingHandler.captureState;
+        captureState.liveReadObservationsInOffloader = false;
+        captureState.advanceStateModelIntoResponseGather();
 
-            if (shouldCapture) {
-                var decoderResultLoose = httpRequest.decoderResult();
-                if (!runRequiredCaptureOperation(ctx, () -> {
-                    if (decoderResultLoose instanceof HttpMessageDecoderResult) {
-                        var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
-                        trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
-                        trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
-                    } else {
-                        log.atWarn().setMessage("HttpRequest decoder result was not an HttpMessageDecoderResult "
-                            + "(was {}). EOM will have -1 for firstLineByteLength and headersByteLength. "
-                            + "This may indicate a missing header in PassThruHttpHeaders.")
-                            .addArgument(() -> decoderResultLoose.getClass().getName())
-                            .log();
-                    }
-                    trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
-                })) {
-                    ReferenceCountUtil.release(msg);
-                    return;
-                }
-                shouldCapture = captureProcessState.shouldCapture();
+        if (shouldCapture && !captureEndOfRequest(ctx, timestamp, httpRequest)) {
+            return false;
+        }
+        channelFinishedReadingAnHttpMessage(
+            ctx,
+            msg,
+            shouldCapture && captureProcessState.shouldCapture(),
+            httpRequest
+        );
+        return true;
+    }
+
+    private boolean captureEndOfRequest(
+        ChannelHandlerContext ctx,
+        Instant timestamp,
+        HttpRequest httpRequest
+    ) {
+        var decoderResultLoose = httpRequest.decoderResult();
+        return runRequiredCaptureOperation(ctx, () -> {
+            if (decoderResultLoose instanceof HttpMessageDecoderResult decoderResult) {
+                trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
+                trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
+            } else {
+                log.atWarn().setMessage("HttpRequest decoder result was not an HttpMessageDecoderResult "
+                    + "(was {}). EOM will have -1 for firstLineByteLength and headersByteLength. "
+                    + "This may indicate a missing header in PassThruHttpHeaders.")
+                    .addArgument(() -> decoderResultLoose.getClass().getName())
+                    .log();
             }
-            channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
-        } else {
-            forwardSourceTrafficOrClose(ctx, msg);
-        }
+            trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
+        });
     }
 
     private void forwardSourceTrafficOrClose(ChannelHandlerContext ctx, Object msg) throws Exception {
@@ -601,11 +684,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         var timestamp = Instant.now();
         var bytesReachingTheClient = bb.readableBytes();
         if (messageContext instanceof IWireCaptureContexts.IResponseContext) {
-            if (captureProcessState.shouldCapture()
-                && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()
-                && !runRequiredCaptureOperation(ctx, () -> trafficOffloader.addWriteEvent(timestamp, bb))) {
-                ReferenceCountUtil.release(msg);
-                promise.tryFailure(new IOException("Required response capture failed"));
+            if (!captureResponseBytesIfRequired(ctx, timestamp, bb)) {
+                failRequiredResponseCapture(msg, promise);
                 return;
             }
             reportBytesWrittenToClient(bytesReachingTheClient);
@@ -618,33 +698,59 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             messageContext = messageContext.createResponseContext();
         }
 
-        if (captureProcessState.shouldCapture()
-            && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
-            if (!runRequiredCaptureOperation(
-                ctx,
-                () -> {
-                    for (var classified : classifiedBytes) {
-                        var capturedBytes = Unpooled.wrappedBuffer(classified.data());
-                        try {
-                            if (classified.interim()) {
-                                trafficOffloader.addInterimResponseEvent(timestamp, capturedBytes);
-                            } else {
-                                trafficOffloader.addWriteEvent(timestamp, capturedBytes);
-                            }
-                        } finally {
-                            capturedBytes.release();
-                        }
-                    }
-                }
-            )) {
-                ReferenceCountUtil.release(msg);
-                promise.tryFailure(new IOException("Required response capture failed"));
-                return;
-            }
+        if (!captureClassifiedResponseBytesIfRequired(ctx, timestamp, classifiedBytes)) {
+            failRequiredResponseCapture(msg, promise);
+            return;
         }
         reportBytesWrittenToClient(bytesReachingTheClient);
 
         super.write(ctx, msg, promise);
+    }
+
+    private boolean captureResponseBytesIfRequired(
+        ChannelHandlerContext ctx,
+        Instant timestamp,
+        ByteBuf buffer
+    ) {
+        return !shouldCaptureResponse()
+            || runRequiredCaptureOperation(ctx, () -> trafficOffloader.addWriteEvent(timestamp, buffer));
+    }
+
+    private boolean captureClassifiedResponseBytesIfRequired(
+        ChannelHandlerContext ctx,
+        Instant timestamp,
+        List<ClassifiedResponseBytes> classifiedBytes
+    ) {
+        return !shouldCaptureResponse()
+            || runRequiredCaptureOperation(ctx, () -> captureClassifiedResponseBytes(timestamp, classifiedBytes));
+    }
+
+    private boolean shouldCaptureResponse() {
+        return captureProcessState.shouldCapture()
+            && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture();
+    }
+
+    private void captureClassifiedResponseBytes(
+        Instant timestamp,
+        List<ClassifiedResponseBytes> classifiedBytes
+    ) throws IOException {
+        for (var classified : classifiedBytes) {
+            var capturedBytes = Unpooled.wrappedBuffer(classified.data());
+            try {
+                if (classified.interim()) {
+                    trafficOffloader.addInterimResponseEvent(timestamp, capturedBytes);
+                } else {
+                    trafficOffloader.addWriteEvent(timestamp, capturedBytes);
+                }
+            } finally {
+                capturedBytes.release();
+            }
+        }
+    }
+
+    private static void failRequiredResponseCapture(Object msg, ChannelPromise promise) {
+        ReferenceCountUtil.release(msg);
+        promise.tryFailure(new IOException("Required response capture failed"));
     }
 
     private boolean finishResponseBeforeNextRequest(ChannelHandlerContext ctx, Instant timestamp) {
@@ -672,11 +778,11 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             if (!isNonSwitchingInformationalResponse(pending)) {
                 classified.add(new ClassifiedResponseBytes(false, pending));
                 pendingSourceResponseBytes.reset();
-                break;
+                return classified;
             }
             var interimEnd = indexAfterHttpHeaders(pending);
             if (interimEnd < 0) {
-                break;
+                return classified;
             }
             classified.add(new ClassifiedResponseBytes(
                 true,
@@ -768,6 +874,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         return value >= '0' && value <= '9';
     }
 
+    @SuppressWarnings("java:S1181") // Error is an intentional input to the process-instability failure path.
     private boolean runRequiredCaptureOperation(
         ChannelHandlerContext ctx,
         RequiredCaptureOperation operation

@@ -39,6 +39,21 @@ case "$success_log" in
         ;;
 esac
 
+FAKE_GRADLE_ARGS_FILE="$TEMP_DIR/spotless.args" \
+FAKE_GRADLE_EXIT_CODE=0 \
+GRADLE_EVIDENCE_GRADLEW="$PWD/tools/testdata/gradle-evidence/fake-gradlew" \
+    "$WRAPPER" spotlessApply --no-build-cache \
+    > "$TEMP_DIR/spotless.out" 2> "$TEMP_DIR/spotless.err"
+
+cat > "$TEMP_DIR/spotless.expected.args" <<'EOF'
+spotlessApply
+--no-build-cache
+EOF
+diff -u "$TEMP_DIR/spotless.expected.args" "$TEMP_DIR/spotless.args"
+grep -F "PASS: Gradle completed with exit code 0." "$TEMP_DIR/spotless.out" >/dev/null
+spotless_log=$(sed -n 's/^Full log: //p' "$TEMP_DIR/spotless.out")
+test -f "$spotless_log"
+
 set +e
 FAKE_GRADLE_ARGS_FILE="$TEMP_DIR/failure.args" \
 FAKE_GRADLE_EXIT_CODE=37 \
@@ -56,5 +71,5 @@ grep -F "> Task :fake FAILED" "$TEMP_DIR/failure.err" >/dev/null
 failure_log=$(sed -n 's/^Full log: //p' "$TEMP_DIR/failure.err")
 test -f "$failure_log"
 
-rm -f "$success_log" "$failure_log"
-echo "PASS: gradle-evidence forwards arguments, injects exclusions, logs output, and preserves status"
+rm -f "$success_log" "$spotless_log" "$failure_log"
+echo "PASS: gradle-evidence forwards arguments, enables explicit Spotless tasks, logs output, and preserves status"

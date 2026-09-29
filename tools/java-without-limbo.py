@@ -50,12 +50,235 @@ class LiveLine:
     text: str
 
 
+@dataclass
+class TraceState:
+    key: tuple[str, str] | None = None
+    start_line: int = 0
+
+
+@dataclass
+class LimboState:
+    name: str = "outside"
+    milestone: str = ""
+    start_line: int = 0
+
+
 def fail(path: Path, line_number: int, message: str) -> LimboFormatError:
     return LimboFormatError(f"{path}:{line_number}: malformed REBUILD-LIMBO region: {message}")
 
 
 def fail_trace(path: Path, line_number: int, message: str) -> LimboFormatError:
     return LimboFormatError(f"{path}:{line_number}: malformed REBUILD-TRACE record: {message}")
+
+
+def consume_active_trace_line(
+    path: Path,
+    line_number: int,
+    line: str,
+    stripped: str,
+    state: TraceState,
+    trace_start: re.Match[str] | None,
+    trace_end: re.Match[str] | None,
+    trace_line: re.Match[str] | None,
+) -> None:
+    if trace_start is not None or trace_line is not None:
+        raise fail_trace(path, line_number, "nested traceability record")
+    if trace_end is not None:
+        ending_key = (trace_end.group("milestone"), trace_end.group("side"))
+        if ending_key != state.key:
+            raise fail_trace(
+                path,
+                line_number,
+                f"START{state.key} at line {state.start_line} closes with END{ending_key}",
+            )
+        state.key = None
+        state.start_line = 0
+        return
+    if TRACE_PREFIX.search(line):
+        raise fail_trace(path, line_number, "trace marker does not match the required line format")
+    if not COMMENT_LINE.match(line) and not BLANK_LINE.fullmatch(stripped):
+        raise fail_trace(path, line_number, "traceability records may contain comment lines only")
+
+
+def consume_inactive_trace_line(
+    path: Path,
+    line_number: int,
+    line: str,
+    state: TraceState,
+    trace_start: re.Match[str] | None,
+    trace_end: re.Match[str] | None,
+    trace_line: re.Match[str] | None,
+) -> bool:
+    if trace_end is not None:
+        raise fail_trace(
+            path,
+            line_number,
+            f"unmatched END({trace_end.group('milestone')},{trace_end.group('side')})",
+        )
+    if trace_start is not None:
+        state.key = (trace_start.group("milestone"), trace_start.group("side"))
+        state.start_line = line_number
+        return True
+    if trace_line is not None:
+        return True
+    if TRACE_PREFIX.search(line):
+        raise fail_trace(path, line_number, "trace marker does not match the required line format")
+    return False
+
+
+def consume_trace_line(
+    path: Path,
+    line_number: int,
+    line: str,
+    stripped: str,
+    state: TraceState,
+) -> bool:
+    trace_start = TRACE_START.fullmatch(stripped)
+    trace_end = TRACE_END.fullmatch(stripped)
+    trace_line = TRACE_LINE.fullmatch(stripped)
+    if state.key is not None:
+        consume_active_trace_line(
+            path,
+            line_number,
+            line,
+            stripped,
+            state,
+            trace_start,
+            trace_end,
+            trace_line,
+        )
+        return True
+    return consume_inactive_trace_line(
+        path,
+        line_number,
+        line,
+        state,
+        trace_start,
+        trace_end,
+        trace_line,
+    )
+
+
+def validated_limbo_marker(path: Path, line_number: int, line: str, stripped: str) -> re.Match[str] | None:
+    marker = MARKER.fullmatch(stripped)
+    if MARKER_PREFIX.search(line) and marker is None:
+        raise fail(path, line_number, "START/END marker does not match the required line format")
+    return marker
+
+
+def consume_outside_limbo_line(
+    path: Path,
+    line_number: int,
+    marker: re.Match[str] | None,
+    state: LimboState,
+) -> bool:
+    if marker is None:
+        return False
+    if marker.group("kind") == "END":
+        raise fail(path, line_number, f"unmatched END({marker.group('milestone')})")
+    state.name = "awaiting_open"
+    state.milestone = marker.group("milestone")
+    state.start_line = line_number
+    return True
+
+
+def consume_awaiting_open_limbo_line(
+    path: Path,
+    line_number: int,
+    line: str,
+    marker: re.Match[str] | None,
+    state: LimboState,
+) -> bool:
+    if marker is not None:
+        if marker.group("kind") == "START":
+            raise fail(path, line_number, f"nested START({marker.group('milestone')})")
+        raise fail(path, line_number, f"END({marker.group('milestone')}) appears before bare /*")
+    if OPEN_DELIMITER.fullmatch(line.rstrip("\r\n")):
+        state.name = "inside"
+    elif not COMMENT_LINE.match(line):
+        raise fail(path, line_number, "START must be followed by optional // notes and a bare /*")
+    return True
+
+
+def consume_inside_limbo_line(
+    path: Path,
+    line_number: int,
+    line: str,
+    marker: re.Match[str] | None,
+    state: LimboState,
+) -> bool:
+    if marker is not None:
+        if marker.group("kind") == "START":
+            raise fail(path, line_number, f"nested START({marker.group('milestone')})")
+        raise fail(path, line_number, f"END({marker.group('milestone')}) appears before bare */")
+    if CLOSE_DELIMITER.fullmatch(line.rstrip("\r\n")):
+        state.name = "awaiting_end"
+    return True
+
+
+def consume_awaiting_end_limbo_line(
+    path: Path,
+    line_number: int,
+    marker: re.Match[str] | None,
+    state: LimboState,
+) -> bool:
+    if marker is None:
+        raise fail(path, line_number, "bare */ must be immediately followed by its END marker")
+    if marker.group("kind") == "START":
+        raise fail(path, line_number, f"nested START({marker.group('milestone')})")
+    if marker.group("milestone") != state.milestone:
+        raise fail(
+            path,
+            line_number,
+            f"START({state.milestone}) at line {state.start_line} "
+            f"closes with END({marker.group('milestone')})",
+        )
+    state.name = "outside"
+    state.milestone = ""
+    state.start_line = 0
+    return True
+
+
+def consume_limbo_line(
+    path: Path,
+    line_number: int,
+    line: str,
+    marker: re.Match[str] | None,
+    state: LimboState,
+) -> bool:
+    if state.name == "outside":
+        return consume_outside_limbo_line(path, line_number, marker, state)
+    if state.name == "awaiting_open":
+        return consume_awaiting_open_limbo_line(path, line_number, line, marker, state)
+    if state.name == "inside":
+        return consume_inside_limbo_line(path, line_number, line, marker, state)
+    return consume_awaiting_end_limbo_line(path, line_number, marker, state)
+
+
+def validate_final_states(
+    path: Path,
+    source_line_count: int,
+    limbo_state: LimboState,
+    trace_state: TraceState,
+) -> None:
+    if limbo_state.name != "outside":
+        expected = {
+            "awaiting_open": "bare /* and matching END",
+            "inside": "bare */ and matching END",
+            "awaiting_end": f"END({limbo_state.milestone})",
+        }[limbo_state.name]
+        raise fail(
+            path,
+            source_line_count + 1,
+            f"unmatched START({limbo_state.milestone}) at line {limbo_state.start_line}; "
+            f"expected {expected} before end of file",
+        )
+    if trace_state.key is not None:
+        raise fail_trace(
+            path,
+            source_line_count + 1,
+            f"unmatched START{trace_state.key} at line {trace_state.start_line}",
+        )
 
 
 def parse_live_lines(path: Path) -> list[LiveLine]:
@@ -65,123 +288,17 @@ def parse_live_lines(path: Path) -> list[LiveLine]:
         raise LimboFormatError(f"{path}: cannot read Java source: {error}") from error
 
     live: list[LiveLine] = []
-    state = "outside"
-    milestone = ""
-    start_line = 0
-    trace_key: tuple[str, str] | None = None
-    trace_start_line = 0
-
+    trace_state = TraceState()
+    limbo_state = LimboState()
     for line_number, line in enumerate(source_lines, start=1):
         stripped = line.rstrip("\r\n")
-        trace_start = TRACE_START.fullmatch(stripped)
-        trace_end = TRACE_END.fullmatch(stripped)
-        trace_line = TRACE_LINE.fullmatch(stripped)
-
-        if trace_key is not None:
-            if trace_start is not None or trace_line is not None:
-                raise fail_trace(path, line_number, "nested traceability record")
-            if trace_end is not None:
-                ending_key = (trace_end.group("milestone"), trace_end.group("side"))
-                if ending_key != trace_key:
-                    raise fail_trace(
-                        path,
-                        line_number,
-                        f"START{trace_key} at line {trace_start_line} closes with END{ending_key}",
-                    )
-                trace_key = None
-                trace_start_line = 0
-                continue
-            if TRACE_PREFIX.search(line):
-                raise fail_trace(path, line_number, "trace marker does not match the required line format")
-            if not COMMENT_LINE.match(line) and not BLANK_LINE.fullmatch(stripped):
-                raise fail_trace(path, line_number, "traceability records may contain comment lines only")
+        if consume_trace_line(path, line_number, line, stripped, trace_state):
             continue
+        marker = validated_limbo_marker(path, line_number, line, stripped)
+        if not consume_limbo_line(path, line_number, line, marker, limbo_state):
+            live.append(LiveLine(line_number, line))
 
-        if trace_end is not None:
-            raise fail_trace(
-                path,
-                line_number,
-                f"unmatched END({trace_end.group('milestone')},{trace_end.group('side')})",
-            )
-        if trace_start is not None:
-            trace_key = (trace_start.group("milestone"), trace_start.group("side"))
-            trace_start_line = line_number
-            continue
-        if trace_line is not None:
-            continue
-        if TRACE_PREFIX.search(line):
-            raise fail_trace(path, line_number, "trace marker does not match the required line format")
-
-        marker = MARKER.fullmatch(stripped)
-
-        if MARKER_PREFIX.search(line) and marker is None:
-            raise fail(path, line_number, "START/END marker does not match the required line format")
-
-        if state == "outside":
-            if marker is None:
-                live.append(LiveLine(line_number, line))
-            elif marker.group("kind") == "END":
-                raise fail(path, line_number, f"unmatched END({marker.group('milestone')})")
-            else:
-                state = "awaiting_open"
-                milestone = marker.group("milestone")
-                start_line = line_number
-            continue
-
-        if state == "awaiting_open":
-            if marker is not None:
-                kind = marker.group("kind")
-                if kind == "START":
-                    raise fail(path, line_number, f"nested START({marker.group('milestone')})")
-                raise fail(path, line_number, f"END({marker.group('milestone')}) appears before bare /*")
-            if OPEN_DELIMITER.fullmatch(line.rstrip("\r\n")):
-                state = "inside"
-            elif not COMMENT_LINE.match(line):
-                raise fail(path, line_number, "START must be followed by optional // notes and a bare /*")
-            continue
-
-        if state == "inside":
-            if marker is not None:
-                kind = marker.group("kind")
-                if kind == "START":
-                    raise fail(path, line_number, f"nested START({marker.group('milestone')})")
-                raise fail(path, line_number, f"END({marker.group('milestone')}) appears before bare */")
-            if CLOSE_DELIMITER.fullmatch(line.rstrip("\r\n")):
-                state = "awaiting_end"
-            continue
-
-        if marker is None:
-            raise fail(path, line_number, "bare */ must be immediately followed by its END marker")
-        if marker.group("kind") == "START":
-            raise fail(path, line_number, f"nested START({marker.group('milestone')})")
-        if marker.group("milestone") != milestone:
-            raise fail(
-                path,
-                line_number,
-                f"START({milestone}) at line {start_line} closes with END({marker.group('milestone')})",
-            )
-        state = "outside"
-        milestone = ""
-        start_line = 0
-
-    if state != "outside":
-        expected = {
-            "awaiting_open": "bare /* and matching END",
-            "inside": "bare */ and matching END",
-            "awaiting_end": f"END({milestone})",
-        }[state]
-        raise fail(
-            path,
-            len(source_lines) + 1,
-            f"unmatched START({milestone}) at line {start_line}; expected {expected} before end of file",
-        )
-    if trace_key is not None:
-        raise fail_trace(
-            path,
-            len(source_lines) + 1,
-            f"unmatched START{trace_key} at line {trace_start_line}",
-        )
-
+    validate_final_states(path, len(source_lines), limbo_state, trace_state)
     return live
 
 

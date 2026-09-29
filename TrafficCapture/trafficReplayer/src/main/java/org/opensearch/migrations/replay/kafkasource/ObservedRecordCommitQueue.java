@@ -30,11 +30,15 @@ import lombok.NonNull;
  * deque of records actually observed by this consumer, never through assumed numeric offsets.
  */
 public final class ObservedRecordCommitQueue {
+    // The warnings target compiler-generated members of this public result contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record Completion(
         @NonNull List<KafkaRecordId> newlyContiguousRecords,
         @NonNull OptionalLong nextCommitOffset
     ) {}
 
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     public record Snapshot(
         @NonNull PartitionGenerationId generation,
         int size,
@@ -187,6 +191,8 @@ public final class ObservedRecordCommitQueue {
         return greatestObservedOffset >= offset;
     }
 
+    // Renaming this public diagnostic accessor would break existing callers and tests.
+    @SuppressWarnings("java:S1845")
     public Snapshot snapshot() {
         ownerThreadGuard.requireOwnerThread();
         var head = observedRecords.peekFirst();

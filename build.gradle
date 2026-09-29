@@ -132,6 +132,10 @@ subprojects {
             java {
                 // src/ only: source-set resolution would pull in generated proto under build/.
                 target 'src/**/*.java'
+                if (project.path == ':TrafficCapture:trafficReplayer') {
+                    // G11 removes this temporary exemption after resolving the remaining limbo regions.
+                    targetExclude 'src/**/*.java'
+                }
                 importOrder(
                         'javax',
                         'java',
