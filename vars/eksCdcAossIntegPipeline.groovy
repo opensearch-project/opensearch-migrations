@@ -17,9 +17,6 @@ def call(Map config = [:]) {
     def clusterContextFilePath = "tmp/cluster-context-cdc-aoss-${currentBuild.number}.json"
     // general-work-pool overrides, verified after the tests: Graviton only (eksCdcIntegPipeline
     // covers amd64). Kept wide -- every Graviton generation (6 = Graviton2 onward) across c/m/r --
-    // so arm64 capacity is not the thing that fails. Categories, on-demand (spot interruptions kill
-    // migration work mid-test) and WhenEmpty (the other policies move running pods) match the chart
-    // defaults; the other fields differ so a dropped override still shows up.
     def workloadsNodePool = config.workloadsNodePool ?: [
         architectures     : ["arm64"],
         capacityTypes     : ["on-demand"],

@@ -106,20 +106,37 @@ cluster:
   useCustomKarpenterNodePool: false
 
 # Migrations NodePool configuration (EKS only)
+# Instance requirements default to unconstrained: an empty list or null omits the requirement, so
+# EKS Auto Mode may pick any instance type it supports. Auto Mode still bounds that choice: it only
+# launches supported families, never nano/micro/small sizes, and nothing with a single CPU
+# (https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html#auto-supported-instances).
 workloadsNodePool:
-  architectures: []  # Empty = no constraint (Karpenter picks). Set ["amd64"] or ["arm64"] to restrict.
-  capacityTypes: ["on-demand"]  # Empty = no constraint. Typical values: ["on-demand"], ["spot"].
-  instanceCategories: ["c", "m", "r"]  # Empty = no constraint. Typical values: compute, general, memory optimized.
-  minInstanceGeneration: 5  # Inclusive minimum generation (5 means generation 5 and newer). Set to 0 or null to omit the constraint.
-  instanceSizes: ["medium", "large", "xlarge", "2xlarge", "4xlarge"]  # Empty = no constraint.
-  # These limits are keep the entire aggregate compute size under these values.
-  # This is an arbiter on total cost that a deployment can consume per unit of time
-  limits:
-    cpu: "64000m"
-    memory: "128Gi"
+  architectures: []  # e.g. ["arm64"] for Graviton only.
+  # With no capacity type, Auto Mode prioritizes reserved, then spot, then on-demand
+  # (https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#auto-supported-labels),
+  # so spot will be used where available. A spot interruption stops the migration work on that
+  # node; set ["on-demand"] for long-running migrations that must not be interrupted.
+  capacityTypes: []
+  instanceCategories: []  # e.g. ["c", "m", "r"] for compute, general purpose and memory optimized.
+  minInstanceGeneration: null  # Inclusive, e.g. 5 means generation 5 and newer. 0 or null omits it.
+  instanceSizes: []  # e.g. ["large", "xlarge", "2xlarge"].
+  # Caps the total cpu and memory of every node in this pool, and so what the deployment can spend
+  # per unit of time. Unset by default: with no limits, Auto Mode provisions until the account's
+  # EC2 vCPU quotas stop it (https://karpenter.sh/docs/concepts/nodepools/#speclimits).
+  # e.g. {cpu: "64000m", memory: "128Gi"}. Setting only one key caps only that resource.
+  limits: {}
+  # When this block is set, EKS's NodePool CRD requires consolidateAfter, and an unset
+  # consolidationPolicy defaults to WhenEmptyOrUnderutilized. Set `disruption: null` to omit the
+  # block and take Auto Mode's defaults for both
+  # (https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#_disruption).
   disruption:
+    # Only empty nodes are consolidated, so running migration pods are never moved to repack nodes.
+    # The Auto Mode default, WhenEmptyOrUnderutilized, would move them.
     consolidationPolicy: WhenEmpty
-    consolidateAfter: 30m
+    # EKS's NodePool CRD requires consolidateAfter whenever a disruption block is set, so this spells
+    # out the value EKS itself defaults to when the block is omitted: remove empty nodes right away.
+    # Set e.g. 30m to keep an empty node around for the next migration step.
+    consolidateAfter: 0s
 
 # Worker fleets: migration-console-identical pods on bigger hardware.
 # Dormant at replicas: 0. Scale up with: kubectl scale deployment/worker-fleet-<name> --replicas=N

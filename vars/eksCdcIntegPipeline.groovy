@@ -13,9 +13,6 @@ def call(Map config = [:]) {
     def traceValuesFile = config.traceValuesFile ?: "../../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesTraceXray.yaml"
     def traceBackend = config.traceBackend ?: "xray"
     // general-work-pool overrides, verified after the tests; eksCdcAossIntegPipeline covers arm64.
-    // Fields differ from the chart defaults so a dropped override shows up, except two kept on
-    // purpose: on-demand (spot interruptions kill migration work mid-test) and WhenEmpty (the
-    // other policies move running pods).
     def workloadsNodePool = config.workloadsNodePool ?: [
         architectures     : ["amd64"],
         capacityTypes     : ["on-demand"],

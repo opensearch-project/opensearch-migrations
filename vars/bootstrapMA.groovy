@@ -35,7 +35,7 @@
  *       enforceTagsOnCreateForTests: true,
  *       // Optional — override the chart's general-work-pool NodePool. Keys are those under
  *       // workloadsNodePool in the chart's values.yaml; passed to aws-bootstrap.sh as a
- *       // --helm-values file, so it goes through the same schema preflight a deployer's would.
+ *       // --helm-values file, so it goes through the same cluster check a deployer's would.
  *       // Has no effect with resolveBootstrap(useGeneralNodePool: true), which skips that pool.
  *       // Pair with verifyWorkloadNodePool() to assert the NodePool and its nodes match.
  *       workloadsNodePool: [architectures: ["arm64"], minInstanceGeneration: 7]

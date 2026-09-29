@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Developer check for general-work-pool overrides: lints a --helm-values file against the chart
-# schema (the same check aws-bootstrap.sh runs before deploying anything) and prints the NodePool
-# it would render. Needs only helm; no AWS access or cluster.
+# Developer check for general-work-pool overrides: runs helm lint with a --helm-values file and
+# prints the NodePool it would render. Needs only helm; no AWS access or cluster. aws-bootstrap.sh
+# validates the same NodePool against the cluster's CRD once the cluster exists.
 #
 # Usage:
 #   ./deployment/k8s/aws/examples/check-nodepool-overrides.sh <values.yaml> [<values.yaml> ...]
@@ -26,7 +26,7 @@ done
 # Placeholders for values the bootstrap normally supplies; they do not affect the NodePool.
 set_flags=(--set stageName=dev --set aws.region=us-east-2 --set aws.account=123456789012)
 
-echo "=== helm lint (schema validation) ==="
+echo "=== helm lint ==="
 helm lint "$chart_dir" --kube-version 1.35.0 "${values_flags[@]}" "${set_flags[@]}"
 
 echo

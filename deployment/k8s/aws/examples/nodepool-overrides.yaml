@@ -2,8 +2,11 @@
 # Pass with:
 #   ./deployment/k8s/aws/aws-bootstrap.sh --helm-values deployment/k8s/aws/examples/nodepool-overrides.yaml ...
 #
-# Omitted map fields fall back to the chart defaults. List fields replace the
-# full default list, so provide the complete desired list when overriding them.
+# The chart leaves instance selection unconstrained by default (see workloadsNodePool in the
+# chart's values.yaml). This example narrows it to on-demand, current-generation compute, general
+# purpose and memory optimized instances up to 4xlarge, and caps the pool's total size (the chart
+# sets no limits by default). Omitted map fields fall back to the chart defaults.
+# List fields replace the full default list, so provide the complete desired list when overriding.
 
 workloadsNodePool:
   architectures: ["amd64", "arm64"]

@@ -5,9 +5,10 @@ metadata:
   name: general-work-pool
 spec:
   weight: 100
+  {{- with .Values.workloadsNodePool.limits }}
   limits:
-    cpu: {{ .Values.workloadsNodePool.limits.cpu }}
-    memory: {{ .Values.workloadsNodePool.limits.memory }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   template:
     spec:
       nodeClassRef:
@@ -43,7 +44,8 @@ spec:
         - key: kubernetes.io/os
           operator: In
           values: ["linux"]
+  {{- with .Values.workloadsNodePool.disruption }}
   disruption:
-    consolidationPolicy: {{ .Values.workloadsNodePool.disruption.consolidationPolicy }}
-    consolidateAfter: {{ .Values.workloadsNodePool.disruption.consolidateAfter }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}
