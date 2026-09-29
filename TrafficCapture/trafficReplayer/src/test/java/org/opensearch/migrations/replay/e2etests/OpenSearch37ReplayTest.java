@@ -12,10 +12,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.replay.ParsedHttpMessagesAsDicts;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.testutils.TrafficStreamFixtures;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
