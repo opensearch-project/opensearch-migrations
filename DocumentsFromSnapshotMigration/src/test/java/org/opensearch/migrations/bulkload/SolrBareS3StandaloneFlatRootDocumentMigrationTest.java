@@ -12,9 +12,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.RfsMigrateDocuments;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
