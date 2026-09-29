@@ -11,6 +11,15 @@ ARGO_VERSION="${WORKFLOW_TEST_ARGO_VERSION:-v3.7.3}"
 ARGO_NAMESPACE="${WORKFLOW_TEST_ARGO_NAMESPACE:-argo}"
 ARGO_MANIFEST_URL="https://github.com/argoproj/argo-workflows/releases/download/${ARGO_VERSION}/quick-start-minimal.yaml"
 
+# Argo's quick-start manifest bundles MinIO as the S3 artifact store. MinIO revoked
+# anonymous image pulls (quay.io/Docker Hub now return HTTP 401), so that Deployment
+# can no longer start. We replace it with LocalStack -- the same S3-compatible backend
+# the rest of this project already uses for Argo artifacts -- from an image the project
+# already mirrors. The artifact repository config in the manifest is rewritten to point
+# at localstack:4566 (see the sed/awk transform below).
+LOCALSTACK_IMAGE="${WORKFLOW_TEST_LOCALSTACK_IMAGE:-mirror.gcr.io/localstack/localstack:4.3.0}"
+LOCALSTACK_PORT=4566
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "Missing required command: $1" >&2
@@ -59,10 +68,89 @@ echo "Ensuring namespace ${ARGO_NAMESPACE} exists..."
 kubectl get namespace "${ARGO_NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${ARGO_NAMESPACE}"
 
 echo "Installing Argo Workflows ${ARGO_VERSION} from ${ARGO_MANIFEST_URL}..."
-curl -fsSL "${ARGO_MANIFEST_URL}" | kubectl apply -n "${ARGO_NAMESPACE}" -f -
+# Rewrite the artifact repository config on the way in:
+#   1. Point every `endpoint: minio:9000` at LocalStack (`localstack:${LOCALSTACK_PORT}`).
+#   2. Add `createBucketIfNotPresent: {}` after each `bucket: my-bucket` so Argo creates
+#      the bucket on first use (LocalStack, unlike the bundled MinIO, starts empty).
+# The dummy `my-minio-cred` credentials are reused as-is; LocalStack does not validate them.
+curl -fsSL "${ARGO_MANIFEST_URL}" \
+  | awk -v ep="localstack:${LOCALSTACK_PORT}" '
+      { if ($0 ~ /endpoint: minio:9000/) sub(/endpoint: minio:9000/, "endpoint: " ep) }
+      { print }
+      /^[[:space:]]*bucket: my-bucket[[:space:]]*$/ {
+        match($0, /^[[:space:]]*/)
+        print substr($0, 1, RLENGTH) "createBucketIfNotPresent: {}"
+      }' \
+  | kubectl apply -n "${ARGO_NAMESPACE}" -f -
+
+# The bundled MinIO Deployment/Service are unusable (image no longer pullable) and now
+# unreferenced; remove them and stand up LocalStack in their place.
+echo "Removing bundled MinIO artifact store..."
+kubectl -n "${ARGO_NAMESPACE}" delete deployment minio --ignore-not-found
+kubectl -n "${ARGO_NAMESPACE}" delete service minio --ignore-not-found
+
+echo "Deploying LocalStack S3 artifact store (${LOCALSTACK_IMAGE})..."
+kubectl -n "${ARGO_NAMESPACE}" apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localstack
+  labels:
+    app: localstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: localstack
+  template:
+    metadata:
+      labels:
+        app: localstack
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: localstack
+        image: ${LOCALSTACK_IMAGE}
+        env:
+        - name: SERVICES
+          value: s3
+        - name: EAGER_SERVICE_LOADING
+          value: "1"
+        ports:
+        - containerPort: ${LOCALSTACK_PORT}
+          name: edge
+        readinessProbe:
+          httpGet:
+            path: /_localstack/health
+            port: ${LOCALSTACK_PORT}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /_localstack/health
+            port: ${LOCALSTACK_PORT}
+          initialDelaySeconds: 20
+          periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: localstack
+  labels:
+    app: localstack
+spec:
+  selector:
+    app: localstack
+  ports:
+  - name: edge
+    port: ${LOCALSTACK_PORT}
+    targetPort: ${LOCALSTACK_PORT}
+    protocol: TCP
+EOF
 
 wait_for_deployment "${ARGO_NAMESPACE}" "workflow-controller"
 wait_for_deployment "${ARGO_NAMESPACE}" "argo-server"
+wait_for_deployment "${ARGO_NAMESPACE}" "localstack"
 
 echo
 echo "Workflow test cluster is ready."

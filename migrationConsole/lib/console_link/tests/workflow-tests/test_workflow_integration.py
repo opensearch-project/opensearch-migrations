@@ -1389,8 +1389,8 @@ class TestArgoWorkflows:
         """Verify workflow status renders correctly when nodes produce artifact outputs.
 
         Regression test for TypeError when statusOutput is stored as an S3 artifact
-        instead of an inline parameter. The quick-start-minimal manifest includes MinIO,
-        so artifact storage is available.
+        instead of an inline parameter. The workflow test cluster provisions LocalStack
+        as the S3 artifact store, so artifact storage is available.
         """
         argo_namespace = argo_workflows["namespace"]
         logger.info(f"\nTesting workflow status with artifact outputs (namespace: {argo_namespace})")
