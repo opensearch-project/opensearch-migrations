@@ -29,8 +29,8 @@ file. It does not summarize the designs or plans.
 - If any required parameters are missing, You MUST ask for them before proceeding
 - When asking for parameters, You MUST request all parameters in a single prompt
 - When asking for parameters, You MUST use the exact parameter names as defined
-- You MUST reject an identifier outside the allowed milestone set because this SOP deliberately
-  excludes Plan B and the superseded `S` sequence.
+- You MUST reject an identifier outside the allowed Plan A milestone set; the superseded `S`
+  sequence is not accepted.
 
 ## Steps
 

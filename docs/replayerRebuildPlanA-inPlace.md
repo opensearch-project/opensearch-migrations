@@ -2,9 +2,6 @@
 
 **Status:** primary plan, selected 2026-09-22
 
-**Fallback:** [`replayerRebuildPlanB-inPlace.md`](replayerRebuildPlanB-inPlace.md) — see
-[§10 Rollback](#10-rollback-to-plan-b)
-
 **Supplemented by:** [`replayerRebuildPlan.md`](replayerRebuildPlan.md), which contains no competing
 sequencing and is authoritative only for the `D1`–`D18` defect analysis (§2), the PA1–PA3 proxy
 milestones (§3.2), the `R1`–`R19` obligation set (§6.5), and deployed-configuration compatibility (§7).
@@ -57,7 +54,7 @@ live models. Removing that constraint is the entire point of this plan.
 **Confidence:** the reference counts, absent types, and identity-record inventory are measured, as are the
 file sizes. The claim that responsibilities failed to move is read from the absence of the design's named
 components and from what the extraction targets do not contain; it has not been confirmed by reading those
-two owners end to end, which is why Plan B makes that read its first milestone.
+two owners end to end, which is why that read was identified as a prerequisite before replacing them.
 
 ## 2. The shape
 
@@ -190,7 +187,7 @@ viable. Each item is a red-line-2 contract; changing any of them is an escalated
 | Docker image name `traffic_replayer` | `buildImages/build.gradle:22,46,51` |
 | Dump modes `dump-raw`, `dump-http`, `dump-both` | `KafkaTopicDumper`, invoked from `TrafficReplayer.java:644` — a user-facing CLI mode for Kafka topics. The owner retired the file-backed branch on 2026-09-24 |
 | Module path `:TrafficCapture:trafficReplayer` | `settings.gradle:70` |
-| CLI options and inline-JSON keys | Previous plan §7 — the full alias list, including the deprecated parse-and-warn set |
+| CLI options and inline-JSON keys | Previous plan §7 — the owner-selected single-name request-concurrency and proxy-style absolute thread settings; retired keys are rejected |
 | Workflow schema fields | `orchestrationSpecs/packages/schemas/src/userSchemas.ts`, `workflowTemplates/replayer.ts` |
 | Deployment service and image references | `deployment/cdk/opensearch-service-migration/lib/service-stacks/traffic-replayer-stack.ts`, `stack-composer.ts`, `deployment/k8s` values, `TrafficCapture/dockerSolution/src/main/docker/docker-compose.yml` and `docker-compose.large-requests.yml` |
 | Exit codes 80 and 89 | `ReplayProcessFatalHandlerTest` |
@@ -610,7 +607,7 @@ or processing-completion ordering.
 
 **Deferred to POST1 — target interim-response preservation.** G5 builds the target response and tuple-input
 chain, but it does not preserve target `1xx` responses in tuples. The current target handler may continue to
-discard `1xx` responses other than `101` throughout the rewrite. POST1, after G12, owns replacing that discard
+discard `1xx` responses other than `101` throughout the rewrite. POST1, after G11, owns replacing that discard
 with target aggregation and tuple serialization based on PR #3000. No target-interim state is added to the G5
 owner model as temporary scaffolding.
 
@@ -758,16 +755,17 @@ what is fatal versus a value `replayerLLD §4:146-164` and `async §2:44`; shutd
 `procCommit §10:1371-1425`; `captureAndReplayArchitecture §12:1193-1273`. Startup validation
 `procCommit:1081` (`P >= 1`, `T >= 1`) and `:1151` (`W` positive). Mandatory archive timestamp
 preservation and rejection when archived broker timestamps cannot be retained or trusted are defined
-by `BringYourOwnCapturedTraffic.md:103-132`. The CLI and
-inline-JSON surface, including every deprecated parse-and-warn alias, is `replayerRebuildPlan.md §7`.
+by `BringYourOwnCapturedTraffic.md:103-132`. The CLI and inline-JSON surface, including the
+owner-selected removal of deprecated aliases, is `replayerRebuildPlan.md §7`.
 **Required tests: `connLLD §19.6:783-788` and `procCommit §13.5:1708-1716`.**
 
 `ProcessSupervisor` and the fatal ladder: `System.exit` → bounded hooks (ten minutes) → thread dump to
 stderr → `Runtime.halt` with the same code. Fatal shutdown skips the intake fence; no unbounded doubling
 loop and no join on a group that may be dead. Orderly shutdown consumes G8's host-bounded drain chain and
-adds no shutdown deadline. The full CLI and
-config surface from previous-plan §7, including every deprecated parse-and-warn alias. Startup rejects
-`P < 1`, `T_threads < 1`, `W <= 0`, `E <= 0`, `S < 0`.
+adds no shutdown deadline. The full CLI and config surface from previous-plan §7 uses only
+`maxConcurrentRequests` externally, passes absolute `numClientThreads` to Netty with zero selecting
+its processor-based default, and rejects retired names. Startup rejects `P < 1`,
+`numClientThreads < 0`, `W <= 0`, `E <= 0`, `S < 0`.
 
 **Inherited from G5 — construct the preserved metric producers from deployed configuration.** Startup selects
 the G5 request-preparation, target-channel, pacing/retry, source-read, and tuple-construction adapters without
@@ -786,8 +784,8 @@ substitute for G9.5 or G10. Record what it exposes; formal agent-driven reproduc
 acceptance belong to G10.
 
 **Exit:** killing a target event loop under load yields exit code 80 with bounded hook time and a thread
-dump at the watchdog bound, and cannot hang; every retired deployed option parses, warns, has no
-behavioral effect, and does not fail as an unrecognized key; the already-integrated replay application from
+dump at the watchdog bound, and cannot hang; every retired option and inline-JSON key fails as unknown,
+while `maxConcurrentRequests` and `numClientThreads` reach live construction; the already-integrated replay application from
 G5 is started through deployed configuration, invokes G8's orderly host-bounded drain on normal shutdown,
 and uses the supervisor only for fatal termination, without replacing its owner or
 queue construction; configured startup selects every preserved replay-pipeline metric producer without
@@ -854,43 +852,63 @@ pushes the reviewed branch through the normal guarded workflow and does not rewr
 exception, the candidate must pass the same exit gates before the coordinator performs the authorized
 guarded replacement. G10 cannot begin until the reviewed production commit is accepted.
 
-### G10 — The fuse
+### G10 — The fuse and ship gate
 
 **Design refs:** `captureAndReplayArchitecture §15:1404-1491` system-level verification requirements;
 `procCommit §13.4:1640-1707` backpressure and Kafka tests. Background for scale and workload shape:
 `docs/LoadTestingBackground.md`.
 
-One small rig, topologically identical to the ship gate: **one proxy, one Kafka traffic topic with two
-partitions, one replayer**, a few
-hundred requests per second, tens of seconds, docker compose rather than k8s or Argo, reusing the
-existing `TrafficCapture/trafficLoadTest` scenarios. G10 is the formal agent-driven E2E defect-resolution
-milestone. It consumes observations from the diagnostic late-G9 smoke, reproduces each real defect in the
-smallest deterministic evidence available, corrects it, and reruns the rig.
+G10 combines fast exact evidence, a workflow-generated local acid test, and the existing EKS stress rig:
 
-This is the "everything breaks, now debug it" milestone. Read the first run as an **observability test
-first and a correctness test second**: gaps in what can be seen are the findings.
+1. The fast real-Kafka construction test runs two capture proxies, one traffic topic, two partitions,
+   two deployed replayers, and a recording target. It compares every generated target method, path, and
+   body and rejects duplicates or omissions.
+2. The local acid test is generated entirely from an ordinary migration workflow config on Kind: two
+   capture-proxy pods, one auto-created traffic topic with at least three partitions (two active proxies
+   plus the approved rolling-surge slot), two replayer pods, one source, and one target. It uses the
+   existing workflow, console, and load-generation paths rather than Docker Compose or manually installed
+   Strimzi, Services, or migration resources. A modest generated workload proves that both proxy and
+   replayer replicas participate, Kafka drains, tuple output is durable, and normalized source and target
+   document contents are exactly equal. A second Kind configuration points tuple output at a nonexistent
+   S3 endpoint and proves that the affected Kafka consumer-group commits do not advance.
+3. The former G12 ship gate runs the existing k6 rig in EKS: 10+ proxies, 20 traffic topics, 10+
+   replayers, greater than 100,000 requests/second and approximately 200 MB/s aggregate for at least ten
+   minutes and no more than one hour. While load remains active, gracefully and forcibly terminate
+   replayer pods, then exercise Kafka and capture-proxy pod disruption. The generated-workload oracle,
+   source/target delivery result, per-connection ordering checks, Kafka lag, and conservation metrics must
+   reconcile after recovery.
 
-At this scale, run **both** exact per-record comparison and the counter-based check and confirm they
-agree. That validates the cheap oracle against the expensive one, which is what earns the right to rely
-on counters at 200 MB/s.
+G10 is the formal agent-driven E2E defect-resolution milestone. It consumes observations from the
+diagnostic late-G9 smoke, reproduces each real defect in the smallest deterministic evidence available,
+corrects it there, and reruns only the affected acid or stress gate. The large rigs are confirmation, not
+debugging oracles.
+
+The owner-approved Java Spotless exemption for `TrafficCapture:trafficReplayer` remains through G10; this
+milestone does not rewrite the still-marked carried sources merely to satisfy formatting. G11 owns removal of
+the exemption after its final limbo cleanup, followed by explicit `spotlessApply` and `spotlessCheck`.
+
+Read the first Kind and EKS runs as observability tests first and correctness tests second: gaps in what
+can be seen are findings. The fast real-Kafka tier owns exact request and record-lifecycle evidence; Kind
+owns the deployed workflow and durable-delivery acid checks; EKS validates the cheap conservation oracle,
+horizontal scaling, recovery, and ordering under stress. Do not add a separate OTEL collector solely to
+reconstruct every deployed record when the focused real-Kafka tier already proves that record contract.
 
 Representative cases are selected from the cited finite design inventories, not from a coverage target:
 multi-observation and shared records, requests or responses split across records, normal and unavailable
-retry inputs around `B + W`, demand/bootstrap overshoot and permit recovery, partition transfer during
-target/tuple work, protocol/fatal termination, and orderly shutdown with admitted work in flight. Keep the
-rig small enough that every source record, target request, tuple result, and terminal accounting event can be
-compared exactly.
+retry inputs around `B + W`, demand/bootstrap overshoot and permit recovery, tuple durability, partition
+transfer during active work, and graceful and forceful process disruption. Protocol-corruption and malformed
+envelope cases remain in the deterministic and real-Kafka component inventory required by the cited design;
+they are not injected into the Kind or EKS delivery tests.
 
-**Exit:** a clean deployed cold start brings up source, proxy, the Kafka traffic topic with both partitions,
-replayer, and target through
-the shipping configuration with no pre-existing replay state; every generated source record has an exact
-expected replay disposition and exact record comparison passes; the record-accounting equations and sequence
-continuity reconcile with the per-record oracle; source and target document contents are equal, not merely
-equal in count; the representative cases above pass; and normal shutdown stops intake, drains every admitted
-complete request, durably emits tuple output, promptly commits every eligible contiguous prefix, closes
-resources, sends no force cancellation, and exits only after drain. Fatal and protocol cases retain their
-designed bounded/non-commit behavior. Every accepted G9-smoke or G10 E2E defect has a focused regression and a
-recorded disposition.
+**Exit:** the fast two-proxy/two-partition/two-replayer real-Kafka test passes exact request comparison; a
+clean workflow-generated Kind deployment starts two proxy pods, an at-least-three-partition traffic topic,
+two replayer pods, source, and target with no pre-existing replay state; both proxy and replayer replicas
+participate; Kafka drains; tuple output is durable; and normalized source and target document contents are
+exactly equal. With tuple S3 unavailable in the separate Kind configuration, commits remain stationary.
+The EKS k6 run sustains the stated scale, preserves per-connection ordering, survives graceful and forceful
+replayer disruption followed by Kafka and proxy disruption, delivers every expected result after recovery,
+and reconciles lag and all applicable conservation metrics. Every accepted G9-smoke or G10 defect has a
+focused regression and recorded disposition.
 
 ### G11 — Formerly the swing; now the last marked region
 
@@ -907,37 +925,24 @@ What remains under this heading is bookkeeping that the earlier milestones produ
   assertions belong to G8; G11 owns only this process-teardown member.
 - The `sonar-project.properties:274` path glob updated if `ClientConnectionPool` is gone.
 - The `REBUILD-LIMBO` scaffolding note in the module's `build.gradle` removed with the last region.
-- After the cleanup commit, rerun the G10 fuse with the same cold-start, exact-comparison, conservation,
-  document-equality, and shutdown/drain assertions so cleanup cannot silently change production behavior.
+- The root-build Spotless exemption for `TrafficCapture:trafficReplayer` removed after the last region,
+  followed by explicit `:TrafficCapture:trafficReplayer:spotlessApply` and `spotlessCheck`.
+- After the cleanup commit, rerun the complete G10 gate so cleanup cannot silently change exact
+  comparison, workflow deployment, durable delivery, conservation, ordering, or disruption recovery.
 
 **Exit:** the assembled application runs, the §2.3 contract surface is unchanged, interrupted source teardown
-still reaches application close, no marked region remains, and the post-cleanup G10 fuse rerun passes.
+still reaches application close, no marked region remains, the replayer Spotless exemption is absent and its
+apply/check tasks pass, and the post-cleanup G10 gate rerun passes.
 
-### G12 — Ship gate
+### G12 — Dissolved into G10
 
-**Design refs:** `captureAndReplayArchitecture §15:1404-1491`; `docs/LoadTestingBackground.md` for
-workload profiles, memory asymmetry, and the horizontal-scaling claims under test. Note from that
-document that complete connection identity is `(writerNodeId, connectionId)` and ordering is guaranteed
-within a connection, not across.
-
-The existing k6 rig at scale: 10+ proxies, 20 topics, 10+ replayers, >100K requests/second, ~200 MB/s
-aggregate, ten minutes, verified by source-versus-target doc count with all metrics reconciling.
-
-G12 owns scale and stronger ordering confirmation. In addition to document equality and reconciled metrics,
-run stateful create → update → query → delete or paging sequences pinned to complete
-`(writerNodeId, connectionId)` identity and verify their target/tuple order. Also spread control sequences
-across connections to confirm the rig does not assert an ordering guarantee the design does not provide.
-
-The rig substantially exists — `trafficLoadTest` scenarios and
-configs, the `k6LoadTest` chart with the k6-operator and Argo templates, the Grafana dashboard,
-`eksCdcK6LoadTestCover.groovy`, and the console `loadtest` CLI. What it needs is delivery verification
-rather than dashboards. G10 and the post-G11 rerun establish small-scale exact correctness; G12 confirms
-throughput, horizontal scaling, metric conservation, document equality, and the stronger per-connection
-ordering oracle under the workload profiles and memory asymmetry described above.
+Owner, 2026-09-28: the former ship-gate stress, ordering, horizontal-scaling, conservation, and disruption
+scope is part of G10 because it is a stronger acceptance gate before final cleanup. G12 owns no remaining
+obligation. G11 remains the final marked-region and formatting cleanup and reruns the complete G10 gate.
 
 ### POST1 — Preserve target interim responses in tuples
 
-**Scheduled after the G0–G12 rewrite workstream.** This milestone does not gate the rewrite or G12. It is the
+**Scheduled after the G0–G11 rewrite workstream.** This milestone does not gate the rewrite or G11. It is the
 named receiver for target-side interim-response preservation deliberately excluded from G5.
 
 Use PR #3000 as the implementation starting point. Replace `InterimHttpResponseHandler`'s discard of target
@@ -1028,14 +1033,14 @@ Escalated per `../AGENTS.md` §2. Blocking items first.
 | `RecordDispositionLedger` (707 lines, 0 refs) | Delete from the legacy module now, or leave it frozen? | Yes | Leave frozen — the legacy module is reference and gets deleted whole at `G11` |
 | Nine obsolete `ReplayIdentity` records | Marked, not promoted; exactly eight design identities declared | No — internal contract break | Proceed; escalating for the record since red line 3 makes *keeping* them a decision too |
 | `testFixtures` API for six `transformation/` modules | Preserve the existing surface, or update those six modules? | No — contract break | Decide at `G11`; preferring to update six test-only consumers over freezing a fixture API we'd otherwise redesign |
-| Ship gate in the definition of done | Does `G12` become a required acceptance condition alongside `R1`–`R19`? | No | Deferred by the human 2026-09-22; revisit at `G10` |
+| Ship gate in the definition of done | Does the former `G12` stress gate become a required acceptance condition alongside `R1`–`R19`? | No | **Resolved 2026-09-28.** The owner moved that gate into `G10`; `G12` is dissolved |
 
-## 10. Rollback to Plan B
+## 10. Nonconvergence signals
 
-**Switching plans is the owner's decision and his alone.** An agent never invokes Plan B, never begins
-hedging toward it, and never treats a signal below as authorization to change approach. What an agent does
-is **report**, in the milestone summary, and keep executing Plan A until told otherwise. These are
-instrumentation, not a trigger.
+Plan A remains the sole sequencing plan. An agent never treats a signal below as authorization to
+introduce another correctness model or change approach. It reports the signal in the milestone summary and
+keeps executing Plan A until the owner directs a specific correction. These are instrumentation, not a
+trigger.
 
 Plan A fails in one specific, detectable way: **marked code becomes load-bearing rather than being resolved.**
 Not by compiling — it cannot — but by the marked set ceasing to shrink while new code is written beside it. The
@@ -1053,6 +1058,5 @@ Signals to report, any one of which is worth the owner's attention:
    implementation bug — that means the rebuild is proceeding against a misread of the protocol.
 5. Two consecutive milestones miss their exit condition for reasons of size rather than difficulty.
 
-Plan B is a complete alternative, not a degraded one, and the work done under Plan A is not wasted if it
-is invoked: the four fixtures, the eight identity records, the `Design refs:` citations, and the status
-table all transfer directly.
+The four fixtures, the eight identity records, the `Design refs:` citations, and the status table remain
+the evidence used to diagnose and correct any such nonconvergence.

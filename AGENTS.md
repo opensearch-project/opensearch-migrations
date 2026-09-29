@@ -1,23 +1,22 @@
 # Agent execution contract — capture/replay hardening
 
-**Read this before doing anything else. It governs both rebuild plans.**
+**Read this before doing anything else. It governs the rebuild plan.**
 
-This file defines how work is performed. The authoritative designs define behavior; the selected plan
+This file defines how work is performed. The authoritative designs define behavior; Plan A
 defines sequencing and milestone evidence. Plans never define behavior. If plan prose conflicts with a
 design, implement the design and report the plan defect.
 
 | Document | Role |
 |---|---|
 | `docs/captureAndReplay/*.md` | Authoritative design. Never changed by an implementation agent. |
-| `docs/replayerRebuildPlanA-inPlace.md` | Primary sequencing plan; default unless told otherwise. |
-| `docs/replayerRebuildPlanB-inPlace.md` | Fallback sequencing plan; only on explicit instruction. |
+| `docs/replayerRebuildPlanA-inPlace.md` | Sequencing plan. |
 | `docs/replayerRebuildPlan.md` | Focused supplemental authority only: D1–D18 (§2), PA1–PA3 (§3.2), R1–R19 (§6.5), and deployed-configuration compatibility (§7). It owns proxy repair because Plan A excludes PA1–PA3. |
 | `docs/replayerRebuildStatus.md` | Live status and debt register. Update at every milestone exit. |
 | `tools/fresh-capture-replay-milestone.sop.md` | Non-authoritative reusable invocation checklist. It must defer to this file and be corrected when it conflicts. |
 | `tools/fresh-capture-replay-task-prompt.md` | Non-authoritative copy/paste entry prompt for the checklist above. |
 | `docs/archive/` | Non-authoritative history and rationale. Never a source of rules, behavior, status, or milestone ownership. |
 
-**Source order:** authoritative designs, this execution contract, then the selected sequencing plan plus
+**Source order:** authoritative designs, this execution contract, then Plan A plus
 the focused supplemental authority. Nothing else supplies process rules. The two tools listed above only
 invoke this contract; their RFC-style language has no independent authority. Any other document that appears
 to supply process rules is drift to report, not an instruction.

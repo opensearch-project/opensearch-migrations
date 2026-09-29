@@ -30,9 +30,10 @@ A **handler** accepts one input and context and eventually produces one typed ou
 A **receiver** accepts the output from a handler and the same context. It eventually produces the
 result returned to the caller of the complete link.
 
-An **asynchronous link** connects one handler to one compatible receiver. If the handler completes
-normally, the link invokes the receiver automatically. The stage returned by the link is the
-receiver's stage, not the handler's intermediate stage.
+`AsyncLink` is an expository helper that demonstrates how one handler can be composed with one
+compatible receiver. It is not a required production abstraction. Production owners may compose
+the same typed stages directly, with the returned stage representing receiver completion rather
+than the handler's intermediate completion.
 
 ## 2. Governing rules
 
@@ -42,7 +43,8 @@ receiver's stage, not the handler's intermediate stage.
 3. Cross-owner inputs and contexts are immutable.
 4. Expected operation outcomes are explicit values, preferably sealed types.
 5. Unexpected throws and exceptional stage completions are process-fatal.
-6. A typed completion required by another owner is delivered through an `AsyncLink`.
+6. A typed completion required by another owner is delivered through an explicit typed completion
+   chain; no particular helper abstraction is required.
 7. An operation may omit a returned domain value only when no correctness decision, cleanup,
    resource release, or required later action depends on it.
 8. The owner never blocks its event loop or queue-draining thread while asynchronous work is
@@ -65,7 +67,7 @@ CompletionStage<Output> output = handler.handle(input, context);
 return output.thenCompose(value -> receiver.receive(value, context));
 ```
 
-`AsyncLink` packages the composition and fixes the compatible types:
+For exposition, `AsyncLink` packages the composition and fixes the compatible types:
 
 ```java
 var link = new AsyncLink<Input, Output, Context, Result>(handler);
@@ -75,7 +77,8 @@ CompletionStage<Result> completion =
 ```
 
 Changing the handler's output type or supplying an incompatible receiver causes a compilation
-error.
+error. Production code is not expected to adopt this helper when direct composition is clearer for
+the owning component.
 
 ## 4. Submit work to the existing owner
 

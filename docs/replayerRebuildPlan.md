@@ -4,8 +4,8 @@ This file is intentionally limited to the four still-active authorities inherite
 plan: D1–D18 (§2), PA1–PA3 (§3.2), R1–R19 (§6.5), and deployed-configuration compatibility (§7).
 Their authority content is preserved from
 [`archive/replayerRebuildPlan-full.md`](archive/replayerRebuildPlan-full.md). Use
-[`replayerRebuildPlanA-inPlace.md`](replayerRebuildPlanA-inPlace.md), or explicitly selected Plan B, for
-sequencing. The authoritative designs remain under `captureAndReplay/`.
+[`replayerRebuildPlanA-inPlace.md`](replayerRebuildPlanA-inPlace.md) for sequencing. The authoritative
+designs remain under `captureAndReplay/`.
 
 The preserved §3.2 phrase “the execution log tracks” now points procedurally to the live status register;
 the archived execution log is non-source. The historical-S routing note below and the current marked-source
@@ -14,8 +14,7 @@ citations in §2 are editorial maintenance corrections. They do not change any o
 Within §2, the authoritative content is each defect's identity, description, mechanism, and consequence;
 the `Fixed by` `S` labels and the sentence referring to §4 are historical provenance, not current ownership.
 Within §6.5, each obligation and minimum proof remains authoritative; its `Implementation steps` `S` labels
-are likewise historical. Current sequencing and ownership come only from the selected Plan A/Plan B section
-and the live register.
+are likewise historical. Current sequencing and ownership come only from Plan A and the live register.
 
 ## 2. Starting-branch defects
 
@@ -209,31 +208,26 @@ hard-coded item count: update the table only after consulting me if the authorit
 **Add** (none of these exists in the starting tree; grep returns zero hits for each): `E` default
 30s, `S` clock-skew bound, `W` default 5s, `P` default 2, revocation cancellation grace default 1s
 through `--cancellation-grace-ms` / `--cancellationGraceMs` (there is no shutdown-grace option),
-`protocolViolationDrainLimit` fixed 60s, the ten-minute watchdog. Startup must reject `P < 1`, `T_threads < 1`,
-`W <= 0`, `E <= 0`, `S < 0`.
+`protocolViolationDrainLimit` fixed 60s, the ten-minute watchdog, and `numClientThreads` default 0.
+Pass `numClientThreads` directly to Netty: zero selects Netty's default of twice the available
+processors and a positive value selects that exact worker count. Startup must reject `P < 1`,
+`numClientThreads < 0`, `W <= 0`, `E <= 0`, `S < 0`.
 
-**Rename the concept but preserve the established external configuration:** add
-`--max-concurrent-target-attempts` and `--maxConcurrentTargetAttempts` as the preferred names, while
-retaining `--max-concurrent-requests`, `--maxConcurrentRequests`, and workflow
-`spec.maxConcurrentRequests` as deprecated aliases for the same target-attempt limit. The compatibility
-requirement is established by `docs/reconfiguringWorkflows.md:314`,
-`orchestrationSpecs/packages/schemas/src/userSchemas.ts:676`,
-`dockerSolution/src/main/docker/docker-compose.large-requests.yml:115`, and
-`JsonCommandLineParser.java:394-398`, which derives accepted inline-JSON keys from every
-`@Parameter` alias. Updating only repository call sites does not preserve already-deployed
-configurations.
-
-Rename internal fields and constructor parameters to `maxConcurrentTargetAttempts`. If a new workflow
-field `spec.maxConcurrentTargetAttempts` is added, the old field must remain accepted with identical
-mapping; conflicting simultaneous values must fail startup rather than acquire order-dependent
-meaning.
+**Use one external request-concurrency name:** CLI/inline JSON
+`--maxConcurrentRequests` and workflow `spec.maxConcurrentRequests` are the only accepted external
+names. They cap simultaneous target HTTP attempts. Internal fields and constructor parameters may use
+the more precise `maxConcurrentTargetAttempts` name, but do not expose that name through CLI, inline
+JSON, or workflow schema and do not add compatibility aliases.
 
 Internal blast radius: `TrafficReplayerTopLevel.java:120,124,133,143,156,167,181,192,316`,
 `TrafficReplayerCore.java:124,144,153,168,185-188`,
 `testFixtures/.../RootReplayerConstructorExtensions.java:31,39`, and
 `coreUtilities/.../EnvVarParameterPullerTest.java:271`.
 
-**Make authoritative:** `--num-client-threads` becomes `T_threads` and must reject `0`.
+**Use the proxy's target-thread convention:** expose only absolute `numClientThreads`, default 0.
+Zero delegates worker-count selection to `NioEventLoopGroup`, whose default is twice the available
+processors; a positive value requests that exact worker count. The resulting positive `T_threads` is
+fixed for the process lifetime and owns tuple-writer worker count and stable worker indices.
 
 **Retain and validate:** `--speedup-factor`, `--speedupFactor`, and workflow
 `spec.speedupFactor`. Positive configured `speedupFactor` is part of the authoritative replay-timing
@@ -241,31 +235,16 @@ formula in `captureAndReplayArchitecture.md` §10, not obsolete flow control. Pr
 `TimeShifter` responsibility, reject nonpositive values, and test target pacing independently from
 Kafka broker-time behavior.
 
-**Remove behavior while preserving deployed-option parsing:** lookahead-based read gating,
+**Remove obsolete behavior and its configuration surface:** lookahead-based read gating,
 `quiescentPeriodMs` reassignment delay, and wall-clock observed-packet expiration are replaced by the
-settled demand, generation-cleanup, and broker-time-expiration mechanisms. Nevertheless,
-`spec.lookaheadTimeSeconds`, `spec.quiescentPeriodMs`, and
-`spec.observedPacketConnectionTimeout` are documented safe rolling fields at
-`docs/reconfiguringWorkflows.md:313,317,316`, and their CLI/inline-JSON aliases are already deployed.
-For these options:
+settled demand, generation-cleanup, and broker-time-expiration mechanisms. Remove
+`lookaheadTimeSeconds`, `quiescentPeriodMs`, and `observedPacketConnectionTimeout` from the workflow
+schema and generated examples. Their prior CLI aliases, plus `maxConcurrentTargetAttempts`, must fail
+as unknown options or inline-JSON keys rather than being silently accepted. This is the owner-selected
+contract break of 2026-09-29; do not add deprecated fields or backward-compatibility aliases.
 
-- continue accepting `--lookahead-time-window`, `--lookaheadTimeWindow`,
-  `--lookaheadTimeSeconds`, `--quiescent-period-ms`, `--quiescentPeriodMs`,
-  `--packet-timeout-seconds`, `--packetTimeoutSeconds`, and
-  `--observedPacketConnectionTimeout`;
-- represent their presence in dedicated nullable compatibility fields so omission is distinguishable
-  from a historical default;
-- emit one clear startup warning per supplied option naming the replacement mechanism and stating
-  that the value is ignored;
-- do not route the value into any owner, timer, demand calculation, expiration state, or cleanup
-  state;
-- update new workflow generation and examples to stop emitting these fields by default, while keeping
-  the schema fields accepted and marked deprecated for existing resources; and
-- remove an adapter only through a separately approved compatibility change, not as incidental
-  cleanup.
-
-Tests must prove that every retired deployed key parses, emits the expected warning, has no behavioral
-effect, and does not cause an unrecognized-key failure.
+Tests must prove the single accepted request-concurrency name, absolute thread-count default and
+validation, and rejection of every retired key.
 
 **Delete outright after confirming no user-facing schema or documented deployment surface:**
 `--max-owned-kafka-records`, `--max-owned-kafka-bytes`, and `--disable-liveness-scanner`. If the
