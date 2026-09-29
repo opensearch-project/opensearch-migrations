@@ -247,7 +247,8 @@ def call(Map config = [:]) {
                                     traceArgs = "--trace-test-ids='$traceTestIds' --trace-values-file='$traceValuesFile' --trace-backend='$traceBackend'"
                                 }
                                 sh "pipenv install --deploy"
-                                withMigrationsTestAccount(region: params.REGION) { accountId ->
+                                // Credentials must outlive the two-hour E2E stage.
+                                withMigrationsTestAccount(region: params.REGION, duration: 10800) { accountId ->
                                     sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg $traceArgs --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                 }
                             }
