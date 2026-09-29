@@ -18,14 +18,13 @@ spec:
 
   templates:
     # Overlay step: jq-merge CDC traffic config onto the base migration config.
-    # speedup-factor and observed-packet-timeout are passed in as parameters
-    # so each caller can expose them as top-level workflow parameters.
+    # speedup-factor is passed in so each caller can expose it as a top-level
+    # workflow parameter.
     - name: add-traffic-config
       inputs:
         parameters:
           - name: baseConfigBase64
           - name: speedupFactor
-          - name: observedPacketTimeout
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: replayer-config-overrides
@@ -72,7 +71,11 @@ spec:
               '. + {
               "kafkaClusterConfiguration": {
                 "default": {
-                  "autoCreate": {}
+                  "autoCreate": {
+                    "topicSpecOverrides": {
+                      "partitions": 3
+                    }
+                  }
                 }
               },
               "traffic": {
@@ -105,7 +108,6 @@ spec:
                       {"source": "source1", "snapshot": "testsnapshot"}
                     ],
                     "replayerConfig": ({
-                      "observedPacketConnectionTimeout": {{inputs.parameters.observedPacketTimeout}},
                       "speedupFactor": {{inputs.parameters.speedupFactor}},
                       "useLocalStack": $useLocalStack
                     }
@@ -167,7 +169,11 @@ spec:
               | . + {
                 "kafkaClusterConfiguration": {
                   "default": {
-                    "autoCreate": {}
+                    "autoCreate": {
+                      "topicSpecOverrides": {
+                        "partitions": 3
+                      }
+                    }
                   }
                 },
                 "traffic": {

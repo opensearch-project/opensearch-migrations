@@ -24,7 +24,6 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
@@ -73,27 +72,23 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class TrafficReplayer {
-    private static final String ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER = "AllActiveWorkMonitor";
-
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
     public static final String KAFKA_AUTH_TYPE_NONE = "none";
     public static final String KAFKA_AUTH_TYPE_MSK_IAM = "msk-iam";
     public static final String KAFKA_AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
+    private static final String MODE_REPLAY = "replay";
 
-    public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
-    static final int DEFAULT_KAFKA_LOOKAHEAD_SECONDS = 30;
-    static final int DEFAULT_LEGACY_LOOKAHEAD_SECONDS = 400;
     static final int DEFAULT_DUMP_OBSERVED_PACKET_TIMEOUT_SECONDS = 360;
-    static final int DEFAULT_MAX_CONCURRENT_TARGET_ATTEMPTS = 10000;
+    static final int DEFAULT_MAX_CONCURRENT_REQUESTS = 10000;
+    static final int DEFAULT_NUM_CLIENT_THREADS = 0;
     static final int DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL_SECONDS = 30;
     static final int DEFAULT_MAXIMUM_BACKWARD_SKEW_SECONDS = 5;
     static final int DEFAULT_SOURCE_RESPONSE_RETRY_WINDOW_SECONDS = 5;
     static final int DEFAULT_READY_REQUESTS_BUFFER_PER_THREAD = 2;
     static final int DEFAULT_MAXIMUM_RESPONSE_RETRIES = 4;
     static final Duration DEFAULT_KAFKA_POLL_TIMEOUT = Duration.ofSeconds(1);
-    private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
         public final Throwable originalCause;
@@ -143,7 +138,7 @@ public class TrafficReplayer {
             names = { "--mode" },
             arity = 1,
             description = "Operating mode: 'replay' (default), 'dump-raw', 'dump-http', or 'dump-both'")
-        String mode = "replay";
+        String mode = MODE_REPLAY;
         @Parameter(
             required = false,
             names = { "--start-offset" },
@@ -244,14 +239,6 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = {PACKET_TIMEOUT_SECONDS_PARAMETER_NAME, "--packetTimeoutSeconds",
-                "--observedPacketConnectionTimeout" },
-            arity = 1,
-            description = "assume that connections were terminated after this many "
-                + "seconds of inactivity observed in the captured stream")
-        Integer observedPacketConnectionTimeout;
-        @Parameter(
-            required = false,
             names = { "--speedup-factor", "--speedupFactor" },
             arity = 1, description = "Accelerate the replayed communications by this factor.  "
                 + "This means that between each interaction will be replayed at this rate faster "
@@ -259,35 +246,17 @@ public class TrafficReplayer {
         double speedupFactor = 1.0;
         @Parameter(
             required = false,
-            names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow", "--lookaheadTimeSeconds" },
+            names = { "--maxConcurrentRequests" },
             arity = 1,
-            description = "Number of seconds of data that will be buffered. Defaults to 30 for Kafka "
-                + "structural expiration and 400 for legacy stream input.")
-        Integer lookaheadTimeSeconds;
+            description = "Maximum number of target HTTP requests that can be in flight")
+        int maxConcurrentRequests = DEFAULT_MAX_CONCURRENT_REQUESTS;
         @Parameter(
             required = false,
-            names = {
-                "--max-concurrent-target-attempts",
-                "--maxConcurrentTargetAttempts"
-            },
+            names = { "--numClientThreads" },
             arity = 1,
-            description = "Maximum number of target attempts that can be in flight")
-        Integer maxConcurrentTargetAttempts;
-        @Parameter(
-            required = false,
-            names = {
-                "--max-concurrent-requests",
-                "--maxConcurrentRequests"
-            },
-            arity = 1,
-            description = "Deprecated alias for --max-concurrent-target-attempts")
-        Integer deprecatedMaxConcurrentRequests;
-        @Parameter(
-            required = false,
-            names = { "--num-client-threads", "--numClientThreads" },
-            arity = 1,
-            description = "Number of threads to use to send requests from.")
-        Integer numClientThreads;
+            description = "Target Netty event-loop threads. "
+                + "A value of 0 uses Netty's default of 2 * available processors.")
+        int numClientThreads = DEFAULT_NUM_CLIENT_THREADS;
         @Parameter(
             required = false,
             names = { "--cancellation-grace-ms", "--cancellationGraceMs" },
@@ -343,13 +312,6 @@ public class TrafficReplayer {
             arity = 1,
             description = "Seconds to wait before timing out a replayed request to the target.")
         int targetServerResponseTimeoutSeconds = 150;
-
-        @Parameter(
-            required = false,
-            names = { "--quiescent-period-ms", "--quiescentPeriodMs" },
-            arity = 1,
-            description = "Deprecated compatibility option; generation cleanup now owns reassignment safety")
-        Long quiescentPeriodMs;
 
         @Parameter(
             required = false,
@@ -514,48 +476,14 @@ public class TrafficReplayer {
             }
         }
 
-        List<String> validateAndCollectCompatibilityWarnings() {
-            var warnings = new ArrayList<String>();
+        void validateConfiguration() {
             validateKafkaAuthFlags();
-            if (mode == null
-                || !List.of("replay", MODE_DUMP_RAW, MODE_DUMP_HTTP, MODE_DUMP_BOTH)
-                    .contains(mode)) {
-                throw new ParameterException("Unsupported --mode value: " + mode);
+            validateMode();
+            if (maxConcurrentRequests <= 0) {
+                throw new ParameterException("--maxConcurrentRequests must be positive");
             }
-            if (lookaheadTimeSeconds != null) {
-                warnings.add(
-                    LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
-                        + " is deprecated and ignored; replay intake demand is controlled by P * T_threads"
-                );
-            }
-            if (quiescentPeriodMs != null) {
-                warnings.add(
-                    "--quiescent-period-ms is deprecated and ignored; typed generation cleanup now gates reassignment"
-                );
-            }
-            if (observedPacketConnectionTimeout != null) {
-                warnings.add(
-                    PACKET_TIMEOUT_SECONDS_PARAMETER_NAME
-                        + " is deprecated and ignored; broker-time heartbeat expiration uses configured E and S"
-                );
-            }
-            if (deprecatedMaxConcurrentRequests != null) {
-                warnings.add(
-                    "--max-concurrent-requests is deprecated; use --max-concurrent-target-attempts"
-                );
-            }
-            if (maxConcurrentTargetAttempts != null
-                && deprecatedMaxConcurrentRequests != null
-                && !maxConcurrentTargetAttempts.equals(deprecatedMaxConcurrentRequests)) {
-                throw new ParameterException(
-                    "--max-concurrent-target-attempts conflicts with --max-concurrent-requests"
-                );
-            }
-            if (getEffectiveMaxConcurrentTargetAttempts() <= 0) {
-                throw new ParameterException("--max-concurrent-target-attempts must be positive");
-            }
-            if (numClientThreads != null && numClientThreads < 1) {
-                throw new ParameterException("--num-client-threads must be at least 1 when supplied");
+            if (numClientThreads < 0) {
+                throw new ParameterException("--numClientThreads must not be negative");
             }
             if (cancellationGraceMs < 0) {
                 throw new ParameterException("--cancellation-grace-ms must not be negative");
@@ -580,20 +508,17 @@ public class TrafficReplayer {
                     "--ready-requests-buffer-per-thread must be at least 1"
                 );
             }
-            if (!(speedupFactor > 0.0) || !Double.isFinite(speedupFactor)) {
+            if (speedupFactor <= 0.0 || !Double.isFinite(speedupFactor)) {
                 throw new ParameterException("--speedup-factor must be a finite positive value");
             }
-            return List.copyOf(warnings);
         }
 
-        int getEffectiveMaxConcurrentTargetAttempts() {
-            if (maxConcurrentTargetAttempts != null) {
-                return maxConcurrentTargetAttempts;
+        private void validateMode() {
+            if (mode == null
+                || !List.of(MODE_REPLAY, MODE_DUMP_RAW, MODE_DUMP_HTTP, MODE_DUMP_BOTH)
+                    .contains(mode)) {
+                throw new ParameterException("Unsupported --mode value: " + mode);
             }
-            if (deprecatedMaxConcurrentRequests != null) {
-                return deprecatedMaxConcurrentRequests;
-            }
-            return DEFAULT_MAX_CONCURRENT_TARGET_ATTEMPTS;
         }
 
         boolean isKafkaTrafficEnableMSKAuth() {
@@ -691,8 +616,7 @@ public class TrafficReplayer {
         var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
             parser.parse(args);
-            p.validateAndCollectCompatibilityWarnings()
-                .forEach(warning -> System.err.println("WARNING: " + warning));
+            p.validateConfiguration();
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
@@ -736,7 +660,7 @@ public class TrafficReplayer {
     ) {
         return new PartitionIntakeState.BrokerTimeConfiguration(
             Math.multiplyExact(
-                (long) params.heartbeatExpirationIntervalSeconds,
+                params.heartbeatExpirationIntervalSeconds,
                 1_000L
             ),
             Math.multiplyExact(
@@ -744,7 +668,7 @@ public class TrafficReplayer {
                 1_000L
             ),
             Math.multiplyExact(
-                (long) params.sourceResponseRetryWindowSeconds,
+                params.sourceResponseRetryWindowSeconds,
                 1_000L
             )
         );
@@ -976,13 +900,13 @@ public class TrafficReplayer {
         Runtime.getRuntime().addShutdownHook(shutdownHook);
         log.atInfo()
             .setMessage(
-                "ReplayerConfig - speedup={} maxConcurrentTargetAttempts={} "
+                "ReplayerConfig - speedup={} maxConcurrentRequests={} "
                     + "serverResponseTimeout={}s targetUri={} numClientThreads={} "
                     + "heartbeatExpiration={}s maximumBackwardSkew={}s "
                     + "sourceResponseRetryWindow={}s readyRequestsBufferPerThread={}"
             )
             .addArgument(params.speedupFactor)
-            .addArgument(params.getEffectiveMaxConcurrentTargetAttempts())
+            .addArgument(params.maxConcurrentRequests)
             .addArgument(params.targetServerResponseTimeoutSeconds)
             .addArgument(targetUri)
             .addArgument(params.numClientThreads)
@@ -1196,6 +1120,8 @@ public class TrafficReplayer {
         }
 
         @Override
+        // Shutdown preserves every failure while still attempting all remaining resource closes.
+        @SuppressWarnings("java:S1181")
         public void closeTargetOwnersAfterOrderly() {
             replayer.allowTargetEventLoopTermination();
             Throwable failure = null;
@@ -1233,8 +1159,23 @@ public class TrafficReplayer {
         > replayer() {
             return replayer;
         }
+
+        private static Throwable appendFailure(
+            Throwable current,
+            Throwable additional
+        ) {
+            if (current == null) {
+                return additional;
+            }
+            if (current != additional) {
+                current.addSuppressed(additional);
+            }
+            return current;
+        }
     }
 
+    // The warnings target compiler-generated record members that are existing construction test hooks.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     record DeployedReplayApplication(
         SupervisedReplayApplication application,
         ProcessSupervisor supervisor,
@@ -1279,6 +1220,8 @@ public class TrafficReplayer {
         );
     }
 
+    // Construction rollback must close resources and rethrow every Throwable without narrowing it.
+    @SuppressWarnings("java:S1181")
     static DeployedReplayApplication createDeployedReplayApplication(
         Parameters params,
         URI targetUri,
@@ -1291,7 +1234,7 @@ public class TrafficReplayer {
                     params.otelTraceCollectorEndpoint,
                     params.otelMetricsCollectorEndpoint
                 ),
-                "replay",
+                MODE_REPLAY,
                 ProcessHelpers.getNodeInstanceName()
             )
         );
@@ -1305,7 +1248,7 @@ public class TrafficReplayer {
         );
         var consumer = new KafkaConsumer<String, byte[]>(kafkaProperties);
         var targetEventLoopGroup = new NioEventLoopGroup(
-            params.numClientThreads == null ? 0 : params.numClientThreads,
+            params.numClientThreads,
             new DefaultThreadFactory("targetConnectionPool")
         );
         var authTransformerFactory = buildAuthTransformerFactory(params);
@@ -1370,6 +1313,8 @@ public class TrafficReplayer {
         );
     }
 
+    // Construction rollback must close resources and rethrow every Throwable without narrowing it.
+    @SuppressWarnings("java:S1181")
     static DeployedReplayApplication createDeployedReplayApplication(
         Parameters params,
         URI targetUri,
@@ -1424,9 +1369,6 @@ public class TrafficReplayer {
             : new BulkItemErrorClassifier(
                 new java.util.HashSet<>(params.nonRetryableDocExceptionTypes)
             );
-        var poisonAllowlist = params.poisonDocExceptionTypes == null
-            ? ExceptionTypeAllowlist.empty()
-            : new ExceptionTypeAllowlist(params.poisonDocExceptionTypes);
         var topLevelReference = new AtomicReference<TrafficReplayerTopLevel<
             NettyPacketToHttpConsumer.PreparedRequest,
             AggregatedRawResponse,
@@ -1490,7 +1432,7 @@ public class TrafficReplayer {
             brokerTimeConfiguration,
             params.readyRequestsBufferPerThread,
             DEFAULT_MAXIMUM_RESPONSE_RETRIES,
-            params.getEffectiveMaxConcurrentTargetAttempts()
+            params.maxConcurrentRequests
         );
         var replayer = new TrafficReplayerTopLevel<>(
             consumer,
@@ -1538,7 +1480,9 @@ public class TrafficReplayer {
             @Override
             public void releaseSourceRequest(
                 HttpMessageAndTimestamp.Request sourceRequest
-            ) {}
+            ) {
+                // Source requests have no releasable resources in the deployed representation.
+            }
 
             @Override
             public void releasePreparedRequest(
@@ -1550,12 +1494,16 @@ public class TrafficReplayer {
             @Override
             public void releaseTargetResponse(
                 AggregatedRawResponse targetResponse
-            ) {}
+            ) {
+                // Aggregated target responses have no releasable resources.
+            }
 
             @Override
             public void releaseSourceResponse(
                 HttpMessageAndTimestamp.Response sourceResponse
-            ) {}
+            ) {
+                // Source responses have no releasable resources in the deployed representation.
+            }
         };
     }
 
@@ -1607,6 +1555,8 @@ public class TrafficReplayer {
         return builder.build();
     }
 
+    // Construction cleanup must preserve Errors as suppressed failures on the original Throwable.
+    @SuppressWarnings("java:S1181")
     private static void closeAfterConstructionFailure(
         Consumer<String, byte[]> consumer,
         NioEventLoopGroup targetEventLoopGroup,
@@ -1640,19 +1590,6 @@ public class TrafficReplayer {
                 constructionFailure.addSuppressed(closeFailure);
             }
         }
-    }
-
-    private static Throwable appendFailure(
-        Throwable current,
-        Throwable additional
-    ) {
-        if (current == null) {
-            return additional;
-        }
-        if (current != additional) {
-            current.addSuppressed(additional);
-        }
-        return current;
     }
     // REBUILD-TRACE-START(G9,source): retain through the rebuild; remove in final pre-merge cleanup.
     // TrafficReplayer.setupShutdownHookForReplayer -> TrafficReplayer.runReplayMode

@@ -195,10 +195,6 @@ public class RequestPipelineOrchestrator<R> {
         addBaselineHandlers(pipeline);
     }
 
-    List<List<Integer>> getChunkSizes() {
-        return chunkSizes;
-    }
-
     void addBaselineHandlers(ChannelPipeline pipeline) {
         addLoggingHandler(pipeline, "J");
         // IN: ByteBufs(2) + HttpJsonRequest(4) with headers only + HttpContent(1) (if the repackaging handlers were

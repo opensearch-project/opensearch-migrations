@@ -33,7 +33,6 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
         expect(mrs).toBeGreaterThanOrEqual(1);
     }
 
-
     it("deployProxyDeployment container has a tcpSocket readinessProbe on listenPort with minReadySeconds", () => {
         const deployment = getResourceManifest(setupCapture, "deployproxydeployment");
         const container = getFirstContainer(deployment);

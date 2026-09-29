@@ -426,11 +426,6 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         return operations;
     }
 
-    boolean firstTargetWriteWasSubmitted() {
-        requireOwnerThread();
-        return firstWriteAttempt != 0;
-    }
-
     boolean finalTargetWriteWasSubmitted() {
         requireOwnerThread();
         return finalWriteAttempt != 0;

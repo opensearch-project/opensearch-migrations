@@ -770,7 +770,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "default": {
-                        "partitions": 1,
+                        "partitions": 2,
                         "replicas": 3,
                         "config": {
                           "retention.ms": 604800000,
@@ -1505,7 +1505,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "default": {
-                        "partitions": 1,
+                        "partitions": 2,
                         "replicas": 3,
                         "config": {
                           "retention.ms": 604800000,
@@ -3077,7 +3077,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "default": {
-                        "partitions": 1,
+                        "partitions": 2,
                         "replicas": 3,
                         "config": {
                           "retention.ms": 604800000,
@@ -3201,24 +3201,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                       "changeRestriction": "impossible"
                     },
-                    "lookaheadTimeSeconds": {
-                      "type": "number",
-                      "description": "[Deprecated] Accepted for existing resources but ignored. Replay intake demand is controlled by retry-ready supply."
-                    },
-                    "maxConcurrentTargetAttempts": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "description": "Maximum number of target HTTP attempts that can be in flight simultaneously."
-                    },
                     "maxConcurrentRequests": {
                       "type": "integer",
                       "minimum": 1,
-                      "description": "[Deprecated] Alias for maxConcurrentTargetAttempts. Conflicting simultaneous values are rejected."
+                      "description": "Maximum number of target HTTP requests that can be in flight simultaneously."
                     },
                     "numClientThreads": {
                       "type": "integer",
-                      "minimum": 1,
-                      "description": "Positive number of target Netty event-loop threads. Omit to use Netty's configured default."
+                      "minimum": 0,
+                      "default": 0
                     },
                     "cancellationGraceMs": {
                       "type": "integer",
@@ -3252,10 +3243,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
                     },
-                    "observedPacketConnectionTimeout": {
-                      "type": "number",
-                      "description": "[Deprecated] Accepted for existing resources but ignored. Broker-time heartbeat expiration uses E and S."
-                    },
                     "otelTraceCollectorEndpoint": {
                       "anyOf": [
                         {
@@ -3284,10 +3271,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "default": "http://otel-collector:4317",
                       "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
-                    },
-                    "quiescentPeriodMs": {
-                      "type": "number",
-                      "description": "[Deprecated] Accepted for existing resources but ignored. Typed generation cleanup gates reassignment."
                     },
                     "removeAuthHeader": {
                       "type": "boolean",
@@ -6356,24 +6339,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                     "changeRestriction": "impossible"
                   },
-                  "lookaheadTimeSeconds": {
-                    "type": "number",
-                    "description": "[Deprecated] Accepted for existing resources but ignored. Replay intake demand is controlled by retry-ready supply."
-                  },
-                  "maxConcurrentTargetAttempts": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum number of target HTTP attempts that can be in flight simultaneously."
-                  },
                   "maxConcurrentRequests": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "[Deprecated] Alias for maxConcurrentTargetAttempts. Conflicting simultaneous values are rejected."
+                    "description": "Maximum number of target HTTP requests that can be in flight simultaneously."
                   },
                   "numClientThreads": {
                     "type": "integer",
-                    "minimum": 1,
-                    "description": "Positive number of target Netty event-loop threads. Omit to use Netty's configured default."
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Number of target Netty event-loop threads. 0 uses Netty's default of 2 times the available processors."
                   },
                   "cancellationGraceMs": {
                     "type": "integer",
@@ -6412,10 +6387,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
                   },
-                  "observedPacketConnectionTimeout": {
-                    "type": "number",
-                    "description": "[Deprecated] Accepted for existing resources but ignored. Broker-time heartbeat expiration uses E and S."
-                  },
                   "otelTraceCollectorEndpoint": {
                     "anyOf": [
                       {
@@ -6444,10 +6415,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "default": "http://otel-collector:4317",
                     "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
-                  },
-                  "quiescentPeriodMs": {
-                    "type": "number",
-                    "description": "[Deprecated] Accepted for existing resources but ignored. Typed generation cleanup gates reassignment."
                   },
                   "removeAuthHeader": {
                     "type": "boolean",

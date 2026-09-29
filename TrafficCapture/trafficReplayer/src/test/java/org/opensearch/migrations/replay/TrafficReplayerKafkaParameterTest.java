@@ -58,44 +58,6 @@ public class TrafficReplayerKafkaParameterTest {
     }
 
     @Test
-    void everyRetiredCliAliasParsesWarnsAndRemainsACompatibilityOnlyValue() {
-        assertRetiredOption("--lookahead-time-window", "17", "lookahead", params -> params.lookaheadTimeSeconds);
-        assertRetiredOption("--lookaheadTimeWindow", "17", "lookahead", params -> params.lookaheadTimeSeconds);
-        assertRetiredOption("--lookaheadTimeSeconds", "17", "lookahead", params -> params.lookaheadTimeSeconds);
-        assertRetiredOption("--quiescent-period-ms", "17", "quiescent", params -> params.quiescentPeriodMs);
-        assertRetiredOption("--quiescentPeriodMs", "17", "quiescent", params -> params.quiescentPeriodMs);
-        assertRetiredOption("--packet-timeout-seconds", "17", "packet",
-            params -> params.observedPacketConnectionTimeout);
-        assertRetiredOption("--packetTimeoutSeconds", "17", "packet",
-            params -> params.observedPacketConnectionTimeout);
-        assertRetiredOption("--observedPacketConnectionTimeout", "17", "packet",
-            params -> params.observedPacketConnectionTimeout);
-    }
-
-    @Test
-    void retiredInlineJsonKeysParseAndWarnWithoutAffectingLiveConfiguration() {
-        var parameters = new TrafficReplayer.Parameters();
-        var parser = JsonCommandLineParser.newBuilder().addObject(parameters).build();
-
-        parser.parse(new String[] {
-            "---INLINE-JSON",
-            """
-            {
-              "lookaheadTimeSeconds": 11,
-              "quiescentPeriodMs": 12,
-              "observedPacketConnectionTimeout": 13
-            }
-            """
-        });
-
-        var warnings = parameters.validateAndCollectCompatibilityWarnings();
-        Assertions.assertEquals(3, warnings.size());
-        Assertions.assertEquals(TrafficReplayer.DEFAULT_MAX_CONCURRENT_TARGET_ATTEMPTS,
-            parameters.getEffectiveMaxConcurrentTargetAttempts());
-        Assertions.assertNull(parameters.numClientThreads);
-    }
-
-    @Test
     void removedShortPacketTimeoutAliasFailsAsUnknown() {
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
@@ -110,7 +72,19 @@ public class TrafficReplayerKafkaParameterTest {
             "--max-owned-kafka-bytes",
             "--disable-liveness-scanner",
             "--timestamp-mode",
-            "--rebase-without-expiration"
+            "--rebase-without-expiration",
+            "--lookahead-time-window",
+            "--lookaheadTimeWindow",
+            "--lookaheadTimeSeconds",
+            "--quiescent-period-ms",
+            "--quiescentPeriodMs",
+            "--packet-timeout-seconds",
+            "--packetTimeoutSeconds",
+            "--observedPacketConnectionTimeout",
+            "--max-concurrent-target-attempts",
+            "--maxConcurrentTargetAttempts",
+            "--max-concurrent-requests",
+            "--num-client-threads"
         }) {
             Assertions.assertThrows(
                 com.beust.jcommander.ParameterException.class,
@@ -125,6 +99,10 @@ public class TrafficReplayerKafkaParameterTest {
             "disableLivenessScanner",
             "timestampMode",
             "rebaseWithoutExpiration",
+            "lookaheadTimeSeconds",
+            "quiescentPeriodMs",
+            "observedPacketConnectionTimeout",
+            "maxConcurrentTargetAttempts",
             "unknownReplayerSetting"
         }) {
             var failure = Assertions.assertThrows(
@@ -143,83 +121,87 @@ public class TrafficReplayerKafkaParameterTest {
     }
 
     @Test
-    void preferredAndDeprecatedTargetAttemptNamesMapIdenticallyAndConflictsFail() {
-        var preferred = parseParameters("--max-concurrent-target-attempts", "7");
-        var legacy = parseParameters("--maxConcurrentRequests", "7");
+    void requestConcurrencyUsesOneExternalName() {
+        var parameters = parseParameters("--maxConcurrentRequests", "7");
 
-        Assertions.assertEquals(7, preferred.getEffectiveMaxConcurrentTargetAttempts());
-        Assertions.assertEquals(7, legacy.getEffectiveMaxConcurrentTargetAttempts());
-        Assertions.assertEquals(1, legacy.validateAndCollectCompatibilityWarnings().size());
-
-        var conflict = parseParameters(
-            "--maxConcurrentTargetAttempts",
-            "7",
-            "--max-concurrent-requests",
-            "8"
-        );
-        Assertions.assertThrows(
-            com.beust.jcommander.ParameterException.class,
-            conflict::validateAndCollectCompatibilityWarnings
-        );
+        parameters.validateConfiguration();
+        Assertions.assertEquals(7, parameters.maxConcurrentRequests);
     }
 
     @Test
     void invalidKnownStartupValuesAreRejected() {
-        var zeroThreads = new TrafficReplayer.Parameters();
-        zeroThreads.numClientThreads = 0;
+        var negativeClientThreads = new TrafficReplayer.Parameters();
+        negativeClientThreads.numClientThreads = -1;
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            zeroThreads::validateAndCollectCompatibilityWarnings
+            negativeClientThreads::validateConfiguration
         );
 
-        var zeroAttempts = new TrafficReplayer.Parameters();
-        zeroAttempts.maxConcurrentTargetAttempts = 0;
+        var zeroRequests = new TrafficReplayer.Parameters();
+        zeroRequests.maxConcurrentRequests = 0;
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            zeroAttempts::validateAndCollectCompatibilityWarnings
+            zeroRequests::validateConfiguration
         );
 
         var zeroSpeed = new TrafficReplayer.Parameters();
         zeroSpeed.speedupFactor = 0;
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            zeroSpeed::validateAndCollectCompatibilityWarnings
+            zeroSpeed::validateConfiguration
         );
 
         var negativeCancellationGrace = new TrafficReplayer.Parameters();
         negativeCancellationGrace.cancellationGraceMs = -1;
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            negativeCancellationGrace::validateAndCollectCompatibilityWarnings
+            negativeCancellationGrace::validateConfiguration
         );
 
         var zeroHeartbeatExpiration = new TrafficReplayer.Parameters();
         zeroHeartbeatExpiration.heartbeatExpirationIntervalSeconds = 0;
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            zeroHeartbeatExpiration::validateAndCollectCompatibilityWarnings
+            zeroHeartbeatExpiration::validateConfiguration
         );
 
         var negativeMaximumSkew = new TrafficReplayer.Parameters();
         negativeMaximumSkew.maximumBackwardSkewSeconds = -1;
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            negativeMaximumSkew::validateAndCollectCompatibilityWarnings
+            negativeMaximumSkew::validateConfiguration
         );
 
         var zeroSourceResponseWindow = new TrafficReplayer.Parameters();
         zeroSourceResponseWindow.sourceResponseRetryWindowSeconds = 0;
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            zeroSourceResponseWindow::validateAndCollectCompatibilityWarnings
+            zeroSourceResponseWindow::validateConfiguration
         );
 
         var zeroReadyRequestsBuffer = new TrafficReplayer.Parameters();
         zeroReadyRequestsBuffer.readyRequestsBufferPerThread = 0;
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            zeroReadyRequestsBuffer::validateAndCollectCompatibilityWarnings
+            zeroReadyRequestsBuffer::validateConfiguration
         );
+    }
+
+    @Test
+    void clientThreadCountDefaultsToNettyAutoSizingAndAcceptsAnAbsoluteValue() {
+        var defaults = new TrafficReplayer.Parameters();
+        var configured = parseParameters("--numClientThreads", "7");
+        var jsonConfigured = parseParameters(
+            "---INLINE-JSON",
+            "{\"numClientThreads\":3}"
+        );
+
+        defaults.validateConfiguration();
+        configured.validateConfiguration();
+        jsonConfigured.validateConfiguration();
+        Assertions.assertEquals(0, defaults.numClientThreads);
+        Assertions.assertEquals(7, configured.numClientThreads);
+        Assertions.assertEquals(3, jsonConfigured.numClientThreads);
     }
 
     @Test
@@ -307,7 +289,7 @@ public class TrafficReplayerKafkaParameterTest {
 
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,
-            parameters::validateAndCollectCompatibilityWarnings
+            parameters::validateConfiguration
         );
     }
 
@@ -387,25 +369,6 @@ public class TrafficReplayerKafkaParameterTest {
         Assertions.assertTrue(allowlist.isAllowed("mapper_parsing_exception"));
         Assertions.assertTrue(allowlist.isAllowed("VERSION_CONFLICT_ENGINE_EXCEPTION"));
         Assertions.assertFalse(allowlist.isAllowed("illegal_argument_exception"));
-    }
-
-    private static void assertRetiredOption(
-        String option,
-        String value,
-        String warningFragment,
-        java.util.function.Function<TrafficReplayer.Parameters, Number> parsedValue
-    ) {
-        var parameters = parseParameters(option, value);
-        var warnings = parameters.validateAndCollectCompatibilityWarnings();
-
-        Assertions.assertEquals(17, parsedValue.apply(parameters).intValue());
-        Assertions.assertEquals(1, warnings.size());
-        Assertions.assertTrue(warnings.get(0).contains(warningFragment));
-        Assertions.assertEquals(
-            TrafficReplayer.DEFAULT_MAX_CONCURRENT_TARGET_ATTEMPTS,
-            parameters.getEffectiveMaxConcurrentTargetAttempts()
-        );
-        Assertions.assertNull(parameters.numClientThreads);
     }
 
     private static TrafficReplayer.Parameters parseParameters(String... args) {

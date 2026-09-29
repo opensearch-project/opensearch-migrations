@@ -315,6 +315,7 @@ function validatePipelineRawConfigConflict(
 const blankStringAsDisabled = (value: unknown) =>
     typeof value === "string" && value.trim().length === 0 ? "" : value;
 
+const OPTIONAL_ENDPOINT_VALUE = z.union([z.literal(""), z.string()]);
 const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.string()]);
 
 const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
@@ -328,7 +329,7 @@ const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDP
 const optionalEndpointWithDefault = (defaultValue: string) =>
     z.preprocess(
         (value) => value === undefined ? defaultValue : blankStringAsDisabled(value),
-        OPTIONAL_ENDPOINT.optional()
+        OPTIONAL_ENDPOINT_VALUE.optional()
     ).meta({default: defaultValue});
 
 const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
@@ -385,7 +386,7 @@ export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
 ]);
 
 export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
-    partitions: 1,
+    partitions: 2,
     replicas: 3,
     config: {
         "retention.ms": 604800000,
@@ -671,14 +672,10 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficPropertyFile: z.string().optional()
         .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.")
         .changeRestriction('impossible'),
-    lookaheadTimeSeconds: z.number().optional()
-        .describe("[Deprecated] Accepted for existing resources but ignored. Replay intake demand is controlled by retry-ready supply."),
-    maxConcurrentTargetAttempts: z.number().int().min(1).optional()
-        .describe("Maximum number of target HTTP attempts that can be in flight simultaneously."),
     maxConcurrentRequests: z.number().int().min(1).optional()
-        .describe("[Deprecated] Alias for maxConcurrentTargetAttempts. Conflicting simultaneous values are rejected."),
-    numClientThreads: z.number().int().min(1).optional()
-        .describe("Positive number of target Netty event-loop threads. Omit to use Netty's configured default."),
+        .describe("Maximum number of target HTTP requests that can be in flight simultaneously."),
+    numClientThreads: z.number().int().nonnegative().default(0).optional()
+        .describe("Number of target Netty event-loop threads. 0 uses Netty's default of 2 times the available processors."),
     cancellationGraceMs: z.number().int().nonnegative().default(1000).optional()
         .describe("Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown."),
     heartbeatExpirationIntervalSeconds: z.number().int().min(1).default(30).optional()
@@ -698,12 +695,8 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "Set explicitly to override the defaults entirely (not additive). " +
             "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
             "illegal_argument_exception, resource_already_exists_exception."),
-    observedPacketConnectionTimeout: z.number().optional()
-        .describe("[Deprecated] Accepted for existing resources but ignored. Broker-time heartbeat expiration uses E and S."),
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
-    quiescentPeriodMs: z.number().optional()
-        .describe("[Deprecated] Accepted for existing resources but ignored. Typed generation cleanup gates reassignment."),
     removeAuthHeader: z.boolean().default(false).optional()
         .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.")
         .changeRestriction('gated'),
@@ -785,15 +778,6 @@ export const USER_REPLAYER_OPTIONS = z.object({
             code: z.ZodIssueCode.custom,
             message: "'tupleS3Region' is required when 'tupleS3Bucket' is configured.",
             path: ["tupleS3Region"]
-        });
-    }
-
-    if (data.maxConcurrentTargetAttempts !== undefined && data.maxConcurrentRequests !== undefined
-        && data.maxConcurrentTargetAttempts !== data.maxConcurrentRequests) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `maxConcurrentTargetAttempts (${data.maxConcurrentTargetAttempts}) conflicts with deprecated maxConcurrentRequests (${data.maxConcurrentRequests})`,
-            path: ['maxConcurrentTargetAttempts']
         });
     }
 });
@@ -1753,6 +1737,47 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
             const proxies = data.traffic.proxies ?? {};
             const s3Sources = data.traffic.s3Sources ?? {};
             const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+            const reportedTimestampRequirements = new Set<string>();
+            const validateWorkflowManagedTimestampType = (
+                kafkaClusterName: string,
+                requiredTimestampType: "LogAppendTime" | "CreateTime",
+                topicKind: string
+            ) => {
+                const kafkaCluster = kafkaClusters[kafkaClusterName];
+                if (!kafkaCluster || !("autoCreate" in kafkaCluster)) {
+                    return;
+                }
+                const topicConfig = kafkaCluster.autoCreate.topicSpecOverrides?.config;
+                const configuredTimestampType =
+                    topicConfig !== null
+                    && typeof topicConfig === "object"
+                    && !Array.isArray(topicConfig)
+                        ? topicConfig["message.timestamp.type"]
+                        : undefined;
+                if (configuredTimestampType === undefined
+                    || configuredTimestampType === requiredTimestampType) {
+                    return;
+                }
+
+                const requirementKey = `${kafkaClusterName}\0${requiredTimestampType}`;
+                if (reportedTimestampRequirements.has(requirementKey)) {
+                    return;
+                }
+                reportedTimestampRequirements.add(requirementKey);
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Workflow-managed ${topicKind} on Kafka cluster '${kafkaClusterName}' require `
+                        + `'message.timestamp.type' to be '${requiredTimestampType}'.`,
+                    path: [
+                        "kafkaClusterConfiguration",
+                        kafkaClusterName,
+                        "autoCreate",
+                        "topicSpecOverrides",
+                        "config",
+                        "message.timestamp.type",
+                    ],
+                });
+            };
             for (const [proxyName, proxyConfig] of Object.entries(proxies)) {
                 if (!(proxyConfig.source in data.sourceClusters)) {
                     ctx.addIssue({
@@ -1769,6 +1794,37 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         path: ['traffic', 'proxies', proxyName, 'kafka']
                     });
                 }
+
+                if (proxyConfig.proxyConfig.noCapture !== true) {
+                    const effectiveKafkaRef = kafkaRef ?? "default";
+                    validateWorkflowManagedTimestampType(
+                        effectiveKafkaRef,
+                        "LogAppendTime",
+                        "live capture topics"
+                    );
+                    const kafkaCluster = kafkaClusters[effectiveKafkaRef];
+                    const partitionCount = kafkaCluster && 'autoCreate' in kafkaCluster
+                        ? kafkaCluster.autoCreate.topicSpecOverrides?.partitions
+                        : Object.keys(kafkaClusters).length === 0
+                            ? DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.partitions
+                            : undefined;
+                    const proxyCount = proxyConfig.proxyConfig.podReplicas ?? 1;
+                    const requiredPartitionCount = proxyCount > 0 ? proxyCount + 1 : 1;
+                    if (typeof partitionCount === "number" && partitionCount < requiredPartitionCount) {
+                        const topicName = proxyConfig.kafkaTopic || proxyName;
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `Kafka topic '${topicName}' on cluster '${effectiveKafkaRef}' has ${partitionCount} partition(s), but capture proxy '${proxyName}' with ${proxyCount} pod replica(s) requires at least ${requiredPartitionCount} partition(s) for one-pod rolling surge.`,
+                            path: [
+                                'kafkaClusterConfiguration',
+                                effectiveKafkaRef,
+                                'autoCreate',
+                                'topicSpecOverrides',
+                                'partitions'
+                            ]
+                        });
+                    }
+                }
             }
             for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
                 const kafkaRef = s3Config.kafka;
@@ -1779,6 +1835,11 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         path: ['traffic', 's3Sources', s3Name, 'kafka']
                     });
                 }
+                validateWorkflowManagedTimestampType(
+                    kafkaRef ?? "default",
+                    "CreateTime",
+                    "BYOC import topics"
+                );
             }
 
             for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {

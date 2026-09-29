@@ -783,21 +783,36 @@ function buildKafkaClientConfig(
     };
 }
 
-function requireLogAppendTimeForWorkflowManagedCapture(
-    kafkaConfig: ReturnType<typeof buildKafkaClientConfig>
+type WorkflowManagedTopicTimestampType = "LogAppendTime" | "CreateTime";
+
+function defaultWorkflowManagedTopicTimestampType(
+    kafkaConfig: ReturnType<typeof buildKafkaClientConfig>,
+    requiredTimestampType: WorkflowManagedTopicTimestampType
 ) {
     if (!kafkaConfig.managedByWorkflow) {
         return kafkaConfig;
     }
     const topicSpecOverrides =
         kafkaConfig.topicSpecOverrides ?? DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES;
+    const topicConfig = topicSpecOverrides.config ?? {};
+    const configuredTimestampType = topicConfig["message.timestamp.type"];
+    if (configuredTimestampType !== undefined) {
+        if (configuredTimestampType !== requiredTimestampType) {
+            throw new Error(
+                `Workflow-managed topic '${kafkaConfig.kafkaTopic}' requires `
+                + `'message.timestamp.type' to be '${requiredTimestampType}', but received `
+                + `'${String(configuredTimestampType)}'.`
+            );
+        }
+        return kafkaConfig;
+    }
     return {
         ...kafkaConfig,
         topicSpecOverrides: {
             ...topicSpecOverrides,
             config: {
-                ...(topicSpecOverrides.config ?? {}),
-                "message.timestamp.type": "LogAppendTime",
+                ...topicConfig,
+                "message.timestamp.type": requiredTimestampType,
             },
         },
     };
@@ -1165,11 +1180,16 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ...sourceCluster,
                 label: proxy.source,
             });
+            const kafkaConfig = buildKafkaClientConfig(
+                proxy.kafka ?? "default",
+                kafkaClusters,
+                topic
+            );
             return {
                 name: proxyName,
-                kafkaConfig: requireLogAppendTimeForWorkflowManagedCapture(
-                    buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic)
-                ),
+                kafkaConfig: proxy.proxyConfig.noCapture === true
+                    ? kafkaConfig
+                    : defaultWorkflowManagedTopicTimestampType(kafkaConfig, "LogAppendTime"),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
                 sourceConnectionIdentity,
                 proxyConfig: prepareProxyConfig(proxy.proxyConfig),
@@ -1485,7 +1505,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 awsRegion: s3.awsRegion,
                 ...(s3.endpoint ? { endpoint: s3.endpoint } : {}),
                 kafkaClusterName: kafkaCluster,
-                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
+                kafkaConfig: defaultWorkflowManagedTopicTimestampType(
+                    buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
+                    "CreateTime"
+                ),
             };
         });
     }

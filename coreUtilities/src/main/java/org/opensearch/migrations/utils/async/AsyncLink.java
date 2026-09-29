@@ -21,6 +21,9 @@ import lombok.NonNull;
 /**
  * Statically pairs a handler's output type with a compatible receiver.
  *
+ * <p>This helper is retained for expository purposes only; production code should compose its
+ * owner-specific asynchronous stages directly.
+ *
  * <p>Normal handler completion necessarily invokes the supplied receiver exactly once. The
  * returned stage completes only after the receiver completes. Unexpected exceptions are not
  * converted into domain values; they remain exceptional so the owning component can report them
@@ -45,6 +48,8 @@ public final class AsyncLink<I, O, C, R> {
             )));
     }
 
+    // Synchronous Errors must remain exceptional stages so owner-level fatal handling can observe them.
+    @SuppressWarnings("java:S1181")
     private static <T> CompletionStage<T> invoke(
         Supplier<? extends CompletionStage<T>> operation
     ) {

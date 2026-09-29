@@ -466,8 +466,6 @@ and OpenSearch Benchmark tooling where it fits.
   current replayer processing, reassignment, and commit design.
 - [`TrafficCaptureAndReplayDesign.md`](./TrafficCaptureAndReplayDesign.md) — retained product and
   component overview.
-- [`replayerArchitecture.md`](./replayerArchitecture.md) — retained existing-implementation
-  reference during hardening.
 - [`Architecture.md`](./Architecture.md) — end-to-end migration architecture and where this pipeline
   fits.
 - [`../TrafficCapture/README.md`](../TrafficCapture/README.md) — module overview for the
