@@ -1,0 +1,135 @@
+{{- $image := ternary
+      (printf "%s@%s" .Values.image.repository .Values.image.digest)
+      (printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion))
+      (ne (toString .Values.image.digest) "") }}
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: k6-ingest-connection-modes
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+    k6-scenario: ingest
+spec:
+  serviceAccountName: {{ .Values.workflow.serviceAccountName }}
+  entrypoint: suite
+  arguments:
+    parameters:
+      - name: CAPTURE_PROXY_URL
+        value: {{ .Values.captureProxyUrl | quote }}
+      - name: INDEX_NAME
+        value: nyc_taxis
+      - name: DURATION
+        value: 20s
+      - name: authSecretName
+        value: {{ .Values.authSecretName | quote }}
+      - name: runs
+  templates:
+    - name: suite
+      dag:
+        tasks:
+          - name: prepare-index
+            template: prepare-index
+          - name: tester
+            depends: prepare-index.Succeeded
+            template: run-tester
+            withParam: "{{`{{workflow.parameters.runs}}`}}"
+            arguments:
+              parameters:
+                - name: name
+                  value: "{{`{{item.name}}`}}"
+                - name: rate
+                  value: "{{`{{item.rate}}`}}"
+                - name: parallelism
+                  value: "{{`{{item.parallelism}}`}}"
+                - name: vus
+                  value: "{{`{{item.vus}}`}}"
+                - name: maxVus
+                  value: "{{`{{item.maxVus}}`}}"
+                - name: connectionMode
+                  value: "{{`{{item.connectionMode}}`}}"
+                - name: noConnectionReuse
+                  value: "{{`{{item.noConnectionReuse}}`}}"
+
+    - name: prepare-index
+      container:
+        image: {{ $image | quote }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: [k6]
+        args: [run, --quiet, /scripts/scenarios/prepare-index.js]
+        envFrom:
+          - secretRef:
+              name: "{{`{{workflow.parameters.authSecretName}}`}}"
+              optional: true
+        env:
+          - name: CAPTURE_PROXY_URL
+            value: "{{`{{workflow.parameters.CAPTURE_PROXY_URL}}`}}"
+          - name: INDEX_NAME
+            value: "{{`{{workflow.parameters.INDEX_NAME}}`}}"
+
+    - name: run-tester
+      inputs:
+        parameters:
+          - name: name
+          - name: rate
+          - name: parallelism
+          - name: vus
+          - name: maxVus
+          - name: connectionMode
+          - name: noConnectionReuse
+      activeDeadlineSeconds: {{ .Values.workflow.activeDeadlineSeconds | int }}
+      resource:
+        action: create
+        setOwnerReference: true
+        successCondition: status.phase == Succeeded
+        failureCondition: status.phase in (Failed, Error)
+        manifest: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Workflow
+          metadata:
+            name: "{{`{{workflow.name}}`}}-{{`{{inputs.parameters.name}}`}}"
+            labels:
+              app: k6-load-test
+              k6-scenario: ingest
+              k6-profile: ingest-steady
+              k6-suite: "{{`{{workflow.name}}`}}"
+              k6-tester: "{{`{{inputs.parameters.name}}`}}"
+          spec:
+            workflowTemplateRef:
+              name: k6-ingest-steady
+            arguments:
+              parameters:
+                - name: CAPTURE_PROXY_URL
+                  value: "{{`{{workflow.parameters.CAPTURE_PROXY_URL}}`}}"
+                - name: INDEX_NAME
+                  value: "{{`{{workflow.parameters.INDEX_NAME}}`}}"
+                - name: DURATION
+                  value: "{{`{{workflow.parameters.DURATION}}`}}"
+                - name: authSecretName
+                  value: "{{`{{workflow.parameters.authSecretName}}`}}"
+                - name: parallelism
+                  value: "{{`{{inputs.parameters.parallelism}}`}}"
+                - name: arguments
+                  value: "--no-setup"
+                - name: INGEST_RATE
+                  value: "{{`{{inputs.parameters.rate}}`}}"
+                - name: INGEST_VUS
+                  value: "{{`{{inputs.parameters.vus}}`}}"
+                - name: INGEST_MAX_VUS
+                  value: "{{`{{inputs.parameters.maxVus}}`}}"
+                - name: BULK_BATCH_SIZE
+                  value: "10"
+                - name: BULK_EXPLICIT_IDS
+                  value: "true"
+                - name: BULK_ID_PREFIX
+                  value: "{{`{{inputs.parameters.name}}`}}"
+                - name: BULK_FRACTION
+                  value: "1"
+                - name: SEQUENCE_FRACTION
+                  value: "0"
+                - name: CONNECTION_MODE
+                  value: "{{`{{inputs.parameters.connectionMode}}`}}"
+                - name: NO_CONNECTION_REUSE
+                  value: "{{`{{inputs.parameters.noConnectionReuse}}`}}"
+                - name: LATENCY_THRESHOLDS_ENABLED
+                  value: "false"

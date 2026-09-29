@@ -73,8 +73,8 @@ export function randomUpdateBody() {
   return { total_amount: parseFloat((Math.random() * 45 + 5).toFixed(2)) };
 }
 
-export function randomBulkBatch(index, batchSize) {
-  return _randomBulkBatch(index, batchSize, randomDocument);
+export function randomBulkBatch(index, batchSize, idFn = null) {
+  return _randomBulkBatch(index, batchSize, randomDocument, idFn);
 }
 
 /**

@@ -71,8 +71,8 @@ export function randomUpdateBody() {
   return { level: randomElement(LEVELS) };
 }
 
-export function randomBulkBatch(index, batchSize) {
-  return _randomBulkBatch(index, batchSize, randomDocument);
+export function randomBulkBatch(index, batchSize, idFn = null) {
+  return _randomBulkBatch(index, batchSize, randomDocument, idFn);
 }
 
 /**

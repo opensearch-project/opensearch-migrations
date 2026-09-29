@@ -106,6 +106,8 @@ scenarios:
       INGEST_MAX_VUS: "100"
       EXECUTOR: constant-arrival-rate    # decides the timing knob: DURATION, or a stage list
       BULK_BATCH_SIZE: "20"              # documents per _bulk call
+      BULK_EXPLICIT_IDS: "false"         # replay-stable IDs for at-least-once CDC verification
+      BULK_ID_PREFIX: bulk               # namespace for explicit bulk IDs from one test run
       BULK_FRACTION: "0.70"              # share of iterations that send _bulk
       SEQUENCE_FRACTION: "0.15"          # share that run create→update→query→delete
       CONNECTION_MODE: pinned            # pinned (keep-alive) | spread (Connection: close)
@@ -303,4 +305,4 @@ workflow:
   # Upper bound on a single run, counted from TestRun creation. It only fires when the run never
   # reaches a terminal stage — for example runner pods stuck on an image pull — so keep it well above
   # the longest load test you expect.
-  activeDeadlineSeconds: 7200
+  activeDeadlineSeconds: 10800

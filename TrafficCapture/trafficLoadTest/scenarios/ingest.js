@@ -18,6 +18,8 @@
  *   DURATION           — test duration for constant-arrival-rate executor;
  *                        ignored when EXECUTOR=ramping-arrival-rate (stages define duration)
  *   BULK_BATCH_SIZE    — documents per _bulk call
+ *   BULK_EXPLICIT_IDS  — "true" to give every bulk item a replay-stable distributed ID
+ *   BULK_ID_PREFIX     — namespace for explicit bulk IDs from one distributed test run
  *   SEQUENCE_FRACTION  — share of iterations run as a create→update→query→delete sequence
  *                        (0.0 disables sequences; default 0.15)
  *   BULK_FRACTION      — share of non-sequence iterations sent as _bulk (default 0.70;
@@ -37,10 +39,11 @@
 
 import http from '../lib/http-client.js';
 import { check } from 'k6';
+import exec from 'k6/execution';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import * as nycTaxisDocs from '../lib/data/nyc_taxis/documents.js';
 import * as logsDocs     from '../lib/data/logs_data/documents.js';
-import { runSequence } from '../lib/sequences.js';
+import { generateId, runSequence } from '../lib/sequences.js';
 import { pinned, spread } from '../lib/connection-control.js';
 import { checkControl } from '../lib/control.js';
 import { CFG } from '../lib/config.js';
@@ -69,6 +72,8 @@ const VUS             = parseInt(CFG.INGEST_VUS          || '20');
 const MAX_VUS         = parseInt(CFG.INGEST_MAX_VUS      || '100');
 const DURATION        = CFG.DURATION            || '5m';
 const BATCH_SIZE      = parseInt(CFG.BULK_BATCH_SIZE     || '20');
+const BULK_EXPLICIT_IDS = (CFG.BULK_EXPLICIT_IDS || 'false') === 'true';
+const BULK_ID_PREFIX  = CFG.BULK_ID_PREFIX       || 'bulk';
 const SEQ_FRACTION    = parseFloat(CFG.SEQUENCE_FRACTION || '0.15');
 const BULK_FRACTION   = parseFloat(CFG.BULK_FRACTION     || '0.70');
 const CONNECTION_MODE     = CFG.CONNECTION_MODE           || 'pinned';
@@ -167,7 +172,10 @@ function doSequence() {
 }
 
 function sendBulk() {
-  const { body, docCount } = docs.randomBulkBatch(INDEX, BATCH_SIZE);
+  const idFn = BULK_EXPLICIT_IDS
+    ? (item) => generateId(exec, BULK_ID_PREFIX, item)
+    : null;
+  const { body, docCount } = docs.randomBulkBatch(INDEX, BATCH_SIZE, idFn);
 
   const res = http.post(
     `${PROXY_URL}/_bulk`,

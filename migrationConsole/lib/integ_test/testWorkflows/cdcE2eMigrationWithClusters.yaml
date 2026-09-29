@@ -69,6 +69,12 @@ spec:
         value: "false"
       - name: capture-proxy-service-type
         value: "LoadBalancer"
+      - name: capture-proxy-pod-replicas
+        value: "1"
+      - name: traffic-topic-partitions
+        value: "2"
+      - name: replayer-pod-replicas
+        value: "1"
       - name: otel-trace-collector-endpoint
         value: ""
       - name: client-auth-pem-base64
@@ -206,6 +212,10 @@ spec:
                       key: migrationConsolePullPolicy
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: captureProxyPodReplicas
+                  value: "{{workflow.parameters.capture-proxy-pod-replicas}}"
+                - name: trafficTopicPartitions
+                  value: "{{workflow.parameters.traffic-topic-partitions}}"
                 - name: otelTraceCollectorEndpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
                 - name: clientAuthPemBase64
@@ -266,6 +276,12 @@ spec:
                   value: "{{workflow.parameters.replayer-config-overrides}}"
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: captureProxyPodReplicas
+                  value: "{{workflow.parameters.capture-proxy-pod-replicas}}"
+                - name: trafficTopicPartitions
+                  value: "{{workflow.parameters.traffic-topic-partitions}}"
+                - name: replayerPodReplicas
+                  value: "{{workflow.parameters.replayer-pod-replicas}}"
                 - name: otelTraceCollectorEndpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
                 - name: clientAuthPemBase64
