@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -19,6 +20,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import reactor.core.publisher.Flux;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -106,13 +108,15 @@ class LuceneSnapshotSourceDeltaTest {
 
     @ParameterizedTest
     @EnumSource(DeltaMode.class)
-    void removedIndicesOnlyEmitDeletionsAndPreserveRouting(DeltaMode mode) {
+    void removedIndicesOnlyEmitDeletionsAndPreserveSourceAndRouting(DeltaMode mode) {
         when(extractor.listIndices("previous")).thenReturn(List.of("removed"));
         when(extractor.listIndices("current")).thenReturn(List.of());
         var entry = shard("previous", "removed", 0);
         when(extractor.listShards("previous", "removed")).thenReturn(List.of(entry));
+        var storedSource = "{\"tenant\":\"tenant-a\"}".getBytes(StandardCharsets.UTF_8);
         when(extractor.readDocuments(eq(entry), eq(WORK_DIR), eq(0), isNull(), eq(false)))
-            .thenReturn(Flux.just(document("old", 8)));
+            .thenReturn(Flux.just(new LuceneDocumentChange(
+                8, "old", "type", storedSource, "route", DocumentChangeType.INDEX)));
 
         var docs = source(mode).readDocuments(new EsShardPartition("current", "removed", 0), 0).collectList().block();
         if (mode == DeltaMode.UPDATES_ONLY) {
@@ -122,6 +126,8 @@ class LuceneSnapshotSourceDeltaTest {
             assertEquals(Document.Operation.DELETE, docs.get(0).operation());
             assertEquals("route", docs.get(0).hints().get(Document.HINT_ROUTING));
             assertEquals("type", docs.get(0).hints().get(Document.HINT_TYPE));
+            assertArrayEquals(storedSource, docs.get(0).source(),
+                "Document transformers must see the same stored fields for additions and deletions");
         }
         verify(extractor, never()).listShards("current", "removed");
     }

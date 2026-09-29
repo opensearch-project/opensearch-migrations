@@ -246,7 +246,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         if (entry == null) {
             return deltaMode == DeltaMode.UPDATES_ONLY ? Flux.empty()
                 : readRegularDocuments(previousEntry, partition, startingDocOffset)
-                    .map(doc -> new Document(doc.id(), null, Document.Operation.DELETE,
+                    .map(doc -> new Document(doc.id(), doc.source(), Document.Operation.DELETE,
                         doc.hints(), doc.sourceMetadata()));
         }
         log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
