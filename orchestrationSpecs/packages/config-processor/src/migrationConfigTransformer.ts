@@ -18,6 +18,8 @@ import {
     TRANSFORM_PIPELINE,
     TRANSFORM_CONTEXT_VALUE,
     DEPLOYMENT_DEFAULTS_CONFIG,
+    SNAPSHOT_MIGRATION_CONFIG,
+    CLUSTER_CONNECTION_IDENTITY,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -27,9 +29,12 @@ import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaph
 import { crdName } from './crdNaming';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 import {FileSourceRegistry} from "./fileSourceUtils";
+import {planSnapshotSequences} from "./snapshotSequencePlanner";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
+type PendingSnapshotMigration = Omit<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>,
+    "configChecksum" | "checksumForReplayer" | "workloadIdentityChecksum" | "resourceUid" | "resourceName">;
 type SolrBackupNormalizedConfig = {
     externalBackupName?: string;
     collectionAllowlist: string[];
@@ -1024,7 +1029,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     targetConnectionIdentity,
                     snapshotConfigChecksum,
                     m.snapshotNameResolution,
-                    snapshotRepoIdentity
+                    snapshotRepoIdentity,
+                    ...(m.delta ? [m.delta] : [])
                 ),
                 checksumForReplayer: cs(targetConnectionIdentity, replayerMaterialPart),
                 workloadIdentityChecksum: cs(
@@ -1034,7 +1040,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     snapshotRepoIdentity,
                     snapshotConfigChecksum,
                     m.migrationLabel,
-                    workloadIdentityMaterialPart
+                    workloadIdentityMaterialPart,
+                    ...(m.delta ? [m.delta] : [])
                 ),
             };
         });
@@ -1085,13 +1092,15 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             configChecksum: kafkaChecksums.get(k.name),
         }));
 
+        const sequencePlan = planSnapshotSequences(snapshotsWithChecksums, migrationsWithChecksums);
         const output = {
             requireBeginApproval: userConfig.requireBeginApproval ?? false,
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
             ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
             ...(s3LoadersWithChecksums.length > 0 ? { s3TrafficLoaders: s3LoadersWithChecksums } : {}),
-            ...(snapshotsWithChecksums.length > 0 ? { snapshots: snapshotsWithChecksums } : {}),
+            ...(sequencePlan.snapshots.length > 0 ? { snapshots: sequencePlan.snapshots } : {}),
             ...(migrationsWithChecksums.length > 0 ? { snapshotMigrations: migrationsWithChecksums } : {}),
+            ...(sequencePlan.snapshotSequences ? {snapshotSequences: sequencePlan.snapshotSequences} : {}),
             ...(replaysWithChecksums.length > 0 ? { trafficReplays: replaysWithChecksums } : {})
         };
 
@@ -1281,7 +1290,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     /** Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig. */
     private async buildSnapshotMigrations(userConfig: NormalizedUserConfig) {
-        const results: any[] = [];
+        const results: PendingSnapshotMigration[] = [];
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
@@ -1314,7 +1323,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
 
-            for (const [snapshotName, migrations] of Object.entries(effectivePerSnapshotConfig)) {
+            let previousMigration: PendingSnapshotMigration | undefined;
+            const snapshotNames = mc.snapshotSequence ?? Object.keys(effectivePerSnapshotConfig);
+            for (const snapshotName of snapshotNames) {
+                const migrations = effectivePerSnapshotConfig[snapshotName];
                 const snapshotDef = sourceCluster.snapshotInfo?.snapshots[snapshotName];
                 if (!snapshotDef) {
                     throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
@@ -1322,6 +1334,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
                 const globallyUniqueSnapshotName = `${fromSource}-${snapshotName}`;
                 const repoConfig = sourceCluster.snapshotInfo?.repos?.[snapshotDef.repoName];
+                if (!repoConfig) {
+                    throw new Error(`Snapshot '${snapshotName}' references unknown repository '${snapshotDef.repoName}'`);
+                }
 
                 const snapshotConfig = snapshotDef.config;
                 let snapshotNameResolution:
@@ -1366,15 +1381,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         this.deploymentDefaults,
                         skipApprovals
                     );
-                    results.push({
+                    const current: PendingSnapshotMigration = {
                         label: snapshotName,
                         migrationLabel: migration.label,
                         snapshotNameResolution,
                         snapshotConfigChecksum: '',
                         metadataMigrationConfig,
-                        documentBackfillConfig,
-                        sourceConnectionIdentity,
-                        targetConnectionIdentity,
+                        documentBackfillConfig: mc.snapshotSequence && documentBackfillConfig
+                            ? {...documentBackfillConfig, serverGeneratedIds: "NEVER"}
+                            : documentBackfillConfig,
+                        sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY.parse(sourceConnectionIdentity),
+                        targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY.parse(targetConnectionIdentity),
                         sourceVersion: sourceCluster.version || "",
                         sourceLabel: fromSource,
                         ...(sourceCluster.endpoint ? {sourceEndpoint: sourceCluster.endpoint} : {}),
@@ -1383,14 +1400,31 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         targetConfig: { ...targetCluster, label: toTarget },
                         snapshotConfig: {
                             label: snapshotName,
-                            ...(repoConfig ? {
-                                repoConfig: {
-                                    ...repoConfig,
-                                    repoName: snapshotDef.repoName
-                                }
-                            } : {})
-                        }
-                    });
+                            repoConfig: DENORMALIZED_REPO_CONFIG.parse({...repoConfig, repoName: snapshotDef.repoName}),
+                        },
+                        ...(mc.snapshotSequence ? {sequenceName: crdName(fromSource, toTarget)} : {}),
+                    };
+                    if (mc.snapshotSequence && previousMigration) {
+                        current.delta = {
+                            previousSnapshotNameResolution: previousMigration.snapshotNameResolution,
+                            mode: "UPDATES_ONLY",
+                        };
+                        // Every deletion worker must finish before any addition worker starts.
+                        // Separate resources/sessions keep the barrier durable across restarts.
+                        results.push({
+                            ...current,
+                            migrationLabel: `${current.migrationLabel}-deletes`,
+                            metadataMigrationConfig: undefined,
+                            documentBackfillConfig: {...current.documentBackfillConfig!, skipApproval: true},
+                            delta: {...current.delta, mode: "DELETES_ONLY"},
+                            previousMigrationResourceName: crdName(
+                                fromSource, toTarget, previousMigration.label, previousMigration.migrationLabel),
+                        });
+                        current.previousMigrationResourceName = crdName(
+                            fromSource, toTarget, current.label, `${current.migrationLabel}-deletes`);
+                    }
+                    results.push(current);
+                    previousMigration = current;
                 }
             }
         }

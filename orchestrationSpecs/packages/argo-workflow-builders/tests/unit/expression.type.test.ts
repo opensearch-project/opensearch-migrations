@@ -12,6 +12,14 @@ import {
 } from '../../src';
 
 describe("expression type contracts", () => {
+    it("sequence indices and increments are numeric", () => {
+        const index = expr.asInt(expr.literal("0"));
+        expectTypeOf(index).toEqualTypeOf<BaseExpression<number, "complicatedExpression">>();
+        expectTypeOf(expr.add(index, expr.literal(1))).toExtend<BaseExpression<number>>();
+        // @ts-expect-error - boolean addition is not a sequence increment
+        expr.add(expr.literal(true), expr.literal(false));
+    });
+
     it("expr.literal() produces the correct value/complexity types", () => {
         const a = expr.literal("a");
         const five = expr.literal(5);

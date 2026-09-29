@@ -160,6 +160,7 @@ function statusSchemaFor(resource: ResourceProjection): Record<string, YamlValue
     }
     if (resource.kind === "SnapshotMigration") {
         common.checksumForReplayer = {type: "string"};
+        common.sequenceCompletionChecksum = {type: "string"};
         common.outputs = {type: "object", "x-kubernetes-preserve-unknown-fields": true};
     }
     return {

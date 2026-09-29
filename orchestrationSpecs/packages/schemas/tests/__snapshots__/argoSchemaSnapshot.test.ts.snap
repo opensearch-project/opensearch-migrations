@@ -1578,6 +1578,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "snapshotPrefix": {
                         "type": "string"
                       },
+                      "sequenceName": {
+                        "type": "string"
+                      },
                       "sourceConnectionIdentity": {
                         "type": "object",
                         "properties": {
@@ -1996,6 +1999,72 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "additionalProperties": false
                     }
                   ]
+                },
+                "delta": {
+                  "type": "object",
+                  "properties": {
+                    "previousSnapshotNameResolution": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "dataSnapshotResourceName": {
+                              "type": "string"
+                            },
+                            "externalSnapshotName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "dataSnapshotResourceName",
+                            "externalSnapshotName"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "externalSnapshotName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "externalSnapshotName"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "dataSnapshotResourceName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "dataSnapshotResourceName"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "DELETES_ONLY",
+                        "UPDATES_ONLY"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "previousSnapshotNameResolution",
+                    "mode"
+                  ]
+                },
+                "sequenceName": {
+                  "type": "string"
+                },
+                "previousMigrationResourceName": {
+                  "type": "string"
                 },
                 "snapshotConfigChecksum": {
                   "type": "string"
@@ -2629,6 +2698,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "additionalProperties": false
                       },
                       "default": []
+                    },
+                    "previousSnapshotName": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deltaMode": {
+                      "type": "string",
+                      "enum": [
+                        "DELETES_ONLY",
+                        "UPDATES_ONLY"
+                      ]
                     }
                   },
                   "required": [
@@ -2942,6 +3022,54 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               ]
             },
             "default": []
+          },
+          "snapshotSequences": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "snapshotCreation": {
+                        "type": "object",
+                        "properties": {
+                          "sourceIndex": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "snapshotIndex": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "sourceIndex",
+                          "snapshotIndex"
+                        ]
+                      },
+                      "migrationIndex": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "migrationIndex"
+                    ]
+                  },
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "name",
+                "steps"
+              ]
+            }
           },
           "trafficReplays": {
             "type": "array",
@@ -4405,6 +4533,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "toTarget": {
             "type": "string",
             "description": "Label of the target cluster to migrate to. Must match a key in targetClusters."
+          },
+          "snapshotSequence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 2,
+            "description": "Ordered snapshot labels for successive backfills. The first snapshot is fully backfilled. Each later snapshot is created only after the preceding backfill and approval finish, then all deletes finish before additions begin. Include every perSnapshotConfig label exactly once, with one document migration per snapshot, using the same repository and index allowlist. Keep both snapshots until their delta completes. The source and target must be exclusive to this sequence."
           },
           "perSnapshotConfig": {
             "type": "object",

@@ -9,8 +9,8 @@ import java.util.Objects;
  *
  * <p>Unlike source-specific types, this carries no source-coupled fields. ES-specific
  * concepts like {@code _type} and {@code routing} are carried in the opaque {@code hints}
- * map, which the pipeline core never reads — only source adapters populate it and
- * sink adapters consume it.
+ * map. The pipeline core accounts for their size without interpreting their values;
+ * source adapters populate them and sink adapters consume them.
  *
  * <p>This is a value type: two {@code Document} instances with the same fields are equal.
  *

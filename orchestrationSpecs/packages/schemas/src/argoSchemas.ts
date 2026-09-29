@@ -241,6 +241,8 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     }).extend({
         ...FILE_SOURCE_RESOLVED_FIELDS,
         skipApproval: z.boolean(),
+        previousSnapshotName: z.string().min(1).optional(),
+        deltaMode: z.enum(["DELETES_ONLY", "UPDATES_ONLY"]).optional(),
     })
 );
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
@@ -349,10 +351,18 @@ export const SNAPSHOT_REPO_CONFIG = z.object({
     repoConfig: DENORMALIZED_REPO_CONFIG
 });
 
+export const SNAPSHOT_DELTA_CONFIG = z.object({
+    previousSnapshotNameResolution: SNAPSHOT_NAME_RESOLUTION,
+    mode: z.enum(["DELETES_ONLY", "UPDATES_ONLY"]),
+});
+
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string(), // from the record of the user config
     migrationLabel: z.string(),
     snapshotNameResolution: SNAPSHOT_NAME_RESOLUTION,
+    delta: SNAPSHOT_DELTA_CONFIG.optional(),
+    sequenceName: z.string().optional(),
+    previousMigrationResourceName: z.string().optional(),
     snapshotConfigChecksum: z.string(),
     metadataMigrationConfig: ARGO_METADATA_OPTIONS.optional(),
     documentBackfillConfig: ARGO_RFS_OPTIONS.optional(),
@@ -409,6 +419,7 @@ export const DENORMALIZED_PROXY_SETUP_CONFIG = DENORMALIZED_PROXY_CONFIG.omit({
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     label: z.string(),
     snapshotPrefix: z.string(),
+    sequenceName: z.string().optional(),
     sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
     repo: DENORMALIZED_REPO_CONFIG,
@@ -485,6 +496,21 @@ function makeResourceUidOptional<
     });
 }
 
+// References index the canonical config arrays, whose objects are enriched with CR UIDs
+// before submission. The plan never copies those objects or invents resource identities.
+export const SNAPSHOT_CREATION_REFERENCE = z.object({
+    sourceIndex: z.number().int().nonnegative(),
+    snapshotIndex: z.number().int().nonnegative(),
+});
+export const SNAPSHOT_SEQUENCE_STEP = z.object({
+    snapshotCreation: SNAPSHOT_CREATION_REFERENCE.optional(),
+    migrationIndex: z.number().int().nonnegative(),
+});
+export const SNAPSHOT_SEQUENCE_PLAN = z.object({
+    name: z.string(),
+    steps: z.array(SNAPSHOT_SEQUENCE_STEP).min(1),
+});
+
 export const ARGO_MIGRATION_CONFIG = z.object({
     requireBeginApproval: z.boolean(),
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
@@ -492,6 +518,7 @@ export const ARGO_MIGRATION_CONFIG = z.object({
     s3TrafficLoaders: z.array(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG).default([]),
     snapshots: z.array(DENORMALIZED_CREATE_SNAPSHOTS_CONFIG).default([]),
     snapshotMigrations: z.array(SNAPSHOT_MIGRATION_CONFIG).default([]),
+    snapshotSequences: z.array(SNAPSHOT_SEQUENCE_PLAN).optional(),
     trafficReplays: z.array(DENORMALIZED_REPLAY_CONFIG).default([]),
 });
 

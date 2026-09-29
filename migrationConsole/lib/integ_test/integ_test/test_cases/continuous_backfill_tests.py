@@ -40,7 +40,8 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
             self.index_name: {
                 "stable": {"value": "unchanged"},
                 "updated": {"value": "before"},
-                "deleted": {"value": "remove me"},
+                # A deleted document's source must never be interpreted as another bulk action.
+                "deleted": {"delete": {"_index": self.index_name, "_id": "sentinel"}},
                 "nested": {"children": [{"value": "one"}, {"value": "two"}]},
             },
             self.removed_index: {"gone": {"value": "removed index"}},
@@ -49,6 +50,7 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
             self._gate_name(snapshot) for snapshot in self.SNAPSHOTS
         ]
         self.versions_before_noop = None
+        self.keep_workflows = False
 
     @staticmethod
     def _gate_name(snapshot: str) -> str:
@@ -72,6 +74,7 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
         return result
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
+        self.keep_workflows = keep_workflows
         deployment = self.argo_service.get_configmap_data("migrations-default-s3-config")
         repo = {"repoPathUri": f"{deployment['BUCKET_URI']}/{self.repo_name}"}
         for source_key, target_key in (
@@ -126,6 +129,9 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
         }
 
     def prepare_clusters(self):
+        mappings = {"properties": {"children": {"type": "nested"}}}
+        if self.source_version.cluster_type == "ES" and self.source_version.major_version < 7:
+            mappings = {self.source_operations.resolve_doc_type(None): mappings}
         for index, documents in self.expected.items():
             self.source_operations.create_index(
                 cluster=self.source_cluster, index_name=index,
@@ -134,7 +140,7 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
                         "number_of_shards": 2, "number_of_replicas": 0, "refresh_interval": "-1",
                         "merge.policy.floor_segment": "1mb", "merge.policy.max_merged_segment": "1mb",
                     },
-                    "mappings": {"properties": {"children": {"type": "nested"}}},
+                    "mappings": mappings,
                 }),
             )
             for doc_id, body in documents.items():
@@ -216,6 +222,10 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
                 assert versions[self.index_name]["stable"] == self.stable_version, versions
                 self._put(self.index_name, "updated", {"value": "after merge"}, update=True)
                 self.expected[self.index_name]["updated"] = {"value": "after merge"}
+                # Recreated indices may reuse Lucene segment names for unrelated contents.
+                self.source_operations.delete_index(cluster=self.source_cluster, index_name=self.new_index)
+                self._put(self.new_index, "replacement", {"value": "recreated index"})
+                self.expected[self.new_index] = {"replacement": {"value": "recreated index"}}
                 self._flush()
                 response = execute_api_call(
                     self.source_cluster, f"/{self.index_name}/_forcemerge?max_num_segments=1",
@@ -234,4 +244,5 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
         self._verify_current_round()
 
     def cleanup(self):
-        self.argo_service.delete_workflow(workflow_name="migration-workflow")
+        if not self.keep_workflows:
+            self.argo_service.delete_workflow(workflow_name="migration-workflow")

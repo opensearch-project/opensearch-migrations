@@ -1647,6 +1647,12 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
         .describe("Label of the source cluster to migrate from. Must match a key in sourceClusters."),
     toTarget: z.string()
         .describe("Label of the target cluster to migrate to. Must match a key in targetClusters."),
+    snapshotSequence: z.array(z.string().min(1)).min(2).optional()
+        .describe("Ordered snapshot labels for successive backfills. The first snapshot is fully backfilled. " +
+            "Each later snapshot is created only after the preceding backfill and approval finish, then all " +
+            "deletes finish before additions begin. Include every perSnapshotConfig label exactly once, " +
+            "with one document migration per snapshot, using the same repository and index allowlist. " +
+            "Keep both snapshots until their delta completes. The source and target must be exclusive to this sequence."),
     perSnapshotConfig: PER_SNAPSHOT_MIGRATION_CONFIG_RECORD
         .describe("Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill)."),
 }).describe("A snapshot-based migration configuration binding a source cluster to a target cluster with per-snapshot migration settings.").superRefine((data, ctx) => {
@@ -1659,6 +1665,48 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
                 message: `Duplicate labels in perSnapshotConfig['${snapName}']`,
                 path: ['perSnapshotConfig', snapName]
             });
+        }
+    }
+    if (data.snapshotSequence) {
+        const sequence = data.snapshotSequence;
+        const snapshotNames = Object.keys(data.perSnapshotConfig);
+        if (new Set(sequence).size !== sequence.length ||
+            sequence.length !== snapshotNames.length ||
+            sequence.some(name => !(name in data.perSnapshotConfig))) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "snapshotSequence must contain every perSnapshotConfig label exactly once",
+                path: ["snapshotSequence"],
+            });
+        }
+        const initialOptions = data.perSnapshotConfig[sequence[0]]?.[0]?.documentBackfillConfig;
+        for (const snapshot of sequence) {
+            const migrations = data.perSnapshotConfig[snapshot];
+            const options = migrations?.[0]?.documentBackfillConfig;
+            if (migrations?.length !== 1 || !options) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "Each snapshot in a sequence requires exactly one migration with documentBackfillConfig",
+                    path: ["perSnapshotConfig", snapshot],
+                });
+                continue;
+            }
+            if (JSON.stringify(options.indexAllowlist ?? []) !== JSON.stringify(initialOptions?.indexAllowlist ?? [])) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "A snapshot sequence must use the same document indexAllowlist for every snapshot",
+                    path: ["perSnapshotConfig", snapshot, "documentBackfillConfig", "indexAllowlist"],
+                });
+            }
+            if (options.serverGeneratedIds === "ALWAYS" || options.enableSourcelessMigrations ||
+                options.useRecoverySource || options.docTransformerConfig || options.docTransformerConfigBase64 ||
+                options.docTransformerConfigFile || options.documentTransforms) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "Snapshot sequences require preserved document IDs and _source, without document transformations",
+                    path: ["perSnapshotConfig", snapshot, "documentBackfillConfig"],
+                });
+            }
         }
     }
 });
@@ -1703,6 +1751,46 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
+            if (mc.snapshotSequence) {
+                const source = data.sourceClusters[mc.fromSource];
+                const snapshotInfo = source?.snapshotInfo;
+                if (!snapshotInfo || !("snapshots" in snapshotInfo)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: "snapshotSequence requires Elasticsearch/OpenSearch snapshots",
+                        path: ["snapshotMigrationConfigs", i, "snapshotSequence"],
+                    });
+                } else {
+                    const repos = new Set(mc.snapshotSequence.map(name => snapshotInfo.snapshots[name]?.repoName));
+                    if (repos.size !== 1 || mc.snapshotSequence.some(name => !snapshotInfo.snapshots[name])) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: "All snapshots in a sequence must exist in the same repository",
+                            path: ["snapshotMigrationConfigs", i, "snapshotSequence"],
+                        });
+                    }
+                }
+                if (data.snapshotMigrationConfigs.some((other, j) =>
+                    j !== i && (other.fromSource === mc.fromSource || other.toTarget === mc.toTarget))) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: "A snapshot sequence requires an exclusive source and target migration configuration",
+                        path: ["snapshotMigrationConfigs", i, "snapshotSequence"],
+                    });
+                }
+                for (const [name, replayer] of Object.entries(data.traffic?.replayers ?? {})) {
+                    const finalSnapshot = mc.snapshotSequence[mc.snapshotSequence.length - 1];
+                    if (replayer.toTarget === mc.toTarget && !replayer.dependsOnSnapshotMigrations?.some(
+                        dependency => dependency.source === mc.fromSource && dependency.snapshot === finalSnapshot
+                    )) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: "Traffic replay to a snapshot sequence target must depend on its final snapshot",
+                            path: ["traffic", "replayers", name, "dependsOnSnapshotMigrations"],
+                        });
+                    }
+                }
+            }
 
             if (!(mc.fromSource in data.sourceClusters)) {
                 ctx.addIssue({
