@@ -117,6 +117,7 @@ Jobs triggered:
 - `k8s-local-opensearch1x-test` (PR and main)
 - `k8s-local-solr8x-test` (PR and main)
 - `k8s-local-solr-other-test` (PR and main)
+- `docker-compose-e2e-test` (PR and main)
 - `eks-integ-test` (PR with `run-eks-tests` label, and main)
 - `eks-cdc-*` (PR with `run-eks-tests` label, and main). This includes `eks-cdc-k6-load-test`, which
   runs test `0080` — a CDC migration whose traffic comes from a k6 load test. The test runner installs
@@ -124,11 +125,18 @@ Jobs triggered:
 - `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three collection types)
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
-
-Adding a label does not start or cancel a run. Label-gated jobs run on the next PR event (a push or
-reopen), so add the label first, then push (an empty commit works: `git commit --allow-empty`).
+- `eks-full-e2e-isolated-vpc-test` (PR with `run-eks-isolated-tests` label, and main)
 
 This ensures PR-triggered jobs don't conflict with post-merge jobs using the same pipeline code.
+
+#### Running label-gated tests on a PR
+
+To run the label-gated tests on a PR (e.g. while reviewing it), add the matching `run-*` label:
+
+- The label's jobs start immediately. The always-on jobs are not re-run, and no in-progress job is cancelled.
+- If that label's jobs are already running for the PR, the new jobs wait and run after the current ones finish.
+- Labels that don't start with `run-` (e.g. `dependencies` added by Dependabot) don't start any jobs.
+- Once a label is on the PR, its jobs also run on every later push.
 
 ### Jenkins Folder Structure
 

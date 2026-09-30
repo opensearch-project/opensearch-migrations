@@ -6,9 +6,7 @@ on:
       - main
       - jenkins-trigger-test-*
   pull_request_target:
-    # `labeled` is intentionally omitted: adding a label must not start or cancel any runs.
-    # run-* labels (e.g. run-eks-tests) take effect on the next push or reopen.
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
   merge_group:
 
 env:
@@ -19,20 +17,24 @@ permissions:
 
 jobs:
   get-require-approval:
-    # Skip all jenkins jobs if not on main repo
-    if: ${{ github.repository == 'opensearch-project/opensearch-migrations' }}
+    # Skip all jenkins jobs if not on main repo, or if triggered by a label other than a run-* test label.
+    if: |
+      github.repository == 'opensearch-project/opensearch-migrations' &&
+      (github.event.action != 'labeled' || startsWith(github.event.label.name, 'run-'))
     uses: ./.github/workflows/require-approval.yml
 
   sanitize-input:
+    if: github.event.action != 'labeled' || startsWith(github.event.label.name, 'run-')
     uses: ./.github/workflows/sanitize-repo-details.yml
 
   full-es68-e2e-aws-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-full-es68-e2e-aws-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -47,12 +49,13 @@ jobs:
           job_timeout_minutes: "180"
 
   k8s-local-elasticsearch1x-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-elasticsearch1x-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -67,12 +70,13 @@ jobs:
           job_timeout_minutes: "120"
 
   k8s-local-elasticsearch2x-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-elasticsearch2x-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -87,12 +91,13 @@ jobs:
           job_timeout_minutes: "120"
 
   k8s-local-elasticsearch5x-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-elasticsearch5x-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -107,12 +112,13 @@ jobs:
           job_timeout_minutes: "120"
 
   k8s-local-elasticsearch6x-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-elasticsearch6x-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -127,12 +133,13 @@ jobs:
           job_timeout_minutes: "120"
 
   k8s-local-elasticsearch7x-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-elasticsearch7x-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -147,12 +154,13 @@ jobs:
           job_timeout_minutes: "120"
 
   k8s-local-elasticsearch8x-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-elasticsearch8x-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -167,12 +175,13 @@ jobs:
           job_timeout_minutes: "120"
 
   k8s-local-opensearch1x-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-opensearch1x-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -187,12 +196,13 @@ jobs:
           job_timeout_minutes: "120"
 
   k8s-local-solr8x-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-solr8x-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -207,12 +217,13 @@ jobs:
           job_timeout_minutes: "120"
 
   k8s-local-solr-other-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-k8s-local-solr-other-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -227,12 +238,13 @@ jobs:
           job_timeout_minutes: "120"
 
   docker-compose-e2e-test:
+    if: github.event.action != 'labeled'
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
       group: ${{ github.workflow }}-docker-compose-e2e-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -249,14 +261,15 @@ jobs:
   eks-integ-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     concurrency:
       group: ${{ github.workflow }}-eks-integ-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -273,14 +286,15 @@ jobs:
   eks-aoss-integ-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     concurrency:
       group: ${{ github.workflow }}-eks-aoss-integ-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -297,14 +311,15 @@ jobs:
   eks-byos-integ-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-byos-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 1080
     concurrency:
       group: ${{ github.workflow }}-eks-byos-integ-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -321,14 +336,15 @@ jobs:
   eks-cdc-full-e2e-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     concurrency:
       group: ${{ github.workflow }}-eks-cdc-full-e2e-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -345,14 +361,15 @@ jobs:
   eks-cdc-aoss-e2e-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     concurrency:
       group: ${{ github.workflow }}-eks-cdc-aoss-e2e-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -369,14 +386,15 @@ jobs:
   eks-cdc-k6-load-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     concurrency:
       group: ${{ github.workflow }}-eks-cdc-k6-load-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -393,14 +411,15 @@ jobs:
   eks-cfn-create-vpc-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-cfn-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     concurrency:
       group: ${{ github.workflow }}-eks-cfn-create-vpc-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -417,14 +436,15 @@ jobs:
   eks-cfn-import-vpc-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-cfn-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     concurrency:
       group: ${{ github.workflow }}-eks-cfn-import-vpc-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
@@ -441,14 +461,15 @@ jobs:
   eks-full-e2e-isolated-vpc-test:
     if: |
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-isolated-tests')
+      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-isolated-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-isolated-tests'))
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     concurrency:
       group: ${{ github.workflow }}-eks-full-e2e-isolated-vpc-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Jenkins Job Trigger and Monitor
