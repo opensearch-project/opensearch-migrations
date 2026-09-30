@@ -29,8 +29,8 @@ from .cdc_base import (
 
 logger = logging.getLogger(__name__)
 
-# The existing ingest scenario writes the nyc_taxis schema to this index by default.
-K6_INDEX = "nyc_taxis"
+# The ingest scenario still uses the nyc_taxis schema; each test gets a fresh index name.
+K6_INDEX_PREFIX = "k6-nyc-taxis"
 K6_TESTERS = (
     ("pinned", {}),
     ("spread", {"CONNECTION_MODE": "spread"}),
@@ -102,7 +102,10 @@ class Test0080CdcK6LoadTest(MATestBase):
     K6_DURATION = "20s"
     K6_RUN_TIMEOUT_SECONDS = 300
     K6_DRAIN_TIMEOUT_SECONDS = 300
-    K6_WORKFLOW_PARAMETERS = {}
+    K6_WORKFLOW_PARAMETERS = {
+        "replayer-config-overrides": '{"numClientThreads":1}',
+    }
+    K6_PARAMETERS = {}
     # pinned, spread, no-reuse: (rate, runner pods, preallocated VUs, max VUs)
     K6_LOAD = (("8", 1, "2", "10"), ("1", 1, "1", "5"), ("1", 1, "1", "5"))
 
@@ -114,7 +117,7 @@ class Test0080CdcK6LoadTest(MATestBase):
                                  MigrationType.CAPTURE_AND_REPLAY],
             allow_source_target_combinations=CDC_SOURCE_TARGET_COMBINATIONS,
         )
-        self._uid = f"{self.unique_id}-{uuid.uuid4().hex[:4]}"
+        self._index_name = f"{K6_INDEX_PREFIX}-{uuid.uuid4().hex[:12]}"
         self._source_count = None
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
@@ -159,10 +162,11 @@ class Test0080CdcK6LoadTest(MATestBase):
                 })
             parameters = {
                 "CAPTURE_PROXY_URL": target_url,
-                "INDEX_NAME": K6_INDEX,
+                "INDEX_NAME": self._index_name,
                 "DURATION": self.K6_DURATION,
                 "authSecretName": secret_name,
                 "runs": json.dumps(runs, separators=(",", ":")),
+                **self.K6_PARAMETERS,
             }
             name = create_workflow(namespace, {
                 "apiVersion": "argoproj.io/v1alpha1",
@@ -236,12 +240,14 @@ class Test0080CdcK6LoadTest(MATestBase):
         self._run_k6(ns, PROXY_ENDPOINT, self.K6_LOAD)
 
         # Capture assertion: k6 wrote through the proxy to the source.
-        self.source_operations.refresh_index(K6_INDEX, self.source_cluster)
+        self.source_operations.refresh_index(self._index_name, self.source_cluster)
         details = self.source_operations.get_all_index_details(cluster=self.source_cluster)
-        self._source_count = int(details.get(K6_INDEX, {}).get("count", 0))
-        logger.info("Source %s doc count after k6: %d", K6_INDEX, self._source_count)
+        self._source_count = int(details.get(self._index_name, {}).get("count", 0))
+        logger.info("Source %s doc count after k6: %d", self._index_name, self._source_count)
         if self._source_count <= 0:
-            raise AssertionError(f"k6 wrote no docs to source index '{K6_INDEX}' via the proxy")
+            raise AssertionError(
+                f"k6 wrote no docs to source index '{self._index_name}' via the proxy"
+            )
 
         if not self.imported_clusters:
             logger.info("Waiting for workflow to reach pause-for-migration-verification suspend...")
@@ -251,37 +257,77 @@ class Test0080CdcK6LoadTest(MATestBase):
         pass
 
     def verify_clusters(self):
-        # Replay assertion: the k6-generated load was captured and replayed to the target.
-        # This suite gives every bulk item an explicit distributed ID. At-least-once redelivery
-        # therefore overwrites the same target document, so replay-only must reproduce the source
-        # count without requiring replay deduplication.
-        logger.info("Verifying %s replayed to target (expect %d)...", K6_INDEX, self._source_count)
-        try:
-            self.target_operations.check_doc_counts_match(
-                cluster=self.target_cluster,
-                expected_index_details={K6_INDEX: {"count": self._source_count}},
-                max_attempts=120, delay=10.0,
-            )
-        finally:
-            assert_replay_drained(
-                label="replay-end",
-                timeout_seconds=self.K6_DRAIN_TIMEOUT_SECONDS,
-            )
+        logger.info(
+            "Verifying %s replayed to target (expect %d)...",
+            self._index_name,
+            self._source_count,
+        )
+        assert_replay_drained(
+            label="replay-end",
+            timeout_seconds=self.K6_DRAIN_TIMEOUT_SECONDS,
+        )
+        self.target_operations.check_doc_counts_match(
+            cluster=self.target_cluster,
+            expected_index_details={self._index_name: {"count": self._source_count}},
+            max_attempts=120, delay=10.0,
+        )
 
 
-class Test0081CdcK6ScaleTest(Test0080CdcK6LoadTest):
-    """Costly CDC scale check using the same three-tester k6 path as Test0080."""
+class Test0081CdcK6StressTest(Test0080CdcK6LoadTest):
+    """Ten-minute 4-proxy/3-broker/8-partition/4-replayer Kafka recovery stress."""
 
-    K6_DURATION = "2m"
-    K6_RUN_TIMEOUT_SECONDS = 1_200
-    K6_DRAIN_TIMEOUT_SECONDS = 3_600
+    K6_DURATION = "10m"
+    K6_RUN_TIMEOUT_SECONDS = 2_400
+    K6_DRAIN_TIMEOUT_SECONDS = 1_800
     K6_WORKFLOW_PARAMETERS = {
-        "capture-proxy-pod-replicas": "10",
-        "traffic-topic-partitions": "20",
-        "replayer-pod-replicas": "10",
+        **Test0080CdcK6LoadTest.K6_WORKFLOW_PARAMETERS,
+        "capture-proxy-pod-replicas": "4",
+        "kafka-broker-replicas": "3",
+        "traffic-topic-partitions": "8",
+        "replayer-pod-replicas": "4",
+    }
+    K6_PARAMETERS = {
+        "RETRY_ENABLED": "true",
+        "RETRY_WINDOW_SECONDS": "300",
+        "GRACEFUL_STOP": "5m30s",
+        "HTTP_REQ_FAILED_THRESHOLD": "rate<1.01",
+        "INGEST_ERROR_THRESHOLD": "rate==0",
+        "DROPPED_ITERATIONS_THRESHOLD": "count>=0",
+        "podChurnEnabled": "true",
+        "podChurnTargets": "kafka",
+        "podChurnExpectedKafkaBrokers": "3",
     }
     K6_LOAD = (
-        ("400", 8, "400", "1200"),
-        ("100", 4, "120", "400"),
-        ("20", 2, "40", "120"),
+        ("8", 1, "20", "2400"),
+        ("1", 1, "5", "300"),
+        ("1", 1, "5", "300"),
+    )
+
+
+class Test0082CdcK6HighLoadStressTest(Test0081CdcK6StressTest):
+    """Two-hour 40.5K-request/s stress run using the proven large EKS rig."""
+
+    K6_DURATION = "2h"
+    K6_RUN_TIMEOUT_SECONDS = 14_400
+    K6_DRAIN_TIMEOUT_SECONDS = 7_200
+    K6_WORKFLOW_PARAMETERS = {
+        "capture-proxy-pod-replicas": "30",
+        "kafka-broker-replicas": "4",
+        "traffic-topic-partitions": "240",
+        "replayer-pod-replicas": "101",
+        "replayer-config-overrides": (
+            '{"maxConcurrentRequests":64,"numClientThreads":4}'
+        ),
+    }
+    K6_PARAMETERS = {
+        **Test0081CdcK6StressTest.K6_PARAMETERS,
+        "BULK_BATCH_SIZE": "4",
+        "podChurnExpectedKafkaBrokers": "4",
+        # Offered high-load arrivals are observational; accepted writes must still all succeed.
+        "DROPPED_ITERATIONS_THRESHOLD": "count>=0",
+    }
+    K6_LOAD = (
+        ("31154", 64, "16384", "32768"),
+        ("7788", 32, "6144", "12288"),
+        ("1558", 16, "2048", "4096"),
     )

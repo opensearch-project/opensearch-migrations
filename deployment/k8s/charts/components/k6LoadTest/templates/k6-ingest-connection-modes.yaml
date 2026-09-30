@@ -23,6 +23,38 @@ spec:
         value: 20s
       - name: authSecretName
         value: {{ .Values.authSecretName | quote }}
+      - name: BULK_BATCH_SIZE
+        value: "10"
+      - name: RETRY_ENABLED
+        value: "false"
+      - name: RETRY_WINDOW_SECONDS
+        value: "300"
+      - name: RETRY_ATTEMPT_TIMEOUT_SECONDS
+        value: "10"
+      - name: RETRY_BACKOFF_SECONDS
+        value: "1"
+      - name: GRACEFUL_STOP
+        value: "30s"
+      - name: HTTP_REQ_FAILED_THRESHOLD
+        value: "rate<0.05"
+      - name: INGEST_ERROR_THRESHOLD
+        value: "rate<0.05"
+      - name: DROPPED_ITERATIONS_THRESHOLD
+        value: "count>=0"
+      - name: podChurnEnabled
+        value: "false"
+      - name: podChurnTargets
+        value: ""
+      - name: podChurnExpectedKafkaBrokers
+        value: "3"
+      - name: podChurnStartupTimeoutSeconds
+        value: "600"
+      - name: podChurnRecoveryTimeoutSeconds
+        value: "600"
+      - name: podChurnIntervalSeconds
+        value: "5"
+      - name: podChurnStableSamples
+        value: "3"
       - name: runs
   templates:
     - name: suite
@@ -50,6 +82,10 @@ spec:
                   value: "{{`{{item.connectionMode}}`}}"
                 - name: noConnectionReuse
                   value: "{{`{{item.noConnectionReuse}}`}}"
+          - name: pod-churn
+            depends: prepare-index.Succeeded
+            when: "{{`{{workflow.parameters.podChurnEnabled}}`}} == true"
+            template: pod-churn
 
     - name: prepare-index
       container:
@@ -66,6 +102,44 @@ spec:
             value: "{{`{{workflow.parameters.CAPTURE_PROXY_URL}}`}}"
           - name: INDEX_NAME
             value: "{{`{{workflow.parameters.INDEX_NAME}}`}}"
+
+    - name: pod-churn
+      inputs:
+        parameters:
+          - name: imageMigrationConsoleLocation
+            valueFrom:
+              configMapKeyRef:
+                name: migration-image-config
+                key: migrationConsoleImage
+          - name: imageMigrationConsolePullPolicy
+            valueFrom:
+              configMapKeyRef:
+                name: migration-image-config
+                key: migrationConsolePullPolicy
+      activeDeadlineSeconds: {{ .Values.workflow.activeDeadlineSeconds | int }}
+      container:
+        image: "{{`{{inputs.parameters.imageMigrationConsoleLocation}}`}}"
+        imagePullPolicy: "{{`{{inputs.parameters.imageMigrationConsolePullPolicy}}`}}"
+        command: [python, -m, console_link.loadtest.pod_churn]
+        args:
+          - --namespace
+          - "{{`{{workflow.namespace}}`}}"
+          - --suite-name
+          - "{{`{{workflow.name}}`}}"
+          - --runs
+          - "{{`{{workflow.parameters.runs}}`}}"
+          - --targets
+          - "{{`{{workflow.parameters.podChurnTargets}}`}}"
+          - --expected-kafka-brokers
+          - "{{`{{workflow.parameters.podChurnExpectedKafkaBrokers}}`}}"
+          - --startup-timeout-seconds
+          - "{{`{{workflow.parameters.podChurnStartupTimeoutSeconds}}`}}"
+          - --recovery-timeout-seconds
+          - "{{`{{workflow.parameters.podChurnRecoveryTimeoutSeconds}}`}}"
+          - --interval-seconds
+          - "{{`{{workflow.parameters.podChurnIntervalSeconds}}`}}"
+          - --stable-samples
+          - "{{`{{workflow.parameters.podChurnStableSamples}}`}}"
 
     - name: run-tester
       inputs:
@@ -118,15 +192,29 @@ spec:
                 - name: INGEST_MAX_VUS
                   value: "{{`{{inputs.parameters.maxVus}}`}}"
                 - name: BULK_BATCH_SIZE
-                  value: "10"
-                - name: BULK_EXPLICIT_IDS
-                  value: "true"
-                - name: BULK_ID_PREFIX
-                  value: "{{`{{inputs.parameters.name}}`}}"
+                  value: "{{`{{workflow.parameters.BULK_BATCH_SIZE}}`}}"
+                - name: DOCUMENT_ID_PREFIX
+                  value: "{{`{{workflow.name}}`}}-{{`{{inputs.parameters.name}}`}}"
                 - name: BULK_FRACTION
                   value: "1"
                 - name: SEQUENCE_FRACTION
                   value: "0"
+                - name: RETRY_ENABLED
+                  value: "{{`{{workflow.parameters.RETRY_ENABLED}}`}}"
+                - name: RETRY_WINDOW_SECONDS
+                  value: "{{`{{workflow.parameters.RETRY_WINDOW_SECONDS}}`}}"
+                - name: RETRY_ATTEMPT_TIMEOUT_SECONDS
+                  value: "{{`{{workflow.parameters.RETRY_ATTEMPT_TIMEOUT_SECONDS}}`}}"
+                - name: RETRY_BACKOFF_SECONDS
+                  value: "{{`{{workflow.parameters.RETRY_BACKOFF_SECONDS}}`}}"
+                - name: GRACEFUL_STOP
+                  value: "{{`{{workflow.parameters.GRACEFUL_STOP}}`}}"
+                - name: HTTP_REQ_FAILED_THRESHOLD
+                  value: "{{`{{workflow.parameters.HTTP_REQ_FAILED_THRESHOLD}}`}}"
+                - name: INGEST_ERROR_THRESHOLD
+                  value: "{{`{{workflow.parameters.INGEST_ERROR_THRESHOLD}}`}}"
+                - name: DROPPED_ITERATIONS_THRESHOLD
+                  value: "{{`{{workflow.parameters.DROPPED_ITERATIONS_THRESHOLD}}`}}"
                 - name: CONNECTION_MODE
                   value: "{{`{{inputs.parameters.connectionMode}}`}}"
                 - name: NO_CONNECTION_REUSE

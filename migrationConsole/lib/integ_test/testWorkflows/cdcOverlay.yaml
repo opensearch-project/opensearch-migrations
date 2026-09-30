@@ -41,6 +41,8 @@ spec:
             default: "LoadBalancer"
           - name: captureProxyPodReplicas
             default: "1"
+          - name: kafkaBrokerReplicas
+            default: "3"
           - name: trafficTopicPartitions
             default: "2"
           - name: replayerPodReplicas
@@ -75,12 +77,16 @@ spec:
               --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
               --arg clientAuthPem "$CLIENT_AUTH_PEM" \
               --argjson captureProxyPodReplicas '{{inputs.parameters.captureProxyPodReplicas}}' \
+              --argjson kafkaBrokerReplicas '{{inputs.parameters.kafkaBrokerReplicas}}' \
               --argjson trafficTopicPartitions '{{inputs.parameters.trafficTopicPartitions}}' \
               --argjson replayerPodReplicas '{{inputs.parameters.replayerPodReplicas}}' \
               '. + {
               "kafkaClusterConfiguration": {
                 "default": {
                   "autoCreate": {
+                    "nodePoolSpecOverrides": {
+                      "replicas": $kafkaBrokerReplicas
+                    },
                     "topicSpecOverrides": {
                       "partitions": $trafficTopicPartitions
                     }
@@ -157,6 +163,8 @@ spec:
             default: "LoadBalancer"
           - name: captureProxyPodReplicas
             default: "1"
+          - name: kafkaBrokerReplicas
+            default: "3"
           - name: trafficTopicPartitions
             default: "2"
           - name: otelTraceCollectorEndpoint
@@ -178,6 +186,7 @@ spec:
               --arg otelTraceCollectorEndpoint "$OTEL_TRACE_COLLECTOR_ENDPOINT" \
               --arg clientAuthPem "$CLIENT_AUTH_PEM" \
               --argjson captureProxyPodReplicas '{{inputs.parameters.captureProxyPodReplicas}}' \
+              --argjson kafkaBrokerReplicas '{{inputs.parameters.kafkaBrokerReplicas}}' \
               --argjson trafficTopicPartitions '{{inputs.parameters.trafficTopicPartitions}}' \
               '
               .sourceClusters |= with_entries(.value |= del(.snapshotInfo))
@@ -186,6 +195,9 @@ spec:
                 "kafkaClusterConfiguration": {
                   "default": {
                     "autoCreate": {
+                      "nodePoolSpecOverrides": {
+                        "replicas": $kafkaBrokerReplicas
+                      },
                       "topicSpecOverrides": {
                         "partitions": $trafficTopicPartitions
                       }

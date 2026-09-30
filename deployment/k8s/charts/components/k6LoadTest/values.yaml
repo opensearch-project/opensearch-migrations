@@ -106,10 +106,17 @@ scenarios:
       INGEST_MAX_VUS: "100"
       EXECUTOR: constant-arrival-rate    # decides the timing knob: DURATION, or a stage list
       BULK_BATCH_SIZE: "20"              # documents per _bulk call
-      BULK_EXPLICIT_IDS: "false"         # replay-stable IDs for at-least-once CDC verification
-      BULK_ID_PREFIX: bulk               # namespace for explicit bulk IDs from one test run
+      DOCUMENT_ID_PREFIX: k6             # suite overrides this with a unique per-tester prefix
       BULK_FRACTION: "0.70"              # share of iterations that send _bulk
       SEQUENCE_FRACTION: "0.15"          # share that run create→update→query→delete
+      RETRY_ENABLED: "false"             # retry transient writes with stable IDs
+      RETRY_WINDOW_SECONDS: "300"
+      RETRY_ATTEMPT_TIMEOUT_SECONDS: "10"
+      RETRY_BACKOFF_SECONDS: "1"
+      GRACEFUL_STOP: 30s                 # lets in-flight iterations finish after arrivals stop
+      HTTP_REQ_FAILED_THRESHOLD: rate<0.05
+      INGEST_ERROR_THRESHOLD: rate<0.05
+      DROPPED_ITERATIONS_THRESHOLD: count>=0
       CONNECTION_MODE: pinned            # pinned (keep-alive) | spread (Connection: close)
       NO_CONNECTION_REUSE: "false"
       CONTROL_ENABLED: "false"           # chaos control bus (needs registry.enabled=true)
@@ -305,4 +312,4 @@ workflow:
   # Upper bound on a single run, counted from TestRun creation. It only fires when the run never
   # reaches a terminal stage — for example runner pods stuck on an image pull — so keep it well above
   # the longest load test you expect.
-  activeDeadlineSeconds: 10800
+  activeDeadlineSeconds: 14400

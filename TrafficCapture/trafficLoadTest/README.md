@@ -667,6 +667,15 @@ value — read the profile, not this table, for what a specific run will do.
 | `BULK_FRACTION` | `0.70` | share of non-sequence iterations sent as `_bulk` |
 | `CONNECTION_MODE` | `pinned` | `pinned` = keep-alive; `spread` = `Connection: close` per request |
 | `NO_CONNECTION_REUSE` | `false` | `true` forces a new TCP connection per request client-side |
+| `DOCUMENT_ID_PREFIX` | `k6` | prefix for stable IDs used by retried writes |
+| `RETRY_ENABLED` | `false` | retry transient writes using the same request body and IDs |
+| `RETRY_WINDOW_SECONDS` | `300` | maximum retry time for one logical request |
+| `RETRY_ATTEMPT_TIMEOUT_SECONDS` | `10` | timeout for each retry-enabled HTTP attempt |
+| `RETRY_BACKOFF_SECONDS` | `1` | delay between retry attempts |
+| `GRACEFUL_STOP` | `30s` | time allowed for in-flight iterations to finish |
+| `HTTP_REQ_FAILED_THRESHOLD` | `rate<0.05` | threshold for raw HTTP attempt failures |
+| `INGEST_ERROR_THRESHOLD` | `rate<0.05` | threshold for final logical write failures |
+| `DROPPED_ITERATIONS_THRESHOLD` | `count>=0` | threshold for arrivals k6 could not start |
 
 ### Search
 
@@ -751,10 +760,13 @@ helm uninstall k6-load-test -n ma        # removes operator + WorkflowTemplates 
 
 ## Integration test
 
-`Test0080CdcK6LoadTest` (`migrationConsole/lib/integ_test/.../test_cases/k6_load_test_tests.py`)
-layers a short k6 run on a live CDC migration and asserts the traffic is captured and replayed to
-the target **under load**. It's explicit-selection only, and IDs `0080-0089` are the reserved
-load-test range.
+The explicit-selection integration cases in
+`migrationConsole/lib/integ_test/.../test_cases/k6_load_test_tests.py` share one path:
+`Test0080CdcK6LoadTest` is the short litmus test, `Test0081CdcK6StressTest` adds low-rate Kafka
+broker churn with five-minute client retries, and `Test0082CdcK6HighLoadStressTest` runs the same
+stress behavior for two hours at 40.5K offered requests/s on the 112-runner large rig. The Argo
+suite owns broker deletion and full-ISR recovery; pytest only selects the parameters and checks the
+terminal results. IDs `0080-0089` are reserved for load tests.
 
 The **only** command that installs the chart for you is the test-automation runner
 (`libraries/testAutomation`) — it runs `helm upgrade --install k6-load-test` once the migration stack

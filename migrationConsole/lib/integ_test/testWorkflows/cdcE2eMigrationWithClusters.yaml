@@ -71,6 +71,8 @@ spec:
         value: "LoadBalancer"
       - name: capture-proxy-pod-replicas
         value: "1"
+      - name: kafka-broker-replicas
+        value: "3"
       - name: traffic-topic-partitions
         value: "2"
       - name: replayer-pod-replicas
@@ -214,6 +216,8 @@ spec:
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
                 - name: captureProxyPodReplicas
                   value: "{{workflow.parameters.capture-proxy-pod-replicas}}"
+                - name: kafkaBrokerReplicas
+                  value: "{{workflow.parameters.kafka-broker-replicas}}"
                 - name: trafficTopicPartitions
                   value: "{{workflow.parameters.traffic-topic-partitions}}"
                 - name: otelTraceCollectorEndpoint
@@ -278,6 +282,8 @@ spec:
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
                 - name: captureProxyPodReplicas
                   value: "{{workflow.parameters.capture-proxy-pod-replicas}}"
+                - name: kafkaBrokerReplicas
+                  value: "{{workflow.parameters.kafka-broker-replicas}}"
                 - name: trafficTopicPartitions
                   value: "{{workflow.parameters.traffic-topic-partitions}}"
                 - name: replayerPodReplicas

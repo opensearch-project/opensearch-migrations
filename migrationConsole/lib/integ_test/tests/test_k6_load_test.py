@@ -14,7 +14,7 @@ from integ_test.test_cases import k6_load_test_tests as k6_test
 _REPO = Path(__file__).resolve().parents[4]
 
 
-def test_k6_scale_test_submits_one_suite_and_checks_three_verdicts(monkeypatch):
+def test_k6_test_submits_one_suite_and_checks_three_verdicts(monkeypatch):
     from console_link.loadtest import health, runs, utils
     from console_link.loadtest import testrun_utils
 
@@ -32,14 +32,12 @@ def test_k6_scale_test_submits_one_suite_and_checks_three_verdicts(monkeypatch):
     monkeypatch.setattr(runs, "wait_for_run", wait)
     monkeypatch.setattr(health, "HealthWatcher", watcher)
 
-    case = SimpleNamespace(
-        source_cluster=Cluster({"endpoint": "http://source:9200", "no_auth": None}),
-        K6_DURATION=k6_test.Test0081CdcK6ScaleTest.K6_DURATION,
-        K6_RUN_TIMEOUT_SECONDS=k6_test.Test0081CdcK6ScaleTest.K6_RUN_TIMEOUT_SECONDS,
-    )
+    case = object.__new__(k6_test.Test0080CdcK6LoadTest)
+    case.source_cluster = Cluster({"endpoint": "http://source:9200", "no_auth": None})
+    case._index_name = "nyc_taxis"
 
-    k6_test.Test0081CdcK6ScaleTest._run_k6(
-        case, "ma", "https://capture-proxy:9201", k6_test.Test0081CdcK6ScaleTest.K6_LOAD
+    case._run_k6(
+        "ma", "https://capture-proxy:9201", k6_test.Test0080CdcK6LoadTest.K6_LOAD
     )
 
     create.assert_called_once()
@@ -54,6 +52,7 @@ def test_k6_scale_test_submits_one_suite_and_checks_three_verdicts(monkeypatch):
         item["name"]: item["value"] for item in body["spec"]["arguments"]["parameters"]
     }
     assert parameters["INDEX_NAME"] == "nyc_taxis"
+    assert "RETRY_ENABLED" not in parameters
     suite_runs = json.loads(parameters["runs"])
     assert suite_runs[2]["connectionMode"] == "spread"
     assert suite_runs[2]["noConnectionReuse"] == "true"
@@ -80,8 +79,10 @@ def test_k6_scale_test_rejects_an_unknown_tester_verdict(monkeypatch):
     ))
     case = SimpleNamespace(
         source_cluster=Cluster({"endpoint": "http://source:9200", "no_auth": None}),
+        _index_name="nyc_taxis",
         K6_DURATION="20s",
         K6_RUN_TIMEOUT_SECONDS=300,
+        K6_PARAMETERS={},
     )
 
     with pytest.raises(AssertionError, match="failed its request checks"):
@@ -99,6 +100,45 @@ def _named_values(node, name):
     elif isinstance(node, list):
         for value in node:
             yield from _named_values(value, name)
+
+
+@pytest.mark.parametrize(("case", "brokers"), (
+    (k6_test.Test0081CdcK6StressTest, "3"),
+    (k6_test.Test0082CdcK6HighLoadStressTest, "4"),
+))
+def test_stress_tests_enable_workflow_owned_kafka_churn(case, brokers):
+    assert case.K6_PARAMETERS["podChurnEnabled"] == "true"
+    assert case.K6_PARAMETERS["podChurnTargets"] == "kafka"
+    assert case.K6_PARAMETERS["podChurnExpectedKafkaBrokers"] == brokers
+
+
+def test_high_load_stress_uses_the_40k_two_hour_rig():
+    case = k6_test.Test0082CdcK6HighLoadStressTest
+
+    assert case.K6_DURATION == "2h"
+    assert case.K6_RUN_TIMEOUT_SECONDS == 14_400
+    assert case.K6_PARAMETERS["BULK_BATCH_SIZE"] == "4"
+    assert sum(int(rate) for rate, *_ in case.K6_LOAD) == 40_500
+    assert sum(parallelism for _, parallelism, *_ in case.K6_LOAD) == 112
+    assert case.K6_WORKFLOW_PARAMETERS == {
+        "capture-proxy-pod-replicas": "30",
+        "kafka-broker-replicas": "4",
+        "traffic-topic-partitions": "240",
+        "replayer-pod-replicas": "101",
+        "replayer-config-overrides": (
+            '{"maxConcurrentRequests":64,"numClientThreads":4}'
+        ),
+    }
+
+
+def test_small_k6_rigs_use_one_replayer_client_thread():
+    for case in (
+        k6_test.Test0080CdcK6LoadTest,
+        k6_test.Test0081CdcK6StressTest,
+    ):
+        assert case.K6_WORKFLOW_PARAMETERS["replayer-config-overrides"] == (
+            '{"numClientThreads":1}'
+        )
 
 
 @pytest.mark.parametrize("workflow_name", (
@@ -122,6 +162,7 @@ def test_k6_topology_parameters_reach_the_existing_cdc_overlay(workflow_name):
     ).read_text())
     for workflow_parameter, overlay_parameter in (
         ("capture-proxy-pod-replicas", "captureProxyPodReplicas"),
+        ("kafka-broker-replicas", "kafkaBrokerReplicas"),
         ("traffic-topic-partitions", "trafficTopicPartitions"),
         ("replayer-pod-replicas", "replayerPodReplicas"),
     ):
@@ -141,13 +182,17 @@ def test_k6_topology_parameters_reach_the_existing_cdc_overlay(workflow_name):
     assert overlay_defaults["replayerPodReplicas"] == "1"
 
 
-def test_k6_scale_topology_is_an_explicit_override():
-    assert k6_test.Test0080CdcK6LoadTest.K6_WORKFLOW_PARAMETERS == {}
-    topology = k6_test.Test0081CdcK6ScaleTest.K6_WORKFLOW_PARAMETERS
+def test_k6_stress_topology_is_an_explicit_override():
+    assert k6_test.Test0080CdcK6LoadTest.K6_WORKFLOW_PARAMETERS == {
+        "replayer-config-overrides": '{"numClientThreads":1}',
+    }
+    topology = k6_test.Test0081CdcK6StressTest.K6_WORKFLOW_PARAMETERS
     assert topology == {
-        "capture-proxy-pod-replicas": "10",
-        "traffic-topic-partitions": "20",
-        "replayer-pod-replicas": "10",
+        "replayer-config-overrides": '{"numClientThreads":1}',
+        "capture-proxy-pod-replicas": "4",
+        "kafka-broker-replicas": "3",
+        "traffic-topic-partitions": "8",
+        "replayer-pod-replicas": "4",
     }
     assert int(topology["traffic-topic-partitions"]) >= (
         int(topology["capture-proxy-pod-replicas"]) + 1
