@@ -18,12 +18,11 @@ plugins {
     id 'jacoco' apply true
 }
 
-allprojects {
-    repositories {
-        mavenCentral()
-    }
-}
+apply from: 'gradle/repositories.gradle'
 
+allprojects {
+    rootProject.ext.configureMavenRepositories(repositories, false)
+}
 
 // Define version properties
 ext {

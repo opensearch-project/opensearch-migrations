@@ -4,6 +4,9 @@
 
 This directory contains Jenkins pipeline "cover" files that serve as entry points for migration integration tests. These files are thin wrappers that load shared library functions from the `vars/` directory.
 
+Source build stages use a shared Maven/Gradle dependency cache. See
+[provisioning, configuration, validation, and rollback](../DEPENDENCY_CACHE.md).
+
 ## Job Name Override Pattern
 
 ### Purpose
