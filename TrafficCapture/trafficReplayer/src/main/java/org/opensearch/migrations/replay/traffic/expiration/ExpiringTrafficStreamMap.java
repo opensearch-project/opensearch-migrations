@@ -180,6 +180,7 @@ public class ExpiringTrafficStreamMap {
     }
 
     public void expireOldEntries(ITrafficStreamKey trafficStreamKey, Accumulation accumulation, Instant timestamp) {
+        accumulation.touchWallClock();
         if (!updateExpirationTrackers(trafficStreamKey, new EpochMillis(timestamp), accumulation, 0)) {
             connectionAccumulationMap.remove(makeKey(trafficStreamKey));
         }
@@ -200,6 +201,50 @@ public class ExpiringTrafficStreamMap {
 
     public Stream<Accumulation> values() {
         return connectionAccumulationMap.values().stream();
+    }
+
+    /**
+     * Sweep connections that haven't received any new data for longer than the guaranteed
+     * lifetime, measured in wall-clock time. This breaks the deadlock where the main thread
+     * is blocked in the backpressure gate because no responses complete — expiring stale
+     * connections triggers commits which release the read gate.
+     *
+     * Unlike the event-driven expiry (which uses source-time), this uses real elapsed time
+     * so it correctly identifies connections that are stale due to replay lag.
+     *
+     * Thread safety: when this fires during the deadlock, the main thread is blocked in
+     * blockIfNeeded (not in accept()), so there is no concurrent Accumulation mutation.
+     * The ConcurrentHashMap.remove() is atomic; if the main thread resumes and calls
+     * getOrCreateWithoutExpiration for an expired key, it simply creates a fresh Accumulation.
+     *
+     * @return the number of connections expired by this sweep
+     */
+    public int expireByWallClock() {
+        var nowMs = System.currentTimeMillis();
+        var wallClockThresholdMs = minimumGuaranteedLifetime.toMillis();
+        int expiredCount = 0;
+        for (var accum : connectionAccumulationMap.values()) {
+            var lastUpdateMs = accum.getLastWallClockUpdateMillis();
+            if (nowMs - lastUpdateMs > wallClockThresholdMs) {
+                var key = new ScopedConnectionIdKey(
+                    accum.trafficChannelKey.getNodeId(),
+                    accum.trafficChannelKey.getConnectionId()
+                );
+                var removed = connectionAccumulationMap.remove(key);
+                if (removed != null) {
+                    try {
+                        removed.expire();
+                        behavioralPolicy.onExpireAccumulation(key.nodeId, removed);
+                    } catch (Exception e) {
+                        log.atError().setCause(e)
+                            .setMessage("Wall-clock expiry callback failed for connection {}")
+                            .addArgument(key).log();
+                    }
+                    expiredCount++;
+                }
+            }
+        }
+        return expiredCount;
     }
 
     public void clear() {

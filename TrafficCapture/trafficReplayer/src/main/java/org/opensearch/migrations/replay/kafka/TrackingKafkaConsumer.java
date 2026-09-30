@@ -227,7 +227,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             newPartitions.forEach(
                 p -> partitionToOffsetLifecycleTrackerMap.computeIfAbsent(
                     p.partition(),
-                    x -> new OffsetLifecycleTracker(consumerConnectionGeneration.get())
+                    x -> new OffsetLifecycleTracker(consumerConnectionGeneration.get(), clock)
                 )
             );
             log.atInfo()
@@ -249,7 +249,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public Optional<Instant> getNextRequiredTouch() {
         var lastTouchTime = lastTouchTimeRef.get();
         Optional<Instant> r;
-        if (kafkaRecordsLeftToCommitEventually.get() == 0) {
+        boolean hasPartitions;
+        synchronized (commitDataLock) {
+            hasPartitions = !partitionToOffsetLifecycleTrackerMap.isEmpty();
+        }
+        if (!hasPartitions && kafkaRecordsLeftToCommitEventually.get() == 0) {
             r = Optional.empty();
         }
         else {
@@ -265,6 +269,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
         try (var touchCtx = context.createNewTouchContext()) {
             log.trace("touch() called.");
+            reapStaleHeads();
             pause();
             try (var pollCtx = touchCtx.createNewPollContext()) {
                 var records = kafkaConsumer.poll(Duration.ZERO);
@@ -289,6 +294,37 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             safeCommit(context::createCommitContext);
             lastTouchTimeRef.set(clock.instant());
         }
+    }
+
+    /**
+     * Lightweight keepalive: reap stale heads, pause, poll(ZERO), resume, commit.
+     * Resets the broker's max.poll.interval.ms timer without requiring a tracing context.
+     * Called from the background keepalive scheduler on kafkaExecutor when the main read
+     * loop is blocked in batch processing. Since touch(), keepAlive(), and
+     * getNextBatchOfRecords all run on the single-threaded kafkaExecutor, no additional
+     * synchronization is needed.
+     */
+    public void keepAlive() {
+        log.atDebug().setMessage("keepAlive() — background poll to prevent max.poll.interval.ms expiry").log();
+        reapStaleHeads();
+        pause();
+        try {
+            var records = kafkaConsumer.poll(Duration.ZERO);
+            if (!records.isEmpty()) {
+                log.atWarn().setMessage("keepAlive poll returned {} records while paused — unexpected")
+                    .addArgument(records.count()).log();
+            }
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e)
+                .setMessage("keepAlive poll failed for topic: {} consumer: {}")
+                .addArgument(topic).addArgument(this).log();
+        } finally {
+            resume();
+        }
+        safeCommit(globalContext::createCommitContext);
+        lastTouchTimeRef.set(clock.instant());
     }
 
     private void pause() {
@@ -340,14 +376,42 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             .collect(Collectors.toList());
     }
 
+    private static final Duration STALE_HEAD_THRESHOLD = Duration.ofMinutes(3);
+
     public <T> Stream<T> getNextBatchOfRecords(
         ITrafficSourceContexts.IReadChunkContext context,
         BiFunction<KafkaCommitOffsetData, ConsumerRecord<String, byte[]>, T> builder
     ) {
+        reapStaleHeads();
         safeCommit(context::createCommitContext);
         var records = safePollWithSwallowedRuntimeExceptions(context);
         safeCommit(context::createCommitContext);
         return applyBuilder(builder, records);
+    }
+
+    void reapStaleHeads() {
+        try {
+            synchronized (commitDataLock) {
+                for (var entry : partitionToOffsetLifecycleTrackerMap.entrySet()) {
+                    var partition = entry.getKey();
+                    var tracker = entry.getValue();
+                    var newHead = tracker.reapStaleHead(STALE_HEAD_THRESHOLD);
+                    newHead.ifPresent(offset -> {
+                        var tp = new TopicPartition(topic, partition);
+                        var v = new OffsetAndMetadata(offset);
+                        log.atWarn().setMessage("Stale head reaped for partition {}, advancing commit to {}")
+                            .addArgument(partition).addArgument(offset).log();
+                        nextSetOfCommitsMap.merge(tp, v, (existing, incoming) ->
+                            existing.offset() >= incoming.offset() ? existing : incoming);
+                        kafkaRecordsReadyToCommit.set(true);
+                    });
+                }
+            }
+        } catch (RuntimeException e) {
+            log.atError().setCause(e)
+                .setMessage("Stale head reaping failed — if persistent, stale offsets will block commit advancement")
+                .log();
+        }
     }
 
     private <T> Stream<T> applyBuilder(
@@ -505,7 +569,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             log.atDebug().setMessage("Adding new commit {}->{} to map").addArgument(k).addArgument(v).log();
             synchronized (commitDataLock) {
                 addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
-                nextSetOfCommitsMap.put(k, v);
+                nextSetOfCommitsMap.merge(k, v, (existing, incoming) ->
+                    existing.offset() >= incoming.offset() ? existing : incoming);
             }
             kafkaRecordsReadyToCommit.set(true);
             return ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ;
@@ -599,6 +664,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         PriorityQueue<OrderedKeyHolder> orderedKeyHolders,
         long upToOffset
     ) {
+        if (orderedKeyHolders == null) {
+            return;
+        }
         for (var nextKeyHolder = orderedKeyHolders.peek(); nextKeyHolder != null
             && nextKeyHolder.offset <= upToOffset; nextKeyHolder = orderedKeyHolders.peek()) {
             onCommitKeyCallback.accept(nextKeyHolder.tsk);

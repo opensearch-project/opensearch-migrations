@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.kafka;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -69,14 +70,15 @@ class OffsetLifecycleTracker {
         synchronized (pQueue) {
             var topCursor = pQueue.peek();
             if (topCursor == null) {
-                throw new IllegalStateException(
-                    "pQueue looks to have been empty by the time we tried to remove " + offsetToRemove
-                );
+                log.atWarn().setMessage("Offset {} already reaped (queue empty)")
+                    .addArgument(offsetToRemove).log();
+                return Optional.empty();
             }
             var didRemove = pQueue.remove(offsetToRemove);
             if (!didRemove) {
-                throw new IllegalStateException(
-                    "Expected all live records to have an entry and for them to be removed only once");
+                log.atWarn().setMessage("Offset {} not found in queue (size={}, head={}), likely reaped by watchdog")
+                    .addArgument(offsetToRemove).addArgument(pQueue.size()).addArgument(topCursor).log();
+                return Optional.empty();
             }
             offsetMetadataMap.remove(offsetToRemove);
 
@@ -95,6 +97,51 @@ class OffsetLifecycleTracker {
                     .log();
                 return Optional.empty();
             }
+        }
+    }
+
+    /**
+     * Force-remove offsets stuck at the head of the queue for longer than the given threshold.
+     * This breaks head-of-line blocking when stale connections pin the commit pointer.
+     * Returns the new commit offset if the head was reaped (enabling a Kafka commit),
+     * or empty if nothing was reaped.
+     */
+    Optional<Long> reapStaleHead(Duration staleThreshold) {
+        synchronized (pQueue) {
+            int reaped = 0;
+            for (var head = pQueue.peek(); head != null; head = pQueue.peek()) {
+                var meta = offsetMetadataMap.get(head);
+                if (meta == null) {
+                    log.atError().setMessage("Offset {} in queue has no metadata — data structure inconsistency, removing orphan")
+                        .addArgument(head).log();
+                    pQueue.poll();
+                    reaped++;
+                } else {
+                    var age = Duration.between(meta.addedAt, clock.instant());
+                    if (age.compareTo(staleThreshold) <= 0) {
+                        break;
+                    }
+                    if (reaped == 0) {
+                        log.atWarn().setMessage("Reaping stale head offset {} (conn={}, age={}) to unblock commits")
+                            .addArgument(head)
+                            .addArgument(meta.connectionId)
+                            .addArgument(age)
+                            .log();
+                    }
+                    pQueue.poll();
+                    offsetMetadataMap.remove(head);
+                    reaped++;
+                }
+            }
+            if (reaped == 0) {
+                return Optional.empty();
+            }
+            if (reaped > 1) {
+                log.atWarn().setMessage("Reaped {} total stale offsets in this sweep")
+                    .addArgument(reaped).log();
+            }
+            var newHead = Optional.ofNullable(pQueue.peek()).orElse(cursorHighWatermark + 1);
+            return Optional.of(newHead);
         }
     }
 
