@@ -6,10 +6,9 @@
 package org.opensearch.knn.index.codec.KNN80Codec;
 
 import java.io.IOException;
+import java.util.Arrays;
 
-import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdDecompressCtx;
-import com.github.luben.zstd.ZstdDictDecompress;
 import org.apache.lucene.codecs.compressing.CompressionMode;
 import org.apache.lucene.codecs.compressing.Compressor;
 import org.apache.lucene.codecs.compressing.Decompressor;
@@ -48,11 +47,18 @@ public class ZstdCompressionMode extends CompressionMode {
         private void doDecompress(DataInput in, ZstdDecompressCtx dctx, BytesRef bytes, int decompressedLen) throws IOException {
             final int compressedLength = readCompressedBlock(in);
             if (compressedLength == 0) {
+                if (decompressedLen != 0) {
+                    throw new IllegalStateException("Empty Zstd block: expected " + decompressedLen + " decoded bytes");
+                }
                 return;
             }
 
             bytes.bytes = ArrayUtil.grow(bytes.bytes, bytes.length + decompressedLen);
             int uncompressed = dctx.decompressByteArray(bytes.bytes, bytes.length, decompressedLen, compressedBuffer, 0, compressedLength);
+            if (uncompressed != decompressedLen) {
+                throw new IllegalStateException(
+                    "Zstd block length mismatch: expected " + decompressedLen + " decoded bytes, got " + uncompressed);
+            }
             bytes.length += uncompressed;
         }
 
@@ -68,16 +74,13 @@ public class ZstdCompressionMode extends CompressionMode {
             bytes.bytes = ArrayUtil.growNoCopy(bytes.bytes, dictLength);
             bytes.offset = bytes.length = 0;
 
-            // Decode the dictionary before creating the context that will retain it.
-            final int compressedDictLength = readCompressedBlock(in);
-            if (compressedDictLength > 0) {
-                bytes.length = (int) Zstd.decompressByteArray(bytes.bytes, 0, dictLength, compressedBuffer, 0, compressedDictLength);
-            }
-
-            // Resources close in reverse order: release the context's reference before closing the dictionary.
-            try (ZstdDictDecompress dictDecompress = new ZstdDictDecompress(bytes.bytes, 0, dictLength);
-                 ZstdDecompressCtx dctx = new ZstdDecompressCtx()) {
-                dctx.loadDict(dictDecompress);
+            try (ZstdDecompressCtx dctx = new ZstdDecompressCtx()) {
+                doDecompress(in, dctx, bytes, dictLength);
+                if (dictLength > 0) {
+                    // The byte-array API copies the dictionary into the context, which owns its cleanup.
+                    // bytes.bytes may have spare capacity; only the exact dictionary prefix is valid.
+                    dctx.loadDict(Arrays.copyOf(bytes.bytes, dictLength));
+                }
 
                 int offsetInBlock = dictLength;
                 int offsetInBytesRef = offset;
