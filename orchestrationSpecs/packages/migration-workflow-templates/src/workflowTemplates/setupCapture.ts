@@ -178,20 +178,8 @@ function makeProxyParamsDict(
     const effectiveKafkaSecretName = expr.getLoose(kafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(kafkaConfig, "kafkaUserName");
     const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
-    const processConfig = expr.omit(
-        expr.get(config, "proxyConfig"),
-        ...ARGO_PROXY_WORKFLOW_OPTION_KEYS
-    );
-    const processConfigWithMetricsOptOut = expr.ternary(
-        expr.equals(
-            expr.dig(processConfig, ["otelMetricsCollectorEndpoint"], expr.literal("")),
-            expr.literal("")
-        ),
-        expr.omit(processConfig, "otelMetricsCollectorEndpoint"),
-        processConfig
-    );
     return expr.mergeDicts(
-        processConfigWithMetricsOptOut,
+        expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
         expr.mergeDicts(
             expr.ternary(expr.dig(config, ["proxyConfig", "noCapture"], false),
                 expr.makeDict({}),

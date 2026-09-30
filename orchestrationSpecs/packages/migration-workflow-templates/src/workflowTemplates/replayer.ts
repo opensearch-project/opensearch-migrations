@@ -118,22 +118,10 @@ function makeReplayerParamsDict(
     const effectiveKafkaSecretName = expr.getLoose(deserializedKafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(deserializedKafkaConfig, "kafkaUserName");
     const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
-    const processOptions = expr.omit(
-        expr.deserializeRecord(options),
-        ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS
-    );
-    const processOptionsWithMetricsOptOut = expr.ternary(
-        expr.equals(
-            expr.dig(processOptions, ["otelMetricsCollectorEndpoint"], expr.literal("")),
-            expr.literal("")
-        ),
-        expr.omit(processOptions, "otelMetricsCollectorEndpoint"),
-        processOptions
-    );
     return expr.mergeDicts(
         expr.mergeDicts(
             makeReplayerTargetParamDict(targetConfig),
-            processOptionsWithMetricsOptOut
+            expr.omit(expr.deserializeRecord(options), ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
         ),
         expr.mergeDicts(
             expr.makeDict({
