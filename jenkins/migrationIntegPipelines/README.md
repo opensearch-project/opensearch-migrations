@@ -125,6 +125,9 @@ Jobs triggered:
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
 
+Adding a label does not start or cancel a run. Label-gated jobs run on the next PR event (a push or
+reopen), so add the label first, then push (an empty commit works: `git commit --allow-empty`).
+
 This ensures PR-triggered jobs don't conflict with post-merge jobs using the same pipeline code.
 
 ### Jenkins Folder Structure
