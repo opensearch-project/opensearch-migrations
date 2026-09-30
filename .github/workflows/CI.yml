@@ -141,6 +141,16 @@ jobs:
       - name: Test Jenkins kind setup scripts
         run: ./jenkins/tests/configureKindClusterTest.sh
 
+  gradle-repository-tests:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
+      - name: Test dependency repository routing
+        run: python3 -m unittest discover -s gradle/tests -v
+
   generate-test-matrix:
     runs-on: ubuntu-22.04
     outputs:
@@ -513,6 +523,7 @@ jobs:
     needs:
       - python-tests
       - jenkins-kind-setup-script-tests
+      - gradle-repository-tests
       - seed-gradle-test-docker-cache
       - gradle-tests
       - link-checker

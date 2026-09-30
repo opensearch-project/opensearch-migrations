@@ -89,6 +89,7 @@ def call(Map config = [:]) {
                 when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
+                        configureMavenCache()
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
                     }
                 }

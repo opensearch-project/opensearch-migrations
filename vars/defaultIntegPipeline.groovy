@@ -117,6 +117,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
+                            configureMavenCache()
                             // Allow overwriting this step
                             if (config.buildStep) {
                                 config.buildStep()
