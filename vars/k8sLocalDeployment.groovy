@@ -207,6 +207,9 @@ def call(Map config = [:]) {
                     }
                 }
             }
+            cleanup {
+                cleanupMavenCache()
+            }
         }
     }
 }

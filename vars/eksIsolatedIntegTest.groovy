@@ -329,6 +329,9 @@ def call(Map config = [:]) {
                     extraVerifyStacks: [buildStackName],
                 )
             }
+            cleanup {
+                cleanupMavenCache()
+            }
         }
     }
 }

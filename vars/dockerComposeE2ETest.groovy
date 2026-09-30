@@ -107,6 +107,9 @@ def call(Map config = [:]) {
                     sh './gradlew -p TrafficCapture dockerSolution:composeDown -x test -x spotlessCheck || true'
                 }
             }
+            cleanup {
+                cleanupMavenCache()
+            }
         }
     }
 }

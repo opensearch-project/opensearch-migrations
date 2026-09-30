@@ -249,6 +249,9 @@ def call(Map config = [:]) {
                     eksClusterName: env.eksClusterName,
                 )
             }
+            cleanup {
+                cleanupMavenCache()
+            }
         }
     }
 }

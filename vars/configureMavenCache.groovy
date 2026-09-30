@@ -5,26 +5,21 @@ def call() {
     }
     withEnv([
         "MIGRATIONS_CACHE_DOMAIN=${env.MIGRATIONS_MAVEN_CACHE_DOMAIN ?: 'opensearch-migrations'}",
-        "MIGRATIONS_CACHE_REGION=${env.MIGRATIONS_MAVEN_CACHE_REGION ?: 'us-east-1'}"
+        "MIGRATIONS_CACHE_REGION=${env.MIGRATIONS_MAVEN_CACHE_REGION ?: 'us-east-1'}",
+        "MIGRATIONS_CACHE_TMP_DIR=${pwd(tmp: true)}"
     ]) {
-        env.MAVEN_REPOSITORY_URL = sh(
+        // Global env is visible through Jenkins's build API. Return only public metadata;
+        // the token and assumed-role credentials stay on the agent, outside the checkout.
+        def configuration = sh(
             returnStdout: true,
             script: '''#!/usr/bin/env bash
 set -euo pipefail
-aws codeartifact get-repository-endpoint \
-    --domain "$MIGRATIONS_CACHE_DOMAIN" --repository build-dependencies --format maven \
-    --region "$MIGRATIONS_CACHE_REGION" --query repositoryEndpoint --output text
-''').trim()
+bash jenkins/configureMavenCache.sh
+''').trim().split('\n')
+        env.MAVEN_REPOSITORY_URL = configuration[0]
         env.MAVEN_REPOSITORY_USERNAME = 'aws'
-        // Capture stdout without shell tracing: never print the authorization token.
-        env.MAVEN_REPOSITORY_PASSWORD = sh(
-            returnStdout: true,
-            script: '''#!/usr/bin/env bash
-set -euo pipefail
-aws codeartifact get-authorization-token \
-    --domain "$MIGRATIONS_CACHE_DOMAIN" --region "$MIGRATIONS_CACHE_REGION" \
-    --duration-seconds 43200 --query authorizationToken --output text
-''').trim()
+        env.MAVEN_REPOSITORY_PASSWORD_FILE = configuration[1]
+        env.MIGRATIONS_MAVEN_CACHE_GENERATED_FILE = configuration[1]
     }
     echo 'Configured shared Maven/Gradle dependency cache (read-only agent access)'
 }

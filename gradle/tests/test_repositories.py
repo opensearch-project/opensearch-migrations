@@ -20,7 +20,10 @@ import zipfile
 REPO = Path(__file__).resolve().parents[2]
 CONFIG = REPO / "gradle/repositories.gradle"
 WRAPPER = REPO / "gradlew"
-MIRROR_ENV = ("MAVEN_REPOSITORY_URL", "MAVEN_REPOSITORY_USERNAME", "MAVEN_REPOSITORY_PASSWORD")
+MIRROR_ENV = (
+    "MAVEN_REPOSITORY_URL", "MAVEN_REPOSITORY_USERNAME",
+    "MAVEN_REPOSITORY_PASSWORD", "MAVEN_REPOSITORY_PASSWORD_FILE",
+)
 
 
 class RepositoryHandler(http.server.SimpleHTTPRequestHandler):
@@ -175,6 +178,16 @@ repositories.withType(MavenArtifactRepository).configureEach {{ repository ->
         return result.stdout
 
     def test_plugin_buildsrc_and_detached_dependencies_use_authenticated_cache(self):
+        self.check_authenticated_resolution()
+
+    def test_file_credentials_authenticate_plugins_buildsrc_and_detached_dependencies(self):
+        password_file = self.project / "private-token"
+        password_file.write_text(self.password + "\n")
+        self.environment.pop("MAVEN_REPOSITORY_PASSWORD")
+        self.environment["MAVEN_REPOSITORY_PASSWORD_FILE"] = str(password_file)
+        self.check_authenticated_resolution()
+
+    def check_authenticated_resolution(self):
         self.settings(self.project)
         build_src = self.project / "buildSrc"
         build_src.mkdir()
@@ -274,7 +287,35 @@ tasks.register('resolveDependencies') {
         self.settings(self.project)
         (self.project / "build.gradle").write_text("")
         output = self.run_gradle("help", success=False)
-        self.assertIn("Set both MAVEN_REPOSITORY_USERNAME and MAVEN_REPOSITORY_PASSWORD", output)
+        self.assertIn("Set MAVEN_REPOSITORY_USERNAME and one password source, or neither", output)
+        self.assertEqual(self.server.requests, [])
+
+    def test_multiple_password_sources_fail_before_network_access(self):
+        self.environment["MAVEN_REPOSITORY_PASSWORD_FILE"] = str(self.project / "private-token")
+        self.settings(self.project)
+        (self.project / "build.gradle").write_text("")
+        output = self.run_gradle("help", success=False)
+        self.assertIn("Set only one of MAVEN_REPOSITORY_PASSWORD and MAVEN_REPOSITORY_PASSWORD_FILE", output)
+        self.assertEqual(self.server.requests, [])
+
+    def test_missing_password_file_fails_without_logging_its_path(self):
+        self.environment.pop("MAVEN_REPOSITORY_PASSWORD")
+        self.environment["MAVEN_REPOSITORY_PASSWORD_FILE"] = str(self.project / self.password)
+        self.settings(self.project)
+        (self.project / "build.gradle").write_text("")
+        output = self.run_gradle("help", success=False)
+        self.assertIn("MAVEN_REPOSITORY_PASSWORD_FILE must name a readable, nonempty file", output)
+        self.assertEqual(self.server.requests, [])
+
+    def test_empty_password_file_fails_before_network_access(self):
+        password_file = self.project / "private-token"
+        password_file.write_text("\n")
+        self.environment.pop("MAVEN_REPOSITORY_PASSWORD")
+        self.environment["MAVEN_REPOSITORY_PASSWORD_FILE"] = str(password_file)
+        self.settings(self.project)
+        (self.project / "build.gradle").write_text("")
+        output = self.run_gradle("help", success=False)
+        self.assertIn("MAVEN_REPOSITORY_PASSWORD_FILE must name a readable, nonempty file", output)
         self.assertEqual(self.server.requests, [])
 
     def test_credentials_in_url_are_rejected_without_logging_them(self):

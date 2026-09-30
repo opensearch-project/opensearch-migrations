@@ -286,6 +286,9 @@ def call(Map config = [:]) {
                     cdkStage: maStageName,
                 )
             }
+            cleanup {
+                cleanupMavenCache()
+            }
         }
     }
 }

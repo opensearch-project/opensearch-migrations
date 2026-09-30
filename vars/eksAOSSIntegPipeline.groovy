@@ -224,6 +224,9 @@ def call(Map config = [:]) {
                     timeoutMinutes: 60,
                 )
             }
+            cleanup {
+                cleanupMavenCache()
+            }
         }
     }
 }
