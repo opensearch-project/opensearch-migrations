@@ -64,28 +64,34 @@ public class ZstdCompressionMode extends CompressionMode {
                 // decompress dictionary first
                 doDecompress(in, dctx, bytes, dictLength);
                 try (ZstdDictDecompress dictDecompress = new ZstdDictDecompress(bytes.bytes, 0, dictLength)) {
-                    dctx.loadDict(dictDecompress);
+                    try {
+                        dctx.loadDict(dictDecompress);
 
-                    int offsetInBlock = dictLength;
-                    int offsetInBytesRef = offset;
+                        int offsetInBlock = dictLength;
+                        int offsetInBytesRef = offset;
 
-                    // Skip unneeded blocks
-                    while (offsetInBlock + blockLength < offset) {
-                        final int compressedLength = in.readVInt();
-                        in.skipBytes(compressedLength);
-                        offsetInBlock += blockLength;
-                        offsetInBytesRef -= blockLength;
+                        // Skip unneeded blocks
+                        while (offsetInBlock + blockLength < offset) {
+                            final int compressedLength = in.readVInt();
+                            in.skipBytes(compressedLength);
+                            offsetInBlock += blockLength;
+                            offsetInBytesRef -= blockLength;
+                        }
+
+                        // Read blocks that intersect with the interval we need
+                        while (offsetInBlock < offset + length) {
+                            int l = Math.min(blockLength, originalLength - offsetInBlock);
+                            doDecompress(in, dctx, bytes, l);
+                            offsetInBlock += blockLength;
+                        }
+
+                        bytes.offset = offsetInBytesRef;
+                        bytes.length = length;
+                    } finally {
+                        // The context retains the dictionary until reset or closed, even after a read fails.
+                        // Release it before try-with-resources closes the dictionary.
+                        dctx.reset();
                     }
-
-                    // Read blocks that intersect with the interval we need
-                    while (offsetInBlock < offset + length) {
-                        int l = Math.min(blockLength, originalLength - offsetInBlock);
-                        doDecompress(in, dctx, bytes, l);
-                        offsetInBlock += blockLength;
-                    }
-
-                    bytes.offset = offsetInBytesRef;
-                    bytes.length = length;
                 }
             }
         }

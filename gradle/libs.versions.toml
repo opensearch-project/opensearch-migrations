@@ -47,7 +47,7 @@ slf4j = "2.0.18"
 testcontainers = "2.0.5"
 testcontainers-modules = "1.21.4"
 toxiproxy = "2.1.11"
-zstd-jni = "1.5.7-12"
+zstd-jni = "1.5.7-20"
 
 [libraries]
 aws-arns = { module = "software.amazon.awssdk:arns", version.ref = "aws-sdk" }
