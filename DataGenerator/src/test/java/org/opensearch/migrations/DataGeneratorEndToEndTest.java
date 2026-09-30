@@ -3,11 +3,11 @@ package org.opensearch.migrations;
 import java.util.Map;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.RestClient;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+import org.opensearch.migrations.testfixtures.SupportedClusters;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
