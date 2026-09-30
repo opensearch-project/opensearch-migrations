@@ -35,17 +35,12 @@ public class ZstdCompressionMode extends CompressionMode {
     private static final class ZstdDictDecompressor extends Decompressor {
         private byte[] compressedBuffer = BytesRef.EMPTY_BYTES;
 
-        private int readCompressedBlock(DataInput in) throws IOException {
+        private void doDecompress(DataInput in, ZstdDecompressCtx dctx, BytesRef bytes, int decompressedLen) throws IOException {
             final int compressedLength = in.readVInt();
             if (compressedLength > 0) {
                 compressedBuffer = ArrayUtil.growNoCopy(compressedBuffer, compressedLength);
                 in.readBytes(compressedBuffer, 0, compressedLength);
             }
-            return compressedLength;
-        }
-
-        private void doDecompress(DataInput in, ZstdDecompressCtx dctx, BytesRef bytes, int decompressedLen) throws IOException {
-            final int compressedLength = readCompressedBlock(in);
             if (compressedLength == 0) {
                 if (decompressedLen != 0) {
                     throw new IllegalStateException("Empty Zstd block: expected " + decompressedLen + " decoded bytes");
