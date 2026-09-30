@@ -15,6 +15,22 @@ def call(Map config = [:]) {
     def defaultTestIds = config.defaultTestIds ?: "0034,0041"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-cdc-aoss-${currentBuild.number}.json"
+    // general-work-pool overrides, verified after the tests: Graviton only (eksCdcIntegPipeline
+    // covers amd64). Kept wide -- every Graviton generation (6 = Graviton2 onward) across c/m/r --
+    // so arm64 capacity is not the thing that fails.
+    def workloadsNodePool = config.workloadsNodePool ?: [
+        architectures     : ["arm64"],
+        capacityTypes     : ["on-demand"],
+        instanceCategories: ["c", "m", "r"],
+        minInstanceGeneration: 6,
+        instanceSizes     : ["large", "xlarge", "2xlarge", "4xlarge", "8xlarge"],
+        limits            : [cpu: "80000m", memory: "160Gi"],
+        disruption        : [consolidationPolicy: "WhenEmpty", consolidateAfter: "45m"],
+    ]
+    // Only the source chart wires every workloadsNodePool field; a release chart (BUILD=false or
+    // USE_RELEASE_BOOTSTRAP) hardcodes most of them, so overriding and verifying there would fail
+    // on the chart version rather than on a real problem.
+    def overrideNodePool = { -> params.BUILD && !params.USE_RELEASE_BOOTSTRAP }
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -76,6 +92,7 @@ def call(Map config = [:]) {
     Test IDs:       ${params.TEST_IDS}
     Source:         ${params.SOURCE_VERSION}
     Target:         AOSS (search collection)
+    Workload pool:  ${overrideNodePool() ? workloadsNodePool : 'chart defaults (release artifacts)'}
     ================================================================
 """
                 }
@@ -125,7 +142,8 @@ def call(Map config = [:]) {
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${maStageName}",
                                     resourceTags: env.MA_RESOURCE_TAGS,
-                                    enforceTagsOnCreateForTests: true
+                                    enforceTagsOnCreateForTests: true,
+                                    workloadsNodePool: overrideNodePool() ? workloadsNodePool : null
                                 )
                             }
                         }
@@ -232,6 +250,19 @@ def call(Map config = [:]) {
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
                                     sh "pipenv run app --source-version=${env.sourceVer} --target-type=AOSS --test-ids='${params.TEST_IDS}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --verify-resource-tags --ma-stack-name='${env.STACK_NAME}' --aws-region=${params.REGION} --eks-cluster-name='${env.eksClusterName}'"
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Verify Workload NodePool') {
+                when { expression { overrideNodePool() } }
+                steps {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        script {
+                            withMigrationsTestAccount(region: params.REGION, duration: 900) { accountId ->
+                                verifyWorkloadNodePool(kubectlContext: env.eksKubeContext, workloadsNodePool: workloadsNodePool)
                             }
                         }
                     }
