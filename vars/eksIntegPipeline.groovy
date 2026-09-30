@@ -49,7 +49,8 @@ def call(Map config = [:]) {
 
         options {
             lock(label: lockLabel, quantity: 1)
-            timeout(time: 3, unit: 'HOURS')
+            // Leave time for deployment and cleanup around the two-hour E2E stage.
+            timeout(time: 4, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
