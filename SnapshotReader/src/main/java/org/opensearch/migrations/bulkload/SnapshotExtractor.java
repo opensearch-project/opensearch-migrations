@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.LongConsumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -163,6 +164,16 @@ public class SnapshotExtractor {
 
     public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
                                                      FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return readDocuments(shard, workDir, startDocIdx, mappingContext, useRecoverySource, null);
+    }
+
+    /**
+     * @param liveDocCountSink receives the shard's live Lucene document count once the reader is
+     *                         open. May be null.
+     */
+    public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
+                                                     FieldMappingContext mappingContext, boolean useRecoverySource,
+                                                     LongConsumer liveDocCountSink) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -179,7 +190,7 @@ public class SnapshotExtractor {
         // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource);
+        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource, liveDocCountSink);
     }
 
     /**

@@ -76,6 +76,19 @@ public class DocumentMigrationBootstrap {
     private final Consumer<WorkItemCursor> cursorConsumer = cursor -> {};
     @Builder.Default
     private final Consumer<Runnable> cancellationTriggerConsumer = runnable -> {};
+    /**
+     * Invoked when a shard finishes. Runs before the work item is marked complete, so an
+     * implementation that persists the count can fail the shard and let a successor re-emit.
+     */
+    @Builder.Default
+    private final ShardDocCountReporter shardDocCountReporter =
+        (index, shard, total, luceneTotal, thisGen, priorGen) -> {};
+
+    @FunctionalInterface
+    public interface ShardDocCountReporter {
+        void report(String indexName, int shardNumber, long liveDocCount, long liveLuceneDocCount,
+                    long docsThisGeneration, long docsPriorGenerations);
+    }
 
     /**
      * Acquire and migrate a single shard via work coordination.
@@ -160,6 +173,7 @@ public class DocumentMigrationBootstrap {
         var partition = resolvePartition(wi);
         long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
             ? wi.getStartingDocId() : 0;
+        long docsAlreadyEmitted = workItem.getDocsEmitted();
 
         var pipeline = new DocumentMigrationPipeline(
             pipelineConfig.source(), pipelineConfig.sink(),
@@ -175,7 +189,7 @@ public class DocumentMigrationBootstrap {
         var migrationError = new AtomicReference<Throwable>();
         var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
 
-        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset)
+        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset, docsAlreadyEmitted)
             .subscribeOn(finishScheduler)
             .doFirst(() -> {
                 if (workItemTimeProvider != null) {
@@ -194,7 +208,8 @@ public class DocumentMigrationBootstrap {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                    cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
+                    cursorConsumer.accept(new WorkItemCursor(
+                        cursor.lastDocProcessed(), cursor.cumulativeDocsEmitted(), cursor.docsInBatch()));
                 },
                 error -> {
                     log.atError()
@@ -217,21 +232,35 @@ public class DocumentMigrationBootstrap {
             long start = System.currentTimeMillis();
             latch.await(); // Bridge reactive→sync: block until pipeline subscription completes
             long durationMs = System.currentTimeMillis() - start;
-            log.atInfo()
-                .setMessage("Partition migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
-                .addArgument(wi.getIndexName())
-                .addArgument(wi.getShardNumber())
-                .addArgument(totalDocsMigrated::get)
-                .addArgument(totalBytesMigrated::get)
-                .addArgument(batchCount::get)
-                .addArgument(durationMs)
-                .log();
-
             var error = migrationError.get();
             if (error != null) {
                 context.recordPipelineError();
                 throw new RfsException("Partition migration failed for " + wi, error);
             }
+
+            // shardMigratedDocs spans every lease generation, so on a completed shard it is
+            // comparable to the source's <index>/_count: nested children are read but never emitted
+            // and so are excluded from both. shardLiveLuceneDocs counts them, matching
+            // _cat/indices docs.count. Both are whole-shard; the docsThisGeneration/bytes/batches
+            // figures cover only this generation. -1 means the source cannot report the count.
+            long shardMigratedDocs = docsAlreadyEmitted + totalDocsMigrated.get();
+            long shardLiveLuceneDocs = documentSource.countLiveDocuments(partition).orElse(-1L);
+            log.atInfo()
+                .setMessage("Partition migration stats: index={}, shard={}, shardMigratedDocs={}, "
+                    + "shardLiveLuceneDocs={}, docsThisGeneration={}, docsPriorGenerations={}, "
+                    + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}")
+                .addArgument(wi.getIndexName())
+                .addArgument(wi.getShardNumber())
+                .addArgument(shardMigratedDocs)
+                .addArgument(shardLiveLuceneDocs)
+                .addArgument(totalDocsMigrated::get)
+                .addArgument(docsAlreadyEmitted)
+                .addArgument(totalBytesMigrated::get)
+                .addArgument(batchCount::get)
+                .addArgument(durationMs)
+                .log();
+            shardDocCountReporter.report(wi.getIndexName(), wi.getShardNumber(), shardMigratedDocs,
+                Math.max(0L, shardLiveLuceneDocs), totalDocsMigrated.get(), docsAlreadyEmitted);
 
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());

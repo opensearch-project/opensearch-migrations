@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.pipeline.source;
 
 import java.util.List;
+import java.util.OptionalLong;
 
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -40,6 +41,17 @@ public interface DocumentSource extends AutoCloseable {
      * @return a cold Flux of documents
      */
     Flux<Document> readDocuments(Partition partition, long startingDocOffset);
+
+    /**
+     * Total live documents in the partition, if the source can determine it cheaply.
+     *
+     * <p>For Lucene-backed sources this is the live Lucene document count, which counts nested
+     * children and so matches {@code _cat/indices docs.count} rather than {@code _count}. Empty when
+     * the source cannot report it without a full scan.
+     */
+    default OptionalLong countLiveDocuments(Partition partition) {
+        return OptionalLong.empty();
+    }
 
     @Override
     default void close() throws Exception {

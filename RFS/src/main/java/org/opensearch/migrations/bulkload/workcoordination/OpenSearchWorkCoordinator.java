@@ -93,6 +93,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String INDEX_NAME_FIELD_NAME = "indexName";
     public static final String SOURCE_FIELD_NAME = "_source";
     public static final String SUCCESSOR_ITEMS_FIELD_NAME = "successor_items";
+    /** Optional; absent on first generations and on items predating this field, read as 0. */
+    public static final String DOCS_EMITTED_FIELD_NAME = "docsEmitted";
     public static final String SUCCESSOR_ITEM_DELIMITER = ",";
 
     public static final int CREATED_RESPONSE_CODE = 201;
@@ -147,6 +149,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         final String workItemId;
         final Instant leaseExpirationTime;
         final List<String> successorWorkItemIds;
+        final long docsEmitted;
     }
 
     protected final String indexName;
@@ -584,6 +587,12 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             return new ArrayList<>(Arrays.asList(responseDoc.get(SUCCESSOR_ITEMS_FIELD_NAME).asText().split(SUCCESSOR_ITEM_DELIMITER)));
         }
         return List.of();
+    }
+
+    /** Absent reads as 0 so the field is safe to add to an in-flight migration. */
+    private static long getDocsEmittedIfPresent(JsonNode responseDoc) {
+        var node = responseDoc.path(DOCS_EMITTED_FIELD_NAME);
+        return node.isMissingNode() || node.isNull() ? 0L : Math.max(0L, node.longValue());
     }
 
     @Override
@@ -1032,7 +1041,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var responseDoc = resultHitInner.get(SOURCE_FIELD_NAME);
         var successorItems = getSuccessorItemsIfPresent(responseDoc);
-        var rval = new WorkItemWithPotentialSuccessors(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000 * expiration), successorItems);
+        var rval = new WorkItemWithPotentialSuccessors(resultHitInner.get("_id").asText(),
+                Instant.ofEpochMilli(1000 * expiration), successorItems,
+                getDocsEmittedIfPresent(responseDoc));
         log.atInfo().setMessage("Returning work item and lease: {}").addArgument(rval).log();
         return rval;
     }
@@ -1147,8 +1158,22 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     // because it is an expected outcome of this function that sometimes the work item is already created. That function
     // uses `createOrUpdateLease`, whereas this function deliberately never modifies an already-existing work item.
     private void createUnassignedWorkItemsIfNonexistent(List<String> workItemIds, int nextAcquisitionLeaseExponent) throws IOException, IllegalStateException {
+        createUnassignedWorkItemsIfNonexistent(workItemIds, nextAcquisitionLeaseExponent, 0L);
+    }
+
+    /**
+     * @param docsEmitted stamped onto each successor so the running total survives the handoff.
+     *                    Absolute, never an increment: successor creation is not transactional and
+     *                    is retried (see the 409 handling below), so an increment would inflate it.
+     */
+    private void createUnassignedWorkItemsIfNonexistent(
+        List<String> workItemIds, int nextAcquisitionLeaseExponent, long docsEmitted
+    ) throws IOException, IllegalStateException {
+        String docsEmittedField = docsEmitted > 0
+            ? ", \"" + DOCS_EMITTED_FIELD_NAME + "\":" + docsEmitted
+            : "";
         String workItemBodyTemplate = "{\"nextAcquisitionLeaseExponent\":" + nextAcquisitionLeaseExponent + ", \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
-            "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
+            "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0" + docsEmittedField + " }";
         String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION).replace(WORKER_ID_TEMPLATE, workerId);
 
         StringBuilder body = new StringBuilder();
@@ -1221,6 +1246,19 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             Instant deadline,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
+        createSuccessorWorkItemsAndMarkComplete(workItemId, successorWorkItemIds,
+            successorNextAcquisitionLeaseExponent, deadline, 0L, contextSupplier);
+    }
+
+    @Override
+    public void createSuccessorWorkItemsAndMarkComplete(
+            String workItemId,
+            List<String> successorWorkItemIds,
+            int successorNextAcquisitionLeaseExponent,
+            Instant deadline,
+            long docsEmitted,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException, IllegalStateException {
         if (successorWorkItemIds.contains(workItemId)) {
             throw new IllegalArgumentException(String.format("successorWorkItemIds %s can not not contain the parent workItemId: %s", successorWorkItemIds, workItemId));
         }
@@ -1238,7 +1276,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
-                    () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds, successorNextAcquisitionLeaseExponent),
+                    () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds, successorNextAcquisitionLeaseExponent, docsEmitted),
                     MAX_CREATE_UNASSIGNED_SUCCESSOR_WORK_ITEM_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
                     Long.MAX_VALUE,
@@ -1433,12 +1471,17 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                                         // in cases of partial successor creation, create with 0 nextAcquisitionLeaseExponent to use default
                                         // lease duration
                                         0,
+                                        null,
+                                        // Forward the inherited total; dropping it here would
+                                        // silently restart the shard's count from zero.
+                                        workItem.docsEmitted,
                                         ctx::getCreateSuccessorWorkItemsContext);
                                 // this item is not acquirable, so repeat the loop to find a new item.
                                 continue;
                             }
                             var workItemAndDuration = new WorkItemAndDuration(workItem.getLeaseExpirationTime(),
-                                    WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItem.getWorkItemId()));
+                                    WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItem.getWorkItemId()),
+                                    workItem.docsEmitted);
                             workItemConsumer.accept(workItemAndDuration);
                             return workItemAndDuration;
                         case NOTHING_TO_ACQUIRE:
