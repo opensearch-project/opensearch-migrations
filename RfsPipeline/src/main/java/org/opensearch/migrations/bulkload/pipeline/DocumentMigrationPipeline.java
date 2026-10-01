@@ -126,28 +126,30 @@ public class DocumentMigrationPipeline {
      * @return a Flux of progress cursors, one per batch written
      */
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingDocOffset) {
-        final long[] cumulativeOffset = { startingDocOffset };
         return Flux.defer(() -> {
+            final long[] cumulativeOffset = { startingDocOffset };
             currentPartition.set(partition);
             return source.readDocuments(partition, startingDocOffset)
                 .subscribeOn(Schedulers.boundedElastic())
-                .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
+                .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch, collectionName))
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
                     return sink.writeBatch(collectionName, batch)
-                        .map(result -> {
-                            cumulativeOffset[0] += result.docsInBatch();
-                            totalDocs.addAndGet(result.docsInBatch());
-                            totalBytes.addAndGet(result.bytesInBatch());
-                            return new ProgressCursor(
-                                partition,
-                                cumulativeOffset[0],
-                                result.docsInBatch(),
-                                result.bytesInBatch()
-                            );
-                        })
                         .doFinally(s -> activeBatches.decrementAndGet());
                 }, batchConcurrency)
+                // Advance only after all earlier batches have completed. An inner request may
+                // finish out of order; checkpointing it there would skip unfinished writes on retry.
+                .map(result -> {
+                    cumulativeOffset[0] += result.docsInBatch();
+                    totalDocs.addAndGet(result.docsInBatch());
+                    totalBytes.addAndGet(result.bytesInBatch());
+                    return new ProgressCursor(
+                        partition,
+                        cumulativeOffset[0],
+                        result.docsInBatch(),
+                        result.bytesInBatch()
+                    );
+                })
                 .onErrorMap(e -> !(e instanceof PipelineException),
                     e -> new PipelineException("Failed migrating partition " + partition, e));
         });
@@ -190,18 +192,28 @@ public class DocumentMigrationPipeline {
     static class BatchPredicate implements java.util.function.Predicate<Document> {
         private final int maxDocs;
         private final long maxBytes;
+        private final String collectionName;
         private int currentCount;
         private long currentBytes;
 
-        BatchPredicate(int maxDocs, long maxBytes) {
+        BatchPredicate(int maxDocs, long maxBytes, String collectionName) {
             this.maxDocs = maxDocs;
             this.maxBytes = maxBytes;
+            this.collectionName = collectionName;
         }
 
         @Override
         public boolean test(Document doc) {
             currentCount++;
             currentBytes += doc.sourceLength();
+            if (doc.operation() == Document.Operation.DELETE) {
+                // Deletes may have no source bytes. Bound their batches by conservatively
+                // estimating metadata size, including up to six JSON bytes per UTF-16 unit.
+                currentBytes += 64L + 6L * (collectionName.length() + doc.id().length());
+                for (var hint : doc.hints().entrySet()) {
+                    currentBytes += 6L * (hint.getKey().length() + hint.getValue().length()) + 6;
+                }
+            }
 
             if (currentCount >= maxDocs || currentBytes >= maxBytes) {
                 currentCount = 0;

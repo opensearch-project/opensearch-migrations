@@ -65,7 +65,9 @@ public final class BulkNdjson {
         Map<String, Object> actionLine = Map.of(operationType, metaMap);
         out.write(mapper.writeValueAsBytes(actionLine));
 
-        if (rawSource != null && rawSource.length > 0) {
+        // Bulk deletes have only an action line. A retained source body must never become
+        // another action in the NDJSON request.
+        if (!"delete".equals(operationType) && rawSource != null && rawSource.length > 0) {
             validateJsonBytes(rawSource);
             out.write(NEWLINE_BYTES);
             out.write(rawSource);

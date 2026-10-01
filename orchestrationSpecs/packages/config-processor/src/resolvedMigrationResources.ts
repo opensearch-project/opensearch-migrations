@@ -394,7 +394,7 @@ function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknow
         mode: snapshotConfig.mode ?? "create",
         solrExternalBackupName: item.solrExternalBackupName ?? "",
         ...withEmptyStringDefaults(snapshotConfig, CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS),
-        dependsOn: (item.dependsOnProxySetups ?? []).map(dep => dep.name),
+        dependsOn: item.dependsOn,
     };
 }
 
@@ -409,6 +409,11 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
             ? snapshotNameResolution.externalSnapshotName
             : "";
     const repo = migration.snapshotConfig.repoConfig as Record<string, unknown>;
+    const previous = migration.delta?.previousSnapshotNameResolution;
+    const previousDataSnapshotResourceName = previous && "dataSnapshotResourceName" in previous
+        ? previous.dataSnapshotResourceName : "";
+    const previousExternalSnapshotName = previous && "externalSnapshotName" in previous
+        ? previous.externalSnapshotName : "";
     return {
         ...prefixFields("metadataMigration", migration.metadataMigrationConfig
             ? withEmptyStringDefaults(migration.metadataMigrationConfig as Record<string, unknown>, METADATA_EMPTY_STRING_DEFAULT_FIELDS)
@@ -416,7 +421,11 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
         ...prefixFields("documentBackfill", migration.documentBackfillConfig
             ? withEmptyStringDefaults(migration.documentBackfillConfig as Record<string, unknown>, DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS)
             : undefined),
-        dependsOn: dataSnapshotResourceName ? [dataSnapshotResourceName] : [],
+        dependsOn: [
+            ...(dataSnapshotResourceName ? [dataSnapshotResourceName] : []),
+            ...(previousDataSnapshotResourceName ? [previousDataSnapshotResourceName] : []),
+            ...(migration.previousMigrationResourceName ? [migration.previousMigrationResourceName] : []),
+        ],
         migrationLabel: migration.migrationLabel,
         ...connectionIdentityParameters(
             "source",
@@ -432,6 +441,14 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
         snapshotSourceType: snapshotSourceType(snapshotNameResolution),
         dataSnapshotResourceName,
         externalSnapshotName,
+        ...(migration.delta ? {
+            deltaMode: migration.delta.mode,
+            previousDataSnapshotResourceName,
+            previousExternalSnapshotName,
+        } : {}),
+        ...(migration.previousMigrationResourceName ? {
+            previousMigrationResourceName: migration.previousMigrationResourceName,
+        } : {}),
         ...repoIdentityParameters("snapshot", repo),
     };
 }

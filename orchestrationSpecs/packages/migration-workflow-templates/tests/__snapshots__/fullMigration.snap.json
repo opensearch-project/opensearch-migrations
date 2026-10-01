@@ -993,7 +993,7 @@
                   },
                   {
                     "name": "uniqueRunNonce",
-                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                    "value": "{{=((!(0 == len(sprig.dig('sequenceName', '', fromJSON(inputs.parameters.snapshotItemConfig))))) ? (fromJSON(inputs.parameters.snapshotItemConfig)['resourceUid']) : (inputs.parameters.uniqueRunNonce))}}"
                   },
                   {
                     "name": "configChecksum",
@@ -1042,6 +1042,136 @@
                 ]
               },
               "name": "createOrGetSnapshot"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "createindependentsnapshot",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "snapshotItemConfig"
+            },
+            {
+              "name": "sourceConfig"
+            },
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "uniqueRunNonce",
+              "description": "Workflow session nonce",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "createsinglesnapshot",
+              "when": "{{=0 == len(sprig.dig('sequenceName', '', fromJSON(inputs.parameters.snapshotItemConfig)))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "snapshotItemConfig",
+                    "value": "{{inputs.parameters.snapshotItemConfig}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "createSnapshot"
             }
           ]
         ],
@@ -1104,18 +1234,10 @@
         "steps": [
           [
             {
-              "template": "createsinglesnapshot",
+              "template": "createindependentsnapshot",
               "withParam": "{{=fromJSON(inputs.parameters.snapshotsSourceConfig)['createSnapshotConfig']}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "groupName_view",
-                    "value": "{{inputs.parameters.groupName_view}}"
-                  },
-                  {
-                    "name": "sortOrder_view",
-                    "value": "{{inputs.parameters.sortOrder_view}}"
-                  },
                   {
                     "name": "uniqueRunNonce",
                     "value": "{{inputs.parameters.uniqueRunNonce}}"
@@ -1162,7 +1284,7 @@
                   },
                   {
                     "name": "snapshotItemConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotPrefix\", item['snapshotPrefix'], \"sourceConnectionIdentity\", fromJSON(item['sourceConnectionIdentity']), \"config\", fromJSON(item['config']), \"repo\", fromJSON(item['repo']), \"semaphoreConfigMapName\", item['semaphoreConfigMapName'], \"semaphoreKey\", item['semaphoreKey'], \"dependsOnProxySetups\", fromJSON(toJSON(item))['dependsOnProxySetups'], \"dependsOn\", item['dependsOn'], \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid'], \"solrExternalBackupName\", sprig.dig('solrExternalBackupName', '', item)))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"sequenceName\", sprig.dig('sequenceName', '', item), \"snapshotPrefix\", item['snapshotPrefix'], \"sourceConnectionIdentity\", fromJSON(item['sourceConnectionIdentity']), \"config\", fromJSON(item['config']), \"repo\", fromJSON(item['repo']), \"semaphoreConfigMapName\", item['semaphoreConfigMapName'], \"semaphoreKey\", item['semaphoreKey'], \"dependsOnProxySetups\", fromJSON(toJSON(item))['dependsOnProxySetups'], \"dependsOn\", item['dependsOn'], \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid'], \"solrExternalBackupName\", sprig.dig('solrExternalBackupName', '', item)))}}"
                   },
                   {
                     "name": "sourceConfig",
@@ -1233,6 +1355,10 @@
             {
               "name": "documentBackfillConfig",
               "value": ""
+            },
+            {
+              "name": "skipBackfillApproval",
+              "value": "false"
             },
             {
               "name": "uniqueRunNonce",
@@ -1422,7 +1548,7 @@
                 "template": "approvebackfill",
                 "name": "document-bulk-load"
               },
-              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(fromJSON(inputs.parameters.documentBackfillConfig)['skipApproval'])}}",
+              "when": "{{=!(fromJSON(inputs.parameters.skipBackfillApproval)) && !(0 == len(inputs.parameters.documentBackfillConfig)) && !(fromJSON(inputs.parameters.documentBackfillConfig)['skipApproval'])}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1588,6 +1714,24 @@
           ],
           [
             {
+              "templateRef": {
+                "template": "readdatasnapshotname",
+                "name": "resource-management"
+              },
+              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && !(0 == len(sprig.dig('delta', 'previousSnapshotNameResolution', 'dataSnapshotResourceName', '', fromJSON(inputs.parameters.snapshotMigrationConfig))))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=sprig.dig('delta', 'previousSnapshotNameResolution', 'dataSnapshotResourceName', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
+                  }
+                ]
+              },
+              "name": "readPreviousSnapshotName"
+            }
+          ],
+          [
+            {
               "template": "migratefromsnapshot",
               "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
@@ -1674,7 +1818,7 @@
                   },
                   {
                     "name": "documentBackfillConfig",
-                    "value": "{{=(('documentBackfillConfig' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? (toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['documentBackfillConfig'])) : (''))}}"
+                    "value": "{{=(('documentBackfillConfig' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? ((('delta' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? (toJSON(sprig.merge(fromJSON(inputs.parameters.snapshotMigrationConfig)['documentBackfillConfig'], sprig.dict(\"previousSnapshotName\", ((!(0 == len(sprig.dig('delta', 'previousSnapshotNameResolution', 'externalSnapshotName', '', fromJSON(inputs.parameters.snapshotMigrationConfig))))) ? (sprig.dig('delta', 'previousSnapshotNameResolution', 'externalSnapshotName', '', fromJSON(inputs.parameters.snapshotMigrationConfig))) : (steps.readPreviousSnapshotName.outputs.parameters.snapshotName)), \"deltaMode\", sprig.dig('delta', 'mode', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))))) : (toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['documentBackfillConfig'])))) : (''))}}"
                   },
                   {
                     "name": "crdName",
@@ -1686,11 +1830,15 @@
                   },
                   {
                     "name": "checksumForReplayer",
-                    "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
+                    "value": "{{=(('sequenceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? ('') : (sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
                   },
                   {
                     "name": "workloadIdentityChecksum",
                     "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['workloadIdentityChecksum']}}"
+                  },
+                  {
+                    "name": "skipBackfillApproval",
+                    "value": "{{='sequenceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)}}"
                   }
                 ]
               },
@@ -1720,11 +1868,779 @@
                   },
                   {
                     "name": "checksumForReplayer",
-                    "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
+                    "value": "{{=(('sequenceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)) ? ('') : (sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
                   }
                 ]
               },
               "name": "patchSnapshotMigrationCompleted"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "runindependentsnapshotmigration",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "snapshotMigrationConfig"
+            },
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "resourceUid"
+            },
+            {
+              "name": "groupName_view",
+              "value": "Snapshot Migration"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "4"
+            },
+            {
+              "name": "uniqueRunNonce",
+              "description": "Workflow session nonce",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "runsinglesnapshotmigration",
+              "when": "{{=0 == len(sprig.dig('sequenceName', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "snapshotMigrationConfig",
+                    "value": "{{inputs.parameters.snapshotMigrationConfig}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
+                  },
+                  {
+                    "name": "groupName_view",
+                    "value": "{{inputs.parameters.groupName_view}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "{{inputs.parameters.sortOrder_view}}"
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "backfill"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "createsequencesnapshot",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "config"
+            },
+            {
+              "name": "snapshotReference"
+            },
+            {
+              "name": "uniqueRunNonce",
+              "description": "Workflow session nonce",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "createsinglesnapshot",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  },
+                  {
+                    "name": "snapshotItemConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.config)['snapshots'][asInt(fromJSON(inputs.parameters.snapshotReference)['sourceIndex'])]['createSnapshotConfig'][asInt(fromJSON(inputs.parameters.snapshotReference)['snapshotIndex'])])}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.config)['snapshots'][asInt(fromJSON(inputs.parameters.snapshotReference)['sourceIndex'])]['sourceConfig'])}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=sprig.dig('sourceConfig', 'label', '', fromJSON(inputs.parameters.config)['snapshots'][asInt(fromJSON(inputs.parameters.snapshotReference)['sourceIndex'])])+'-'+fromJSON(inputs.parameters.config)['snapshots'][asInt(fromJSON(inputs.parameters.snapshotReference)['sourceIndex'])]['createSnapshotConfig'][asInt(fromJSON(inputs.parameters.snapshotReference)['snapshotIndex'])]['label']}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshots'][asInt(fromJSON(inputs.parameters.snapshotReference)['sourceIndex'])]['createSnapshotConfig'][asInt(fromJSON(inputs.parameters.snapshotReference)['snapshotIndex'])]['configChecksum']}}"
+                  },
+                  {
+                    "name": "groupName_view",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshots'][asInt(fromJSON(inputs.parameters.snapshotReference)['sourceIndex'])]['createSnapshotConfig'][asInt(fromJSON(inputs.parameters.snapshotReference)['snapshotIndex'])]['label']}}"
+                  }
+                ]
+              },
+              "name": "createSnapshot"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "evaluatebackfillrepeat",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "repeatPolicy"
+            },
+            {
+              "name": "run"
+            },
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "resourceUid"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "snapshotResourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "RESOURCE_NAME",
+              "value": "{{inputs.parameters.resourceName}}"
+            },
+            {
+              "name": "RESOURCE_UID",
+              "value": "{{inputs.parameters.resourceUid}}"
+            },
+            {
+              "name": "CONFIG_CHECKSUM",
+              "value": "{{inputs.parameters.configChecksum}}"
+            },
+            {
+              "name": "SNAPSHOT_RESOURCE_NAME",
+              "value": "{{inputs.parameters.snapshotResourceName}}"
+            },
+            {
+              "name": "REPEAT_POLICY",
+              "value": "{{inputs.parameters.repeatPolicy}}"
+            },
+            {
+              "name": "RUN_NUMBER",
+              "value": "{{inputs.parameters.run}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/evaluateBackfillRepeat.sh\""
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "action",
+              "valueFrom": {
+                "path": "/tmp/backfill-repeat-action"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "runsnapshotsequence",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "config"
+            },
+            {
+              "name": "sequencePlan"
+            },
+            {
+              "name": "stepIndex",
+              "value": "0"
+            },
+            {
+              "name": "groupName_view",
+              "value": "Successive snapshots"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "4"
+            },
+            {
+              "name": "uniqueRunNonce",
+              "description": "Workflow session nonce",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "createsequencesnapshot",
+              "when": "{{='snapshotCreation' in fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "config",
+                    "value": "{{inputs.parameters.config}}"
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  },
+                  {
+                    "name": "snapshotReference",
+                    "value": "{{=toJSON(sprig.dig('snapshotCreation', sprig.dict(\"sourceIndex\", 0, \"snapshotIndex\", 0), fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]))}}"
+                  }
+                ]
+              },
+              "name": "createSnapshot"
+            }
+          ],
+          [
+            {
+              "template": "runsinglesnapshotmigration",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "groupName_view",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['label']}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "{{inputs.parameters.sortOrder_view}}"
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  },
+                  {
+                    "name": "snapshotMigrationConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])])}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['resourceName']}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['configChecksum']}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['resourceUid']}}"
+                  }
+                ]
+              },
+              "name": "backfill"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "readsnapshotsequencecheckpoint",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['resourceName']}}"
+                  }
+                ]
+              },
+              "name": "readCheckpoint"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "approvebackfill",
+                "name": "document-bulk-load"
+              },
+              "when": "{{=true && !(steps.readCheckpoint.outputs.parameters.completedChecksum == fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['configChecksum']) && !(sprig.dig('documentBackfillConfig', 'skipApproval', false, fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{='documentbackfill.'+fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['resourceName']}}"
+                  }
+                ]
+              },
+              "name": "approveBackfill"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchsnapshotsequencecheckpoint",
+                "name": "resource-management"
+              },
+              "when": "{{=true && !(steps.readCheckpoint.outputs.parameters.completedChecksum == fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['configChecksum'])}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['resourceName']}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Completed"
+                  },
+                  {
+                    "name": "sequenceCompletionChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['configChecksum']}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['checksumForReplayer']}}"
+                  }
+                ]
+              },
+              "name": "saveCheckpoint"
+            }
+          ],
+          [
+            {
+              "template": "evaluatebackfillrepeat",
+              "when": "{{='repeat' in fromJSON(inputs.parameters.sequencePlan) && 'completedRun' in fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "repeatPolicy",
+                    "value": "{{=toJSON(sprig.dig('repeat', sprig.dict(\"maxRuns\", 1), fromJSON(inputs.parameters.sequencePlan)))}}"
+                  },
+                  {
+                    "name": "run",
+                    "value": "{{=sprig.dig('completedRun', 1, fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))])}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['resourceName']}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['resourceUid']}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])]['configChecksum']}}"
+                  },
+                  {
+                    "name": "snapshotResourceName",
+                    "value": "{{=sprig.dig('snapshotNameResolution', 'dataSnapshotResourceName', '', fromJSON(inputs.parameters.config)['snapshotMigrations'][asInt(fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]['migrationIndex'])])}}"
+                  }
+                ]
+              },
+              "name": "evaluateRepeat"
+            }
+          ],
+          [
+            {
+              "template": "runsnapshotsequence",
+              "when": "{{=asInt(fromJSON(inputs.parameters.stepIndex)) + 1 < len(fromJSON(inputs.parameters.sequencePlan)['steps']) && (('repeat' in fromJSON(inputs.parameters.sequencePlan) && 'completedRun' in fromJSON(inputs.parameters.sequencePlan)['steps'][asInt(fromJSON(inputs.parameters.stepIndex))]) ? (steps.evaluateRepeat.outputs.parameters.action == 'continue') : (true))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "config",
+                    "value": "{{inputs.parameters.config}}"
+                  },
+                  {
+                    "name": "sequencePlan",
+                    "value": "{{inputs.parameters.sequencePlan}}"
+                  },
+                  {
+                    "name": "stepIndex",
+                    "value": "{{=asInt(fromJSON(inputs.parameters.stepIndex)) + 1}}"
+                  },
+                  {
+                    "name": "groupName_view",
+                    "value": "{{inputs.parameters.groupName_view}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "{{inputs.parameters.sortOrder_view}}"
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "next"
             }
           ]
         ],
@@ -2068,6 +2984,419 @@
                 ]
               },
               "name": "patchTrafficReplayReady"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "runconfiguredreplay",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "replayConfig"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "runsinglereplay",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "name",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['name']}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['name']}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['resourceUid']}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['configChecksum']}}"
+                  },
+                  {
+                    "name": "dependsOn",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayConfig)['dependsOn'])}}"
+                  },
+                  {
+                    "name": "dependsOnSnapshotMigrations",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayConfig)['dependsOnSnapshotMigrations'])}}"
+                  },
+                  {
+                    "name": "kafkaConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayConfig)['kafkaConfig'])}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['kafkaClusterName']}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['sourceLabel']}}"
+                  },
+                  {
+                    "name": "fromCapturedTraffic",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['fromCapturedTraffic']}}"
+                  },
+                  {
+                    "name": "fromCapturedTrafficSourceKind",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['fromCapturedTrafficSourceKind']}}"
+                  },
+                  {
+                    "name": "fromCapturedTrafficConfigChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['fromCapturedTrafficConfigChecksum']}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayConfig)['toTarget'])}}"
+                  },
+                  {
+                    "name": "targetConnectionIdentity",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayConfig)['targetConnectionIdentity'])}}"
+                  },
+                  {
+                    "name": "replayerOptions",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayConfig)['replayerConfig'])}}"
+                  },
+                  {
+                    "name": "useLocalStack",
+                    "value": "{{=sprig.dig('replayerConfig', 'useLocalStack', false, fromJSON(inputs.parameters.replayConfig))}}"
+                  },
+                  {
+                    "name": "groupName_view",
+                    "value": "{{=fromJSON(inputs.parameters.replayConfig)['name']}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "5"
+                  }
+                ]
+              },
+              "name": "replay"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "runindependentreplay",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "replayConfig"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "runconfiguredreplay",
+              "when": "{{=!('snapshotSequenceName' in fromJSON(inputs.parameters.replayConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "replayConfig",
+                    "value": "{{inputs.parameters.replayConfig}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "replay"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "runsnapshotsequenceandreplays",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "config"
+            },
+            {
+              "name": "sequencePlan"
+            },
+            {
+              "name": "uniqueRunNonce",
+              "description": "Workflow session nonce",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "runsnapshotsequence",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "config",
+                    "value": "{{inputs.parameters.config}}"
+                  },
+                  {
+                    "name": "sequencePlan",
+                    "value": "{{inputs.parameters.sequencePlan}}"
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "sequence"
+            }
+          ],
+          [
+            {
+              "template": "runconfiguredreplay",
+              "withParam": "{{=sprig.dig('replayIndices', [], fromJSON(inputs.parameters.sequencePlan))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  },
+                  {
+                    "name": "replayConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.config)['trafficReplays'][asInt(item)])}}"
+                  }
+                ]
+              },
+              "name": "replay"
             }
           ]
         ],
@@ -2471,7 +3800,7 @@
               "name": "createSnapshot"
             },
             {
-              "template": "runsinglesnapshotmigration",
+              "template": "runindependentsnapshotmigration",
               "withParam": "{{=fromJSON(inputs.parameters.config)['snapshotMigrations']}}",
               "arguments": {
                 "parameters": [
@@ -2548,17 +3877,25 @@
               "name": "performSnapshotMigration"
             },
             {
-              "template": "runsinglereplay",
-              "withParam": "{{=fromJSON(inputs.parameters.config)['trafficReplays']}}",
+              "template": "runsnapshotsequenceandreplays",
+              "withParam": "{{=sprig.dig('snapshotSequences', [], fromJSON(inputs.parameters.config))}}",
               "arguments": {
                 "parameters": [
                   {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                    "name": "config",
+                    "value": "{{inputs.parameters.config}}"
                   },
                   {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
                   },
                   {
                     "name": "imageTrafficReplayerLocation",
@@ -2569,84 +3906,85 @@
                     "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
                   },
                   {
-                    "name": "name",
-                    "value": "{{=jsonpath(toJSON(item), '$.name')}}"
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
                   },
                   {
-                    "name": "sourceLabel",
-                    "value": "{{=jsonpath(toJSON(item), '$.sourceLabel')}}"
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
                   },
                   {
-                    "name": "dependsOn",
-                    "value": "{{=jsonpath(toJSON(item), '$.dependsOn')}}"
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
                   },
                   {
-                    "name": "dependsOnSnapshotMigrations",
-                    "value": "{{=jsonpath(toJSON(item), '$.dependsOnSnapshotMigrations')}}"
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
-                    "name": "fromCapturedTraffic",
-                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTraffic')}}"
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
                   },
                   {
-                    "name": "fromCapturedTrafficSourceKind",
-                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTrafficSourceKind')}}"
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   },
                   {
-                    "name": "fromCapturedTrafficConfigChecksum",
-                    "value": "{{=jsonpath(toJSON(item), '$.fromCapturedTrafficConfigChecksum')}}"
+                    "name": "sequencePlan",
+                    "value": "{{item}}"
+                  }
+                ]
+              },
+              "name": "performSnapshotSequence"
+            },
+            {
+              "template": "runindependentreplay",
+              "withParam": "{{=fromJSON(inputs.parameters.config)['trafficReplays']}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
                   {
-                    "name": "kafkaClusterName",
-                    "value": "{{=jsonpath(toJSON(item), '$.kafkaClusterName')}}"
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
                   },
                   {
-                    "name": "kafkaConfig",
-                    "value": "{{=jsonpath(toJSON(item), '$.kafkaConfig')}}"
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
                   },
                   {
-                    "name": "replayerConfig",
-                    "value": "{{=jsonpath(toJSON(item), '$.replayerConfig')}}"
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
                   },
                   {
-                    "name": "toTarget",
-                    "value": "{{=jsonpath(toJSON(item), '$.toTarget')}}"
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
                   },
                   {
-                    "name": "targetConnectionIdentity",
-                    "value": "{{=jsonpath(toJSON(item), '$.targetConnectionIdentity')}}"
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
                   },
                   {
-                    "name": "configChecksum",
-                    "value": "{{=jsonpath(toJSON(item), '$.configChecksum')}}"
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
                   },
                   {
-                    "name": "resourceUid",
-                    "value": "{{=jsonpath(toJSON(item), '$.resourceUid')}}"
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
-                    "name": "targetConfig",
-                    "value": "{{=item['toTarget']}}"
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
                   },
                   {
-                    "name": "replayerOptions",
-                    "value": "{{=item['replayerConfig']}}"
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   },
                   {
-                    "name": "resourceName",
-                    "value": "{{=item['name']}}"
-                  },
-                  {
-                    "name": "useLocalStack",
-                    "value": "{{=sprig.dig('useLocalStack', false, fromJSON(item['replayerConfig']))}}"
-                  },
-                  {
-                    "name": "groupName_view",
-                    "value": "{{=item['fromCapturedTraffic']+' → '+sprig.dig('label', '', fromJSON(item['toTarget']))}}"
-                  },
-                  {
-                    "name": "sortOrder_view",
-                    "value": "5"
+                    "name": "replayConfig",
+                    "value": "{{item}}"
                   }
                 ]
               },

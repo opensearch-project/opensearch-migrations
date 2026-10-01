@@ -88,6 +88,24 @@ def gcs_snapshot(mock_cluster):
     return GcsSnapshot(config, mock_cluster)
 
 
+@pytest.mark.parametrize("snapshot_fixture", ["s3_snapshot", "fs_snapshot", "gcs_snapshot"])
+@pytest.mark.parametrize("nested_stats", [False, True])
+def test_snapshot_json_status_preserves_source_start_timestamp(request, snapshot_fixture, nested_stats):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    started = 1719343996753
+    timing = {"start_time_in_millis": started}
+    details = {"snapshot": snapshot.snapshot_name, "state": "SUCCESS",
+               **({"stats": timing} if nested_stats else timing)}
+    response = mock.Mock()
+    response.json.return_value = {"snapshots": [details]}
+    snapshot.source_cluster.call_api.return_value = response
+    result = snapshot.status_json()
+    assert result["state"] == "SUCCESS"
+    assert result["snapshot_start_time_in_millis"] == started
+    snapshot.source_cluster.call_api.assert_called_once_with(
+        f"/_snapshot/{snapshot.snapshot_repo_name}/{snapshot.snapshot_name}", HttpMethod.GET)
+
+
 def snapshot_404_response():
     mock_response = mock.Mock(spec=Response)
     mock_response.status_code = 404

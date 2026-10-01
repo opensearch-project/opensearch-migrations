@@ -32,6 +32,10 @@ The three CRD type packages (`k8s-types`, `argo-types`, `strimzi-types`) contain
 
 ## Usage
 
+For repeated snapshot and backfill rounds, see
+[Successive snapshot backfills](../docs/successiveSnapshotBackfills.md) and the
+[configuration example](examples/successive-snapshots.yaml).
+
 ### Templates
 
 To build and view the workflow templates without posting them to the kubernetes cluster, run

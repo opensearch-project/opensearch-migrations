@@ -38,6 +38,9 @@ type StatusPatchableResource = {
     status?: Record<string, unknown>;
 };
 
+// Leave room below Kubernetes request and etcd object limits for server-side metadata.
+const MAX_MIGRATION_RUN_BYTES = 1024 * 1024;
+
 const CRD_KIND_TO_PLURAL: Record<string, string> = {
     ApprovalGate: 'approvalgates',
     CaptureProxy: 'captureproxies',
@@ -91,7 +94,7 @@ export class MigrationInitializer {
         if (migrationRunOptions?.runNumber === undefined) {
             throw new Error("Migration run number is required when generating migration resources.");
         }
-        const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
+        const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig, workflows);
         const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
         const customMigrationResources = this.generateCustomMigrationResources(
             workflows,
@@ -280,8 +283,13 @@ export class MigrationInitializer {
         return `kubectl patch ${plural}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
     }
 
-    private generateConcurrencyConfigMaps(userConfig: any) {
-        const semaphoreKeys = this.generateSemaphoreKeys(userConfig);
+    private generateConcurrencyConfigMaps(userConfig: any, workflows?: WorkflowConfig) {
+        // Keep explicit snapshot/backup keys and include keys produced by policy expansion.
+        const semaphoreKeys = new Set([
+            ...this.generateSemaphoreKeys(userConfig),
+            ...(workflows?.snapshots.flatMap(snapshot =>
+                snapshot.createSnapshotConfig.map(config => config.semaphoreKey)) ?? []),
+        ]);
         const semaphoreData: Record<string, string> = {};
         
         // Add each semaphore key with count=1
@@ -453,7 +461,7 @@ export class MigrationInitializer {
             ));
         }
 
-        items.push({
+        const migrationRunResource = {
             apiVersion: CRD_API_VERSION,
             kind: 'MigrationRun',
             metadata: {
@@ -469,7 +477,18 @@ export class MigrationInitializer {
                 timestamp: migrationRun.timestamp.toISOString(),
                 resolvedConfig: resolvedMigrationResources,
             },
-        });
+        };
+        // kubectl create serializes the manifest as JSON; validate before any bundle files are written.
+        const migrationRunSizeBytes = Buffer.byteLength(JSON.stringify(migrationRunResource), "utf8");
+        if (workflows.snapshotSequences?.some(sequence => sequence.repeat) &&
+            migrationRunSizeBytes > MAX_MIGRATION_RUN_BYTES) {
+            throw new Error(
+                `Generated MigrationRun '${migrationRun.name}' is ${migrationRunSizeBytes} bytes and exceeds ` +
+                `the 1 MiB (${MAX_MIGRATION_RUN_BYTES} bytes) size budget. Reduce backfill.repeat.maxRuns ` +
+                "or the size of the migration configuration before submitting."
+            );
+        }
+        items.push(migrationRunResource);
         const resourcesByKey = new Map(
             resolvedMigrationResources.resources
                 .map(resource => [`${resource.kind}:${resource.name}`, resource])

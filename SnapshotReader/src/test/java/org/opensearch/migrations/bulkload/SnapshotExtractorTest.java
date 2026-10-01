@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -110,6 +111,15 @@ class SnapshotExtractorTest {
     void getSnapshotReader_returnsUnderlyingReader() {
         var extractor = createExtractor();
         assertEquals(snapshotReader, extractor.getSnapshotReader());
+    }
+
+    @Test
+    void deltaRejectsSnapshotsThatNeedSourceReconstruction() {
+        var extractor = createExtractor();
+        var metadata = mock(IndexMetadata.class);
+        when(indexMetadataFactory.fromRepo("snap-1", "idx")).thenReturn(metadata);
+        when(metadata.needsSourceReconstruction()).thenReturn(true);
+        assertThrows(IllegalArgumentException.class, () -> extractor.validateDeltaSource("snap-1", "idx"));
     }
 
     @Test

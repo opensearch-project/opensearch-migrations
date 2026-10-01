@@ -360,17 +360,19 @@ public class RfsMigrateDocuments {
 
     public static class ExperimentalArgs {
         @Parameter(required = false,
-            names = { "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
-            description = "Optional. The name of the previous snapshot for delta migration (experimental feature)",
-            hidden = true
+            names = { "--previous-snapshot-name", "--previousSnapshotName",
+                "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
+            description = "Previous snapshot for delta migration, in the same repository as --snapshot-name. " +
+                "The target must already contain its completed backfill. Requires --delta-mode."
         )
         public String previousSnapshotName = null;
 
         @Parameter(required = false,
-            names = { "--experimental-delta-mode" },
+            names = { "--delta-mode", "--deltaMode", "--experimental-delta-mode" },
             converter = DeltaModeConverter.class,
-            description = "Experimental delta snapshot migration mode. Requires --base-snapshot-name",
-            hidden = true
+            description = "Delta snapshot migration mode. Requires --previous-snapshot-name. " +
+                "For multiple workers, finish DELETES_ONLY for all shards before running UPDATES_ONLY, " +
+                "with a distinct --session-name for each phase. UPDATES_AND_DELETES is a legacy per-shard mode."
         )
         public DeltaMode experimentalDeltaMode = null;
 
@@ -534,16 +536,21 @@ public class RfsMigrateDocuments {
         if (args.experimental.experimentalDeltaMode != null) {
             if (args.experimental.previousSnapshotName == null) {
                 throw new ParameterException(
-                    "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
+                    "When --delta-mode is specified, --previous-snapshot-name must be provided."
                 );
             }
-            log.atWarn().setMessage("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
-                    "This feature is experimental and should not be used in production.")
-                    .addArgument(args.experimental.experimentalDeltaMode).log();
+            if (args.experimental.previousSnapshotName.isBlank()) {
+                throw new ParameterException("--previous-snapshot-name must not be blank.");
+            }
+            if (args.serverGeneratedIds == ServerGeneratedIdMode.ALWAYS) {
+                throw new ParameterException("Delta migration requires preserved source document IDs.");
+            }
+            if (args.experimental.enableSourcelessMigrations || args.experimental.useRecoverySource) {
+                throw new ParameterException("Delta migration requires complete stored _source in both snapshots.");
+            }
         } else if (args.experimental.previousSnapshotName != null) {
-            log.atError().setMessage("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.").log();
             throw new ParameterException(
-                "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
+                "When --previous-snapshot-name is specified, --delta-mode must be provided."
             );
         }
 
@@ -627,6 +634,9 @@ public class RfsMigrateDocuments {
                 yield false;
             }
         };
+        if (useServerGeneratedIds && arguments.experimental.experimentalDeltaMode != null) {
+            throw new ParameterException("Delta migration requires a target that preserves source document IDs.");
+        }
 
         var docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
         if (docTransformerConfig != null) {
@@ -877,7 +887,10 @@ public class RfsMigrateDocuments {
             .targetClient(targetClient)
             .maxDocsPerBatch(arguments.numDocsPerBulkRequest)
             .maxBytesPerBatch(arguments.numBytesPerBulkRequest)
-            .batchConcurrency(arguments.maxConnections)
+            // Legacy combined mode must finish earlier delete batches before submitting additions.
+            // Successive snapshot workflows instead use separate, globally completed phases.
+            .batchConcurrency(arguments.experimental.experimentalDeltaMode == DeltaMode.UPDATES_AND_DELETES
+                ? 1 : arguments.maxConnections)
             .transformerSupplier(docTransformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
             .allowlist(allowlist)

@@ -21,6 +21,7 @@ import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.testfixtures.SupportedClusters;
 import org.opensearch.migrations.utils.FileSystemUtils;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.sdk.metrics.data.LongPointData;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -140,6 +141,12 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             var indexName = "test_index";
             var numberOfShards = 1; // Using single shard for simplicity
             var sourceClusterOperations = new ClusterOperations(sourceCluster);
+            var objectMapper = new ObjectMapper();
+            // ES 1.x segments have no immutable IDs, so even unchanged documents
+            // must be deleted and re-added instead of matching segments by filename.
+            var hasLegacySegmentsWithoutIds = VersionMatchers.isES_1_X.test(
+                sourceCluster.getContainerVersion().getVersion());
+            var expectedDeltaDocumentCount = hasLegacySegmentsWithoutIds ? 2 : 1;
 
             // Create index with single shard on both source and target
             String indexSettings = String.format(
@@ -225,8 +232,9 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
 
             // === ACTION: Migrate state change between snapshot1 and snapshot2
             var targetClusterOperations = new ClusterOperations(targetCluster);
-            // Create docIdDeletedOnSecondSnapshot to verify it's deleted when going from snapshot1 -> snapshot2
+            // A delta requires the complete preceding snapshot to be present on the target.
             targetClusterOperations.createDocument(indexName, docIdDeletedOnSecondSnapshot, doc);
+            targetClusterOperations.createDocument(indexName, docIdOnBoth, doc);
             {
                 final var testDocMigrationContext = DocumentMigrationTestContext.factory()
                     .withTracking(false, true, false);
@@ -263,12 +271,16 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     Assertions.assertEquals(200, response.getKey(), docIdOnlyOnSecond + " should be created");
                 }
                 {
-                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnBoth);
-                    Assertions.assertEquals(404, response.getKey(), docIdOnBoth + " should not be created");
+                    var response = targetClusterOperations.get("/" + indexName + "/_doc/" + docIdOnBoth);
+                    Assertions.assertEquals(200, response.getKey(), docIdOnBoth + " should be preserved");
+                    var document = objectMapper.readTree(response.getValue());
+                    Assertions.assertEquals(objectMapper.readTree(doc), document.get("_source"));
+                    Assertions.assertEquals(hasLegacySegmentsWithoutIds ? 3 : 1, document.get("_version").asLong(),
+                        "Only segments without immutable IDs should rewrite the unchanged document");
                 }
 
-                // After first run (snapshot1 -> snapshot2): 3 segments, 1 addition, 1 deletion
-                assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
+                // Legacy segments also contribute the unchanged document to both streams.
+                assertDeltaMetrics(testDocMigrationContext, 3, expectedDeltaDocumentCount, expectedDeltaDocumentCount);
             }
 
             // Run second time reversing base and current snapshot
@@ -309,11 +321,14 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                      Assertions.assertEquals(404, response.getKey(), "doc2 should not exist");
                 }
                 {
-                    var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdOnBoth);
-                    Assertions.assertEquals(404, response.getKey(), docIdOnlyOnSecond + " should not be created");
+                    var response = targetClusterOperations.get("/" + indexName + "/_doc/" + docIdOnBoth);
+                    Assertions.assertEquals(200, response.getKey(), docIdOnBoth + " should be preserved");
+                    var document = objectMapper.readTree(response.getValue());
+                    Assertions.assertEquals(objectMapper.readTree(doc), document.get("_source"));
+                    Assertions.assertEquals(hasLegacySegmentsWithoutIds ? 5 : 1, document.get("_version").asLong(),
+                        "Reversing the snapshots should preserve the same segment identity behavior");
                 }
-                // After second run (snapshot2 -> snapsho12): 3 segments, 1 addition, 1 deletion
-                assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
+                assertDeltaMetrics(testDocMigrationContext, 3, expectedDeltaDocumentCount, expectedDeltaDocumentCount);
             }
         } finally {
             FileSystemUtils.deleteDirectories(localDirectory.toString());
