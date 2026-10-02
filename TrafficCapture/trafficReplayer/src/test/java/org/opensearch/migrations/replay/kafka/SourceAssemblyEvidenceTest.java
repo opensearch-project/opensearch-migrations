@@ -43,8 +43,8 @@ import org.junit.jupiter.api.Test;
  * generation identities, {@code §7}'s apply order, {@code §9}'s assembly and the dumper all run in one process
  * against bytes the proxy actually produced.
  *
- * <p>Driven through {@code TrafficReplayer.main} rather than by constructing the owner, because an entry point
- * with no caller is what {@code AGENTS.md §4} refuses to count as wired.
+ * <p>Driven through {@code TrafficReplayer.main} rather than by constructing the owner, because direct owner
+ * construction would not prove that the production entry point wires the complete path.
  *
  * <p>One proxy and one topic for the whole class, shared deliberately. Each test used to start its own, and
  * three proxy containers racing for ports in one JVM failed to start rather than failing an assertion — an

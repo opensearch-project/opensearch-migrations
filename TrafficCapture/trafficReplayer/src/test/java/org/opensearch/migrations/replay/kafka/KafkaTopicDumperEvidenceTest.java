@@ -173,8 +173,7 @@ class KafkaTopicDumperEvidenceTest {
             );
 
             // Through TrafficReplayer.main, not by calling the dumper directly. Calling the dumper would
-            // prove the dumper works while leaving the CLI dispatch unexercised, and an entry point with no
-            // caller is exactly what AGENTS.md section 4 refuses to count as wired.
+            // prove the dumper works while leaving the production CLI dispatch unexercised.
             // No --target-uri: dumping is a read-only inspection of the capture topic and must not require a
             // replay target to exist.
             var output = captureStdout(() -> TrafficReplayer.main(new String[] {

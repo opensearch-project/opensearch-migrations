@@ -29,8 +29,7 @@ dependencies {
 
     // The testcontainers rig -- CaptureProxyContainer, which runs the real CaptureProxy against a real
     // Kafka broker -- is published as test fixtures so the replayer can produce a topic with the actual
-    // proxy rather than a hand-rolled writer. That is the supply side of G1's exit criterion in
-    // docs/replayerRebuildPlanA-inPlace.md: "a topic written by the current, unmodified proxy".
+    // proxy rather than a hand-rolled writer and verify the real proxy-to-Kafka supply path.
     // `api` where a fixture's signature exposes the type to its callers: CaptureProxyContainer extends
     // GenericContainer and its constructors take Container and KafkaContainer, and the annotations
     // expose JUnit's.

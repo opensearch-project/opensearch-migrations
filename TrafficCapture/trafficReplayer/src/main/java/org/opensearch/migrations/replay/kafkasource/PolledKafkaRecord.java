@@ -21,9 +21,8 @@ import com.google.protobuf.InvalidProtocolBufferException;
  * <p>This exists so that {@link KafkaSourcePort} never needs to know a partition generation.
  * {@code kafkaLLD §5} makes {@code KafkaSourceOwner} the sole authority on generations, and the adapter
  * previously took a {@code Map<TopicPartition, PartitionGenerationId>} in order to stamp records itself — a
- * second mutable copy of state the owner already holds, which nothing populated and which
- * {@code AGENTS.md §6} forbids as a second correctness model. The owner stamps instead, turning each of these
- * into an {@link ApplicationKafkaRecord} under the generation it knows is current.
+ * second mutable copy of state the owner already holds and which nothing populated. The owner stamps instead,
+ * turning each of these into an {@link ApplicationKafkaRecord} under the generation it knows is current.
  *
  * <p>Carries the broker timestamp and serialized size because those come from Kafka metadata and cannot be
  * recovered later; everything else intake needs is inside the still-encoded envelope.

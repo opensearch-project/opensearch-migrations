@@ -291,7 +291,6 @@ public final class TestEventLoop extends AbstractEventExecutor implements EventL
                 + " channel cannot be combined in one test. Pick a tier: TestEventLoop + FakeClock with"
                 + " a fake TargetChannelPort for owner logic, ordering, timers and cancellation; or a"
                 + " real channel on a real NioEventLoopGroup with real time for integration."
-                + " See AGENTS.md section 4."
         );
     }
 
