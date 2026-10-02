@@ -56,20 +56,12 @@ public class KafkaTopicDumper {
         return baseEpoch;
     }
 
-    /**
-     * Reads a topic and writes one line per record to stdout.
-     *
-     * <p>{@code observedPacketConnectionTimeout} and {@code packetTimeoutParamName} configure the
-     * accumulator that {@code dump-http} builds, so only that mode reads them. They are threaded here so
-     * the CLI options stay connected to the method that consumes them; do not remove them as unused.
-     */
-    @SuppressWarnings("java:S1172") // see javadoc: read by the dump-http path only
+    /** Reads a topic and writes one line per record to stdout. */
     public void runDumpFromKafka(
         String mode, String brokers, String topic, String authType,
         String kafkaUserName, String kafkaPassword, String propertyFile,
         Long startOffset, Long startTime, Long endOffset, Long endTime,
         int previewBytesRead, int previewBytesWrite,
-        int observedPacketConnectionTimeout, String packetTimeoutParamName,
         RootReplayerContext rootContext
     ) throws Exception {
         var kafkaProps = KafkaConsumerProperties.buildKafkaProperties(

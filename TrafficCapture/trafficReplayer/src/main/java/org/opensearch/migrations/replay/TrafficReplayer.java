@@ -71,13 +71,11 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 public class TrafficReplayer {
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
-    public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
     public static final String KAFKA_AUTH_TYPE_NONE = "none";
     public static final String KAFKA_AUTH_TYPE_MSK_IAM = "msk-iam";
     public static final String KAFKA_AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
     private static final String MODE_REPLAY = "replay";
 
-    static final int DEFAULT_DUMP_OBSERVED_PACKET_TIMEOUT_SECONDS = 360;
     static final int DEFAULT_MAX_CONCURRENT_REQUESTS = 10000;
     static final int DEFAULT_NUM_CLIENT_THREADS = 0;
     static final int DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL_SECONDS = 30;
@@ -686,7 +684,6 @@ public class TrafficReplayer {
                 params.kafkaTrafficPropertyFile,
                 params.startOffset, params.startTime, params.endOffset, params.endTime,
                 params.previewBytesRead, params.previewBytesWrite,
-                DEFAULT_DUMP_OBSERVED_PACKET_TIMEOUT_SECONDS, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
                 rootContext);
         } else {
             System.err.println("Dump modes require --kafka-traffic-brokers and --kafka-traffic-topic");

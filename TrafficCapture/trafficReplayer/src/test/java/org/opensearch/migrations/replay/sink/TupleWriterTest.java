@@ -200,8 +200,17 @@ class TupleWriterTest {
     }
 
     @Test
-    void graceFlushesOnEntryAndImmediatelyAfterEachAcceptedTuple() {
-        var contexts = new ContextFixture();
+    void graceFlushesOnlyTheAffectedGenerationUntilItsLastReferenceLeaves() {
+        var contexts = new ContextFixture(REQUEST_ID);
+        var otherRequestId = new ReplayRequestId(
+            new ConnectionProcessingId(
+                new PartitionGenerationId(new TopicPartition("traffic", 0), 2),
+                new CapturedConnectionId("node", "other-connection"),
+                1
+            ),
+            0
+        );
+        var otherContexts = new ContextFixture(otherRequestId);
         var clock = new FakeClock();
         var eventLoop = new TestEventLoop(clock);
         var sink = new ScriptedSink();
@@ -216,12 +225,13 @@ class TupleWriterTest {
             OutstandingOperationRegistry.CountHook.NOOP
         );
 
-        writer.enterGrace();
+        var generation = REQUEST_ID.connectionProcessingId().generation();
+        writer.enterGrace(generation);
         eventLoop.runUntilIdle();
         Assertions.assertEquals(1, sink.flushes.get(), "grace entry must flush buffered tuples");
-        writer.enterGrace();
+        writer.enterGrace(generation);
         eventLoop.runUntilIdle();
-        Assertions.assertEquals(1, sink.flushes.get(), "duplicate grace entry must not flush again");
+        Assertions.assertEquals(1, sink.flushes.get(), "another connection in the generation shares eager flush");
 
         var write = writer.write(new TupleWriter.WriteTuple<>(contexts.tuple, "tuple"));
         eventLoop.runUntilIdle();
@@ -238,7 +248,56 @@ class TupleWriterTest {
             TupleWriter.TupleDurable.class,
             write.completion().toCompletableFuture().join()
         );
+
+        var otherWrite = writer.write(
+            new TupleWriter.WriteTuple<>(otherContexts.tuple, "other-generation")
+        );
+        eventLoop.runUntilIdle();
+        Assertions.assertEquals(
+            2,
+            sink.flushes.get(),
+            "a generation outside grace must retain ordinary sink batching"
+        );
+        sink.durableNext();
+        eventLoop.runUntilIdle();
+        Assertions.assertInstanceOf(
+            TupleWriter.TupleDurable.class,
+            otherWrite.completion().toCompletableFuture().join()
+        );
+
+        writer.leaveGrace(generation);
+        eventLoop.runUntilIdle();
+        var stillInGrace = writer.write(
+            new TupleWriter.WriteTuple<>(contexts.tuple, "last-generation-reference")
+        );
+        eventLoop.runUntilIdle();
+        Assertions.assertEquals(3, sink.flushes.get());
+        sink.durableNext();
+        eventLoop.runUntilIdle();
+        Assertions.assertInstanceOf(
+            TupleWriter.TupleDurable.class,
+            stillInGrace.completion().toCompletableFuture().join()
+        );
+
+        writer.leaveGrace(generation);
+        eventLoop.runUntilIdle();
+        var afterGrace = writer.write(
+            new TupleWriter.WriteTuple<>(contexts.tuple, "after-grace")
+        );
+        eventLoop.runUntilIdle();
+        Assertions.assertEquals(
+            3,
+            sink.flushes.get(),
+            "the last connection leaving grace must restore ordinary batching"
+        );
+        sink.durableNext();
+        eventLoop.runUntilIdle();
+        Assertions.assertInstanceOf(
+            TupleWriter.TupleDurable.class,
+            afterGrace.completion().toCompletableFuture().join()
+        );
         Assertions.assertTrue(fatalFailures.isEmpty());
+        otherContexts.close();
         contexts.close();
     }
 
@@ -279,21 +338,27 @@ class TupleWriterTest {
     private static final class ContextFixture implements AutoCloseable {
         private final RootReplayerContext root =
             new RootReplayerContext(OpenTelemetry.noop());
-        private final IReplayContexts.IKafkaRecordContext record =
-            root.createKafkaRecordContext(
-                new KafkaRecordId(REQUEST_ID.connectionProcessingId().generation(), 0),
-                0
-            );
-        private final IReplayContexts.ITrafficStreamsLifecycleContext traffic =
-            record.createTrafficStreamContext(0);
-        private final IReplayContexts.IRequestContext request =
-            traffic.createRequestContext(
-                REQUEST_ID,
-                java.time.Instant.EPOCH
-            );
+        private final IReplayContexts.IKafkaRecordContext record;
+        private final IReplayContexts.ITrafficStreamsLifecycleContext traffic;
+        private final IReplayContexts.IRequestContext request;
         private final IReplayContexts.ITupleHandlingContext tuple;
 
         private ContextFixture() {
+            this(REQUEST_ID);
+        }
+
+        private ContextFixture(ReplayRequestId requestId) {
+            record =
+            root.createKafkaRecordContext(
+                new KafkaRecordId(requestId.connectionProcessingId().generation(), 0),
+                0
+            );
+            traffic = record.createTrafficStreamContext(0);
+            request =
+            traffic.createRequestContext(
+                requestId,
+                java.time.Instant.EPOCH
+            );
             request.onRequestReconstituted();
             tuple = request.createTupleContext();
         }

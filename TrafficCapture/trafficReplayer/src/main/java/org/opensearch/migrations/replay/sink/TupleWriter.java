@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
@@ -121,7 +122,8 @@ public final class TupleWriter<T> {
     private final FatalHandler fatalHandler;
     private final OutstandingOperationRegistry operations;
     private final Map<ReplayRequestId, WriteOperation> active = new LinkedHashMap<>();
-    private boolean eagerFlush;
+    private final Map<PartitionGenerationId, Integer> eagerFlushReferences =
+        new LinkedHashMap<>();
 
     public TupleWriter(
         @NonNull EventLoop eventLoop,
@@ -273,18 +275,40 @@ public final class TupleWriter<T> {
         return operations;
     }
 
-    /**
-     * Enters eager-flush operation for generation grace. Idempotent and confined to the writer's event loop.
-     */
-    public void enterGrace() {
+    /** Enters eager-flush operation for one connection served during generation grace. */
+    public void enterGrace(@NonNull PartitionGenerationId generation) {
         postRequired(
-            "tuple grace entry",
+            "tuple grace entry " + generation,
             () -> {
-                if (eagerFlush) {
-                    return;
+                var references = eagerFlushReferences.get(generation);
+                eagerFlushReferences.put(
+                    generation,
+                    references == null ? 1 : Math.addExact(references, 1)
+                );
+                if (references == null) {
+                    flushSink();
                 }
-                eagerFlush = true;
-                flushSink();
+            },
+            ignored -> {}
+        );
+    }
+
+    /** Leaves eager-flush operation after one connection owner finishes generation grace. */
+    public void leaveGrace(@NonNull PartitionGenerationId generation) {
+        postRequired(
+            "tuple grace exit " + generation,
+            () -> {
+                var references = eagerFlushReferences.get(generation);
+                if (references == null) {
+                    throw new IllegalStateException(
+                        "tuple writer has no grace reference for " + generation
+                    );
+                }
+                if (references == 1) {
+                    eagerFlushReferences.remove(generation);
+                } else {
+                    eagerFlushReferences.put(generation, references - 1);
+                }
             },
             ignored -> {}
         );
@@ -372,7 +396,9 @@ public final class TupleWriter<T> {
                 ),
                 "physical tuple sink returned no completion stage"
             );
-            if (eagerFlush) {
+            if (eagerFlushReferences.containsKey(
+                operation.input.requestId().connectionProcessingId().generation()
+            )) {
                 flushSink();
             }
         } catch (Throwable failure) {

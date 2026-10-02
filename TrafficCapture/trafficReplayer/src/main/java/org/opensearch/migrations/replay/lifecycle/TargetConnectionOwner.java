@@ -349,6 +349,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private boolean targetChannelClosed;
     private boolean targetChannelClosePending;
     private boolean ownerFinishedSubmitted;
+    private boolean tupleWriterGraceEntered;
 
     public TargetConnectionOwner(
         @NonNull ConnectionProcessingId connectionProcessingId,
@@ -1102,7 +1103,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         CancellationGrace grace,
         CancellationException cause
     ) {
-        tupleWriter.enterGrace();
+        if (!tupleWriterGraceEntered) {
+            tupleWriterGraceEntered = true;
+            tupleWriter.enterGrace(partitionGenerationId);
+        }
         switch (grace) {
             case CancellationGrace.Revocation revocation ->
                 gracefulCancel(revocation.deadline(), cause);
@@ -1204,8 +1208,16 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                     partitionGenerationId,
                     connectionProcessingId
                 ),
-            ownerTerminated
+            this::finishOwnerTermination
         );
+    }
+
+    private void finishOwnerTermination() {
+        if (tupleWriterGraceEntered) {
+            tupleWriter.leaveGrace(partitionGenerationId);
+            tupleWriterGraceEntered = false;
+        }
+        ownerTerminated.run();
     }
 
     private RequestReplayOwner<S, P, R, F, T> routeRequest(ReplayRequestId requestId) {

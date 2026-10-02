@@ -109,7 +109,7 @@ services:
       - "logging-group-default"
       - "--kafkaPropertyFile"
       - "/tmp/kafka-consumer.properties"
-      - "--max-concurrent-target-attempts"
+      - "--maxConcurrentRequests"
       - "200"
 
 volumes:

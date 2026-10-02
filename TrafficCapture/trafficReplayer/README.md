@@ -6,16 +6,10 @@ server, recording the packet traffic of the new interactions for future analysis
 ## Overview
 
 The replayer consumes protobuf-encoded
-[TrafficStream](../captureProtobufs/src/main/proto/TrafficCaptureStream.proto) objects from a configured Kafka topic
-and reconstructs complete traffic channels. This involves buffering connections whose contents are divided across
-multiple Kafka records.
-Read and write observations are extracted from TrafficStream objects into source requests and source responses.
-The [CapturedTrafficToHttpTransactionAccumulator](src/main/java/org/opensearch/migrations/replay/CapturedTrafficToHttpTransactionAccumulator.java)
-takes full requests (as defined by the data, not necessarily by the HTTP format) and sends them to
-an [IPacketConsumer](src/main/java/org/opensearch/migrations/replay/datahandlers/IPacketConsumer.java). The packet handler is
-responsible for doing
-any transformation of the request and sending it to the target server. It is also responsible for aggregating the HTTP
-response from the server and returning that as a CompletableFuture via finalizeRequest().
+[CaptureRecord](../captureProtobufs/src/main/proto/TrafficCaptureStream.proto) envelopes from a configured Kafka topic
+and reconstructs complete traffic channels. This involves buffering connections whose observations are divided across
+multiple Kafka records. The intake and connection owners turn read and write observations into source requests and
+responses, while target owners transform and send complete requests to the target server.
 
 Once the response is acquired, the full response and the recorded request and response for the source interaction, plus
 other pertinent information is sent to stdout.
@@ -271,13 +265,11 @@ one line per request and one line per response as they become available.
 ```
 traffic-replayer --mode dump-http \
   --kafka-traffic-brokers kafka:9092 \
-  --kafka-traffic-topic my-topic \
-  [--packet-timeout-seconds 360]
+  --kafka-traffic-topic my-topic
 ```
 
-`--packet-timeout-seconds` is retained only as a deprecated compatibility option. It parses with a
-warning and has no effect; dump HTTP uses its fixed diagnostic timeout. The removed `-t` shorthand
-is rejected.
+The retired packet-timeout options are rejected. Dump HTTP uses the same broker-time reconstruction
+rules as replay mode.
 
 **Output format:**
 ```
@@ -302,20 +294,15 @@ Emits the `dump-raw` record view and the reconstructed `dump-http` transaction v
 
 ### Implementation notes
 
-- All dump modes bypass the replay engine, connection pool, transformers, and backpressure
-  (`BlockingTrafficSource`). They use `TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource`
-  directly.
+- All dump modes bypass the target replay pipeline, connection pool, transformers, and target backpressure.
 - For Kafka sources, dump modes create a bare `KafkaConsumer` using `assign()` instead of
   `subscribe()`. This avoids all group coordination and offset tracking. Partitions are
   discovered via `partitionsFor(topic)`, then seeked to the requested start position.
   Offset windowing uses `seek()`; time windowing uses `offsetsForTimes()`.
 - `dump-raw` is implemented in `TrafficStreamDumper` — a standalone class with no dependency on
-  the accumulator. It iterates observations from each `TrafficStream` record and formats output.
-- `dump-http` is implemented in `HttpTransactionDumper` — a custom `AccumulationCallbacks`
-  implementation wired into `CapturedTrafficToHttpTransactionAccumulator`. It reuses the existing
-  `pullCaptureFromSourceToAccumulator` loop from `TrafficReplayerCore` but with no replay
-  machinery.
+  source reconstruction. It iterates observations from each traffic record and formats output.
+- `dump-http` and `dump-both` send records through the active replay-intake and source-reconstruction
+  owners. `HttpTransactionDumper` consumes the resulting request, response, close, and expiration events.
 - The `--mode` parameter is added to `TrafficReplayer.Parameters`. The `targetUriString` positional
-  parameter is only required when mode is `replay` (the default). Dump modes branch in
-  `TrafficReplayer.main()` after creating the traffic source, skipping all replay setup.
+  parameter is only required when mode is `replay` (the default). Dump modes skip target replay setup.
 - Output goes to stdout. Log messages go to stderr (via slf4j, same as existing behavior).

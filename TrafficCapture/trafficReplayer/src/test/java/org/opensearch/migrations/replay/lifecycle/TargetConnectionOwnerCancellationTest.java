@@ -94,6 +94,13 @@ class TargetConnectionOwnerCancellationTest {
             fixture.tupleSink.flushes,
             "grace entry and both accepted tuples must each flush"
         );
+        fixture.tupleWriter.enterGrace(GENERATION);
+        fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(
+            4,
+            fixture.tupleSink.flushes,
+            "owner completion must release its generation-grace reference"
+        );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
