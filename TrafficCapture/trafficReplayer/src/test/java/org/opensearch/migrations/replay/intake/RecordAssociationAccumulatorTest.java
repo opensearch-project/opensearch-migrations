@@ -8,11 +8,15 @@
 
 package org.opensearch.migrations.replay.intake;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
@@ -42,6 +46,8 @@ import com.google.protobuf.Timestamp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Record accounting across source assembly.
@@ -159,6 +165,70 @@ class RecordAssociationAccumulatorTest {
             ),
             "finishing every expected lifecycle must leave no hidden association holding either record"
         );
+    }
+
+    /**
+     * Restores the cut-point oracle from
+     * {@code ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest.testAccumulatedSplit} at the active
+     * production boundary. Every record boundary is tried as the simulated process-stop point. Only the
+     * contiguous completed prefix may become the restart cursor; a request or response split across records
+     * holds its entire unfinished suffix for the next process.
+     */
+    @ParameterizedTest(name = "cut after {0} records; restart at offset {1}")
+    @CsvSource({
+        "0, 0",
+        "1, 1",
+        "2, 1",
+        "3, 3",
+        "4, 3",
+        "5, 5"
+    })
+    void testAccumulatedSplit(int cutPoint, int expectedRestartOffset) {
+        var firstPass = runCutPointPass(0, 0, cutPoint);
+        var restartOffset = nextUnfinishedOffset(firstPass.completedRecordOffsets());
+        Assertions.assertEquals(
+            expectedRestartOffset,
+            restartOffset,
+            "the restart cursor must stop before every record still held by partial reconstruction"
+        );
+
+        var secondPass = runCutPointPass(1, restartOffset, CUT_POINT_RECORD_COUNT);
+        var completedTransactions = new ArrayList<>(firstPass.completedTransactions());
+        completedTransactions.addAll(secondPass.completedTransactions());
+        Assertions.assertEquals(
+            List.of(
+                new CompletedTransaction(
+                    "GET /a HTTP/1.1\r\n\r\n",
+                    "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na"
+                ),
+                new CompletedTransaction(
+                    "GET /b HTTP/1.1\r\nHost: source\r\n\r\n",
+                    "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nb"
+                ),
+                new CompletedTransaction(
+                    "GET /c HTTP/1.1\r\n\r\n",
+                    "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody"
+                )
+            ),
+            completedTransactions,
+            "complete request/response bytes must be independent of the process cut point"
+        );
+
+        var completedOffsets = new ArrayList<>(firstPass.completedRecordOffsets());
+        completedOffsets.addAll(secondPass.completedRecordOffsets());
+        Assertions.assertEquals(
+            CUT_POINT_RECORD_COUNT,
+            completedOffsets.size(),
+            "the two passes together must finish each physical offset exactly once"
+        );
+        var uniqueOffsets = new TreeSet<>(completedOffsets);
+        Assertions.assertEquals(
+            CUT_POINT_RECORD_COUNT,
+            uniqueOffsets.size(),
+            "a replayed suffix must not create duplicate completion authority"
+        );
+        Assertions.assertEquals(0L, uniqueOffsets.first());
+        Assertions.assertEquals(CUT_POINT_RECORD_COUNT - 1L, uniqueOffsets.last());
     }
 
     /**
@@ -922,13 +992,151 @@ class RecordAssociationAccumulatorTest {
         return List.copyOf(drainedSourceInputs);
     }
 
+    private static final int CUT_POINT_RECORD_COUNT = 5;
+
+    private static CutPointPassResult runCutPointPass(
+        long generationSequence,
+        int fromOffset,
+        int toOffset
+    ) {
+        if (fromOffset == toOffset) {
+            return new CutPointPassResult(List.of(), List.of());
+        }
+        var passTelemetry = new InMemoryInstrumentationBundle(false, true);
+        try {
+            var passContext = new RootReplayerContext(passTelemetry.openTelemetrySdk);
+            var passSourceInputs = new KafkaSourceInputQueue(
+                new WakeupController(() -> {}, passContext)
+            );
+            var passSink = new RecordingSink();
+            var passOwner = new ReplayIntakeOwner(
+                new ReplayIntakeInputQueue(),
+                passSourceInputs,
+                passSink,
+                failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
+                passContext.replayIntakeMetrics
+            );
+            var script = cutPointScript(generationSequence, fromOffset, toOffset);
+            var generation = script.generation(0);
+            passOwner.applyOnCallingThread(
+                new ReplayIntakeInput.PartitionGenerationAssigned(generation)
+            );
+            passOwner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+                new PartitionBatchRequestId(generation, 0),
+                script.records()
+            ));
+            for (var requestId : List.copyOf(passSink.completeResponses)) {
+                passOwner.applyOnCallingThread(new RequestLifecycleInput.ConnectionRequestFinished(
+                    generation,
+                    requestId
+                ));
+                passOwner.applyOnCallingThread(new RequestLifecycleInput.RequestProcessingFinished(
+                    generation,
+                    requestId
+                ));
+            }
+            var completedRecordOffsets = passSourceInputs.drain()
+                .stream()
+                .filter(KafkaSourceInput.RecordProcessingFinished.class::isInstance)
+                .map(input -> ((KafkaSourceInput.RecordProcessingFinished) input).recordId().offset())
+                .sorted()
+                .toList();
+            return new CutPointPassResult(
+                passSink.completedTransactions(),
+                completedRecordOffsets
+            );
+        } finally {
+            passTelemetry.close();
+        }
+    }
+
+    private static RecordScript cutPointScript(
+        long generationSequence,
+        int fromOffset,
+        int toOffset
+    ) {
+        var streams = cutPointStreams();
+        var script = new RecordScript(TOPIC, generationSequence);
+        for (var offset = fromOffset; offset < toOffset; ++offset) {
+            script.addTraffic(
+                0,
+                offset,
+                Instant.ofEpochMilli(1_000L + offset),
+                WRITER,
+                streams.get(offset)
+            );
+        }
+        return script;
+    }
+
+    private static List<TrafficStream> cutPointStreams() {
+        return List.of(
+            streamForConnection(
+                "connection-a",
+                0,
+                read(1, "GET /a HTTP/1.1\r\n\r\n"),
+                endOfMessage(2),
+                write(3, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na"),
+                close(4)
+            ),
+            streamForConnection(
+                "connection-b",
+                0,
+                read(1, "GET /b HTTP/1.1\r\nHo")
+            ),
+            continuedStream(
+                "connection-b",
+                1,
+                0,
+                true,
+                read(2, "st: source\r\n\r\n"),
+                endOfMessage(3),
+                write(4, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nb"),
+                close(5)
+            ),
+            streamForConnection(
+                "connection-c",
+                0,
+                read(1, "GET /c HTTP/1.1\r\n\r\n"),
+                endOfMessage(2),
+                write(3, "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbo")
+            ),
+            continuedStream(
+                "connection-c",
+                1,
+                1,
+                false,
+                write(4, "dy"),
+                close(5)
+            )
+        );
+    }
+
+    private static int nextUnfinishedOffset(List<Long> completedOffsets) {
+        var completed = Set.copyOf(completedOffsets);
+        var offset = 0;
+        while (completed.contains((long) offset)) {
+            ++offset;
+        }
+        return offset;
+    }
+
     // ---------------------------------------------------------------- fixtures
+
+    private record CompletedTransaction(String requestBytes, String responseBytes) {}
+
+    private record CutPointPassResult(
+        List<CompletedTransaction> completedTransactions,
+        List<Long> completedRecordOffsets
+    ) {}
 
     /** Records what source assembly emitted, so a test can read the lifetime it allocated. */
     private static final class RecordingSink implements SourceAssemblySink {
         private final List<ReplayRequestId> reconstituted = new ArrayList<>();
         private final List<ReplayRequestId> completeResponses = new ArrayList<>();
         private final List<ReplayRequestId> incompleteResponses = new ArrayList<>();
+        private final Map<ReplayRequestId, String> requestBytes = new HashMap<>();
+        private final Map<ReplayRequestId, String> responseBytes = new HashMap<>();
         private final List<ConnectionProcessingId> closes = new ArrayList<>();
         private final List<ConnectionProcessingId> gracefulCancellations = new ArrayList<>();
         private final List<CancellationGrace> graceModes = new ArrayList<>();
@@ -945,6 +1153,7 @@ class RecordAssociationAccumulatorTest {
             long requestCompletingLogAppendTime
         ) {
             reconstituted.add(replayRequestId);
+            requestBytes.put(replayRequestId, bytesOf(request));
         }
 
         @Override
@@ -960,6 +1169,7 @@ class RecordAssociationAccumulatorTest {
             boolean keptAlive
         ) {
             completeResponses.add(replayRequestId);
+            responseBytes.put(replayRequestId, bytesOf(response));
         }
 
         @Override
@@ -997,6 +1207,15 @@ class RecordAssociationAccumulatorTest {
 
         @Override
         public void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId) {}
+
+        private List<CompletedTransaction> completedTransactions() {
+            return completeResponses.stream()
+                .map(requestId -> new CompletedTransaction(
+                    requestBytes.get(requestId),
+                    responseBytes.get(requestId)
+                ))
+                .toList();
+        }
     }
 
     private static TrafficStream stream(int number, TrafficObservation... observations) {
@@ -1006,6 +1225,41 @@ class RecordAssociationAccumulatorTest {
             .setNumber(number)
             .addAllSubStream(List.of(observations))
             .build();
+    }
+
+    private static TrafficStream streamForConnection(
+        String connectionId,
+        int number,
+        TrafficObservation... observations
+    ) {
+        return TrafficStream.newBuilder()
+            .setNodeId(WRITER)
+            .setConnectionId(connectionId)
+            .setNumber(number)
+            .addAllSubStream(List.of(observations))
+            .build();
+    }
+
+    private static TrafficStream continuedStream(
+        String connectionId,
+        int number,
+        int priorRequestsReceived,
+        boolean lastObservationWasUnterminatedRead,
+        TrafficObservation... observations
+    ) {
+        return streamForConnection(connectionId, number, observations)
+            .toBuilder()
+            .setPriorRequestsReceived(priorRequestsReceived)
+            .setLastObservationWasUnterminatedRead(lastObservationWasUnterminatedRead)
+            .build();
+    }
+
+    private static String bytesOf(HttpMessageAndTimestamp message) {
+        var joined = new StringBuilder();
+        message.stream().forEach(packet ->
+            joined.append(new String(packet, StandardCharsets.UTF_8))
+        );
+        return joined.toString();
     }
 
     private static TrafficObservation read(long sequence, String data) {

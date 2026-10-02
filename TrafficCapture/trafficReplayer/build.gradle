@@ -98,6 +98,7 @@ dependencies {
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
     testImplementation libs.junit.jupiter.api
+    testImplementation libs.testcontainers.localstack
     testRuntimeOnly libs.junit.jupiter.engine
 }
 

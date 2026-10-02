@@ -38,6 +38,9 @@ import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InvalidPartitionsException;
+import org.apache.kafka.common.record.AbstractRecords;
+import org.apache.kafka.common.record.CompressionType;
+import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
@@ -258,6 +261,83 @@ class KafkaCaptureFactoryTest {
                 kafkaRecord.partition(),
                 harness.producer.acknowledgedPartition(kafkaRecord)
             );
+        }
+    }
+
+    @Test
+    void testLargeRequestIsWithinKafkaMessageSizeLimit() throws Exception {
+        var connectionId =
+            "0242c0fffea82008-0000000a-00000003-62993a3207f92af6-9093ce33";
+        for (var maximumKafkaMessageSize : List.of(1024 * 1024, 8 * 1024 * 1024)) {
+            var producer = new ProtocolProducer(partitionInfo(TOPIC, 4));
+            try (var harness = readyHarness(
+                producer,
+                maximumKafkaMessageSize,
+                ignored -> {},
+                ignored -> {}
+            )) {
+                var offloader = harness.createOffloader(connectionId);
+                var payload = Unpooled.wrappedBuffer(
+                    new byte[maximumKafkaMessageSize + 16 * 1024]
+                );
+                try {
+                    var publication = harness.onEventLoop(() -> {
+                        offloader.addReadEvent(Instant.EPOCH, payload);
+                        offloader.addCloseEvent(Instant.EPOCH.plusMillis(1));
+                        return offloader.flushCommitAndResetStream(true);
+                    });
+                    publication.get(TEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                } finally {
+                    payload.release();
+                }
+
+                var trafficRecords = recordsOfType(
+                    producer,
+                    CaptureRecord.PayloadCase.TRAFFICSTREAM
+                );
+                assertTrue(
+                    trafficRecords.size() > 1,
+                    "the over-one-record payload must exercise near-limit fragmentation"
+                );
+                var largestRecord = 0;
+                for (var record : trafficRecords) {
+                    assertEquals(connectionId, record.key());
+                    var recordSize = kafkaRecordUpperBound(record);
+                    largestRecord = Math.max(largestRecord, recordSize);
+                    assertTrue(
+                        recordSize <= maximumKafkaMessageSize,
+                        () -> "Kafka record upper bound "
+                            + recordSize
+                            + " exceeds max.request.size "
+                            + maximumKafkaMessageSize
+                    );
+                }
+                assertTrue(
+                    largestRecord
+                        >= maximumKafkaMessageSize
+                            - (2 * KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES),
+                    "largest accepted record "
+                        + largestRecord
+                        + " did not exercise the configured boundary "
+                        + maximumKafkaMessageSize
+                );
+            }
+        }
+    }
+
+    @Test
+    void testNullConnectionIdFailsFastAtCreation() {
+        var producer = new ProtocolProducer(partitionInfo(TOPIC, 4));
+        var consumer = configuredConsumer(TOPIC, 4);
+        var factory = newFactory(producer, consumer, ignored -> {}, ignored -> {});
+        try {
+            var exception = assertThrows(
+                NullPointerException.class,
+                () -> factory.createOffloader(connectionContext(null))
+            );
+            assertTrue(exception.getMessage().contains("partition locality"));
+        } finally {
+            factory.close();
         }
     }
 
@@ -538,10 +618,25 @@ class KafkaCaptureFactoryTest {
         Consumer<Throwable> captureFailureCallback,
         Consumer<Throwable> unstableProcessFailureCallback
     ) throws Exception {
+        return readyHarness(
+            producer,
+            MAXIMUM_KAFKA_MESSAGE_SIZE,
+            captureFailureCallback,
+            unstableProcessFailureCallback
+        );
+    }
+
+    private static FactoryHarness readyHarness(
+        ProtocolProducer producer,
+        int maximumKafkaMessageSize,
+        Consumer<Throwable> captureFailureCallback,
+        Consumer<Throwable> unstableProcessFailureCallback
+    ) throws Exception {
         var consumer = configuredConsumer(TOPIC, 4);
         var factory = newFactory(
             producer,
             consumer,
+            maximumKafkaMessageSize,
             captureFailureCallback,
             unstableProcessFailureCallback
         );
@@ -555,13 +650,29 @@ class KafkaCaptureFactoryTest {
         Consumer<Throwable> captureFailureCallback,
         Consumer<Throwable> unstableProcessFailureCallback
     ) {
+        return newFactory(
+            producer,
+            consumer,
+            MAXIMUM_KAFKA_MESSAGE_SIZE,
+            captureFailureCallback,
+            unstableProcessFailureCallback
+        );
+    }
+
+    private static KafkaCaptureFactory newFactory(
+        ProtocolProducer producer,
+        TrackingMockConsumer consumer,
+        int maximumKafkaMessageSize,
+        Consumer<Throwable> captureFailureCallback,
+        Consumer<Throwable> unstableProcessFailureCallback
+    ) {
         return new KafkaCaptureFactory(
             TestRootKafkaOffloaderContext.noTracking(),
             ACTIVATION_ID,
             producer,
             consumer,
             TOPIC,
-            MAXIMUM_KAFKA_MESSAGE_SIZE,
+            maximumKafkaMessageSize,
             captureFailureCallback,
             unstableProcessFailureCallback
         );
@@ -618,6 +729,33 @@ class KafkaCaptureFactoryTest {
             return CaptureRecord.parseFrom(record.value());
         } catch (InvalidProtocolBufferException e) {
             throw new AssertionError("Kafka value was not a CaptureRecord", e);
+        }
+    }
+
+    private static int kafkaRecordUpperBound(ProducerRecord<String, byte[]> record) {
+        var keySerializer = new StringSerializer();
+        var valueSerializer = new ByteArraySerializer();
+        try {
+            var serializedKey = keySerializer.serialize(
+                record.topic(),
+                record.headers(),
+                record.key()
+            );
+            var serializedValue = valueSerializer.serialize(
+                record.topic(),
+                record.headers(),
+                record.value()
+            );
+            return AbstractRecords.estimateSizeInBytesUpperBound(
+                RecordBatch.CURRENT_MAGIC_VALUE,
+                CompressionType.NONE,
+                serializedKey,
+                serializedValue,
+                record.headers().toArray()
+            );
+        } finally {
+            keySerializer.close();
+            valueSerializer.close();
         }
     }
 
