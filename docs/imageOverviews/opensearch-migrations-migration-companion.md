@@ -8,7 +8,7 @@
 
 The Migration Assistant for OpenSearch is a tool that simplifies the migration of data from Elasticsearch to OpenSearch. It provides a comprehensive solution for migrating historical and/or live data.
 
-Learn more at the documentation for the [Migration Assistant for OpenSearch](https://docs.opensearch.org/docs/latest/migration-assistant).
+Learn more at the documentation for the [Migration Assistant for OpenSearch](https://docs.opensearch.org/latest/migration-assistant).
 
 ## What is OpenSearch Migration Companion?
 

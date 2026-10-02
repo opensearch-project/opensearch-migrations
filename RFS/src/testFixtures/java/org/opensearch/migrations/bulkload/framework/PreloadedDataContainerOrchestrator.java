@@ -11,6 +11,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.PullImageResultCallback;
 import com.github.dockerjava.api.command.WaitContainerResultCallback;
@@ -83,7 +85,7 @@ public class PreloadedDataContainerOrchestrator {
         var imageTagArray = imageName.split(":");
         if (imageTagArray.length != 2) {
             throw new IllegalArgumentException(
-                "Base source image [" + baseSourceVersion.imageName + "] name isn't of the form .*:.*"
+                "Base source image [" + baseSourceVersion.getImageName() + "] name isn't of the form .*:.*"
             );
         }
         return imageTagArray;
@@ -95,7 +97,7 @@ public class PreloadedDataContainerOrchestrator {
         var image = getExistingImage(dockerClient, imageAndTagArr[0], imageAndTagArr[1], pullIfUnavailable);
         if (image == null) {
             throw new IllegalStateException(
-                "Base source image doesn't exist [" + baseSourceVersion.imageName + "].  Please build/pull it first."
+                "Base source image doesn't exist [" + baseSourceVersion.getImageName() + "].  Please build/pull it first."
             );
         }
         return image.getId();
@@ -103,7 +105,7 @@ public class PreloadedDataContainerOrchestrator {
 
     private int getHashCodeOfImagesAndArgs(DockerClient dockerClient, boolean pullIfUnavailable)
         throws InterruptedException {
-        var sourceImageId = getImageId(dockerClient, baseSourceVersion.imageName, pullIfUnavailable);
+        var sourceImageId = getImageId(dockerClient, baseSourceVersion.getImageName(), pullIfUnavailable);
         var dataLoaderImageId = getImageId(dockerClient, dataLoaderImageName, pullIfUnavailable);
         var rval = Objects.hash(sourceImageId, dataLoaderImageId, Arrays.hashCode(generatorContainerArgs));
         log.atInfo().setMessage("{}")
@@ -164,7 +166,7 @@ public class PreloadedDataContainerOrchestrator {
 
     private void makeNewImage(DockerClient dockerClient, String imageName, String tag) throws IOException,
         InterruptedException {
-        var imageResponse = dockerClient.inspectImageCmd(baseSourceVersion.imageName).exec();
+        var imageResponse = dockerClient.inspectImageCmd(baseSourceVersion.getImageName()).exec();
         var originalEntrypoint = imageResponse.getConfig().getEntrypoint();
         var originalCmd = imageResponse.getConfig().getCmd();
         final var replacementCommand = Streams.concat(
@@ -196,7 +198,7 @@ public class PreloadedDataContainerOrchestrator {
     }
 
     private void execStartSource(DockerClient dockerClient, String serverContainerId) {
-        var imageResponse = dockerClient.inspectImageCmd(baseSourceVersion.imageName).exec();
+        var imageResponse = dockerClient.inspectImageCmd(baseSourceVersion.getImageName()).exec();
         var originalEntrypoint = imageResponse.getConfig().getEntrypoint();
         var originalCmd = imageResponse.getConfig().getCmd();
 

@@ -9,8 +9,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.replay.ParsedHttpMessagesAsDicts;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;

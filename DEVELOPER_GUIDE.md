@@ -68,6 +68,10 @@ Users can interact with the migration process through the CLI, which orchestrate
 ./gradlew build
 ```
 
+Builds use Maven Central and the Gradle Plugin Portal by default. To use a shared
+dependency cache, including for Spotless and `buildSrc`, see
+[dependency repository configuration](jenkins/DEPENDENCY_CACHE.md#use-another-repository-manager).
+
 ## Running Tests
 
 ```bash

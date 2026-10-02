@@ -67,6 +67,7 @@ def call(Map config = [:]) {
                             // so the non-login Jenkins sh step can forward it to buildDockerImages.sh.
                             def ptcEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
                             withEnv(ptcEndpoint ? ["ECR_PULL_THROUGH_ENDPOINT=${ptcEndpoint}"] : []) {
+                                configureMavenCache()
                                 sh './deployment/cdk/opensearch-service-migration/buildDockerImages.sh'
                             }
                         }
@@ -113,6 +114,9 @@ def call(Map config = [:]) {
                     archiveArtifacts artifacts: 'logs/docker/**', allowEmptyArchive: true
                     sh './gradlew -p TrafficCapture dockerSolution:composeDown -x test -x spotlessCheck || true'
                 }
+            }
+            cleanup {
+                cleanupMavenCache()
             }
         }
     }

@@ -5,10 +5,10 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
-import org.opensearch.migrations.bulkload.framework.SearchClusterWithZoneAwarenessContainer;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+import org.opensearch.migrations.testfixtures.SearchClusterWithZoneAwarenessContainer;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Nested;
