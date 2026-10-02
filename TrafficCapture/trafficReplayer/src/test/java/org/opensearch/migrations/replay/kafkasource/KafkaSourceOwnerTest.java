@@ -21,8 +21,8 @@ import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
+import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
@@ -859,10 +859,6 @@ class KafkaSourceOwnerTest {
         );
     }
 
-    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // TrafficSourceReaderInterruptedCloseWiringTest.emptyBatchReturnedWhileTerminationObligationIsPending -> KafkaSourceOwnerTest.aSuccessorReadsOnlyAfterEveryEarlierGenerationFinishesCleanup
-    // TrafficSourceReaderInterruptedCloseAccountingTest.realReadsResumeOnlyAfterEveryTerminationObligationSettles -> KafkaSourceOwnerTest.aSuccessorReadsOnlyAfterEveryEarlierGenerationFinishesCleanup
-    // REBUILD-TRACE-END(G8,target)
     @Test
     void aSuccessorReadsOnlyAfterEveryEarlierGenerationFinishesCleanup() {
         var port = pumpedSource(List.of(PARTITION_0));

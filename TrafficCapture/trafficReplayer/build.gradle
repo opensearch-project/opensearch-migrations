@@ -9,18 +9,6 @@
  * GitHub history for details.
  */
 
-/*
- * The traffic replayer. See docs/replayerRebuildPlanA-inPlace.md.
- *
- * The rebuild happens in this module, in place. Code that has not yet been refactored sits at the path it
- * will ship from inside REBUILD-LIMBO regions, so it cannot compile and cannot become a second live
- * implementation, but is unavoidable when the file is next opened. There is no second module and no swing at
- * the end; the rebuild finishes when the last marked region is resolved.
- *
- * Dependencies are added as milestones need them rather than carried forward wholesale, so this file records
- * what the module actually uses. Anything absent is absent because nothing live needs it yet.
- */
-
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
@@ -119,9 +107,3 @@ tasks.withType(Test).configureEach {
         systemProperty 'trafficReplayerMainRuntimeClasspath', sourceSets.main.runtimeClasspath.asPath
     }
 }
-
-// Scaffolding for the replayer rebuild: carried-but-not-yet-refactored code is marked in place, at the
-// path it will ship from, inside REBUILD-LIMBO regions. The build needs nothing special for it, because the
-// regions are ordinary comments and every tool sees a valid source file. See AGENTS.md section 8a.
-//
-// Outstanding work: grep -rl REBUILD-LIMBO-START src | wc -l

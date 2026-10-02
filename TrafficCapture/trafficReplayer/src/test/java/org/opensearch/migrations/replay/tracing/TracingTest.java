@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
 import java.time.Instant;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 

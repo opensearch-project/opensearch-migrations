@@ -22,8 +22,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.LongConsumer;
 
-import org.opensearch.migrations.replay.kafkasource.PolledKafkaRecord;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort;
+import org.opensearch.migrations.replay.kafkasource.PolledKafkaRecord;
 
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;

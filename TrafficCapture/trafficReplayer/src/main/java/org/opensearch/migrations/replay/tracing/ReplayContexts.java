@@ -78,12 +78,6 @@ public interface ReplayContexts extends IReplayContexts {
         implements IConnectionContext {
         private final ConnectionProcessingId connectionProcessingId;
 
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.ChannelKeyContext.<init> -> ReplayContexts.ConnectionContext.<init>
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.ChannelKeyContext.<init> -> ReplayContexts.ConnectionContext.<init>
-        // REBUILD-TRACE-END(G5,target)
         ConnectionContext(
             @NonNull RootReplayerContext rootScope,
             @NonNull ConnectionProcessingId connectionProcessingId
@@ -111,40 +105,16 @@ public interface ReplayContexts extends IReplayContexts {
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.ChannelKeyContext.getChannelKey ->
-        //     ReplayContexts.ConnectionContext.getConnectionProcessingId
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.ChannelKeyContext.getChannelKey ->
-        //     ReplayContexts.ConnectionContext.getConnectionProcessingId
-        // REBUILD-TRACE-END(G5,target)
         public ConnectionProcessingId getConnectionProcessingId() {
             return connectionProcessingId;
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.ChannelKeyContext.createSocketContext ->
-        //     ReplayContexts.ConnectionContext.createSocketContext
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.ChannelKeyContext.createSocketContext ->
-        //     ReplayContexts.ConnectionContext.createSocketContext
-        // REBUILD-TRACE-END(G5,target)
         public ISocketContext createSocketContext() {
             return new SocketContext(this);
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.ChannelKeyContext.addFailedChannelCreation ->
-        //     ReplayContexts.ConnectionContext.addFailedChannelCreation
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.ChannelKeyContext.addFailedChannelCreation ->
-        //     ReplayContexts.ConnectionContext.addFailedChannelCreation
-        // REBUILD-TRACE-END(G5,target)
         public void addFailedChannelCreation() {
             meterIncrementEvent(getMetrics().unretryableConnectionFailures);
         }
@@ -178,14 +148,6 @@ public interface ReplayContexts extends IReplayContexts {
         final KafkaRecordId recordId;
         private boolean completed;
 
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.KafkaRecordContext.<init>(RootReplayerContext,IChannelKeyContext,String,int) ->
-        //     ReplayContexts.KafkaRecordContext.<init>(RootReplayerContext,KafkaRecordId,int)
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.KafkaRecordContext.<init>(RootReplayerContext,IChannelKeyContext,String,int) ->
-        //     ReplayContexts.KafkaRecordContext.<init>(RootReplayerContext,KafkaRecordId,int)
-        // REBUILD-TRACE-END(G5,target)
         KafkaRecordContext(
             @NonNull RootReplayerContext rootScope,
             @NonNull KafkaRecordId recordId,
@@ -214,25 +176,11 @@ public interface ReplayContexts extends IReplayContexts {
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.KafkaRecordContext.getRecordId -> ReplayContexts.KafkaRecordContext.getRecordId
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.KafkaRecordContext.getRecordId -> ReplayContexts.KafkaRecordContext.getRecordId
-        // REBUILD-TRACE-END(G5,target)
         public KafkaRecordId getRecordId() {
             return recordId;
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.KafkaRecordContext.createTrafficLifecyleContext ->
-        //     ReplayContexts.KafkaRecordContext.createTrafficStreamContext
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.KafkaRecordContext.createTrafficLifecyleContext ->
-        //     ReplayContexts.KafkaRecordContext.createTrafficStreamContext
-        // REBUILD-TRACE-END(G5,target)
         public ITrafficStreamsLifecycleContext createTrafficStreamContext(
             long trafficStreamNumber
         ) {
@@ -270,14 +218,6 @@ public interface ReplayContexts extends IReplayContexts {
         implements ITrafficStreamsLifecycleContext {
         private final long trafficStreamNumber;
 
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.TrafficStreamLifecycleContext.<init>(RootReplayerContext,IScopedInstrumentationAttributes,ITrafficStreamKey) ->
-        //     ReplayContexts.TrafficStreamLifecycleContext.<init>(KafkaRecordContext,long)
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.TrafficStreamLifecycleContext.<init>(RootReplayerContext,IScopedInstrumentationAttributes,ITrafficStreamKey) ->
-        //     ReplayContexts.TrafficStreamLifecycleContext.<init>(KafkaRecordContext,long)
-        // REBUILD-TRACE-END(G5,target)
         TrafficStreamLifecycleContext(
             KafkaRecordContext enclosingScope,
             long trafficStreamNumber
@@ -302,27 +242,11 @@ public interface ReplayContexts extends IReplayContexts {
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.TrafficStreamLifecycleContext.getTrafficStreamKey ->
-        //     ReplayContexts.TrafficStreamLifecycleContext.getTrafficStreamNumber
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.TrafficStreamLifecycleContext.getTrafficStreamKey ->
-        //     ReplayContexts.TrafficStreamLifecycleContext.getTrafficStreamNumber
-        // REBUILD-TRACE-END(G5,target)
         public long getTrafficStreamNumber() {
             return trafficStreamNumber;
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.TrafficStreamLifecycleContext.createHttpTransactionContext ->
-        //     ReplayContexts.TrafficStreamLifecycleContext.createRequestContext
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.TrafficStreamLifecycleContext.createHttpTransactionContext ->
-        //     ReplayContexts.TrafficStreamLifecycleContext.createRequestContext
-        // REBUILD-TRACE-END(G5,target)
         public IRequestContext createRequestContext(
             @NonNull ReplayRequestId requestId,
             @NonNull Instant sourceTimestamp
@@ -357,14 +281,6 @@ public interface ReplayContexts extends IReplayContexts {
         private boolean reconstituted;
         int numTransactionContextsCreated;
 
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.HttpTransactionContext.<init>(RootReplayerContext,ITrafficStreamsLifecycleContext,UniqueReplayerRequestKey,Instant) ->
-        //     ReplayContexts.HttpTransactionContext.<init>(TrafficStreamLifecycleContext,ReplayRequestId,Instant)
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.HttpTransactionContext.<init>(RootReplayerContext,ITrafficStreamsLifecycleContext,UniqueReplayerRequestKey,Instant) ->
-        //     ReplayContexts.HttpTransactionContext.<init>(TrafficStreamLifecycleContext,ReplayRequestId,Instant)
-        // REBUILD-TRACE-END(G5,target)
         HttpTransactionContext(
             TrafficStreamLifecycleContext enclosingScope,
             ReplayRequestId requestId,
@@ -391,27 +307,11 @@ public interface ReplayContexts extends IReplayContexts {
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.HttpTransactionContext.getReplayerRequestKey ->
-        //     ReplayContexts.HttpTransactionContext.getRequestId
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.HttpTransactionContext.getReplayerRequestKey ->
-        //     ReplayContexts.HttpTransactionContext.getRequestId
-        // REBUILD-TRACE-END(G5,target)
         public ReplayRequestId getRequestId() {
             return requestId;
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.HttpTransactionContext.getChannelKeyContext ->
-        //     ReplayContexts.HttpTransactionContext.getConnectionProcessingId
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ReplayContexts.HttpTransactionContext.getChannelKeyContext ->
-        //     ReplayContexts.HttpTransactionContext.getConnectionProcessingId
-        // REBUILD-TRACE-END(G5,target)
         public ConnectionProcessingId getConnectionProcessingId() {
             return requestId.connectionProcessingId();
         }

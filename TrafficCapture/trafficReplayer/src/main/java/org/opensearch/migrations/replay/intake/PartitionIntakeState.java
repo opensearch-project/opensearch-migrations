@@ -13,7 +13,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -27,8 +26,8 @@ import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.replay.lifecycle.OwnerThreadGuard;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import lombok.NonNull;
 
@@ -550,10 +549,6 @@ public final class PartitionIntakeState {
      * a later {@code TrafficStream} for the same captured identity is a protocol violation rather than fresh
      * reconstruction.
      */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.createInitialAccumulation ->
-    //     PartitionIntakeState.connectionFor
-    // REBUILD-TRACE-END(G5,target)
     public SourceConnectionState connectionFor(
         @NonNull CapturedConnectionId capturedConnectionId,
         @NonNull TrafficStream firstStream,
@@ -1005,9 +1000,6 @@ public final class PartitionIntakeState {
     /**
      * Expires every current lifetime for one writer and returns owners that need the matching target command.
      */
-    // REBUILD-TRACE-START(G6,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ExpiringKeyQueue.expireItemsBefore -> PartitionIntakeState.expireConnectionsForWriter
-    // REBUILD-TRACE-END(G6,target)
     public WriterExpirationResult expireConnectionsForWriter(@NonNull String writerNodeId) {
         return expireOpenConnections(lifetime ->
             lifetime.connectionProcessingId().capturedConnectionId().writerNodeId().equals(writerNodeId)

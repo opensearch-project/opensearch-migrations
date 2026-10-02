@@ -8,8 +8,8 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
 

@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay;
 
 
-
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -11,13 +10,13 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import org.opensearch.migrations.replay.HttpByteBufFormatter.HttpMessageType;
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonResponseWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpRequestConvertHandler;
 import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpResponseConvertHandler;
 import org.opensearch.migrations.replay.datahandlers.http.NettyJsonBodyAccumulateHandler;
-import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -59,22 +58,6 @@ public class ParsedHttpMessagesAsDicts {
     public final List<Map<String, Object>> targetResponseList;
     public final IReplayContexts.ITupleHandlingContext context;
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.<init>(SourceTargetCaptureTuple) ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,RequestResult)
-    // ParsedHttpMessagesAsDicts.<init>(SourceTargetCaptureTuple,Optional) ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,RequestResult)
-    // ParsedHttpMessagesAsDicts.getSourceRequestOp ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,RequestResult)
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.<init>(SourceTargetCaptureTuple) ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,RequestResult)
-    // ParsedHttpMessagesAsDicts.<init>(SourceTargetCaptureTuple,Optional) ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,RequestResult)
-    // ParsedHttpMessagesAsDicts.getSourceRequestOp ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,RequestResult)
-    // REBUILD-TRACE-END(G5,target)
     public ParsedHttpMessagesAsDicts(
         @NonNull IReplayContexts.ITupleHandlingContext context,
         @NonNull RequestReplayOwner.RequestResult<
@@ -94,14 +77,6 @@ public class ParsedHttpMessagesAsDicts {
         );
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.getTargetResponseOp(SourceTargetCaptureTuple) ->
-    //     ParsedHttpMessagesAsDicts.getTargetResponseOp(ITupleHandlingContext,List)
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.getTargetResponseOp(SourceTargetCaptureTuple) ->
-    //     ParsedHttpMessagesAsDicts.getTargetResponseOp(ITupleHandlingContext,List)
-    // REBUILD-TRACE-END(G5,target)
     private static List<Map<String, Object>> getTargetResponseOp(
         IReplayContexts.ITupleHandlingContext context,
         List<TargetAttemptOutcome<AggregatedRawResponse>> attempts
@@ -123,14 +98,6 @@ public class ParsedHttpMessagesAsDicts {
         }).toList();
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.getTargetRequestOp(SourceTargetCaptureTuple) ->
-    //     ParsedHttpMessagesAsDicts.getTargetRequestOp(ITupleHandlingContext,PreparedRequest)
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.getTargetRequestOp(SourceTargetCaptureTuple) ->
-    //     ParsedHttpMessagesAsDicts.getTargetRequestOp(ITupleHandlingContext,PreparedRequest)
-    // REBUILD-TRACE-END(G5,target)
     private static Optional<Map<String, Object>> getTargetRequestOp(
         IReplayContexts.ITupleHandlingContext context,
         NettyPacketToHttpConsumer.PreparedRequest preparedRequest
@@ -146,14 +113,6 @@ public class ParsedHttpMessagesAsDicts {
         }
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.getSourceResponseOp(SourceTargetCaptureTuple,Optional) ->
-    //     ParsedHttpMessagesAsDicts.getSourceResponseOp(ITupleHandlingContext,RequestResult)
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.getSourceResponseOp(SourceTargetCaptureTuple,Optional) ->
-    //     ParsedHttpMessagesAsDicts.getSourceResponseOp(ITupleHandlingContext,RequestResult)
-    // REBUILD-TRACE-END(G5,target)
     private static Optional<Map<String, Object>> getSourceResponseOp(
         IReplayContexts.ITupleHandlingContext context,
         RequestReplayOwner.RequestResult<
@@ -201,14 +160,6 @@ public class ParsedHttpMessagesAsDicts {
             : Duration.between(requestEnd, responseEnd);
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,Optional,Optional,Optional,List) ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,Optional,Optional,Optional,List)
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,Optional,Optional,Optional,List) ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,Optional,Optional,Optional,List)
-    // REBUILD-TRACE-END(G5,target)
     public ParsedHttpMessagesAsDicts(
         IReplayContexts.ITupleHandlingContext context,
         Optional<Map<String, Object>> sourceRequestOp1,
@@ -226,14 +177,6 @@ public class ParsedHttpMessagesAsDicts {
         );
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,Optional,Optional,Optional,List) ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,Optional,Optional,Optional,Optional,List)
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,Optional,Optional,Optional,List) ->
-    //     ParsedHttpMessagesAsDicts.<init>(ITupleHandlingContext,Optional,Optional,Optional,Optional,List)
-    // REBUILD-TRACE-END(G5,target)
     private ParsedHttpMessagesAsDicts(
         IReplayContexts.ITupleHandlingContext context,
         Optional<Map<String, Object>> sourceRequestOp1,
@@ -254,14 +197,6 @@ public class ParsedHttpMessagesAsDicts {
     /**
      * Build the structured tuple map used by {@link org.opensearch.migrations.replay.sink.TupleSink} implementations.
      */
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.toTupleMap(SourceTargetCaptureTuple) ->
-    //     ParsedHttpMessagesAsDicts.toTupleMap(RequestResult)
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ParsedHttpMessagesAsDicts.toTupleMap(SourceTargetCaptureTuple) ->
-    //     ParsedHttpMessagesAsDicts.toTupleMap(RequestResult)
-    // REBUILD-TRACE-END(G5,target)
     public Map<String, Object> toTupleMap(
         RequestReplayOwner.RequestResult<
             HttpMessageAndTimestamp.Request,

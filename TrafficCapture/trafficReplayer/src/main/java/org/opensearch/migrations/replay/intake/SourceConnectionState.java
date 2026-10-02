@@ -133,10 +133,6 @@ public final class SourceConnectionState {
      *                    and {@code lastObservationWasUnterminatedRead} decides whether the first bytes are
      *                    the tail of a message that began outside this lifetime
      */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.createInitialAccumulation ->
-    //     SourceConnectionState.<init>
-    // REBUILD-TRACE-END(G5,target)
     public SourceConnectionState(
         @NonNull ConnectionProcessingId connectionProcessingId,
         @NonNull TrafficStream firstStream,
@@ -185,11 +181,6 @@ public final class SourceConnectionState {
         return apply(observation, containingRecord, logAppendTimeMillis, null);
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.addObservationToAccumulation(
-    //     Accumulation,ITrafficStreamKey,TrafficObservation,KafkaRecordId) ->
-    //     SourceConnectionState.apply(TrafficObservation,KafkaRecordId,long,ITrafficStreamsLifecycleContext)
-    // REBUILD-TRACE-END(G5,target)
     public ObservationOutcome apply(
         @NonNull TrafficObservation observation,
         @NonNull KafkaRecordId containingRecord,
@@ -245,12 +236,6 @@ public final class SourceConnectionState {
      * assembled for a reconstituted request does get {@code SourceResponseIncomplete}, because that request
      * exists and something is waiting on its source response.
      */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.close -> SourceConnectionState.expire
-    // REBUILD-TRACE-END(G5,target)
-    // REBUILD-TRACE-START(G6,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // Accumulation.expire -> SourceConnectionState.expire
-    // REBUILD-TRACE-END(G6,target)
     public ObservationOutcome expire() {
         if (lifetime != Lifetime.OPEN) {
             return ObservationOutcome.none();
@@ -291,10 +276,6 @@ public final class SourceConnectionState {
 
     // ------------------------------------------------------------------ phases
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.handleObservationForSkipState ->
-    //     SourceConnectionState.applyWhileDiscardingInheritedTail
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome applyWhileDiscardingInheritedTail(TrafficObservation observation) {
         // Everything up to and including the inherited message's end is discarded. Its end is whichever
         // comes first: the EOM that terminates its request, or the writes that answer it.
@@ -305,10 +286,6 @@ public final class SourceConnectionState {
         return ObservationOutcome.none();
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.handleObservationForReadState ->
-    //     SourceConnectionState.applyBetweenRequests
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome applyBetweenRequests(
         TrafficObservation observation,
         KafkaRecordId containingRecord,
@@ -325,10 +302,6 @@ public final class SourceConnectionState {
         return applyToRequest(observation, containingRecord, logAppendTimeMillis, trafficContext);
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.handleObservationForReadState ->
-    //     SourceConnectionState.applyToRequest
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome applyToRequest(
         TrafficObservation observation,
         KafkaRecordId containingRecord,
@@ -395,10 +368,6 @@ public final class SourceConnectionState {
         return ObservationOutcome.none();
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.handleObservationForWriteState ->
-    //     SourceConnectionState.applyToResponse
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome applyToResponse(
         TrafficObservation observation,
         KafkaRecordId containingRecord,
@@ -462,10 +431,6 @@ public final class SourceConnectionState {
     // ------------------------------------------------------------------ transitions
 
     /** {@code §9.1}: the parser reconstituted a request, so it gains an identity and leaves this class. */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.handleEndOfRequest ->
-    //     SourceConnectionState.reconstituteRequest
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome reconstituteRequest(
         Instant requestEndOfMessageSourceTime,
         long requestCompletingLogAppendTime,
@@ -534,14 +499,6 @@ public final class SourceConnectionState {
      * @param keptAlive whether the next request's read observation ended it, which is the only thing that
      *                  proves the source finished the response
      */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.rotateAccumulationIfNecessary ->
-    //     SourceConnectionState.completeResponse
-    // CapturedTrafficToHttpTransactionAccumulator.rotateAccumulationOnReadIfNecessary ->
-    //     SourceConnectionState.completeResponse
-    // CapturedTrafficToHttpTransactionAccumulator.handleEndOfResponse ->
-    //     SourceConnectionState.completeResponse
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome completeResponse(boolean keptAlive) {
         var requestId = responseBeingAssembledFor;
         var response = responseStateByRequest.remove(requestId);
@@ -560,10 +517,6 @@ public final class SourceConnectionState {
      * <p>{@code §9.2} names it as a response terminal boundary, while {@code §9.3} says it performs none of
      * the captured-close steps. In particular, it does not discard an incomplete request or end the lifetime.
      */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.handleCloseObservationThatAffectEveryState ->
-    //     SourceConnectionState.applyConnectionException
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome applyConnectionException() {
         if (phase != Phase.ASSEMBLING_RESPONSE) {
             return ObservationOutcome.none();
@@ -573,10 +526,6 @@ public final class SourceConnectionState {
         return completed;
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.handleCloseObservationThatAffectEveryState ->
-    //     SourceConnectionState.applyCapturedClose
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome applyCapturedClose(KafkaRecordId containingRecord) {
         var terminal = new RecordAssociationId.TerminalConnection(connectionProcessingId);
         var abandoned = endAssemblyAtBoundary();
@@ -596,10 +545,6 @@ public final class SourceConnectionState {
         );
     }
 
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.handleDroppedRequestForAccumulation ->
-    //     SourceConnectionState.applyRequestDropped
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome applyRequestDropped() {
         if (phase == Phase.DISCARDING_INHERITED_TAIL) {
             // §9/§9.4: fresh reconstruction already reserved the inherited request's ordinal. The marker is
@@ -637,10 +582,6 @@ public final class SourceConnectionState {
      * <p>A request that never reached end-of-message has no identity at all, so nothing is notified about it
      * and its assembly association is simply released ({@code §8.2}).
      */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.fireAccumulationsCallbacksAndClose ->
-    //     SourceConnectionState.endAssemblyAtBoundary
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome endAssemblyAtBoundary() {
         var finished = new java.util.ArrayList<RecordAssociationId>();
         if (incomingRequest != null) {
@@ -664,10 +605,6 @@ public final class SourceConnectionState {
      * Both are the replayer's own doing, which is the whole content of the word: it says nothing about whether
      * the captured bytes are partial, because nothing here can know that.
      */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // CapturedTrafficToHttpTransactionAccumulator.fireAccumulationsCallbacksAndClose ->
-    //     SourceConnectionState.stopAssembling
-    // REBUILD-TRACE-END(G5,target)
     private ObservationOutcome stopAssembling(SourceAssemblySink.IncompleteReason reason) {
         var finished = new java.util.ArrayList<RecordAssociationId>();
         if (incomingRequest != null) {

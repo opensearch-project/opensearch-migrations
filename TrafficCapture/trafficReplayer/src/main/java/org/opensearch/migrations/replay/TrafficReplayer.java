@@ -4,14 +4,12 @@ import java.net.URI;
 import java.nio.charset.Charset;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.Base64;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ThreadLocalRandom;
@@ -19,7 +17,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.DoubleSupplier;
-import java.util.function.IntFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -43,13 +40,13 @@ import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.PredicateLoader;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.transform.PredicateLoader;
-import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.URIHelper;
 
@@ -715,176 +712,6 @@ public class TrafficReplayer {
         }
         return uri;
     }
-    // REBUILD-LIMBO-START(G9)
-    // runReplayMode -- blocked on TrafficReplayerTopLevel, which is replaced rather than carried.
-    // Expected to be rewritten against the design's owners rather than restored, so new blame here is honest.
-    // Kept verbatim anyway so the functionality it wires up is enumerable rather than remembered.
-    /*
-    private static void runReplayMode(Parameters params) throws Exception {
-        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
-        URI uri = parseAndValidateReplayTarget(params);
-        if (uri == null) {
-            return;
-        }
-        var globalContextTracker = new ActiveContextTracker();
-        var perContextTracker = new ActiveContextTrackerByActivityType();
-        var scheduledExecutorService = Executors.newScheduledThreadPool(
-            1,
-            new DefaultThreadFactory("activeWorkMonitorThread")
-        );
-        var contextTrackers = new CompositeContextTracker(globalContextTracker, perContextTracker);
-        var topContext = new RootReplayerContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
-                new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
-                "replay",
-                ProcessHelpers.getNodeInstanceName()),
-            contextTrackers
-        );
-
-        ActiveContextMonitor activeContextMonitor = null;
-        ThreadLocalTupleWriter tupleWriter = null;
-        try (
-            var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(
-                topContext,
-                params,
-                Duration.ofSeconds(params.getEffectiveLookaheadTimeSeconds())
-            );
-            var authTransformer = buildAuthTransformerFactory(params)
-        ) {
-            var timeShifter = new TimeShifter(params.speedupFactor);
-            var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
-
-            String requestTransformerConfig = TransformerConfigUtils.getTransformerConfig(params.requestTransformationParams);
-            if (requestTransformerConfig != null) {
-                log.atInfo().setMessage("Request Transformations config string: {}")
-                    .addArgument(requestTransformerConfig).log();
-            }
-
-            String tupleTransformerConfig = TransformerConfigUtils.getTransformerConfig(params.tupleTransformationParams);
-            if (tupleTransformerConfig != null) {
-                log.atInfo().setMessage("Tuple Transformations config string: {}")
-                    .addArgument(tupleTransformerConfig).log();
-            }
-
-            final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
-            final var hostname = uri.getHost();
-
-            var errorClassifier = params.nonRetryableDocExceptionTypes != null
-                ? new BulkItemErrorClassifier(new java.util.HashSet<>(params.nonRetryableDocExceptionTypes))
-                : new BulkItemErrorClassifier();
-            var poisonAllowlist = params.poisonDocExceptionTypes == null
-                ? ExceptionTypeAllowlist.empty()
-                : new ExceptionTypeAllowlist(params.poisonDocExceptionTypes);
-
-            var transformationLoader = new TransformationLoader();
-            var effectiveTransformerSupplier = buildTransformerSupplier(
-                transformationLoader, hostname, params.userAgent, requestTransformerConfig, params.requestFilterConfig);
-            var tr = new TrafficReplayerTopLevel(
-                topContext,
-                uri,
-                authTransformer,
-                effectiveTransformerSupplier,
-                TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
-                    uri,
-                    params.allowInsecureConnections,
-                    params.numClientThreads,
-                    null,
-                    topContext.getTargetExchangeStateMetrics()
-                ),
-                params.maxConcurrentTargetAttempts,
-                orderedRequestTracker,
-                errorClassifier,
-                poisonAllowlist,
-                new ProcessSupervisor()
-            );
-            configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
-            log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
-                    " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
-                    " targetUri={} numClientThreads={}")
-                .addArgument(params.getEffectiveLookaheadTimeSeconds())
-                .addArgument(params.speedupFactor)
-                .addArgument(params.maxConcurrentTargetAttempts)
-                .addArgument(params.targetServerResponseTimeoutSeconds)
-                .addArgument(params.observedPacketConnectionTimeout)
-                .addArgument(uri)
-                .addArgument(params.numClientThreads)
-                .log();
-            activeContextMonitor = new ActiveContextMonitor(
-                globalContextTracker,
-                perContextTracker,
-                orderedRequestTracker,
-                64,
-                cf -> TrackedFutureJsonFormatter.format(cf, TrafficReplayerTopLevel::formatWorkItem),
-                activeContextLogger
-            );
-            ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
-            var finalBlockingTrafficSource = blockingTrafficSource;
-            scheduledExecutorService.scheduleAtFixedRate(() -> {
-                activeContextLogger.atInfo().setMessage("Total requests outstanding at {}: {}")
-                    .addArgument(Instant::now)
-                    .addArgument(tr.requestWorkTracker::size)
-                    .log();
-                finalActiveContextMonitor.run();
-                finalActiveContextMonitor.logCompactSummary();
-                finalBlockingTrafficSource.logHeartbeat();
-                var accum = tr.getCurrentAccumulator();
-                if (accum != null) {
-                    accum.logHeartbeat();
-                }
-                var engine = tr.getCurrentReplayEngine();
-                if (engine != null) {
-                    engine.logHeartbeat();
-                }
-            }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
-
-            setupShutdownHookForReplayer(tr);
-            tupleWriter = createS3TupleWriterIfConfigured(
-                params,
-                () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
-            );
-            if (tupleWriter != null) {
-                tr.setupRunAndWaitForReplayWithShutdownChecks(
-                    Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                    serverTimeout,
-                    blockingTrafficSource,
-                    timeShifter,
-                    tupleWriter,
-                    Duration.ofMillis(params.quiescentPeriodMs)
-                );
-            } else {
-                var resultsToLogsConsumer = new ResultsToLogsConsumer(null, null,
-                        () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig));
-                var tupleLogConsumer = new TupleParserChainConsumer(resultsToLogsConsumer);
-                tr.setupRunAndWaitForReplayWithShutdownChecks(
-                    Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                    serverTimeout,
-                    blockingTrafficSource,
-                    timeShifter,
-                    tupleLogConsumer,
-                    Duration.ofMillis(params.quiescentPeriodMs)
-                );
-            }
-            log.info("Done processing TrafficStreams");
-        } finally {
-            if (tupleWriter != null) {
-                tupleWriter.close();
-            }
-            scheduledExecutorService.shutdown();
-            if (activeContextMonitor != null) {
-                var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent()
-                    ? Level.ERROR
-                    : Level.INFO;
-                activeContextLogger.atLevel(acmLevel).setMessage("Outstanding work after shutdown...").log();
-                activeContextMonitor.run();
-                activeContextLogger.atLevel(acmLevel).setMessage("[end of run]]").log();
-            }
-        }
-    }
-    */
-    // REBUILD-LIMBO-END(G9)
-    // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // TrafficReplayer.setupShutdownHookForReplayer -> TrafficReplayer.runReplayMode
-    // REBUILD-TRACE-END(G9,target)
     private static void runReplayMode(Parameters params) throws Exception {
         validateReplayModeParams(params);
         var targetUri = parseAndValidateReplayTarget(params);
@@ -944,48 +771,6 @@ public class TrafficReplayer {
         log.atInfo().setMessage("Response post-processor configured").log();
         return () -> loader.getTransformerFactoryLoader(null, null, config);
     }
-    // REBUILD-LIMBO-START(G5)
-    // createS3TupleWriterIfConfigured -- blocked ONLY on the TupleWriter shape.
-    // S3TupleSink is a reusable library object in :TrafficCapture:tupleSink and the S3 client construction is not
-    // in question. The blocker is the return type: ThreadLocalTupleWriter declares a class in ...replay.sink,
-    // a package tupleSink already owns on the same classpath. Roughly 30 of these 34 lines should survive G5.
-    /*
-    private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
-        Parameters params,
-        Supplier<IJsonTransformer> tupleTransformerSupplier
-    ) {
-        if (params.tupleS3Bucket == null || params.tupleS3Bucket.isEmpty()) {
-            return null;
-        }
-        log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
-            params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
-        var credentialsProvider = DefaultCredentialsProvider.builder().build();
-        var s3ClientBuilder = S3AsyncClient.builder()
-            .region(Region.of(params.tupleS3Region))
-            .credentialsProvider(credentialsProvider);
-        if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isEmpty()) {
-            s3ClientBuilder
-                .endpointOverride(URI.create(params.tupleS3Endpoint))
-                .forcePathStyle(true);
-        }
-        var s3Client = s3ClientBuilder.build();
-        var replayerId = ProcessHelpers.getNodeInstanceName();
-        return new ThreadLocalTupleWriter(
-            sinkIndex -> new S3TupleSink(
-                s3Client,
-                params.tupleS3Bucket,
-                params.tupleS3Prefix,
-                replayerId,
-                sinkIndex,
-                params.tupleMaxFileSizeMb * 1024L * 1024L,
-                Duration.ofSeconds(params.tupleMaxBufferSeconds),
-                params.tupleMaxPerFile
-            ),
-            tupleTransformerSupplier
-        );
-    }
-    */
-    // REBUILD-LIMBO-END(G5)
 
     static final class TupleSinkResources implements AutoCloseable {
         private final TrafficReplayerTopLevel.ManagedPhysicalTupleSinkFactory<Map<String, Object>>
@@ -1591,50 +1376,6 @@ public class TrafficReplayer {
             }
         }
     }
-    // REBUILD-TRACE-START(G9,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // TrafficReplayer.setupShutdownHookForReplayer -> TrafficReplayer.runReplayMode
-    // TrafficReplayer.setupShutdownHookForReplayer ->
-    //     TrafficReplayer.SupervisedReplayApplication.createShutdownHook
-    // TrafficReplayer.setupShutdownHookForReplayer ->
-    //     TrafficReplayer.SupervisedReplayApplication.requestAndAwaitOrderlyShutdown
-    // REBUILD-TRACE-END(G9,source)
-    // REBUILD-LIMBO-START(G9)
-    // setupShutdownHookForReplayer -- blocked on TrafficReplayerTopLevel.
-    // This is one of D14's three unbounded waits for orderly recovery. A defect to fix at G9, not behavior to
-    // reproduce -- carried so the current behavior is legible while it is being replaced.
-    /*
-    private static void setupShutdownHookForReplayer(TrafficReplayerTopLevel tr) {
-        var weakTrafficReplayer = new WeakReference<>(tr);
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            // both Log4J and the java builtin loggers add shutdown hooks.
-            // The API for addShutdownHook says that those hooks registered will run in an undetermined order.
-            // Hence, the reason that this code logs via slf4j logging AND stderr.
-            Optional.of("Running TrafficReplayer Shutdown.  "
-                    + "The logging facilities may also be shutting down concurrently, "
-                    + "resulting in missing logs messages.")
-                .ifPresent(beforeMsg -> {
-                    log.atWarn().setMessage(beforeMsg).log();
-                    System.err.println(beforeMsg);
-                });
-            Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(TrafficReplayer::awaitReplayerShutdown);
-            Optional.of("Done shutting down TrafficReplayer (due to Runtime shutdown).  "
-                    + "Logs may be missing for events that have happened after the Shutdown event was received.")
-                .ifPresent(afterMsg -> {
-                    log.atWarn().setMessage(afterMsg).log();
-                    System.err.println(afterMsg);
-                });
-        }));
-    }
-    */
-    // REBUILD-LIMBO-END(G9)
-    // REBUILD-LIMBO-START(G9)
-    // awaitReplayerShutdown -- blocked on TrafficReplayerTopLevel. See the D14 note above.
-    /*
-    static void awaitReplayerShutdown(TrafficReplayerTopLevel trafficReplayer) {
-        trafficReplayer.shutdown(null);
-    }
-    */
-    // REBUILD-LIMBO-END(G9)
 
     interface ReplayLifecycle {
         void start();
@@ -1700,10 +1441,6 @@ public class TrafficReplayer {
             }
         }
 
-        // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // TrafficReplayer.setupShutdownHookForReplayer ->
-        //     TrafficReplayer.SupervisedReplayApplication.createShutdownHook
-        // REBUILD-TRACE-END(G9,target)
         Thread createShutdownHook() {
             return new Thread(
                 this::requestAndAwaitOrderlyShutdown,
@@ -1711,10 +1448,6 @@ public class TrafficReplayer {
             );
         }
 
-        // REBUILD-TRACE-START(G9,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // TrafficReplayer.setupShutdownHookForReplayer ->
-        //     TrafficReplayer.SupervisedReplayApplication.requestAndAwaitOrderlyShutdown
-        // REBUILD-TRACE-END(G9,target)
         void requestAndAwaitOrderlyShutdown() {
             if (supervisor.fatalTerminationStarted()) {
                 return;

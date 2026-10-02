@@ -8,10 +8,10 @@
 
 package org.opensearch.migrations.replay.tracing;
 
-import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
-import org.opensearch.migrations.replay.intake.PartitionIntakeState;
-import org.opensearch.migrations.replay.intake.SourceAssemblySink;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
+import org.opensearch.migrations.replay.intake.PartitionIntakeState;
+import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
+import org.opensearch.migrations.replay.intake.SourceAssemblySink;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;

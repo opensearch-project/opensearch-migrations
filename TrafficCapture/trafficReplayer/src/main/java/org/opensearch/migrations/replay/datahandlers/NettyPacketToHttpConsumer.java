@@ -52,8 +52,8 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
-import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.ReadTimeoutException;
+import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
@@ -132,10 +132,6 @@ public final class NettyPacketToHttpConsumer
     /**
      * Builds the production Netty implementation of the G5 target-channel contract.
      */
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // NettyPacketToHttpConsumer.createClientConnectionFactory ->
-    //     NettyPacketToHttpConsumer.create
-    // REBUILD-TRACE-END(G5,target)
     public static NettyPacketToHttpConsumer create(
         @NonNull ConnectionProcessingId connectionProcessingId,
         @NonNull EventLoop eventLoop,
@@ -340,10 +336,6 @@ public final class NettyPacketToHttpConsumer
             return closeCurrentChannel();
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // NettyPacketToHttpConsumer.activateLiveChannel ->
-        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.acquireChannel
-        // REBUILD-TRACE-END(G5,target)
         private CompletableFuture<Channel> acquireChannel(
             DeployedTargetPacketConsumer consumer
         ) {
@@ -367,16 +359,6 @@ public final class NettyPacketToHttpConsumer
             return connect(consumer);
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // NettyPacketToHttpConsumer.activateLiveChannel ->
-        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
-        // NettyPacketToHttpConsumer.createClientConnection(4-argument) ->
-        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
-        // NettyPacketToHttpConsumer.createClientConnection(5-argument) ->
-        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
-        // NettyPacketToHttpConsumer.ClientConnectionAttempt.initializeConnectionHandlers ->
-        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
-        // REBUILD-TRACE-END(G5,target)
         private CompletableFuture<Channel> connect(
             DeployedTargetPacketConsumer consumer
         ) {
@@ -450,10 +432,6 @@ public final class NettyPacketToHttpConsumer
             return result;
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // NettyPacketToHttpConsumer.ClientConnectionAttempt.initializeConnectionHandlers ->
-        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.initializeTls
-        // REBUILD-TRACE-END(G5,target)
         private void initializeTls(
             Channel connected,
             IReplayContexts.IRequestConnectingContext connectingContext,
@@ -568,10 +546,6 @@ public final class NettyPacketToHttpConsumer
             return result;
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // NettyPacketToHttpConsumer.addLoggingHandlerLast ->
-        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.addLoggingHandlerLast
-        // REBUILD-TRACE-END(G5,target)
         private static void addLoggingHandlerLast(
             ChannelPipeline pipeline,
             String name
@@ -589,10 +563,6 @@ public final class NettyPacketToHttpConsumer
             }
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // NettyPacketToHttpConsumer.channelIsInUse ->
-        //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.channelIsInUse
-        // REBUILD-TRACE-END(G5,target)
         private static boolean channelIsInUse(Channel channel) {
             var lastHandler = channel.pipeline().last();
             return !(lastHandler instanceof ConnectionClosedListenerHandler)
@@ -612,20 +582,12 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.ConnectionClosedListenerHandler.channelInactive ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.ConnectionClosedListenerHandler.channelInactive
-            // REBUILD-TRACE-END(G5,target)
             public void channelInactive(ChannelHandlerContext context) throws Exception {
                 socketContext.close();
                 super.channelInactive(context);
             }
 
             @Override
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.ConnectionClosedListenerHandler.exceptionCaught ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.ConnectionClosedListenerHandler.exceptionCaught
-            // REBUILD-TRACE-END(G5,target)
             public void exceptionCaught(
                 ChannelHandlerContext context,
                 Throwable cause
@@ -654,10 +616,6 @@ public final class NettyPacketToHttpConsumer
             private boolean finalizationStarted;
             private boolean cleaned;
 
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.<init> ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.<init>
-            // REBUILD-TRACE-END(G5,target)
             private DeployedTargetPacketConsumer(
                 TargetChannelPort.AttemptInput<PreparedRequest> input,
                 IntConsumer targetWriteAccepted
@@ -668,10 +626,6 @@ public final class NettyPacketToHttpConsumer
                 this.channelReady = acquireChannel(this);
             }
 
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.initializeRequestHandlers ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.initializeRequestHandlers
-            // REBUILD-TRACE-END(G5,target)
             private void initializeRequestHandlers(Channel acquiredChannel) {
                 requireOwnerThread();
                 if (channelIsInUse(acquiredChannel)) {
@@ -715,10 +669,6 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.consumeBytes ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.consumeBytes
-            // REBUILD-TRACE-END(G5,target)
             public TrackedFuture<String, Void> consumeBytes(ByteBuf packet) {
                 return sendPacket(packet).thenApply(
                     ignored -> null,
@@ -727,12 +677,6 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.consumeBytes ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.sendPacket
-            // NettyPacketToHttpConsumer.writePacketAndUpdateFuture ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.sendPacket
-            // REBUILD-TRACE-END(G5,target)
             public TrackedFuture<String, PacketSendOutcome> sendPacket(ByteBuf packet) {
                 requireOwnerThread();
                 var result = new CompletableFuture<PacketSendOutcome>();
@@ -834,10 +778,6 @@ public final class NettyPacketToHttpConsumer
             }
 
             @Override
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.finalizeRequest ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finalizeRequest
-            // REBUILD-TRACE-END(G5,target)
             public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
                 requireOwnerThread();
                 if (finalizationStarted) {
@@ -897,12 +837,6 @@ public final class NettyPacketToHttpConsumer
                 return new TextTrackedFuture<>(response, "finalize target response");
             }
 
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.finalizeRequest ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finishResponse
-            // NettyPacketToHttpConsumer.deactivateChannel ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finishResponse
-            // REBUILD-TRACE-END(G5,target)
             private void finishResponse(
                 AggregatedRawResponse value,
                 boolean reusable
@@ -939,10 +873,6 @@ public final class NettyPacketToHttpConsumer
                 );
             }
 
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.deactivateChannel ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.resetForReuse
-            // REBUILD-TRACE-END(G5,target)
             private CompletionStage<Void> resetForReuse() {
                 requireOwnerThread();
                 if (cleaned) {
@@ -983,10 +913,6 @@ public final class NettyPacketToHttpConsumer
                 closeRequestPhase();
             }
 
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.setCurrentMessageContext ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.transitionTo
-            // REBUILD-TRACE-END(G5,target)
             private void transitionTo(RequestPhase next) {
                 requireOwnerThread();
                 if (requestPhase == next) {
@@ -1005,12 +931,6 @@ public final class NettyPacketToHttpConsumer
                 requestPhase = next;
             }
 
-            // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-            // NettyPacketToHttpConsumer.deactivateChannel ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.closeRequestPhase
-            // NettyPacketToHttpConsumer.getCurrentRequestSpan ->
-            //     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.closeRequestPhase
-            // REBUILD-TRACE-END(G5,target)
             private void closeRequestPhase() {
                 if (requestPhaseContext != null) {
                     requestPhaseContext.close();
@@ -1130,9 +1050,6 @@ public final class NettyPacketToHttpConsumer
             this.firstPacketStart = clock.instant();
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.start
-        // REBUILD-TRACE-END(G5,target)
         private void start() {
             if (packets.isEmpty()) {
                 throw new IllegalStateException("target attempt has no request packets");
@@ -1173,9 +1090,6 @@ public final class NettyPacketToHttpConsumer
             }
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.sendPacket
-        // REBUILD-TRACE-END(G5,target)
         private void sendPacket(int index) {
             requireOwnerThread();
             if (finished || aborting) {
@@ -1201,9 +1115,6 @@ public final class NettyPacketToHttpConsumer
             );
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.settlePacket
-        // REBUILD-TRACE-END(G5,target)
         private void settlePacket(
             int index,
             TargetPacketConsumer.PacketSendOutcome packetOutcome,
@@ -1248,9 +1159,6 @@ public final class NettyPacketToHttpConsumer
             });
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.schedulePacket
-        // REBUILD-TRACE-END(G5,target)
         private void schedulePacket(int index) {
             var targetTime = firstPacketStart.plus(
                 input.preparedRequest().packetInterval().multipliedBy(index)
@@ -1271,11 +1179,6 @@ public final class NettyPacketToHttpConsumer
             }
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // RequestSenderOrchestrator.sendPackets -> NettyPacketToHttpConsumer.ActiveAttempt.finalizeResponse
-        // NettyPacketToHttpConsumer.finalizeRequest ->
-        //     NettyPacketToHttpConsumer.ActiveAttempt.finalizeResponse
-        // REBUILD-TRACE-END(G5,target)
         private void finalizeResponse(NoTargetResponseDiagnostic packetFailure) {
             final org.opensearch.migrations.utils.TrackedFuture<String, AggregatedRawResponse>
                 finalized;
@@ -1304,10 +1207,6 @@ public final class NettyPacketToHttpConsumer
             );
         }
 
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // RequestTransformerAndSender.getRetryCheckVisitor ->
-        //     NettyPacketToHttpConsumer.ActiveAttempt.classify
-        // REBUILD-TRACE-END(G5,target)
         private TargetAttemptOutcome<AggregatedRawResponse> classify(
             AggregatedRawResponse response
         ) {
@@ -1470,1081 +1369,3 @@ public final class NettyPacketToHttpConsumer
         }
     }
 }
-
-// REBUILD-LIMBO(G5) -- the carried predecessor members below remain inert. Javadoc is left outside
-// the marked regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: ConnectionReplaySession IReplayContexts . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G5)
-/*
-
-import java.io.IOException;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.NoSuchElementException;
-import java.util.Optional;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
-
-import org.opensearch.migrations.NettyFutureBinders;
-import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.datahandlers.http.helpers.ReadMeteringHandler;
-import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringHandler;
-import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
-import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
-import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
-import org.opensearch.migrations.replay.netty.InterimHttpResponseHandler;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
-import org.opensearch.migrations.utils.TextTrackedFuture;
-import org.opensearch.migrations.utils.TrackedFuture;
-
-import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoop;
-import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.http.HttpMessage;
-import io.netty.handler.codec.http.HttpResponseDecoder;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
-import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslHandler;
-import io.netty.handler.timeout.ReadTimeoutHandler;
-import io.netty.util.concurrent.ScheduledFuture;
-import lombok.Lombok;
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
-
-@Slf4j
-public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
-
-    private static final String HEAD_METHOD = "HEAD";
-
-*/
-// REBUILD-LIMBO-END(G5)
-    /**
-     * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
-     * Set this to Optional.empty() to disable intra-handler logging.
-     */
-// REBUILD-LIMBO-START(G5)
-/*
-    private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
-
-    private static final Duration MAX_WAIT_BETWEEN_CREATE_RETRIES = Duration.ofSeconds(30);
-
-    public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
-    public static final String CONNECTION_CLOSE_HANDLER_NAME = "CONNECTION_CLOSE_HANDLER";
-    public static final String SSL_HANDLER_NAME = "ssl";
-    public static final String READ_TIMEOUT_HANDLER_NAME = "readTimeoutHandler";
-    public static final String WRITE_COUNT_WATCHER_HANDLER_NAME = "writeCountWatcher";
-    public static final String READ_COUNT_WATCHER_HANDLER_NAME = "readCountWatcher";
-
-*/
-// REBUILD-LIMBO-END(G5)
-    /**
-     * This is a future that chains work onto the channel.  If the value is ready, the future isn't waiting
-     * on anything to happen for the channel.  If the future isn't done, something in the chain is still
-     * pending.
-     */
-// REBUILD-LIMBO-START(G5)
-/*
-    TrackedFuture<String, PacketSendOutcome> activeChannelFuture;
-    ConnectionReplaySession replaySession;
-    private Channel channel;
-    AggregatedRawResponse.Builder responseBuilder;
-    IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
-    Duration readTimeoutDuration;
-    private final CompletableFuture<AggregatedRawResponse> responseFuture = new CompletableFuture<>();
-    private final OutboundRequestMethod outboundRequestMethod = new OutboundRequestMethod();
-    private final Runnable firstTargetWriteSubmitted;
-    private CancellationException cancellationCause;
-    private boolean firstTargetWriteReported;
-    private boolean spansClosed;
-
-    private static final class OutboundRequestMethod {
-        private int bytesRead;
-        private boolean couldBeHead = true;
-        private boolean complete;
-
-        private void accept(ByteBuf packetData) {
-            if (complete) {
-                return;
-            }
-            var bytes = packetData.duplicate();
-            while (bytes.isReadable()) {
-                var next = bytes.readUnsignedByte();
-                if (bytesRead == 0 && (next == '\r' || next == '\n')) {
-                    continue;
-                }
-                if (next == ' ' || next == '\t') {
-                    complete = true;
-                    return;
-                }
-                if (next == '\r' || next == '\n') {
-                    couldBeHead = false;
-                    complete = true;
-                    return;
-                }
-                if (bytesRead >= HEAD_METHOD.length() || next != HEAD_METHOD.charAt(bytesRead)) {
-                    couldBeHead = false;
-                }
-                bytesRead++;
-            }
-        }
-
-        private boolean isHead() {
-            return complete && couldBeHead && bytesRead == HEAD_METHOD.length();
-        }
-    }
-
-    private static final class RequestMethodAwareHttpResponseDecoder extends HttpResponseDecoder {
-        private final OutboundRequestMethod requestMethod;
-
-        private RequestMethodAwareHttpResponseDecoder(OutboundRequestMethod requestMethod) {
-            this.requestMethod = requestMethod;
-        }
-
-        @Override
-        protected boolean isContentAlwaysEmpty(HttpMessage message) {
-            return requestMethod.isHead() || super.isContentAlwaysEmpty(message);
-        }
-    }
-
-
-    private static class ConnectionClosedListenerHandler extends ChannelInboundHandlerAdapter {
-        private final IReplayContexts.ISocketContext socketContext;
-
-        ConnectionClosedListenerHandler(IReplayContexts.IChannelKeyContext channelKeyContext) {
-            socketContext = channelKeyContext.createSocketContext();
-        }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.ConnectionClosedListenerHandler.channelInactive ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.ConnectionClosedListenerHandler.channelInactive
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-        @Override
-        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-            socketContext.close();
-            super.channelInactive(ctx);
-        }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.ConnectionClosedListenerHandler.exceptionCaught ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.ConnectionClosedListenerHandler.exceptionCaught
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-        @Override
-        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-            socketContext.addTraceException(cause, true);
-            log.atDebug().setCause(cause)
-                .setMessage("Exception caught in ConnectionClosedListenerHandler for {}.  Closing channel due to exception")
-                .addArgument(() -> socketContext)
-                .log();
-            ctx.close();
-            super.exceptionCaught(ctx, cause);
-        }
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.<init> ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.<init>
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    public NettyPacketToHttpConsumer(
-        ConnectionReplaySession replaySession,
-        IReplayContexts.IReplayerHttpTransactionContext ctx,
-        Duration readTimeoutDuration,
-        @NonNull Runnable firstTargetWriteSubmitted
-    ) {
-        this.replaySession = replaySession;
-        this.readTimeoutDuration = readTimeoutDuration;
-        this.firstTargetWriteSubmitted = firstTargetWriteSubmitted;
-        this.responseBuilder = AggregatedRawResponse.builder(Instant.now());
-        var parentContext = ctx.createTargetRequestContext();
-        this.setCurrentMessageContext(parentContext.createHttpSendingContext());
-        log.atDebug().setMessage("C'tor: incoming session={} connId={}").addArgument(replaySession).addArgument(ctx::getConnectionId).log();
-        this.activeChannelFuture = activateLiveChannel().thenApply(
-            ignored -> new PacketSendOutcome.PacketSubmitted(),
-            () -> "target channel activated"
-        );
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.activateLiveChannel ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.acquireChannel
-// NettyPacketToHttpConsumer.activateLiveChannel ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    private TrackedFuture<String, Void> activateLiveChannel() {
-        if (cancellationCause != null) {
-            return TextTrackedFuture.failedFuture(
-                cancellationCause,
-                () -> "target request was cancelled before channel activation"
-            );
-        }
-        final var channelCtx = replaySession.getChannelKeyContext();
-        return replaySession.getChannelFutureInActiveState(getParentContext())
-            .thenCompose(
-                channelFuture -> NettyFutureBinders.bindNettyFutureToTrackableFuture(
-                    channelFuture,
-                    "waiting for newly acquired channel to be ready"
-                ).getDeferredFutureThroughHandle((connectFuture, t) -> {
-                    if (t != null) {
-                        channelCtx.addFailedChannelCreation();
-                        channelCtx.addTraceException(channelFuture.cause(), true);
-                        log.atWarn().setCause(t).setMessage("{} error creating channel, not retrying")
-                            .addArgument(this::httpContext).log();
-                        throw Lombok.sneakyThrow(t);
-                    }
-
-                    final var c = channelFuture.channel();
-                    if (cancellationCause != null) {
-                        c.close();
-                        return TextTrackedFuture.failedFuture(
-                            cancellationCause,
-                            () -> "target request was cancelled while activating its channel"
-                        );
-                    }
-                    if (c.isActive()) {
-                        this.channel = c;
-                        initializeRequestHandlers();
-                        log.atDebug().setMessage("Channel initialized for {} signaling future")
-                            .addArgument(channelCtx).log();
-                        return TextTrackedFuture.completedFuture(null, () -> "Done");
-                    } else {
-                        // this may recurse forever - until the event loop is shutdown
-                        // (see the ClientConnectionPool::shutdownNow())
-                        channelCtx.addFailedChannelCreation();
-                        log.atWarn()
-                            .setMessage("{} Channel wasn't active, trying to create another for this request")
-                            .addArgument(this::httpContext).log();
-                        return activateLiveChannel();
-                    }
-                }, () -> "acting on ready channelFuture to retry if inactive or to return"),
-                () -> "taking newly acquired channel and making it active"
-            );
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.setCurrentMessageContext ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.transitionTo
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> & IScopedInstrumentationAttributes>
-    void setCurrentMessageContext(T requestSendingContext) {
-        currentRequestContextUnion = requestSendingContext;
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.getCurrentRequestSpan ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.closeRequestPhase
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    private IScopedInstrumentationAttributes getCurrentRequestSpan() {
-        return (IScopedInstrumentationAttributes) currentRequestContextUnion;
-    }
-
-    public IReplayContexts.ITargetRequestContext getParentContext() {
-        return currentRequestContextUnion.getLogicalEnclosingScope();
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.createClientConnectionFactory ->
-//     NettyPacketToHttpConsumer.create
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    public static ConnectionReplaySession.ChannelFutureFactory
-    createClientConnectionFactory(SslContext sslContext, URI uri) {
-        return (eventLoop, ctx, cancellationSignal) ->
-            NettyPacketToHttpConsumer.createClientConnection(
-                eventLoop,
-                sslContext,
-                uri,
-                ctx,
-                Duration.ofMillis(1),
-                cancellationSignal
-            );
-    }
-
-    public static class ChannelNotActiveException extends IOException { }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.createClientConnection(4-argument) ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
-// NettyPacketToHttpConsumer.createClientConnection(4-argument) ->
-//     RequestReplayOwner.scheduleRetry
-// NettyPacketToHttpConsumer.createClientConnection(5-argument) ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
-// NettyPacketToHttpConsumer.createClientConnection(5-argument) ->
-//     RequestReplayOwner.scheduleRetry
-// The two baseline overloads were consolidated into the retained six-argument predecessor.
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    public static TrackedFuture<String, ChannelFuture> createClientConnection(
-        EventLoop eventLoop,
-        SslContext sslContext,
-        URI serverUri,
-        IReplayContexts.ITargetRequestContext requestCtx,
-        Duration nextRetryDuration,
-        ConnectionReplaySession.CancellationSignal cancellationSignal
-    ) {
-        var completion = new CompletableFuture<ChannelFuture>();
-        var attempt = new ClientConnectionAttempt(
-            eventLoop,
-            sslContext,
-            serverUri,
-            requestCtx,
-            cancellationSignal,
-            completion
-        );
-        attempt.start(nextRetryDuration);
-        return new TextTrackedFuture<>(completion, "creating a cancellable target connection");
-    }
-
-    private static final class ClientConnectionAttempt {
-        private final EventLoop eventLoop;
-        private final SslContext sslContext;
-        private final URI serverUri;
-        private final IReplayContexts.ITargetRequestContext requestContext;
-        private final ConnectionReplaySession.CancellationSignal cancellationSignal;
-        private final CompletableFuture<ChannelFuture> completion;
-        private ChannelFuture activeChannelFuture;
-        private ScheduledFuture<?> retryFuture;
-
-        private ClientConnectionAttempt(
-            EventLoop eventLoop,
-            SslContext sslContext,
-            URI serverUri,
-            IReplayContexts.ITargetRequestContext requestContext,
-            ConnectionReplaySession.CancellationSignal cancellationSignal,
-            CompletableFuture<ChannelFuture> completion
-        ) {
-            this.eventLoop = eventLoop;
-            this.sslContext = sslContext;
-            this.serverUri = serverUri;
-            this.requestContext = requestContext;
-            this.cancellationSignal = cancellationSignal;
-            this.completion = completion;
-        }
-
-        private void start(Duration nextRetryDuration) {
-            var cancellationRegistration = cancellationSignal.register(this::cancel);
-            completion.whenComplete((ignored, failure) -> cancellationRegistration.close());
-            runOnEventLoop(
-                "start target connection attempt",
-                () -> connect(nextRetryDuration)
-            );
-        }
-
-        private void connect(Duration nextRetryDuration) {
-            if (completion.isDone()) {
-                return;
-            }
-            if (cancellationSignal.cause() != null) {
-                cancelOnEventLoop();
-                return;
-            }
-            if (eventLoop.isShuttingDown()) {
-                fail(new IllegalStateException("EventLoop is shutting down"));
-                return;
-            }
-
-            var connectingCtx = requestContext.createHttpConnectingContext();
-            String host = serverUri.getHost();
-            int port = serverUri.getPort();
-            log.atTrace().setMessage("Active - setting up backend connection to {}:{}")
-                .addArgument(host)
-                .addArgument(port)
-                .log();
-
-            try {
-                Bootstrap bootstrap = new Bootstrap();
-                var channelKeyCtx = requestContext.getLogicalEnclosingScope().getChannelKeyContext();
-                bootstrap.group(eventLoop).handler(new ChannelInitializer<>() {
-                    @Override
-                    protected void initChannel(@NonNull Channel ch) throws Exception {
-                        ch.pipeline()
-                            .addFirst(
-                                CONNECTION_CLOSE_HANDLER_NAME,
-                                new ConnectionClosedListenerHandler(channelKeyCtx)
-                            );
-                    }
-                }).channel(NioSocketChannel.class).option(ChannelOption.AUTO_READ, false);
-
-                var outboundChannelFuture = bootstrap.connect(host, port);
-                activeChannelFuture = outboundChannelFuture;
-                outboundChannelFuture.addListener(ignored -> {
-                    try {
-                        onConnectSettled(
-                            outboundChannelFuture,
-                            nextRetryDuration,
-                            connectingCtx
-                        );
-                    } finally {
-                        connectingCtx.close();
-                    }
-                });
-            } catch (Throwable t) {
-                connectingCtx.close();
-                fail(t);
-            }
-        }
-
-        private void onConnectSettled(
-            ChannelFuture outboundChannelFuture,
-            Duration nextRetryDuration,
-            IReplayContexts.IRequestConnectingContext connectingContext
-        ) {
-            if (completion.isDone()) {
-                activeChannelFuture = null;
-                closeChannel(outboundChannelFuture);
-                return;
-            }
-            if (cancellationSignal.cause() != null) {
-                activeChannelFuture = null;
-                closeChannel(outboundChannelFuture);
-                cancelOnEventLoop();
-                return;
-            }
-
-            Throwable failure = outboundChannelFuture.isSuccess() ? null : outboundChannelFuture.cause();
-            if (failure == null && !outboundChannelFuture.channel().isActive()) {
-                failure = new ChannelNotActiveException();
-            }
-            if (failure != null) {
-                activeChannelFuture = null;
-                closeChannel(outboundChannelFuture);
-                log.atWarn().setCause(failure)
-                    .setMessage("{} Caught exception while trying to get an active channel")
-                    .addArgument(requestContext.getLogicalEnclosingScope().getChannelKeyContext())
-                    .log();
-                connectingContext.addTraceException(failure, true);
-                if (failure instanceof Exception) {
-                    scheduleRetry(nextRetryDuration);
-                } else {
-                    fail(failure);
-                }
-                return;
-            }
-
-            try {
-                var initialization = initializeConnectionHandlers(outboundChannelFuture);
-                initialization.future.whenComplete((channelFuture, initializationFailure) ->
-                    runOnEventLoop(
-                        "settle target connection initialization",
-                        () -> onInitializationSettled(
-                            outboundChannelFuture,
-                            channelFuture,
-                            initializationFailure
-                        )
-                    )
-                );
-            } catch (Throwable t) {
-                closeChannel(outboundChannelFuture);
-                fail(t);
-            }
-        }
-
-        private void onInitializationSettled(
-            ChannelFuture outboundChannelFuture,
-            ChannelFuture initializedChannelFuture,
-            Throwable failure
-        ) {
-            if (activeChannelFuture == outboundChannelFuture) {
-                activeChannelFuture = null;
-            }
-            if (cancellationSignal.cause() != null) {
-                closeChannel(outboundChannelFuture);
-                cancelOnEventLoop();
-                return;
-            }
-            if (failure != null) {
-                closeChannel(outboundChannelFuture);
-                fail(TrackedFuture.unwindPossibleCompletionException(failure));
-                return;
-            }
-            if (initializedChannelFuture == null) {
-                closeChannel(outboundChannelFuture);
-                fail(new NullPointerException("channel initialization completed without a ChannelFuture"));
-                return;
-            }
-            completion.complete(initializedChannelFuture);
-        }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-LIMBO-ESCAPED-LINE(G5):         /*
-// REBUILD-LIMBO-START(G5)
-/*
-         * TLS handshake failures remain terminal for this attempt rather than entering the
-         * connection-acquisition retry loop.
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-LIMBO-ESCAPED-LINE(G5):          */
-// REBUILD-LIMBO-START(G5)
-/*
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.ClientConnectionAttempt.initializeConnectionHandlers ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.connect
-// NettyPacketToHttpConsumer.ClientConnectionAttempt.initializeConnectionHandlers ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.initializeTls
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-        private TrackedFuture<String, ChannelFuture> initializeConnectionHandlers(
-            ChannelFuture outboundChannelFuture
-        ) {
-            final var channel = outboundChannelFuture.channel();
-            var channelKeyContext = requestContext.getLogicalEnclosingScope().getChannelKeyContext();
-            log.atTrace().setMessage("{} successfully done setting up client channel for {}")
-                .addArgument(channelKeyContext::getChannelKey)
-                .addArgument(channel)
-                .log();
-            var pipeline = channel.pipeline();
-            if (sslContext == null) {
-                return TextTrackedFuture.completedFuture(outboundChannelFuture, () -> "");
-            }
-            var sslEngine = sslContext.newEngine(channel.alloc());
-            sslEngine.setUseClientMode(true);
-            var sslHandler = new SslHandler(sslEngine);
-            addLoggingHandlerLast(pipeline, "A");
-            pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
-            return NettyFutureBinders.bindNettyFutureToTrackableFuture(sslHandler.handshakeFuture(), () -> "")
-                .thenApply(ignored -> outboundChannelFuture, () -> "");
-        }
-
-        private void scheduleRetry(Duration retryDelay) {
-            if (cancellationSignal.cause() != null) {
-                cancelOnEventLoop();
-                return;
-            }
-            if (eventLoop.isShuttingDown()) {
-                fail(new IllegalStateException("EventLoop is shutting down"));
-                return;
-            }
-            var delayMillis = Math.max(0, retryDelay.toMillis());
-            var nextRetryDelay = Duration.ofMillis(
-                Math.min(
-                    MAX_WAIT_BETWEEN_CREATE_RETRIES.toMillis(),
-                    retryDelay.multipliedBy(2).toMillis()
-                )
-            );
-            activeChannelFuture = null;
-            try {
-                retryFuture = eventLoop.schedule(() -> {
-                    retryFuture = null;
-                    connect(nextRetryDelay);
-                }, delayMillis, TimeUnit.MILLISECONDS);
-            } catch (Throwable t) {
-                fail(t);
-            }
-        }
-
-        private void cancel() {
-            runOnEventLoop("cancel target connection attempt", this::cancelOnEventLoop);
-        }
-
-        private void cancelOnEventLoop() {
-            var cause = cancellationSignal.cause();
-            if (cause == null || completion.isDone()) {
-                return;
-            }
-            if (retryFuture != null) {
-                var retry = retryFuture;
-                retryFuture = null;
-                retry.cancel(false);
-            }
-            if (activeChannelFuture != null) {
-                var channelFuture = activeChannelFuture;
-                activeChannelFuture = null;
-                channelFuture.cancel(false);
-                closeChannel(channelFuture);
-            }
-            completion.completeExceptionally(cause);
-        }
-
-        private void fail(Throwable failure) {
-            if (activeChannelFuture != null) {
-                var channelFuture = activeChannelFuture;
-                activeChannelFuture = null;
-                closeChannel(channelFuture);
-            }
-            completion.completeExceptionally(failure);
-        }
-
-        private void closeChannel(ChannelFuture channelFuture) {
-            try {
-                channelFuture.channel().close();
-            } catch (Throwable closeFailure) {
-                log.atWarn()
-                    .setCause(closeFailure)
-                    .setMessage("Failed to close an incomplete target connection")
-                    .log();
-            }
-        }
-
-        @SuppressWarnings("java:S1181") // The connection completion must settle even if owner work throws an Error.
-        private void runOnEventLoop(String operation, Runnable command) {
-            Runnable guarded = () -> {
-                try {
-                    command.run();
-                } catch (Throwable failure) {
-                    fail(failure);
-                }
-            };
-            if (eventLoop.inEventLoop()) {
-                guarded.run();
-                return;
-            }
-            try {
-                eventLoop.execute(guarded);
-            } catch (RejectedExecutionException rejection) {
-                log.atDebug()
-                    .setCause(rejection)
-                    .setMessage("Event loop rejected required operation '{}'")
-                    .addArgument(operation)
-                    .log();
-                completion.completeExceptionally(rejection);
-            }
-        }
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.channelIsInUse ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.channelIsInUse
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    private static boolean channelIsInUse(Channel c) {
-        var pipeline = c.pipeline();
-        var lastHandler = pipeline.last();
-        if (lastHandler instanceof ConnectionClosedListenerHandler || lastHandler instanceof SslHandler) {
-            assert !c.config().isAutoRead();
-            return false;
-        } else {
-            assert c.config().isAutoRead();
-            return true;
-        }
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.initializeRequestHandlers ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.initializeRequestHandlers
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    private void initializeRequestHandlers() {
-        assert channel.isActive();
-        if (channelIsInUse(channel)) {
-            throw new IllegalStateException("Channel " + channel + "is being used elsewhere already!");
-        }
-        var pipeline = channel.pipeline();
-        // add these size counters BEFORE TLS? Notice that when removing from the pipeline, we need to be more careful
-        pipeline.addAfter(
-            CONNECTION_CLOSE_HANDLER_NAME,
-            WRITE_COUNT_WATCHER_HANDLER_NAME,
-            new WriteMeteringHandler(size -> {
-                // client side, so this is the request
-                if (size == 0) {
-                    return;
-                }
-                if (!spansClosed
-                    && !(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
-                    this.getCurrentRequestSpan().close();
-                    this.setCurrentMessageContext(getParentContext().createHttpSendingContext());
-                }
-                getParentContext().onBytesSent(size);
-            })
-        );
-        pipeline.addAfter(
-            CONNECTION_CLOSE_HANDLER_NAME,
-            READ_COUNT_WATCHER_HANDLER_NAME,
-            new ReadMeteringHandler(size -> {
-                // client side, so this is the response
-                if (size == 0) {
-                    return;
-                }
-                if (!spansClosed
-                    && !(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
-                    this.getCurrentRequestSpan().close();
-                    this.setCurrentMessageContext(getParentContext().createHttpReceivingContext());
-                }
-                getParentContext().onBytesReceived(size);
-            })
-        );
-        addLoggingHandlerLast(pipeline, "B");
-        pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
-        addLoggingHandlerLast(pipeline, "C");
-        pipeline.addLast(new RequestMethodAwareHttpResponseDecoder(outboundRequestMethod));
-        addLoggingHandlerLast(pipeline, "D");
-        pipeline.addLast(new InterimHttpResponseHandler());
-        pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
-        addLoggingHandlerLast(pipeline, "E");
-        log.atTrace().setMessage("Added handlers to the pipeline: {}").addArgument(pipeline).log();
-
-        channel.config().setAutoRead(true);
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.addLoggingHandlerLast ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumerFactory.addLoggingHandlerLast
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    private static void addLoggingHandlerLast(ChannelPipeline pipeline, String name) {
-        PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel -> pipeline.addLast(new LoggingHandler("n" + name, logLevel)));
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.deactivateChannel ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finishResponse
-// NettyPacketToHttpConsumer.deactivateChannel ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.resetForReuse
-// NettyPacketToHttpConsumer.deactivateChannel ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.closeRequestPhase
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    private void deactivateChannel() {
-        try {
-            var pipeline = channel.pipeline();
-            log.atDebug().setMessage("[{}] Resetting the pipeline for channel {} currently at: {}")
-                .addArgument(this::connId)
-                .addArgument(channel)
-                .addArgument(pipeline)
-                .log();
-            for (var handlerName : new String[] { WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME }) {
-                try {
-                    pipeline.remove(handlerName);
-                } catch (NoSuchElementException e) {
-                    log.atWarn().setMessage("Ignoring an exception that the {}} wasn't present")
-                        .addArgument(handlerName).log();
-                }
-            }
-            while (true) {
-                var lastHandler = pipeline.last();
-                if (lastHandler == null
-                    || lastHandler instanceof SslHandler
-                    || lastHandler instanceof ConnectionClosedListenerHandler) {
-                    break;
-                }
-                try {
-                    pipeline.removeLast();
-                } catch (NoSuchElementException e) {
-                    break;
-                }
-            }
-            channel.config().setAutoRead(false);
-            log.atDebug().setMessage("[{}] Reset the pipeline for channel {} back to: {}")
-                .addArgument(this::connId)
-                .addArgument(channel)
-                .addArgument(pipeline)
-                .log();
-        } finally {
-            closeSpans();
-        }
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.consumeBytes ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.consumeBytes
-// NettyPacketToHttpConsumer.consumeBytes ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.sendPacket
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    @Override
-    public TrackedFuture<String, Void> consumeBytes(ByteBuf packetData) {
-        return sendPacket(packetData).thenApply(
-            ignored -> null,
-            () -> "preserving the typed target packet result for finalization"
-        );
-    }
-
-    @Override
-    public TrackedFuture<String, PacketSendOutcome> sendPacket(ByteBuf packetData) {
-        activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelException) -> {
-            var failure = cancellationCause == null ? channelException : cancellationCause;
-            if (failure == null) {
-                if (v instanceof PacketSendOutcome.NoTargetResponseObtained) {
-                    packetData.release();
-                    return TextTrackedFuture.completedFuture(
-                        v,
-                        () -> "preserving an earlier typed no-response packet result"
-                    );
-                }
-                outboundRequestMethod.accept(packetData);
-                log.atTrace().setMessage("[{}] outboundChannelFuture is ready. Writing packets (hash={}): {}: {}")
-                    .addArgument(this::connId)
-                    .addArgument(() -> System.identityHashCode(packetData))
-                    .addArgument(this::httpContext)
-                    .addArgument(() -> packetData.toString(StandardCharsets.UTF_8))
-                    .log();
-                return writePacketAndUpdateFuture(packetData).whenComplete((v2, t2) ->
-                    log.atTrace().setMessage("[{}] finished writing {} t={}")
-                        .addArgument(this::connId)
-                        .addArgument(this::httpContext)
-                        .addArgument(t2)
-                        .log(), () -> "");
-            } else {
-                log.atWarn()
-                    .setMessage("[{}] outbound channel was not set up successfully, NOT writing bytes hash={}")
-                    .addArgument(this::connId)
-                    .addArgument(() -> System.identityHashCode(packetData))
-                    .setCause(channelException)
-                    .log();
-                if (channel != null) {
-                    channel.close();
-                }
-                packetData.release();
-                return classifyPacketTransportFailure(failure);
-            }
-        }, () -> "consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");
-        log.atTrace()
-            .setMessage("Setting up write of packetData[{}] hash={}.  Created future consumeBytes={}")
-            .addArgument(packetData)
-            .addArgument(() -> System.identityHashCode(packetData))
-            .addArgument(activeChannelFuture)
-            .log();
-        return activeChannelFuture;
-    }
-
-    private IReplayContexts.IReplayerHttpTransactionContext httpContext() {
-        return getParentContext().getLogicalEnclosingScope();
-    }
-
-    private String connId() {
-        try {
-            return httpContext().getConnectionId();
-        } catch (Exception e) {
-            return "<unknown>";
-        }
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.writePacketAndUpdateFuture ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.sendPacket
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    private TrackedFuture<String, PacketSendOutcome> writePacketAndUpdateFuture(ByteBuf packetData) {
-        final ChannelFuture writeFuture;
-        try {
-            writeFuture = channel.writeAndFlush(packetData);
-        } catch (Throwable writeFailure) {
-            try {
-                packetData.release();
-            } catch (Throwable releaseFailure) {
-                if (releaseFailure != writeFailure) {
-                    writeFailure.addSuppressed(releaseFailure);
-                }
-            }
-            return TextTrackedFuture.failedFuture(
-                writeFailure,
-                () -> "target packet write failed before Netty accepted the packet"
-            );
-        }
-        if (!firstTargetWriteReported) {
-            firstTargetWriteReported = true;
-            firstTargetWriteSubmitted.run();
-        }
-        return NettyFutureBinders.bindNettyFutureToTrackableFuture(
-            writeFuture,
-            "CompletableFuture that will wait for the netty future to fill in the completion value"
-        ).getDeferredFutureThroughHandle((ignored, failure) -> {
-            if (failure == null) {
-                return TextTrackedFuture.completedFuture(
-                    new PacketSendOutcome.PacketSubmitted(),
-                    () -> "target packet write completed"
-                );
-            }
-            return classifyPacketTransportFailure(failure);
-        }, () -> "classifying the target packet write result"
-        );
-    }
-
-    private TrackedFuture<String, PacketSendOutcome> classifyPacketTransportFailure(
-        Throwable failure
-    ) {
-        var cause = TrackedFuture.unwindPossibleCompletionException(failure);
-        if (!(cause instanceof IOException ioFailure)) {
-            return TextTrackedFuture.failedFuture(
-                cause,
-                () -> "unexpected target packet failure"
-            );
-        }
-        return TextTrackedFuture.completedFuture(
-            new PacketSendOutcome.NoTargetResponseObtained(ioFailure),
-            () -> "target transport produced no response"
-        );
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// NettyPacketToHttpConsumer.finalizeRequest ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finalizeRequest
-// NettyPacketToHttpConsumer.finalizeRequest ->
-//     NettyPacketToHttpConsumer.DeployedTargetPacketConsumer.finishResponse
-// NettyPacketToHttpConsumer.finalizeRequest ->
-//     NettyPacketToHttpConsumer.ActiveAttempt.finalizeResponse
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-LIMBO-START(G5)
-/*
-    @Override
-    public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
-        var ff = activeChannelFuture.getDeferredFutureThroughHandle((v, t) -> {
-            log.atDebug().setMessage("[{}] finalization running since all prior work has completed for {}")
-                .addArgument(this::connId).addArgument(() -> httpContext()).log();
-            if (!spansClosed
-                && !(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
-                this.getCurrentRequestSpan().close();
-                this.setCurrentMessageContext(getParentContext().createWaitingForResponseContext());
-            }
-
-            var rval = new TrackedFuture<>(
-                responseFuture,
-                () -> "NettyPacketToHttpConsumer.finalizeRequest()"
-            );
-            if (t == null) {
-                v.visit(new PacketSendOutcome.Visitor<Void>() {
-                    @Override
-                    public Void onPacketSubmitted(PacketSendOutcome.PacketSubmitted submitted) {
-                        var pipeline = channel.pipeline();
-                        var timeoutPredecessor = pipeline.get(SSL_HANDLER_NAME) == null
-                            ? WRITE_COUNT_WATCHER_HANDLER_NAME
-                            : SSL_HANDLER_NAME;
-                        pipeline.addAfter(
-                            timeoutPredecessor,
-                            READ_TIMEOUT_HANDLER_NAME,
-                            new ReadTimeoutHandler(
-                                NettyPacketToHttpConsumer.this.readTimeoutDuration.toMillis(),
-                                TimeUnit.MILLISECONDS
-                            )
-                        );
-                        var responseWatchHandler = (BacksideHttpWatcherHandler) pipeline
-                            .get(BACKSIDE_HTTP_WATCHER_HANDLER_NAME);
-                        responseWatchHandler.addCallback(responseFuture::complete);
-                        return null;
-                    }
-
-                    @Override
-                    public Void onNoTargetResponseObtained(
-                        PacketSendOutcome.NoTargetResponseObtained noResponse
-                    ) {
-                        responseFuture.complete(responseBuilder.build());
-                        return null;
-                    }
-                });
-            } else {
-                responseFuture.complete(responseBuilder.addErrorCause(t).build());
-            }
-            return rval;
-        }, () -> "Waiting for previous consumes to set the future")
-        .map(f -> f.whenComplete((v, t) -> {
-            if (channel == null) {
-                log.atTrace().setMessage(
-                    "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
-                closeSpans();
-            } else {
-                deactivateChannel();
-            }
-        }), () -> "clearing pipeline");
-        log.atDebug().setMessage("[{}] Chaining finalization work off of {} for {}.  Returning finalization future={}")
-            .addArgument(this::connId)
-            .addArgument(activeChannelFuture)
-            .addArgument(() -> httpContext())
-            .addArgument(ff)
-            .log();
-        return ff;
-    }
-
-    @Override
-    public void abort(CancellationException cause) {
-        if (cancellationCause == null) {
-            cancellationCause = cause;
-        }
-        responseFuture.complete(responseBuilder.addErrorCause(cause).build());
-        // Channel activation retries connections until something stops it, so an abort can arrive while the
-        // activation future is still outstanding, which means finalizeRequest may never run and the spans
-        // opened in the constructor would never be closed.  Close them here; the parent http transaction
-        // span will close as soon as its caller is settled, and it must not outlive this one.
-        closeSpans();
-    }
-
-*/
-// REBUILD-LIMBO-END(G5)
-    /**
-     * Closes the target request span and whichever phase span is current.  Every path that finishes a target
-     * request funnels through here so that an abort racing an orderly finalization closes each span once.
-     */
-// REBUILD-LIMBO-START(G5)
-/*
-    private void closeSpans() {
-        if (spansClosed) {
-            return;
-        }
-        spansClosed = true;
-        getCurrentRequestSpan().close();
-        getParentContext().close();
-    }
-}
-
-*/
-// REBUILD-LIMBO-END(G5)

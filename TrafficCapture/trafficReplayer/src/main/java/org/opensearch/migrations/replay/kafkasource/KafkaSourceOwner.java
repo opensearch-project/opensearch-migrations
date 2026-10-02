@@ -306,9 +306,6 @@ public final class KafkaSourceOwner {
     /**
      * Begins host-bounded orderly shutdown while retaining Kafka ownership long enough to commit drained work.
      */
-    // REBUILD-TRACE-START(G8,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // TrafficReplayerTopLevel.shutdown(Error) -> KafkaSourceOwner.beginOrderlyShutdown
-    // REBUILD-TRACE-END(G8,target)
     public void beginOrderlyShutdown() {
         if (orderlyShutdownStarted) {
             return;

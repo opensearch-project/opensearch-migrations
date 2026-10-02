@@ -259,12 +259,6 @@ public final class TupleWriter<T> {
         };
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.write
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.write
-    // REBUILD-TRACE-END(G5,target)
     public LogicalWrite write(@NonNull WriteTuple<T> input) {
         var operation = new WriteOperation(input);
         postRequired(
@@ -296,12 +290,6 @@ public final class TupleWriter<T> {
         );
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.start
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.start
-    // REBUILD-TRACE-END(G5,target)
     private void start(WriteOperation operation) {
         requireOwnerThread();
         var requestId = operation.input.requestId();
@@ -352,12 +340,6 @@ public final class TupleWriter<T> {
         }
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.submitPhysicalWrite
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.submitPhysicalWrite
-    // REBUILD-TRACE-END(G5,target)
     private void submitPhysicalWrite(WriteOperation operation) {
         requireOwnerThread();
         if (operation.state == State.CANCELLED || operation.state == State.FAILED) {
@@ -415,14 +397,6 @@ public final class TupleWriter<T> {
         }
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.onPhysicalWriteComplete
-    //     [successful physical-write settlement slice].
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.onPhysicalWriteComplete
-    //     [successful physical-write settlement slice].
-    // REBUILD-TRACE-END(G5,target)
     private void onPhysicalWriteComplete(
         WriteOperation operation,
         OutstandingOperationRegistry.Registration registration,
@@ -507,12 +481,6 @@ public final class TupleWriter<T> {
         reportFatal("tuple transformation", failure);
     }
 
-    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.finish
-    // REBUILD-TRACE-END(G5,source)
-    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // ThreadLocalTupleWriter.writeTuple -> TupleWriter.finish
-    // REBUILD-TRACE-END(G5,target)
     private void finish(WriteOperation operation, TupleWriteResult result) {
         active.remove(operation.input.requestId(), operation);
         if (operation.logicalRegistration != null) {
@@ -603,12 +571,6 @@ public final class TupleWriter<T> {
         }
 
         @Override
-        // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-        // ThreadLocalTupleWriter.writeTuple -> TupleWriter.WriteOperation.completion
-        // REBUILD-TRACE-END(G5,source)
-        // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-        // ThreadLocalTupleWriter.writeTuple -> TupleWriter.WriteOperation.completion
-        // REBUILD-TRACE-END(G5,target)
         public CompletionStage<TupleWriteResult> completion() {
             return completion.minimalCompletionStage();
         }

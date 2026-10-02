@@ -34,4 +34,3 @@ public class RawPackets extends ArrayList<byte[]> {
         return result;
     }
 }
-
