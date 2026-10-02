@@ -14,10 +14,8 @@ java {
     }
 }
 
-repositories {
-    // Use the plugin portal to apply community plugins in convention plugins.
-    gradlePluginPortal()
-}
+apply from: '../gradle/repositories.gradle'
+configureMavenRepositories(repositories, true)
 
 dependencies {
     implementation 'net.ltgt.gradle:gradle-errorprone-plugin:4.1.0'
