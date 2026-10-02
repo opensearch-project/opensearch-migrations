@@ -74,7 +74,7 @@ class DocumentMigrationBootstrapFailedDocumentStreamE2ETest {
     private static IWorkCoordinator.WorkItemAndDuration workItem() {
         return new IWorkCoordinator.WorkItemAndDuration(
             Instant.now().plusSeconds(60),
-            new IWorkCoordinator.WorkItemAndDuration.WorkItem(INDEX, 0, 0L));
+            new IWorkCoordinator.WorkItemAndDuration.WorkItem(INDEX, "synthetic/" + INDEX + "/0", null));
     }
 
     private record Harness(DocumentMigrationBootstrap bootstrap,
@@ -140,7 +140,7 @@ class DocumentMigrationBootstrapFailedDocumentStreamE2ETest {
         // Work item completed, progress advanced to the one processed doc, and the failed document stream record
         // was durably uploaded by the per-batch flush.
         assertThat(status, is(CompletionStatus.WORK_COMPLETED));
-        assertThat(h.cursorRef().get().getProgressCheckpointNum(), equalTo(1L));
+        assertThat(h.cursorRef().get().getCursor(), equalTo("1"));
         assertThat(uploaded, hasSize(1));
     }
 
@@ -154,6 +154,6 @@ class DocumentMigrationBootstrapFailedDocumentStreamE2ETest {
         var status = h.bootstrap().runPartitionMigration(workItem(), h.pipelineConfig(), h.context());
 
         assertThat(status, is(CompletionStatus.WORK_COMPLETED));
-        assertThat(h.cursorRef().get().getProgressCheckpointNum(), equalTo(1L));
+        assertThat(h.cursorRef().get().getCursor(), equalTo("1"));
     }
 }

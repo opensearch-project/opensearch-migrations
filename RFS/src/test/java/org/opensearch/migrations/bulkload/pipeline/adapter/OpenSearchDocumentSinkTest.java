@@ -6,6 +6,7 @@ import java.util.Map;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import org.junit.jupiter.api.Test;
@@ -45,7 +46,9 @@ class OpenSearchDocumentSinkTest {
 
         assertNotNull(result);
         assertEquals(2, result.docsInBatch());
-        verify(client).sendBulkRequestRaw(eq("idx"), eq(docs), isNull(), eq(false), any());
+        assertEquals("cursor-after-d2", result.cursorAfter(), "cursor of the batch's last document");
+        var unwrapped = docs.stream().map(PositionedDocument::document).collect(java.util.stream.Collectors.toList());
+        verify(client).sendBulkRequestRaw(eq("idx"), eq(unwrapped), isNull(), eq(false), any());
         verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any());
     }
 
@@ -70,8 +73,8 @@ class OpenSearchDocumentSinkTest {
         byte[] src1 = "{\"x\":1}".getBytes();
         byte[] src2 = "{\"y\":2}".getBytes();
         var docs = List.of(
-            new Document("d1", src1, Document.Operation.UPSERT, Map.of(), Map.of()),
-            new Document("d2", src2, Document.Operation.UPSERT, Map.of(), Map.of())
+            at(new Document("d1", src1, Document.Operation.UPSERT, Map.of(), Map.of())),
+            at(new Document("d2", src2, Document.Operation.UPSERT, Map.of(), Map.of()))
         );
 
         var result = sink.writeBatch("idx", docs).block();
@@ -86,7 +89,7 @@ class OpenSearchDocumentSinkTest {
         when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(
-            new Document("d1", null, Document.Operation.DELETE, Map.of(), Map.of())
+            at(new Document("d1", null, Document.Operation.DELETE, Map.of(), Map.of()))
         );
 
         var result = sink.writeBatch("idx", docs).block();
@@ -130,7 +133,7 @@ class OpenSearchDocumentSinkTest {
         // Create a document with _type hint (as the pipeline does for ES 5.x multi-type indices)
         var docJson = "{\"title\":\"test\"}";
         var hints = Map.of(Document.HINT_TYPE, "type1");
-        var docs = List.of(new Document("doc1", docJson.getBytes(), Document.Operation.UPSERT, hints, Map.of()));
+        var docs = List.of(at(new Document("doc1", docJson.getBytes(), Document.Operation.UPSERT, hints, Map.of())));
 
         // This would throw ClassCastException: PolyglotList cannot be cast to Map
         // before the fix in applyTransformation
@@ -208,7 +211,12 @@ class OpenSearchDocumentSinkTest {
         assertEquals("renamed", op.getOperation().getId());
     }
 
-    private static Document doc(String id, String json) {
-        return new Document(id, json.getBytes(), Document.Operation.UPSERT, Map.of(), Map.of());
+    private static PositionedDocument doc(String id, String json) {
+        return at(new Document(id, json.getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()));
+    }
+
+    /** Pairs a document with an arbitrary cursor; these tests don't care what the cursor says. */
+    private static PositionedDocument at(Document document) {
+        return new PositionedDocument(document, "cursor-after-" + document.id());
     }
 }

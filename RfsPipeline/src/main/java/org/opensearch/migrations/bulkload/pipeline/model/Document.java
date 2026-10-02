@@ -14,7 +14,8 @@ import java.util.Objects;
  *
  * <p>This is a value type: two {@code Document} instances with the same fields are equal.
  *
- * @param id             the document identifier, must not be null
+ * @param id             the document identifier; null when the source has none yet, such as a
+ *                       record whose operation a transform still has to derive
  * @param source         the document body bytes, nullable for DELETE operations
  * @param operation      the operation type (UPSERT or DELETE), must not be null
  * @param hints          sink-specific routing hints (opaque to pipeline), never null
@@ -43,7 +44,6 @@ public record Document(
     }
 
     public Document {
-        Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(operation, "operation must not be null");
         hints = hints != null ? Map.copyOf(hints) : Map.of();
         sourceMetadata = sourceMetadata != null ? Map.copyOf(sourceMetadata) : Map.of();
