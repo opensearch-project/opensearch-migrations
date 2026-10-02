@@ -41,7 +41,8 @@ public abstract class MigratorEvaluatorBase {
 
     protected final MigrateOrEvaluateArgs arguments;
     protected final ClusterReaderExtractor clusterReaderCliExtractor;
-    private Optional<ServerlessCollectionRouting> collectionRouting;
+    private ServerlessCollectionRouting collectionRouting;
+    private boolean collectionRoutingParsed;
 
     protected MigratorEvaluatorBase(MigrateOrEvaluateArgs arguments) {
         this.arguments = arguments;
@@ -50,15 +51,17 @@ public abstract class MigratorEvaluatorBase {
 
     /** Parses the routing table once; empty unless the target is collection-routed. */
     Optional<ServerlessCollectionRouting> getCollectionRouting() {
-        if (collectionRouting == null) {
+        if (!collectionRoutingParsed) {
             try {
                 collectionRouting = ServerlessCollectionRouting
-                    .forTarget(arguments.collectionRouting, arguments.targetArgs.collectionRouted);
+                    .forTarget(arguments.collectionRouting, arguments.targetArgs.collectionRouted)
+                    .orElse(null);
             } catch (IllegalArgumentException e) {
                 throw new ParameterException(e.getMessage(), e);
             }
+            collectionRoutingParsed = true;
         }
-        return collectionRouting;
+        return Optional.ofNullable(collectionRouting);
     }
 
     protected Clusters createClusters() {

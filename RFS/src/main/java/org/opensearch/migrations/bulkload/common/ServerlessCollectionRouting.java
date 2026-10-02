@@ -31,7 +31,11 @@ public class ServerlessCollectionRouting {
     public static final String REGEX_FIELD = "regexCollectionRouting";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    // In order: an escaped character, ${name}, $n, then the incomplete forms ${, $ and a trailing backslash
+    private static final Pattern REPLACEMENT_TOKEN =
+        Pattern.compile("\\\\.|\\$\\{([^}]*)}|\\$(\\d)|\\$\\{|\\$|\\\\", Pattern.DOTALL);
 
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     private record RegexRule(Pattern sourceIndex, String collection) {}
 
     private final Map<String, String> staticRules;
@@ -135,39 +139,30 @@ public class ServerlessCollectionRouting {
      * a reference to a group the pattern does not define, so mistakes surface before any work starts.
      */
     private static void validateReplacement(Pattern pattern, String collection) {
-        var groupCount = pattern.matcher("").groupCount();
-        var groupNames = pattern.namedGroups().keySet();
-        for (int i = 0; i < collection.length(); i++) {
-            var c = collection.charAt(i);
-            if (c == '\\') {
-                if (++i >= collection.length()) {
-                    throw invalidReplacement(pattern, collection, "ends with an unescaped backslash");
-                }
-            } else if (c == '$') {
-                if (i + 1 >= collection.length()) {
-                    throw invalidReplacement(pattern, collection, "ends with '$'");
-                }
-                var next = collection.charAt(i + 1);
-                if (next == '{') {
-                    var end = collection.indexOf('}', i + 2);
-                    if (end < 0) {
-                        throw invalidReplacement(pattern, collection, "has an unclosed '${'");
-                    }
-                    var name = collection.substring(i + 2, end);
-                    if (!groupNames.contains(name)) {
-                        throw invalidReplacement(pattern, collection, "references undefined group '" + name + "'");
-                    }
-                    i = end;
-                } else if (Character.isDigit(next)) {
-                    if (next - '0' > groupCount) {
-                        throw invalidReplacement(pattern, collection, "references undefined group " + next);
-                    }
-                    i++;
-                } else {
-                    throw invalidReplacement(pattern, collection, "has '$' that is not a group reference");
-                }
+        var tokens = REPLACEMENT_TOKEN.matcher(collection);
+        while (tokens.find()) {
+            var problem = replacementTokenProblem(pattern, tokens.group(), tokens.group(1), tokens.group(2));
+            if (problem != null) {
+                throw invalidReplacement(pattern, collection, problem);
             }
         }
+    }
+
+    /** Returns why a replacement token is invalid for the pattern, or null when it is valid. */
+    private static String replacementTokenProblem(Pattern pattern, String token, String groupName, String groupNumber) {
+        if (groupName != null) {
+            return pattern.namedGroups().containsKey(groupName) ? null : "references undefined group '" + groupName + "'";
+        }
+        if (groupNumber != null) {
+            var groupCount = pattern.matcher("").groupCount();
+            return Integer.parseInt(groupNumber) <= groupCount ? null : "references undefined group " + groupNumber;
+        }
+        return switch (token) {
+            case "${" -> "has an unclosed '${'";
+            case "$" -> "has '$' that is not a group reference";
+            case "\\" -> "ends with an unescaped backslash";
+            default -> null; // an escaped character
+        };
     }
 
     private static IllegalArgumentException invalidReplacement(Pattern pattern, String collection, String problem) {

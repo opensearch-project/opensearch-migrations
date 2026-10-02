@@ -50,6 +50,8 @@ public class ConnectionContext {
     @JsonIgnore
     private TlsCredentialsProvider tlsCredentialsProvider;
 
+    private static final String ENABLED = "Enabled";
+
     private ConnectionContext(IParams params) {
         if (params.getHost() == null) {
             throw new IllegalArgumentException("No host was found");
@@ -113,7 +115,11 @@ public class ConnectionContext {
         this.disableCompression = params.isDisableCompression();
 
         this.collectionRouted = params.isCollectionRouted();
-        if (collectionRouted && !(sigv4Enabled && "aoss".equals(params.getAwsServiceSigningName()))) {
+        validateCollectionRouted(params, sigv4Enabled);
+    }
+
+    private static void validateCollectionRouted(IParams params, boolean sigv4Enabled) {
+        if (params.isCollectionRouted() && !(sigv4Enabled && "aoss".equals(params.getAwsServiceSigningName()))) {
             throw new IllegalArgumentException("A collection-routed target requires SigV4 auth with service 'aoss'");
         }
     }
@@ -123,12 +129,12 @@ public class ConnectionContext {
         var dataBuilder = new LinkedHashMap<String, String>();
         dataBuilder.put("Uri", getUri().toString());
         dataBuilder.put("Protocol", getProtocol().toString());
-        dataBuilder.put("TLS Verification", isInsecure() ? "Disabled" : "Enabled");
+        dataBuilder.put("TLS Verification", isInsecure() ? "Disabled" : ENABLED);
         if (awsSpecificAuthentication) {
-            dataBuilder.put("AWS Auth", "Enabled");
+            dataBuilder.put("AWS Auth", ENABLED);
         }
         if (collectionRouted) {
-            dataBuilder.put("Collection Routed", "Enabled");
+            dataBuilder.put("Collection Routed", ENABLED);
         }
         return dataBuilder;
     }
