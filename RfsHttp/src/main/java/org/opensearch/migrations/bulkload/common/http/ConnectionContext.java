@@ -43,6 +43,9 @@ public class ConnectionContext {
     private final boolean awsSpecificAuthentication;
     @JsonProperty("disableCompression")
     private final boolean disableCompression;
+    /** An OpenSearch Serverless per-account endpoint that selects the collection from a request header */
+    @JsonProperty("collectionRouted")
+    private final boolean collectionRouted;
 
     @JsonIgnore
     private TlsCredentialsProvider tlsCredentialsProvider;
@@ -108,6 +111,11 @@ public class ConnectionContext {
         }
 
         this.disableCompression = params.isDisableCompression();
+
+        this.collectionRouted = params.isCollectionRouted();
+        if (collectionRouted && !(sigv4Enabled && "aoss".equals(params.getAwsServiceSigningName()))) {
+            throw new IllegalArgumentException("A collection-routed target requires SigV4 auth with service 'aoss'");
+        }
     }
 
     // Used for presentation to user facing output
@@ -118,6 +126,9 @@ public class ConnectionContext {
         dataBuilder.put("TLS Verification", isInsecure() ? "Disabled" : "Enabled");
         if (awsSpecificAuthentication) {
             dataBuilder.put("AWS Auth", "Enabled");
+        }
+        if (collectionRouted) {
+            dataBuilder.put("Collection Routed", "Enabled");
         }
         return dataBuilder;
     }
@@ -150,6 +161,10 @@ public class ConnectionContext {
         boolean isDisableCompression();
 
         boolean isInsecure();
+
+        default boolean isCollectionRouted() {
+            return false;
+        }
 
         default ConnectionContext toConnectionContext() {
             return new ConnectionContext(this);
@@ -215,6 +230,14 @@ public class ConnectionContext {
             names = { "--target-insecure", "--targetInsecure" },
             description = "Allow untrusted SSL certificates for target", required = false)
         public boolean insecure = false;
+
+        @Parameter(
+            names = { "--target-collection-routed", "--targetCollectionRouted" },
+            description = "Optional. The target is an OpenSearch Serverless per-account endpoint " +
+                "(<account-id>.aoss.<region>.on.aws) that selects the collection from a request header. " +
+                "Requires a collection routing table.",
+            required = false)
+        public boolean collectionRouted = false;
 
         @ParametersDelegate
         TargetAdvancedArgs advancedArgs = new TargetAdvancedArgs();

@@ -222,6 +222,14 @@ public class RestClient {
         return asyncRequest(HttpMethod.GET, path, null, null, context);
     }
 
+    public Mono<HttpResponse> getAsync(
+        String path,
+        Map<String, List<String>> additionalHeaders,
+        IRfsContexts.IRequestContext context
+    ) {
+        return asyncRequest(HttpMethod.GET, path, null, additionalHeaders, context);
+    }
+
     public Mono<HttpResponse> postAsync(
         String path,
         String body,
@@ -250,6 +258,15 @@ public class RestClient {
 
     public Mono<HttpResponse> putAsync(String path, String body, IRfsContexts.IRequestContext context) {
         return asyncRequest(HttpMethod.PUT, path, body, null, context);
+    }
+
+    public Mono<HttpResponse> putAsync(
+        String path,
+        String body,
+        Map<String, List<String>> additionalHeaders,
+        IRfsContexts.IRequestContext context
+    ) {
+        return asyncRequest(HttpMethod.PUT, path, body, additionalHeaders, context);
     }
 
     public HttpResponse put(String path, String body, IRfsContexts.IRequestContext context) {

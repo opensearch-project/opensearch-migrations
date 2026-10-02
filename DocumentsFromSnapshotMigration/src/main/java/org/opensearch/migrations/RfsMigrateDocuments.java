@@ -23,9 +23,11 @@ import java.util.regex.Pattern;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
 import org.opensearch.migrations.bulkload.common.GcsUri;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -33,6 +35,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -258,6 +261,15 @@ public class RfsMigrateDocuments {
         public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
 
         @Parameter(required = false,
+            names = { "--collection-routing", "--collectionRouting" },
+            description = "Optional. JSON object mapping source indices to OpenSearch Serverless collections, e.g. " +
+                "{\"staticCollectionRouting\": [{\"sourceIndex\": \"shared-config\", \"collection\": \"common\"}], " +
+                "\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}. " +
+                "An exact static match wins, otherwise the first regex that matches the whole index name is used. " +
+                "Required when --target-collection-routed is set.")
+        public String collectionRouting;
+
+        @Parameter(required = false,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
             description = ("Version of the source cluster. Required when --source-type is SNAPSHOT."))
@@ -465,6 +477,12 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
+        try {
+            ServerlessCollectionRouting.forTarget(args.collectionRouting, args.targetArgs.collectionRouted);
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException(e.getMessage(), e);
+        }
+
         // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.repoUri == null) {
@@ -615,18 +633,9 @@ public class RfsMigrateDocuments {
         targetClient.setFailedDocumentStreamContext(failedDocumentStreamSink, resolvedSessionId, workerId);
         logFailedDocumentStreamStatus(failedDocumentStreamSink, resolvedSessionId);
 
-        boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
-            case ALWAYS -> true;
-            case NEVER -> false;
-            case AUTO -> {
-                var collectionType = targetClientFactory.detectServerlessCollectionType();
-                if (collectionType.requiresServerGeneratedIds()) {
-                    log.atInfo().setMessage("Auto-enabling server-generated IDs for {} serverless collection").addArgument(collectionType).log();
-                    yield true;
-                }
-                yield false;
-            }
-        };
+        var collectionRoutedTarget = buildCollectionRoutedTarget(arguments, targetClientFactory);
+        boolean useServerGeneratedIds = resolveUseServerGeneratedIds(
+            arguments.serverGeneratedIds, targetClientFactory, collectionRoutedTarget);
 
         var docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
         if (docTransformerConfig != null) {
@@ -645,14 +654,81 @@ public class RfsMigrateDocuments {
 
         MigrationSourceFactory sourceFactory;
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
-            sourceFactory = buildSolrSourceFactory(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
+            sourceFactory = buildSolrSourceFactory(arguments, targetClient, docTransformerSupplier,
+                useServerGeneratedIds, collectionRoutedTarget, context);
         } else {
             sourceFactory = buildElasticsearchSourceFactory(arguments, targetClient,
-                docTransformerSupplier, useServerGeneratedIds, emitDocType, context);
+                docTransformerSupplier, useServerGeneratedIds, collectionRoutedTarget, emitDocType, context);
         }
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
         runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory, failedDocumentStreamSink);
+    }
+
+    /** Returns null unless the target is collection-routed. */
+    static CollectionRoutedTarget buildCollectionRoutedTarget(Args arguments, OpenSearchClientFactory targetClientFactory) {
+        return ServerlessCollectionRouting
+            .forTarget(arguments.collectionRouting, arguments.targetArgs.collectionRouted)
+            .map(routing -> new CollectionRoutedTarget(routing,
+                collection -> requiresServerGeneratedIds(arguments.serverGeneratedIds, targetClientFactory, collection)))
+            .orElse(null);
+    }
+
+    static boolean resolveUseServerGeneratedIds(
+        ServerGeneratedIdMode mode,
+        OpenSearchClientFactory targetClientFactory,
+        CollectionRoutedTarget collectionRoutedTarget
+    ) {
+        return switch (mode) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            // A collection-routed target decides per collection in CollectionRoutedTarget
+            case AUTO -> {
+                if (collectionRoutedTarget != null) {
+                    yield false;
+                }
+                var collectionType = targetClientFactory.detectServerlessCollectionType();
+                if (collectionType.requiresServerGeneratedIds()) {
+                    log.atInfo().setMessage("Auto-enabling server-generated IDs for {} serverless collection").addArgument(collectionType).log();
+                    yield true;
+                }
+                yield false;
+            }
+        };
+    }
+
+    /** Fails before any work item is created or acquired if an allowlisted index has no collection. */
+    static void validateCollectionRouting(
+        CollectionRoutedTarget collectionRoutedTarget,
+        org.opensearch.migrations.bulkload.pipeline.source.DocumentSource documentSource,
+        List<String> indexAllowlist
+    ) {
+        if (collectionRoutedTarget == null) {
+            return;
+        }
+        var allowed = FilterScheme.filterByAllowList(indexAllowlist, FilterScheme.FilterContext.INDEX);
+        collectionRoutedTarget.validateSourceIndices(
+            documentSource.listCollections().stream().filter(allowed).toList());
+    }
+
+    static boolean requiresServerGeneratedIds(
+        ServerGeneratedIdMode mode,
+        OpenSearchClientFactory targetClientFactory,
+        String collection
+    ) {
+        return switch (mode) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            case AUTO -> {
+                var collectionType = targetClientFactory.detectServerlessCollectionType(collection);
+                if (collectionType.requiresServerGeneratedIds()) {
+                    log.atInfo().setMessage("Auto-enabling server-generated IDs for {} serverless collection {}")
+                        .addArgument(collectionType).addArgument(collection).log();
+                    yield true;
+                }
+                yield false;
+            }
+        };
     }
 
     private static void runMigration(
@@ -789,6 +865,7 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
         boolean useServerGeneratedIds,
+        CollectionRoutedTarget collectionRoutedTarget,
         boolean emitDocType,
         RootDocumentMigrationContext context
     ) {
@@ -849,7 +926,7 @@ public class RfsMigrateDocuments {
 
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
-                useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
+                useServerGeneratedIds, collectionRoutedTarget, allowlist, progressCursor, cancellationRunnableRef,
                 workItemTimeProvider, arguments, context);
         };
     }
@@ -861,6 +938,7 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
         boolean useServerGeneratedIds,
+        CollectionRoutedTarget collectionRoutedTarget,
         DocumentExceptionAllowlist allowlist,
         AtomicReference<WorkItemCursor> progressCursor,
         AtomicReference<Runnable> cancellationRunnableRef,
@@ -868,6 +946,7 @@ public class RfsMigrateDocuments {
         Args arguments,
         RootDocumentMigrationContext context
     ) throws IOException, InterruptedException, NoWorkLeftException {
+        validateCollectionRouting(collectionRoutedTarget, documentSource, arguments.indexAllowlist);
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, processManager, documentSource,
             arguments.indexAllowlist, context);
@@ -880,6 +959,7 @@ public class RfsMigrateDocuments {
             .batchConcurrency(arguments.maxConnections)
             .transformerSupplier(docTransformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
+            .collectionRoutedTarget(collectionRoutedTarget)
             .allowlist(allowlist)
             .workCoordinator(scopedWorkCoordinator)
             .workItemTimeProvider(workItemTimeProvider)
@@ -1367,6 +1447,7 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
         boolean useServerGeneratedIds,
+        CollectionRoutedTarget collectionRoutedTarget,
         RootDocumentMigrationContext context
     ) {
         return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
@@ -1409,7 +1490,7 @@ public class RfsMigrateDocuments {
 
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
-                useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
+                useServerGeneratedIds, collectionRoutedTarget, allowlist, progressCursor, cancellationRunnableRef,
                 workItemTimeProvider, arguments, context);
         };
     }

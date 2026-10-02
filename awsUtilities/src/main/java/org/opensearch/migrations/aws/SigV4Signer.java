@@ -30,7 +30,6 @@ import software.amazon.awssdk.utils.BinaryUtils;
  * TODO: Figure out how to implement this with AwsV4HttpSigner given
  *  BaseAws4Signer/Aws4Signer is deprecated while keeping the streaming, non-buffering
  *  payload signing behavior.
- *  Also, think about signing all headers in the request
  */
 @SuppressWarnings("java:S1874") // Ignore deprecation notices for this class
 @Slf4j
@@ -40,6 +39,9 @@ public class SigV4Signer {
 
     public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
     public static final String CONTENT_TYPE = "Content-Type";
+    private static final String AMZ_HEADER_PREFIX = "x-amz-";
+    private static final Set<String> SIGNER_COMPUTED_HEADERS =
+        Set.of("x-amz-date", AMZ_CONTENT_SHA_256, "x-amz-security-token");
 
     static {
         AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<>(Set.of("authorization", "x-amz-date", "x-amz-security-token"));
@@ -116,6 +118,14 @@ public class SigV4Signer {
 
         msg.getFirstHeaderValueCaseInsensitive(CONTENT_TYPE)
             .ifPresent(contentType -> httpRequestBuilder.appendHeader(CONTENT_TYPE, contentType));
+
+        // AWS requires x-amz-* request headers (e.g. x-amz-aoss-collection-name) to be signed
+        msg.headers().forEach((name, values) -> {
+            var lowerName = name.toLowerCase();
+            if (lowerName.startsWith(AMZ_HEADER_PREFIX) && !SIGNER_COMPUTED_HEADERS.contains(lowerName)) {
+                values.forEach(value -> httpRequestBuilder.appendHeader(lowerName, value));
+            }
+        });
 
         if (messageDigest != null) {
             byte[] bytesToEncode = messageDigest.digest();

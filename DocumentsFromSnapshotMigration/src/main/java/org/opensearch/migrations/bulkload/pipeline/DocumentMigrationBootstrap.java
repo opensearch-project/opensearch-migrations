@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
@@ -65,6 +66,8 @@ public class DocumentMigrationBootstrap {
     private final boolean allowServerGeneratedIds = false;
     @Builder.Default
     private final DocumentExceptionAllowlist allowlist = DocumentExceptionAllowlist.empty();
+    @Builder.Default
+    private final CollectionRoutedTarget collectionRoutedTarget = null;
 
     @Builder.Default
     private final ScopedWorkCoordinator workCoordinator = null;
@@ -97,7 +100,8 @@ public class DocumentMigrationBootstrap {
             () -> {
                 var ctx = contextRef.get();
                 return ctx != null ? ctx.createBulkRequest() : null;
-            }
+            },
+            collectionRoutedTarget
         );
         try {
             var pipelineConfig = new PipelineConfig(source, sink, maxDocsPerBatch, maxBytesPerBatch, batchConcurrency);
@@ -155,6 +159,10 @@ public class DocumentMigrationBootstrap {
 
         if (workItemTimeProvider != null) {
             workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
+        }
+
+        if (collectionRoutedTarget != null) {
+            collectionRoutedTarget.prepare(wi.getIndexName());
         }
 
         var partition = resolvePartition(wi);

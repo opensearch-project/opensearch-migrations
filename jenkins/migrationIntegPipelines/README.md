@@ -121,7 +121,9 @@ Jobs triggered:
 - `eks-cdc-*` (PR with `run-eks-tests` label, and main). This includes `eks-cdc-k6-load-test`, which
   runs test `0080` — a CDC migration whose traffic comes from a k6 load test. The test runner installs
   the standalone k6LoadTest chart for any `008x` ID, so the job needs no extra flag
-- `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three collection types)
+- `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three collection types).
+  On a PR, the `run-aoss-routing-tests` label adds test `0024`, which routes through the per-account endpoint to
+  NextGen collections. With only that label, the job skips the Classic collections and runs `0024` alone
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
 

@@ -1,6 +1,8 @@
+// Test 0021 migrates to Classic collections. Test 0024 is opt-in through AOSS_TEST_IDS and routes
+// through the per-account endpoint to NextGen collections from test/aossNextGen/collections.yaml.
 def call(Map config = [:]) {
     def gitBranchDefault = config.gitBranchDefault ?: 'main'
-    def testId = '0021'
+    def supportedTestIds = ['0021', '0024']
     def collections = [
         [id: 'search', type: 'SEARCH'],
         [id: 'timeseries', type: 'TIMESERIES'],
@@ -27,6 +29,7 @@ def call(Map config = [:]) {
             string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/aoss-osb-data/os1x-aoss-osb-data/', description: 'Full S3 URI to snapshot repository')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'os1x-aoss-osb-data', description: 'Name of the snapshot')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '33', description: 'Max retries for workflow monitoring (~1/min). 33=~30min')
+            string(name: 'AOSS_TEST_IDS', defaultValue: '0021', description: 'Tests to run, separated by commas or semicolons: 0021 (Classic collections), 0024 (per-account endpoint routing to NextGen collections)')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
@@ -45,6 +48,7 @@ def call(Map config = [:]) {
                     [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                     [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
                     [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
+                    [key: 'AOSS_TEST_IDS', value: '$.AOSS_TEST_IDS', defaultValue: '0021'],
                     [key: 'job_name', value: '$.job_name']
                 ],
                 tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -64,6 +68,19 @@ def call(Map config = [:]) {
                         env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
                         env.STACK_NAME = "MA-Serverless-${maStageName}-${params.REGION}"
                         env.CLUSTER_STACK = "OpenSearch-${maStageName}-${params.REGION}"
+                        env.NEXTGEN_STACK = "AOSS-NextGen-${maStageName}-${params.REGION}"
+                        // Classic collections already use <stage>-search, and collection names are unique per account
+                        env.NEXTGEN_PREFIX = "${maStageName}-ng"
+
+                        // Semicolons are accepted because the GitHub trigger splits its parameters on commas
+                        def testIds = (params.AOSS_TEST_IDS ?: '0021').split(/[,;\s]+/).findAll { it }
+                        def unsupported = testIds - supportedTestIds
+                        if (!testIds || unsupported) {
+                            error("AOSS_TEST_IDS must list tests from ${supportedTestIds}, got '${params.AOSS_TEST_IDS}'")
+                        }
+                        env.SELECTED_TEST_IDS = testIds.join(',')
+                        env.RUN_CLASSIC = testIds.contains('0021').toString()
+                        env.RUN_ROUTING = testIds.contains('0024').toString()
 
                         echo """
                             ================================================================
@@ -72,8 +89,9 @@ def call(Map config = [:]) {
                             Git:              ${params.GIT_REPO_URL} @ ${params.GIT_BRANCH}
                             Stage:            ${maStageName}
                             Region:           ${params.REGION}
-                            Collection Types: SEARCH, TIMESERIES, VECTORSEARCH
-                            Test ID:          ${testId}
+                            Classic:          ${env.RUN_CLASSIC == 'true' ? 'SEARCH, TIMESERIES, VECTORSEARCH' : 'skipped'}
+                            NextGen routing:  ${env.RUN_ROUTING == 'true' ? env.NEXTGEN_PREFIX + '-search, ' + env.NEXTGEN_PREFIX + '-vectors' : 'skipped'}
+                            Test IDs:         ${env.SELECTED_TEST_IDS}
                             Source:           ${params.SOURCE_VERSION}
                             Workers:          ${params.RFS_WORKERS}
                             Build:                  ${params.BUILD}
@@ -131,6 +149,7 @@ def call(Map config = [:]) {
             }
 
             stage('Deploy AOSS Targets') {
+                when { expression { env.RUN_CLASSIC == 'true' } }
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
@@ -174,6 +193,45 @@ def call(Map config = [:]) {
                 }
             }
 
+            // Runs after bootstrap because the data access policy names the EKS pod role
+            stage('Deploy NextGen Collections') {
+                when { expression { env.RUN_ROUTING == 'true' } }
+                steps {
+                    timeout(time: 30, unit: 'MINUTES') {
+                        script {
+                            withMigrationsTestAccount(region: params.REGION) { accountId ->
+                                def principals = [
+                                    "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
+                                    "arn:aws:iam::${accountId}:role/${env.eksClusterName}-migrations-role",
+                                ].join(',')
+                                sh """
+                                    aws cloudformation deploy \
+                                      --region ${params.REGION} \
+                                      --stack-name ${env.NEXTGEN_STACK} \
+                                      --template-file test/aossNextGen/collections.yaml \
+                                      --parameter-overrides CollectionPrefix=${env.NEXTGEN_PREFIX} DataAccessPrincipals=${principals}
+                                """
+                                def outputList = readJSON text: sh(
+                                    script: "aws cloudformation describe-stacks --region ${params.REGION} --stack-name ${env.NEXTGEN_STACK} --query 'Stacks[0].Outputs' --output json",
+                                    returnStdout: true
+                                )
+                                def outputs = [:]
+                                for (def entry : outputList) {
+                                    outputs[entry.OutputKey] = entry.OutputValue
+                                }
+                                // The per-account endpoint is not returned by any API; it is built from the account and Region
+                                env.AOSS_ACCOUNT_ENDPOINT = "https://${accountId}.aoss.${params.REGION}.on.aws"
+                                env.AOSS_NEXTGEN_SEARCH_ENDPOINT = outputs.SearchCollectionEndpoint
+                                env.AOSS_NEXTGEN_VECTOR_ENDPOINT = outputs.VectorCollectionEndpoint
+                                echo "AOSS account endpoint: ${env.AOSS_ACCOUNT_ENDPOINT}"
+                                echo "NextGen search: ${outputs.SearchCollectionName} ${env.AOSS_NEXTGEN_SEARCH_ENDPOINT}"
+                                echo "NextGen vectors: ${outputs.VectorCollectionName} ${env.AOSS_NEXTGEN_VECTOR_ENDPOINT}"
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Run Migration & Tests') {
                 steps {
                     timeout(time: 2, unit: 'HOURS') {
@@ -186,12 +244,22 @@ def call(Map config = [:]) {
                                 }
 
                                 // Inject AOSS endpoint and snapshot config as container env vars
+                                def endpointVars = []
+                                if (env.RUN_CLASSIC == 'true') {
+                                    endpointVars << "AOSS_SEARCH_ENDPOINT=${env.AOSS_SEARCH_ENDPOINT}"
+                                    endpointVars << "AOSS_TIMESERIES_ENDPOINT=${env.AOSS_TIMESERIES_ENDPOINT}"
+                                    endpointVars << "AOSS_VECTOR_ENDPOINT=${env.AOSS_VECTOR_ENDPOINT}"
+                                }
+                                if (env.RUN_ROUTING == 'true') {
+                                    endpointVars << "AOSS_ACCOUNT_ENDPOINT=${env.AOSS_ACCOUNT_ENDPOINT}"
+                                    endpointVars << "AOSS_COLLECTION_PREFIX=${env.NEXTGEN_PREFIX}"
+                                    endpointVars << "AOSS_NEXTGEN_SEARCH_ENDPOINT=${env.AOSS_NEXTGEN_SEARCH_ENDPOINT}"
+                                    endpointVars << "AOSS_NEXTGEN_VECTOR_ENDPOINT=${env.AOSS_NEXTGEN_VECTOR_ENDPOINT}"
+                                }
                                 sh """
                                     kubectl --context=${env.eksKubeContext} set env statefulset/migration-console \
                                       -n ma \
-                                      AOSS_SEARCH_ENDPOINT=${env.AOSS_SEARCH_ENDPOINT} \
-                                      AOSS_TIMESERIES_ENDPOINT=${env.AOSS_TIMESERIES_ENDPOINT} \
-                                      AOSS_VECTOR_ENDPOINT=${env.AOSS_VECTOR_ENDPOINT} \
+                                      ${endpointVars.join(' ')} \
                                       AOSS_SNAPSHOT_NAME=${params.SNAPSHOT_NAME} \
                                       AOSS_S3_REPO_URI=${s3RepoUri} \
                                       AOSS_S3_REGION=${params.REGION} \
@@ -203,7 +271,7 @@ def call(Map config = [:]) {
                             dir('libraries/testAutomation') {
                                 sh "pipenv install --deploy"
                                 withMigrationsTestAccount(region: params.REGION) { accountId ->
-                                    sh "pipenv run app --source-version=${params.SOURCE_VERSION} --target-type=AOSS --test-ids='${testId}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
+                                    sh "pipenv run app --source-version=${params.SOURCE_VERSION} --target-type=AOSS --test-ids='${env.SELECTED_TEST_IDS}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                 }
                             }
                         }
@@ -214,6 +282,7 @@ def call(Map config = [:]) {
 
         post {
             always {
+                // NextGen collections are outside the MA VPC, so their stack goes after the MA stack
                 eksPostCleanup(
                     maStackName: env.STACK_NAME,
                     clusterStackName: env.CLUSTER_STACK,
@@ -221,6 +290,10 @@ def call(Map config = [:]) {
                     kubeContext: env.eksKubeContext,
                     eksClusterName: env.eksClusterName,
                     timeoutMinutes: 60,
+                    stepsAfterMaDelete: env.RUN_ROUTING == 'true'
+                        ? [[type: 'cfn-destroy', stackName: env.NEXTGEN_STACK, reason: 'NextGen collections']]
+                        : [],
+                    extraVerifyStacks: env.RUN_ROUTING == 'true' ? [env.NEXTGEN_STACK] : [],
                 )
             }
         }
