@@ -274,7 +274,7 @@ class Test0080CdcK6LoadTest(MATestBase):
 
 
 class Test0081CdcK6StressTest(Test0080CdcK6LoadTest):
-    """Ten-minute 4-proxy/3-broker/8-partition/4-replayer Kafka recovery stress."""
+    """Ten-minute 4-proxy/3-broker/8-partition/4-replayer pod recovery stress."""
 
     K6_DURATION = "10m"
     K6_RUN_TIMEOUT_SECONDS = 2_400
@@ -294,7 +294,7 @@ class Test0081CdcK6StressTest(Test0080CdcK6LoadTest):
         "INGEST_ERROR_THRESHOLD": "rate==0",
         "DROPPED_ITERATIONS_THRESHOLD": "count>=0",
         "podChurnEnabled": "true",
-        "podChurnTargets": "kafka",
+        "podChurnTargets": "kafka,replayer,proxy",
         "podChurnExpectedKafkaBrokers": "3",
     }
     K6_LOAD = (

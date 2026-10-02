@@ -762,11 +762,12 @@ helm uninstall k6-load-test -n ma        # removes operator + WorkflowTemplates 
 
 The explicit-selection integration cases in
 `migrationConsole/lib/integ_test/.../test_cases/k6_load_test_tests.py` share one path:
-`Test0080CdcK6LoadTest` is the short litmus test, `Test0081CdcK6StressTest` adds low-rate Kafka
-broker churn with five-minute client retries, and `Test0082CdcK6HighLoadStressTest` runs the same
-stress behavior for two hours at 40.5K offered requests/s on the 112-runner large rig. The Argo
-suite owns broker deletion and full-ISR recovery; pytest only selects the parameters and checks the
-terminal results. IDs `0080-0089` are reserved for load tests.
+`Test0080CdcK6LoadTest` is the short litmus test, `Test0081CdcK6StressTest` adds low-rate serial
+Kafka broker, replayer, and proxy churn with five-minute client retries, and
+`Test0082CdcK6HighLoadStressTest` runs the same stress behavior for two hours at 40.5K offered
+requests/s on the 112-runner large rig. The Argo suite deletes only one pod at a time and waits for
+full fleet and traffic-topic ISR recovery before the next deletion; pytest only selects the
+parameters and checks the terminal results. IDs `0080-0089` are reserved for load tests.
 
 The **only** command that installs the chart for you is the test-automation runner
 (`libraries/testAutomation`) — it runs `helm upgrade --install k6-load-test` once the migration stack

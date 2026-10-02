@@ -106,9 +106,9 @@ def _named_values(node, name):
     (k6_test.Test0081CdcK6StressTest, "3"),
     (k6_test.Test0082CdcK6HighLoadStressTest, "4"),
 ))
-def test_stress_tests_enable_workflow_owned_kafka_churn(case, brokers):
+def test_stress_tests_churn_kafka_replayer_and_proxy_pods(case, brokers):
     assert case.K6_PARAMETERS["podChurnEnabled"] == "true"
-    assert case.K6_PARAMETERS["podChurnTargets"] == "kafka"
+    assert case.K6_PARAMETERS["podChurnTargets"] == "kafka,replayer,proxy"
     assert case.K6_PARAMETERS["podChurnExpectedKafkaBrokers"] == brokers
 
 
