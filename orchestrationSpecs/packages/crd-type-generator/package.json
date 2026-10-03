@@ -10,6 +10,6 @@
   "devDependencies": {
     "@types/json-schema": "^7.0.15",
     "@types/node": "*",
-    "json-schema-to-typescript": "^15.0.4"
+    "json-schema-to-typescript": "^16.0.0"
   }
 }
