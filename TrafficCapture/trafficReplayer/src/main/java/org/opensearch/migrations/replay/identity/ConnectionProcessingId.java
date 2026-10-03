@@ -8,7 +8,7 @@
 
 package org.opensearch.migrations.replay.identity;
 
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * One process-local source-assembly and target-connection lifetime for a {@link CapturedConnectionId}.
@@ -29,13 +29,11 @@ import java.util.Objects;
  * {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
  */
 public record ConnectionProcessingId(
-    PartitionGenerationId generation,
-    CapturedConnectionId capturedConnectionId,
+    @NonNull PartitionGenerationId generation,
+    @NonNull CapturedConnectionId capturedConnectionId,
     long localSequence
 ) {
     public ConnectionProcessingId {
-        Objects.requireNonNull(generation, "generation");
-        Objects.requireNonNull(capturedConnectionId, "capturedConnectionId");
         if (localSequence < 0) {
             throw new IllegalArgumentException("localSequence must not be negative: " + localSequence);
         }

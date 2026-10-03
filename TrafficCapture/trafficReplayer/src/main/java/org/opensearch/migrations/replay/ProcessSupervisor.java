@@ -12,10 +12,10 @@ import java.io.PrintStream;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 
@@ -74,18 +74,11 @@ public final class ProcessSupervisor {
     }
 
     public record FatalSignal(
-        Reason reason,
-        String owner,
-        String operation,
-        Error failure
-    ) {
-        public FatalSignal {
-            Objects.requireNonNull(reason, "reason");
-            Objects.requireNonNull(owner, "owner");
-            Objects.requireNonNull(operation, "operation");
-            Objects.requireNonNull(failure, "failure");
-        }
-    }
+        @NonNull Reason reason,
+        @NonNull String owner,
+        @NonNull String operation,
+        @NonNull Error failure
+    ) {}
 
     @FunctionalInterface
     public interface FailureSink {
@@ -150,23 +143,23 @@ public final class ProcessSupervisor {
     }
 
     ProcessSupervisor(
-        Metrics metrics,
-        InputStopper inputStopper,
-        ExitInitiator exitInitiator,
-        HaltTerminator haltTerminator,
-        WatchdogStarter watchdogStarter,
-        ThreadDumper threadDumper,
-        Runnable diagnosticFlusher,
-        PrintStream errorStream
+        @NonNull Metrics metrics,
+        @NonNull InputStopper inputStopper,
+        @NonNull ExitInitiator exitInitiator,
+        @NonNull HaltTerminator haltTerminator,
+        @NonNull WatchdogStarter watchdogStarter,
+        @NonNull ThreadDumper threadDumper,
+        @NonNull Runnable diagnosticFlusher,
+        @NonNull PrintStream errorStream
     ) {
-        this.metrics = Objects.requireNonNull(metrics, "metrics");
-        this.inputStopper = Objects.requireNonNull(inputStopper, "inputStopper");
-        this.exitInitiator = Objects.requireNonNull(exitInitiator, "exitInitiator");
-        this.haltTerminator = Objects.requireNonNull(haltTerminator, "haltTerminator");
-        this.watchdogStarter = Objects.requireNonNull(watchdogStarter, "watchdogStarter");
-        this.threadDumper = Objects.requireNonNull(threadDumper, "threadDumper");
-        this.diagnosticFlusher = Objects.requireNonNull(diagnosticFlusher, "diagnosticFlusher");
-        this.errorStream = Objects.requireNonNull(errorStream, "errorStream");
+        this.metrics = metrics;
+        this.inputStopper = inputStopper;
+        this.exitInitiator = exitInitiator;
+        this.haltTerminator = haltTerminator;
+        this.watchdogStarter = watchdogStarter;
+        this.threadDumper = threadDumper;
+        this.diagnosticFlusher = diagnosticFlusher;
+        this.errorStream = errorStream;
     }
 
     public void unexpectedOwnerFailure(String owner, String operation, Error failure) {
@@ -190,8 +183,7 @@ public final class ProcessSupervisor {
         return this::onFatal;
     }
 
-    public void onFatal(FatalSignal signal) {
-        Objects.requireNonNull(signal, "signal");
+    public void onFatal(@NonNull FatalSignal signal) {
         if (!firstFatal.compareAndSet(null, signal)) {
             return;
         }

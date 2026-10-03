@@ -1,6 +1,5 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -17,6 +16,7 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import lombok.Getter;
+import lombok.NonNull;
 
 public class NettyScanningHttpProxy {
     @Getter
@@ -32,10 +32,10 @@ public class NettyScanningHttpProxy {
 
     public NettyScanningHttpProxy(
         int proxyPort,
-        Consumer<Throwable> unstableProcessFailureHandler
+        @NonNull Consumer<Throwable> unstableProcessFailureHandler
     ) {
         this.proxyPort = proxyPort;
-        this.unstableProcessFailureHandler = Objects.requireNonNull(unstableProcessFailureHandler);
+        this.unstableProcessFailureHandler = unstableProcessFailureHandler;
     }
 
     public void start(ProxyChannelInitializer<?> proxyChannelInitializer, int numThreads)

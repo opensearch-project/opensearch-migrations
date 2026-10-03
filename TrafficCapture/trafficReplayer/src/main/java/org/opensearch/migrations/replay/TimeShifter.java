@@ -3,10 +3,10 @@ package org.opensearch.migrations.replay;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.event.Level;
 
@@ -36,13 +36,13 @@ public class TimeShifter {
         this(rateMultiplier, realtimeOffset, Clock.systemUTC());
     }
 
-    public TimeShifter(double rateMultiplier, Duration realtimeOffset, Clock clock) {
+    public TimeShifter(double rateMultiplier, @NonNull Duration realtimeOffset, @NonNull Clock clock) {
         if (rateMultiplier <= 0.0 || !Double.isFinite(rateMultiplier)) {
             throw new IllegalArgumentException("rateMultiplier must be finite and positive");
         }
         this.rateMultiplier = rateMultiplier;
-        this.realtimeOffset = Objects.requireNonNull(realtimeOffset, "realtimeOffset");
-        this.clock = Objects.requireNonNull(clock, "clock");
+        this.realtimeOffset = realtimeOffset;
+        this.clock = clock;
     }
 
     public void setFirstTimestamp(Instant sourceTime) {

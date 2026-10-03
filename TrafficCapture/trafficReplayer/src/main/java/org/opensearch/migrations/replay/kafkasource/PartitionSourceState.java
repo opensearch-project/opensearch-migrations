@@ -8,12 +8,12 @@
 
 package org.opensearch.migrations.replay.kafkasource;
 
-import java.util.Objects;
 import java.util.Optional;
 
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 
+import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
@@ -59,8 +59,7 @@ public final class PartitionSourceState {
             return new CommitCoverage(Math.addExact(unsubmitted, count), rejected, unknown);
         }
 
-        public CommitCoverage plus(CommitCoverage other) {
-            Objects.requireNonNull(other, "other");
+        public CommitCoverage plus(@NonNull CommitCoverage other) {
             return new CommitCoverage(
                 Math.addExact(unsubmitted, other.unsubmitted),
                 Math.addExact(rejected, other.rejected),
@@ -91,8 +90,8 @@ public final class PartitionSourceState {
     private CommitCoverage recordsAwaitingCommit = CommitCoverage.EMPTY;
     private CommitUncertainty commitUncertainty = CommitUncertainty.NONE_OBSERVED;
 
-    public PartitionSourceState(PartitionGenerationId generation) {
-        this.generation = Objects.requireNonNull(generation, "generation");
+    public PartitionSourceState(@NonNull PartitionGenerationId generation) {
+        this.generation = generation;
         this.commitQueue = new ObservedRecordCommitQueue(generation);
     }
 
@@ -138,8 +137,7 @@ public final class PartitionSourceState {
      * at most one outstanding request per partition generation, and that limit is only checkable if
      * violating it fails here ({@code kafkaLLD §5.3}).
      */
-    public void requestBatch(PartitionBatchRequestId requestId) {
-        Objects.requireNonNull(requestId, "requestId");
+    public void requestBatch(@NonNull PartitionBatchRequestId requestId) {
         if (!requestId.generation().equals(generation)) {
             throw new IllegalArgumentException(
                 "batch request " + requestId + " does not belong to partition generation " + generation

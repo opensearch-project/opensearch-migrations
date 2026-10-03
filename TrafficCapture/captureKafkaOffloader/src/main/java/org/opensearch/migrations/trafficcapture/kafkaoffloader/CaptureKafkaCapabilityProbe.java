@@ -12,6 +12,7 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.trafficcapture.protos.CaptureCapabilityProbe;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
+import lombok.NonNull;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
@@ -37,17 +38,12 @@ final class CaptureKafkaCapabilityProbe {
     }
 
     static CompletableFuture<Void> publish(
-        Producer<String, byte[]> producer,
-        String topic,
-        String captureActivationId,
-        Collection<Integer> representativePartitions,
-        Supplier<String> probeIdSupplier
+        @NonNull Producer<String, byte[]> producer,
+        @NonNull String topic,
+        @NonNull String captureActivationId,
+        @NonNull Collection<Integer> representativePartitions,
+        @NonNull Supplier<String> probeIdSupplier
     ) {
-        Objects.requireNonNull(producer);
-        Objects.requireNonNull(topic);
-        Objects.requireNonNull(captureActivationId);
-        Objects.requireNonNull(representativePartitions);
-        Objects.requireNonNull(probeIdSupplier);
         if (captureActivationId.isBlank()) {
             throw new IllegalArgumentException("captureActivationId must not be blank");
         }

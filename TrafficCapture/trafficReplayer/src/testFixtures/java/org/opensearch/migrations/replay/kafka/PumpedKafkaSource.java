@@ -17,7 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.LongConsumer;
@@ -25,6 +24,7 @@ import java.util.function.LongConsumer;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort;
 import org.opensearch.migrations.replay.kafkasource.PolledKafkaRecord;
 
+import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 
@@ -107,9 +107,9 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
      *                     observable to the owner's deadline arithmetic. Without it a grace-interval test could
      *                     only reach its deadline by sleeping
      */
-    public PumpedKafkaSource(Collection<TopicPartition> assignedPartitions, LongConsumer clockAdvance) {
+    public PumpedKafkaSource(Collection<TopicPartition> assignedPartitions, @NonNull LongConsumer clockAdvance) {
         assignment.addAll(assignedPartitions);
-        this.clockAdvance = Objects.requireNonNull(clockAdvance, "clockAdvance");
+        this.clockAdvance = clockAdvance;
     }
 
     // ---------------------------------------------------------------- scripting
@@ -129,13 +129,13 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
      * would exercise a state that cannot occur: the wakeup controller requires a poll to be in progress,
      * precisely because a callback always runs within one.
      */
-    public void scriptRebalanceDuringNextPoll(ThrowingRunnable callback) {
-        scriptedRebalances.add(Objects.requireNonNull(callback));
+    public void scriptRebalanceDuringNextPoll(@NonNull ThrowingRunnable callback) {
+        scriptedRebalances.add(callback);
     }
 
     /** Makes the next poll throw. A poll failure is fatal and must not become an empty success. */
-    public void scriptPollFailure(RuntimeException failure) {
-        pollFailure = Objects.requireNonNull(failure);
+    public void scriptPollFailure(@NonNull RuntimeException failure) {
+        pollFailure = failure;
     }
 
     /**
@@ -165,8 +165,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         wakeupNextPollAfterRebalance = true;
     }
 
-    public void scriptCommitOutcome(CommitOutcome outcome) {
-        nextCommitOutcome = Objects.requireNonNull(outcome);
+    public void scriptCommitOutcome(@NonNull CommitOutcome outcome) {
+        nextCommitOutcome = outcome;
     }
 
     /**
@@ -202,8 +202,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     /** Refuses the next asynchronous operation before a callback is registered. */
-    public void scriptCommitAsyncRejection(CommitOutcome outcome) {
-        nextRejectedCommitOutcome = Objects.requireNonNull(outcome);
+    public void scriptCommitAsyncRejection(@NonNull CommitOutcome outcome) {
+        nextRejectedCommitOutcome = outcome;
     }
 
     public void setCommittedPosition(TopicPartition topicPartition, long position) {
@@ -217,8 +217,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     /**
      * Scripts client callbacks delivered synchronously by {@link #close()}, as real Kafka clients may do.
      */
-    public void scriptCloseCallback(ThrowingRunnable callback) {
-        closeCallback = Objects.requireNonNull(callback);
+    public void scriptCloseCallback(@NonNull ThrowingRunnable callback) {
+        closeCallback = callback;
     }
 
     // ---------------------------------------------------------------- KafkaSourcePort
@@ -370,8 +370,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
      * Makes {@link #commitSync} advance the injected clock by {@code duration}, modelling a commit that takes
      * time. Scripting the duration rather than sleeping is what keeps a grace-interval test deterministic.
      */
-    public void scriptCommitDuration(Duration duration) {
-        this.commitDuration = Objects.requireNonNull(duration);
+    public void scriptCommitDuration(@NonNull Duration duration) {
+        this.commitDuration = duration;
     }
 
     // ---------------------------------------------------------------- observation
@@ -387,8 +387,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
      * intake, say. Comparing two separate histories cannot express "A happened before B" across them, so a
      * test written that way passes with the two production statements reversed.
      */
-    public void onObservation(java.util.function.Consumer<String> listener) {
-        observationListener = Objects.requireNonNull(listener);
+    public void onObservation(@NonNull java.util.function.Consumer<String> listener) {
+        observationListener = listener;
     }
 
     public boolean isPaused(TopicPartition topicPartition) {

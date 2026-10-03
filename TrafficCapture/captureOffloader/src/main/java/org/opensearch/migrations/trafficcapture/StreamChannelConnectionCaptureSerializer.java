@@ -6,7 +6,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.GatheringByteChannel;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -160,7 +159,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     @Override
     public void bindToConnectionEventLoop(
         EventExecutor eventLoop,
-        Consumer<Throwable> asynchronousFailureHandler
+        @NonNull Consumer<Throwable> asynchronousFailureHandler
     ) {
         if (!eventLoop.inEventLoop()) {
             throw new IllegalStateException("Connection capture must be bound by its owning event loop");
@@ -169,7 +168,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             throw new IllegalStateException("Connection capture is already bound to a different event loop");
         }
         this.connectionEventLoop = eventLoop;
-        this.asynchronousFailureHandler = Objects.requireNonNull(asynchronousFailureHandler);
+        this.asynchronousFailureHandler = asynchronousFailureHandler;
     }
 
     @Override

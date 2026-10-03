@@ -67,8 +67,8 @@ import org.opensearch.migrations.utils.TrackedFuture;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.EventLoop;
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
-import org.slf4j.LoggerFactory;
 
 /**
  * G5's production composition root. G9 owns starting and supervising its two owner loops.
@@ -77,11 +77,10 @@ import org.slf4j.LoggerFactory;
  * connection/request owners, tuple writer and context lifecycle are constructed as one reachable chain.
  * Every connection is published only after its first event-loop submission has been accepted.</p>
  */
+@Slf4j
 public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     implements AutoCloseable {
 
-    private static final org.slf4j.Logger log =
-        LoggerFactory.getLogger(TrafficReplayerTopLevel.class);
     public static final int DEFAULT_READY_REQUESTS_BUFFER_PER_THREAD = 2;
 
     @FunctionalInterface

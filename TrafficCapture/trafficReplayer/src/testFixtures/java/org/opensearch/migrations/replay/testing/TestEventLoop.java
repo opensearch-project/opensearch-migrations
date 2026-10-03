@@ -14,7 +14,6 @@ import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.concurrent.Callable;
@@ -34,6 +33,7 @@ import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.ScheduledFuture;
+import lombok.NonNull;
 
 /**
  * Single-threaded event-loop fixture driven explicitly by its test.
@@ -85,13 +85,12 @@ public final class TestEventLoop extends AbstractEventExecutor implements EventL
         this(new FakeClock());
     }
 
-    public TestEventLoop(FakeClock clock) {
-        this.clock = Objects.requireNonNull(clock);
+    public TestEventLoop(@NonNull FakeClock clock) {
+        this.clock = clock;
     }
 
     @Override
-    public void execute(Runnable command) {
-        Objects.requireNonNull(command);
+    public void execute(@NonNull Runnable command) {
         if (rejectNewTasks) {
             throw new RejectedExecutionException("test event loop rejected task");
         }
@@ -99,8 +98,7 @@ public final class TestEventLoop extends AbstractEventExecutor implements EventL
     }
 
     @Override
-    public boolean inEventLoop(Thread thread) {
-        Objects.requireNonNull(thread);
+    public boolean inEventLoop(@NonNull Thread thread) {
         return running && thread == pumpingThread;
     }
 
@@ -112,9 +110,7 @@ public final class TestEventLoop extends AbstractEventExecutor implements EventL
      * Schedules against the injected clock. Unlike the {@link ScheduledFuture}-contract overloads,
      * a negative delay is a test bug rather than a request to run immediately, so it throws.
      */
-    public ScheduledFuture<?> schedule(Runnable command, Duration delay) {
-        Objects.requireNonNull(command);
-        Objects.requireNonNull(delay);
+    public ScheduledFuture<?> schedule(@NonNull Runnable command, @NonNull Duration delay) {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("delay must not be negative");
         }
@@ -122,14 +118,12 @@ public final class TestEventLoop extends AbstractEventExecutor implements EventL
     }
 
     @Override
-    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
-        Objects.requireNonNull(command);
+    public ScheduledFuture<?> schedule(@NonNull Runnable command, long delay, TimeUnit unit) {
         return addTimer(nonNegativeDelay(delay, unit), asCallable(command));
     }
 
     @Override
-    public <V> ScheduledFuture<V> schedule(Callable<V> command, long delay, TimeUnit unit) {
-        Objects.requireNonNull(command);
+    public <V> ScheduledFuture<V> schedule(@NonNull Callable<V> command, long delay, TimeUnit unit) {
         return addTimer(nonNegativeDelay(delay, unit), command);
     }
 
@@ -327,8 +321,7 @@ public final class TestEventLoop extends AbstractEventExecutor implements EventL
         };
     }
 
-    private static Duration nonNegativeDelay(long delay, TimeUnit unit) {
-        Objects.requireNonNull(unit);
+    private static Duration nonNegativeDelay(long delay, @NonNull TimeUnit unit) {
         return Duration.ofNanos(Math.max(0, unit.toNanos(delay)));
     }
 

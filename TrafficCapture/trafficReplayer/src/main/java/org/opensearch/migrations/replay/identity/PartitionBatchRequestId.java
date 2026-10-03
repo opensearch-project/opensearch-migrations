@@ -8,7 +8,7 @@
 
 package org.opensearch.migrations.replay.identity;
 
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * One request by replay intake for the next available batch from one partition generation.
@@ -21,9 +21,8 @@ import java.util.Objects;
  *
  * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
  */
-public record PartitionBatchRequestId(PartitionGenerationId generation, long localSequence) {
+public record PartitionBatchRequestId(@NonNull PartitionGenerationId generation, long localSequence) {
     public PartitionBatchRequestId {
-        Objects.requireNonNull(generation, "generation");
         if (localSequence < 0) {
             throw new IllegalArgumentException("localSequence must not be negative: " + localSequence);
         }

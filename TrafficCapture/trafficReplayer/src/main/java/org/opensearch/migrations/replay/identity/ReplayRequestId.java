@@ -8,7 +8,7 @@
 
 package org.opensearch.migrations.replay.identity;
 
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * One reconstituted request within a {@link ConnectionProcessingId}.
@@ -25,9 +25,8 @@ import java.util.Objects;
  * <p>Defined by {@code docs/captureAndReplay/replayerLowLevelDesign.md} section 1 and
  * {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
  */
-public record ReplayRequestId(ConnectionProcessingId connectionProcessingId, long capturedRequestOrdinal) {
+public record ReplayRequestId(@NonNull ConnectionProcessingId connectionProcessingId, long capturedRequestOrdinal) {
     public ReplayRequestId {
-        Objects.requireNonNull(connectionProcessingId, "connectionProcessingId");
         if (capturedRequestOrdinal < 0) {
             throw new IllegalArgumentException(
                 "capturedRequestOrdinal must not be negative: " + capturedRequestOrdinal);

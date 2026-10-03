@@ -15,7 +15,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -377,9 +376,8 @@ public class CaptureProxy {
         Parameters params,
         RootCaptureContext rootContext,
         CaptureProcessState captureProcessState,
-        String captureActivationId
+        @NonNull String captureActivationId
     ) throws IOException {
-        Objects.requireNonNull(captureActivationId);
         if (params.kafkaParameters.kafkaBrokers != null) {
             KafkaProducer<String, byte[]> producer = null;
             try {
@@ -548,11 +546,9 @@ public class CaptureProxy {
      */
     public static void run(
         String[] args,
-        Runnable flushCaptureFailureDiagnostics,
-        IntConsumer haltProcess
+        @NonNull Runnable flushCaptureFailureDiagnostics,
+        @NonNull IntConsumer haltProcess
     ) throws InterruptedException, IOException {
-        Objects.requireNonNull(flushCaptureFailureDiagnostics);
-        Objects.requireNonNull(haltProcess);
         System.err.println("Got args: " + String.join("; ", args));
         var processId = ProcessHelpers.getNodeInstanceName();
         var captureActivationId = newCaptureActivationId();
@@ -843,8 +839,7 @@ public class CaptureProxy {
         LogManager.shutdown();
     }
 
-    private static void requirePositive(Duration value, String name) {
-        Objects.requireNonNull(value);
+    private static void requirePositive(@NonNull Duration value, String name) {
         if (value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException(name + " must be positive");
         }

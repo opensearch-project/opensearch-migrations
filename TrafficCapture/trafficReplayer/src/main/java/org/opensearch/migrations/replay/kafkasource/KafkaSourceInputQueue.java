@@ -10,10 +10,11 @@ package org.opensearch.migrations.replay.kafkasource;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import lombok.NonNull;
 
 /**
  * Carries {@link KafkaSourceInput} from other owners to the Kafka thread, which is the only thread that
@@ -48,8 +49,8 @@ public final class KafkaSourceInputQueue {
     private final AtomicBoolean closed = new AtomicBoolean();
     private final WakeupController wakeupController;
 
-    public KafkaSourceInputQueue(WakeupController wakeupController) {
-        this.wakeupController = Objects.requireNonNull(wakeupController, "wakeupController");
+    public KafkaSourceInputQueue(@NonNull WakeupController wakeupController) {
+        this.wakeupController = wakeupController;
     }
 
     /**
@@ -58,8 +59,7 @@ public final class KafkaSourceInputQueue {
      * @throws IllegalStateException if the queue is closed, so a caller learns its input was not accepted
      *                               instead of losing it
      */
-    public void submit(KafkaSourceInput input) {
-        Objects.requireNonNull(input, "input");
+    public void submit(@NonNull KafkaSourceInput input) {
         if (closed.get()) {
             throw new IllegalStateException("Kafka source input queue is closed; refusing " + input);
         }

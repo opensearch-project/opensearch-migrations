@@ -15,7 +15,6 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -27,6 +26,7 @@ import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriterPartitionHeartbeat;
 
+import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
@@ -60,8 +60,8 @@ public final class RecordScript {
         this(topic, 0);
     }
 
-    public RecordScript(String topic, long generationSequence) {
-        if (Objects.requireNonNull(topic).isBlank()) {
+    public RecordScript(@NonNull String topic, long generationSequence) {
+        if (topic.isBlank()) {
             throw new IllegalArgumentException("topic must not be blank");
         }
         if (generationSequence < 0) {
@@ -84,10 +84,9 @@ public final class RecordScript {
         long offset,
         Instant logAppendTime,
         String writerNodeId,
-        TrafficStream trafficStream,
+        @NonNull TrafficStream trafficStream,
         String... expectedAssociations
     ) {
-        Objects.requireNonNull(trafficStream);
         var normalizedStream = trafficStream.toBuilder().setNodeId(writerNodeId).build();
         return add(
             partition,
@@ -164,16 +163,15 @@ public final class RecordScript {
     private RecordScript add(
         int partition,
         long offset,
-        Instant logAppendTime,
-        String writerNodeId,
+        @NonNull Instant logAppendTime,
+        @NonNull String writerNodeId,
         CaptureRecord envelope,
         String... expectedAssociations
     ) {
-        Objects.requireNonNull(logAppendTime);
         if (partition < 0) {
             throw new IllegalArgumentException("partition must not be negative");
         }
-        if (Objects.requireNonNull(writerNodeId).isBlank()) {
+        if (writerNodeId.isBlank()) {
             throw new IllegalArgumentException("writerNodeId must not be blank");
         }
         var generation = generation(partition);
@@ -227,8 +225,8 @@ public final class RecordScript {
      * The writer the test scripted this record for. Read from the script rather than the envelope so
      * it is also available for a {@code PAYLOAD_NOT_SET} record, which has no writer field to read.
      */
-    public WriterPartitionId writerOf(KafkaRecordId recordId) {
-        var writer = writerByRecord.get(Objects.requireNonNull(recordId));
+    public WriterPartitionId writerOf(@NonNull KafkaRecordId recordId) {
+        var writer = writerByRecord.get(recordId);
         if (writer == null) {
             throw new AssertionError("No scripted record " + recordId);
         }
@@ -236,8 +234,8 @@ public final class RecordScript {
     }
 
     /** The literal operation names supplied when this record was added to the script. */
-    public Set<String> expectedAssociationsOf(KafkaRecordId recordId) {
-        var expected = associationsByRecord.get(Objects.requireNonNull(recordId));
+    public Set<String> expectedAssociationsOf(@NonNull KafkaRecordId recordId) {
+        var expected = associationsByRecord.get(recordId);
         if (expected == null) {
             throw new AssertionError("No association expectation for " + recordId);
         }

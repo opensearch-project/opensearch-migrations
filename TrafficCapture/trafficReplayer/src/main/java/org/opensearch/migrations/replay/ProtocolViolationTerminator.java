@@ -9,7 +9,6 @@
 package org.opensearch.migrations.replay;
 
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -18,6 +17,7 @@ import java.util.function.IntConsumer;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -58,19 +58,19 @@ public final class ProtocolViolationTerminator implements AutoCloseable {
 
     private ProtocolViolationTerminator(
         Duration drainLimit,
-        Scheduler scheduler,
-        IntConsumer termination,
-        Metrics metrics,
-        AutoCloseable schedulerResource
+        @NonNull Scheduler scheduler,
+        @NonNull IntConsumer termination,
+        @NonNull Metrics metrics,
+        @NonNull AutoCloseable schedulerResource
     ) {
         if (drainLimit.isNegative()) {
             throw new IllegalArgumentException("drainLimit must not be negative");
         }
         this.drainLimit = drainLimit;
-        this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
-        this.termination = Objects.requireNonNull(termination, "termination");
-        this.metrics = Objects.requireNonNull(metrics, "metrics");
-        this.schedulerResource = Objects.requireNonNull(schedulerResource, "schedulerResource");
+        this.scheduler = scheduler;
+        this.termination = termination;
+        this.metrics = metrics;
+        this.schedulerResource = schedulerResource;
     }
 
     /** Creates the fixed production timer. G9 may replace only the process-supervisor termination sink. */
@@ -94,9 +94,7 @@ public final class ProtocolViolationTerminator implements AutoCloseable {
         );
     }
 
-    public void begin(KafkaRecordId recordId, String diagnostic) {
-        Objects.requireNonNull(recordId, "recordId");
-        Objects.requireNonNull(diagnostic, "diagnostic");
+    public void begin(@NonNull KafkaRecordId recordId, @NonNull String diagnostic) {
         if (!started.compareAndSet(false, true)) {
             return;
         }

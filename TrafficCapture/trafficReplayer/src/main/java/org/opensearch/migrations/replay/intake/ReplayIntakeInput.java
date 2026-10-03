@@ -9,13 +9,14 @@
 package org.opensearch.migrations.replay.intake;
 
 import java.util.List;
-import java.util.Objects;
 
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
+
+import lombok.NonNull;
 
 /**
  * Inputs submitted to the replay-intake owner. The Kafka thread, Netty event loops, and tuple I/O may submit
@@ -57,11 +58,7 @@ public sealed interface ReplayIntakeInput permits
      * Applying this input also runs the ordinary demand pass over every assigned generation and may request
      * one additional batch. Prior-generation cleanup delays source reading without rejecting that request.</p>
      */
-    record PartitionGenerationAssigned(PartitionGenerationId generation) implements ReplayIntakeInput {
-        public PartitionGenerationAssigned {
-            Objects.requireNonNull(generation, "generation");
-        }
-    }
+    record PartitionGenerationAssigned(@NonNull PartitionGenerationId generation) implements ReplayIntakeInput {}
 
     /**
      * Kafka returned the records that satisfy one outstanding request for this partition generation.
@@ -73,11 +70,12 @@ public sealed interface ReplayIntakeInput permits
      * is matched to exactly one outstanding request. An empty poll does not produce this input at all — it
      * leaves the request outstanding — so a batch here always has records.</p>
      */
-    record PartitionRecordBatch(PartitionBatchRequestId requestId, List<ApplicationKafkaRecord> records)
+    record PartitionRecordBatch(
+        @NonNull PartitionBatchRequestId requestId,
+        @NonNull List<ApplicationKafkaRecord> records
+    )
         implements ReplayIntakeInput {
         public PartitionRecordBatch {
-            Objects.requireNonNull(requestId, "requestId");
-            Objects.requireNonNull(records, "records");
             if (records.isEmpty()) {
                 throw new IllegalArgumentException(
                     "a delivered batch must contain records; an empty poll leaves the request outstanding");
@@ -98,20 +96,13 @@ public sealed interface ReplayIntakeInput permits
      * operation, and distributes the typed grace mode. Revocation is deadline-bound; orderly shutdown drains
      * admitted complete requests without a process-local deadline.</p>
      */
-    record GracefulGenerationCancellation(PartitionGenerationId generation, CancellationGrace grace)
-        implements ReplayIntakeInput {
-        public GracefulGenerationCancellation {
-            Objects.requireNonNull(generation, "generation");
-            Objects.requireNonNull(grace, "grace");
-        }
-    }
+    record GracefulGenerationCancellation(
+        @NonNull PartitionGenerationId generation,
+        @NonNull CancellationGrace grace
+    ) implements ReplayIntakeInput {}
 
     /** Every remaining owner in the revoked generation begins immediate cancellation cleanup. */
-    record ForceGenerationCancellation(PartitionGenerationId generation) implements ReplayIntakeInput {
-        public ForceGenerationCancellation {
-            Objects.requireNonNull(generation, "generation");
-        }
-    }
+    record ForceGenerationCancellation(@NonNull PartitionGenerationId generation) implements ReplayIntakeInput {}
 
     /**
      * A finalized imported partition has no later record.
@@ -119,11 +110,7 @@ public sealed interface ReplayIntakeInput permits
      * <p>Applies the finite-input expiration rules <em>without</em> creating Kafka timestamp or offset
      * evidence, because an archive has no broker to supply either.</p>
      */
-    record FinalizedArchivePartitionEnd(PartitionGenerationId generation) implements ReplayIntakeInput {
-        public FinalizedArchivePartitionEnd {
-            Objects.requireNonNull(generation, "generation");
-        }
-    }
+    record FinalizedArchivePartitionEnd(@NonNull PartitionGenerationId generation) implements ReplayIntakeInput {}
 
     /**
      * A normally completed connection owner has no requests, queued work, target connection, timers, or
@@ -133,14 +120,9 @@ public sealed interface ReplayIntakeInput permits
      * <strong>not</strong> itself finish a Kafka record.</p>
      */
     record ConnectionOwnerFinished(
-        PartitionGenerationId generation,
-        ConnectionProcessingId connectionProcessingId
-    ) implements ReplayIntakeInput {
-        public ConnectionOwnerFinished {
-            Objects.requireNonNull(generation, "generation");
-            Objects.requireNonNull(connectionProcessingId, "connectionProcessingId");
-        }
-    }
+        @NonNull PartitionGenerationId generation,
+        @NonNull ConnectionProcessingId connectionProcessingId
+    ) implements ReplayIntakeInput {}
 
     /**
      * A connection owner and all of its requests finished cancellation cleanup after Kafka revoked the
@@ -150,14 +132,9 @@ public sealed interface ReplayIntakeInput permits
      * <strong>Cancelled Kafka work does not become committable.</strong></p>
      */
     record ConnectionCleanupFinished(
-        PartitionGenerationId generation,
-        ConnectionProcessingId connectionProcessingId
-    ) implements ReplayIntakeInput {
-        public ConnectionCleanupFinished {
-            Objects.requireNonNull(generation, "generation");
-            Objects.requireNonNull(connectionProcessingId, "connectionProcessingId");
-        }
-    }
+        @NonNull PartitionGenerationId generation,
+        @NonNull ConnectionProcessingId connectionProcessingId
+    ) implements ReplayIntakeInput {}
 
     /** The partition generation this input belongs to. */
     PartitionGenerationId generation();

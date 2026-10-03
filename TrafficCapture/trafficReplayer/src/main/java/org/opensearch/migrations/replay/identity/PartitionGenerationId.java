@@ -8,8 +8,7 @@
 
 package org.opensearch.migrations.replay.identity;
 
-import java.util.Objects;
-
+import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
@@ -24,9 +23,8 @@ import org.apache.kafka.common.TopicPartition;
  *
  * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
  */
-public record PartitionGenerationId(TopicPartition topicPartition, long localSequence) {
+public record PartitionGenerationId(@NonNull TopicPartition topicPartition, long localSequence) {
     public PartitionGenerationId {
-        Objects.requireNonNull(topicPartition, "topicPartition");
         if (localSequence < 0) {
             throw new IllegalArgumentException("localSequence must not be negative: " + localSequence);
         }

@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
@@ -95,8 +96,8 @@ public interface KafkaSourcePort {
             return new AsyncCommitSubmission(true, null);
         }
 
-        public static AsyncCommitSubmission rejectedBeforeAcceptance(CommitOutcome outcome) {
-            return new AsyncCommitSubmission(false, java.util.Objects.requireNonNull(outcome, "outcome"));
+        public static AsyncCommitSubmission rejectedBeforeAcceptance(@NonNull CommitOutcome outcome) {
+            return new AsyncCommitSubmission(false, outcome);
         }
     }
 

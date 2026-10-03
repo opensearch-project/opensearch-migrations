@@ -8,12 +8,13 @@
 
 package org.opensearch.migrations.replay.kafkasource;
 
-import java.util.Objects;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+
+import lombok.NonNull;
 
 /**
  * Decides when {@code KafkaConsumer.wakeup()} may be issued.
@@ -76,10 +77,9 @@ public final class WakeupController {
      *                    a broker, and because the controller must not depend on the consumer itself
      * @param rootContext the scope its phase contexts hang off, which is where the instruments live
      */
-    public WakeupController(Runnable issueWakeup, RootReplayerContext rootContext) {
-        Objects.requireNonNull(issueWakeup, "issueWakeup");
+    public WakeupController(@NonNull Runnable issueWakeup, @NonNull RootReplayerContext rootContext) {
         this.issueWakeup = ignored -> issueWakeup.run();
-        this.rootContext = Objects.requireNonNull(rootContext, "rootContext");
+        this.rootContext = rootContext;
     }
 
     /**

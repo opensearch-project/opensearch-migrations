@@ -2,8 +2,9 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.function.Consumer;
+
+import lombok.NonNull;
 
 /**
  * Process-lifetime gate that linearizes admission to the Kafka publisher against a terminal
@@ -17,10 +18,9 @@ final class CaptureKafkaWriteGate {
         return new CaptureKafkaWriteGate();
     }
 
-    void addTerminalFailureListener(Consumer<Throwable> listener) {
+    void addTerminalFailureListener(@NonNull Consumer<Throwable> listener) {
         Throwable existingFailure;
         synchronized (this) {
-            Objects.requireNonNull(listener);
             terminalFailureListeners.add(listener);
             existingFailure = terminalFailure;
         }
@@ -44,11 +44,10 @@ final class CaptureKafkaWriteGate {
         return submitIfWritable(() -> {});
     }
 
-    Throwable trip(Throwable failure) {
+    Throwable trip(@NonNull Throwable failure) {
         List<Consumer<Throwable>> listeners = List.of();
         Throwable canonicalFailure;
         synchronized (this) {
-            Objects.requireNonNull(failure);
             if (terminalFailure == null) {
                 terminalFailure = failure;
                 listeners = List.copyOf(terminalFailureListeners);

@@ -9,7 +9,6 @@
 package org.opensearch.migrations.replay.lifecycle;
 
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -377,8 +376,8 @@ public final class TargetAttemptPermitProvider {
             new AtomicReference<>(AcquisitionState.WAITING);
         private final AtomicBoolean countedPending = new AtomicBoolean();
 
-        private PendingAcquisition(ReplayRequestId requestId) {
-            this.requestId = Objects.requireNonNull(requestId);
+        private PendingAcquisition(@NonNull ReplayRequestId requestId) {
+            this.requestId = requestId;
         }
 
         @Override

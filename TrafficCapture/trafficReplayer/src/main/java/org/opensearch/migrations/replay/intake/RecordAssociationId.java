@@ -8,10 +8,10 @@
 
 package org.opensearch.migrations.replay.intake;
 
-import java.util.Objects;
-
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+
+import lombok.NonNull;
 
 /**
  * Which replay-intake operation still needs a Kafka record's observation.
@@ -37,10 +37,9 @@ public sealed interface RecordAssociationId {
      * @param capturedRequestOrdinal which request within the connection lifetime, so two requests in one
      *                               record do not collide ({@code §8.3})
      */
-    record RequestAssembly(ConnectionProcessingId connectionProcessingId, long capturedRequestOrdinal)
+    record RequestAssembly(@NonNull ConnectionProcessingId connectionProcessingId, long capturedRequestOrdinal)
         implements RecordAssociationId {
         public RequestAssembly {
-            Objects.requireNonNull(connectionProcessingId, "connectionProcessingId");
             if (capturedRequestOrdinal < 0) {
                 throw new IllegalArgumentException(
                     "capturedRequestOrdinal must not be negative: " + capturedRequestOrdinal);
@@ -58,11 +57,7 @@ public sealed interface RecordAssociationId {
      * after durable tuple output, which is why a record carrying only source-response bytes stays
      * unfinished that long ({@code §9.2}).
      */
-    record Request(ReplayRequestId replayRequestId) implements RecordAssociationId {
-        public Request {
-            Objects.requireNonNull(replayRequestId, "replayRequestId");
-        }
-
+    record Request(@NonNull ReplayRequestId replayRequestId) implements RecordAssociationId {
         @Override
         public String toString() {
             return replayRequestId.toString();
@@ -76,12 +71,8 @@ public sealed interface RecordAssociationId {
      * {@code explicitly closed} or {@code expired}, so there is no second terminal operation to
      * distinguish from the first.
      */
-    record TerminalConnection(ConnectionProcessingId connectionProcessingId)
+    record TerminalConnection(@NonNull ConnectionProcessingId connectionProcessingId)
         implements RecordAssociationId {
-        public TerminalConnection {
-            Objects.requireNonNull(connectionProcessingId, "connectionProcessingId");
-        }
-
         @Override
         public String toString() {
             return connectionProcessingId + ".terminal";

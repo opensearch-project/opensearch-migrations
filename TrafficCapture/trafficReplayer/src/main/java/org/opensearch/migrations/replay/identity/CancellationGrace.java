@@ -8,7 +8,7 @@
 
 package org.opensearch.migrations.replay.identity;
 
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * Why a partition generation entered grace.
@@ -19,11 +19,7 @@ import java.util.Objects;
 public sealed interface CancellationGrace
     permits CancellationGrace.Revocation, CancellationGrace.Shutdown {
 
-    record Revocation(CancellationDeadline deadline) implements CancellationGrace {
-        public Revocation {
-            Objects.requireNonNull(deadline, "deadline");
-        }
-    }
+    record Revocation(@NonNull CancellationDeadline deadline) implements CancellationGrace {}
 
     enum Shutdown implements CancellationGrace {
         INSTANCE

@@ -8,12 +8,11 @@
 
 package org.opensearch.migrations.replay.kafkasource;
 
-import java.util.Objects;
-
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
+import lombok.NonNull;
 
 /**
  * One record as Kafka returned it, before any process-local identity is attached.
@@ -31,24 +30,23 @@ public record PolledKafkaRecord(
     long offset,
     long logAppendTimeMillis,
     int serializedSizeBytes,
-    ByteString encodedEnvelope
+    @NonNull ByteString encodedEnvelope
 ) {
     public PolledKafkaRecord(
         long offset,
         long logAppendTimeMillis,
         int serializedSizeBytes,
-        CaptureRecord envelope
+        @NonNull CaptureRecord envelope
     ) {
         this(
             offset,
             logAppendTimeMillis,
             serializedSizeBytes,
-            Objects.requireNonNull(envelope, "envelope").toByteString()
+            envelope.toByteString()
         );
     }
 
     public PolledKafkaRecord {
-        Objects.requireNonNull(encodedEnvelope, "encodedEnvelope");
         if (offset < 0) {
             throw new IllegalArgumentException("offset must not be negative: " + offset);
         }

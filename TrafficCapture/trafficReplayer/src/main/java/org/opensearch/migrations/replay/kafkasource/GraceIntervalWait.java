@@ -8,10 +8,11 @@
 
 package org.opensearch.migrations.replay.kafkasource;
 
-import java.util.Objects;
 import java.util.function.LongSupplier;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
+
+import lombok.NonNull;
 
 /**
  * How {@code onPartitionsRevoked} waits out its grace interval.
@@ -45,9 +46,10 @@ public interface GraceIntervalWait {
      * clock adjustment can go unnoticed, not a polling interval — a submission still wakes the wait
      * immediately.
      */
-    static GraceIntervalWait blockingOn(KafkaSourceInputQueue queue, LongSupplier monotonicNanos) {
-        Objects.requireNonNull(queue, "queue");
-        Objects.requireNonNull(monotonicNanos, "monotonicNanos");
+    static GraceIntervalWait blockingOn(
+        @NonNull KafkaSourceInputQueue queue,
+        @NonNull LongSupplier monotonicNanos
+    ) {
         var sliceNanos = java.time.Duration.ofMillis(25).toNanos();
         return deadline -> {
             while (!deadline.hasPassed(monotonicNanos.getAsLong())) {

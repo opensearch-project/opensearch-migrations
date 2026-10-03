@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -60,6 +59,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -1310,11 +1310,9 @@ public class TrafficReplayer {
     }
 
     static EventLoop selectDeployedTargetEventLoop(
-        List<EventLoop> eventLoops,
-        ConnectionProcessingId connectionId
+        @NonNull List<EventLoop> eventLoops,
+        @NonNull ConnectionProcessingId connectionId
     ) {
-        Objects.requireNonNull(eventLoops, "eventLoops");
-        Objects.requireNonNull(connectionId, "connectionId");
         if (eventLoops.isEmpty()) {
             throw new IllegalArgumentException("eventLoops must not be empty");
         }
@@ -1397,11 +1395,11 @@ public class TrafficReplayer {
         private final CompletableFuture<Void> orderlyShutdownFinished = new CompletableFuture<>();
 
         SupervisedReplayApplication(
-            ReplayLifecycle lifecycle,
-            ProcessSupervisor supervisor
+            @NonNull ReplayLifecycle lifecycle,
+            @NonNull ProcessSupervisor supervisor
         ) {
-            this.lifecycle = java.util.Objects.requireNonNull(lifecycle, "lifecycle");
-            this.supervisor = java.util.Objects.requireNonNull(supervisor, "supervisor");
+            this.lifecycle = lifecycle;
+            this.supervisor = supervisor;
         }
 
         void run() {

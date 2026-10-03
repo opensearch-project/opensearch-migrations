@@ -1,13 +1,13 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -24,18 +24,17 @@ final class CaptureFailureTerminator implements Consumer<Throwable> {
     CaptureFailureTerminator(
         int exitCode,
         Duration logFlushTimeout,
-        Runnable flushLogs,
-        IntConsumer haltProcess
+        @NonNull Runnable flushLogs,
+        @NonNull IntConsumer haltProcess
     ) {
         this.exitCode = exitCode;
         this.logFlushTimeout = requirePositive(logFlushTimeout);
-        this.flushLogs = Objects.requireNonNull(flushLogs);
-        this.haltProcess = Objects.requireNonNull(haltProcess);
+        this.flushLogs = flushLogs;
+        this.haltProcess = haltProcess;
     }
 
     @Override
-    public void accept(Throwable failure) {
-        Objects.requireNonNull(failure);
+    public void accept(@NonNull Throwable failure) {
         if (!started.compareAndSet(false, true)) {
             return;
         }
@@ -93,8 +92,7 @@ final class CaptureFailureTerminator implements Consumer<Throwable> {
         }
     }
 
-    private static Duration requirePositive(Duration value) {
-        Objects.requireNonNull(value);
+    private static Duration requirePositive(@NonNull Duration value) {
         if (value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException("logFlushTimeout must be positive");
         }

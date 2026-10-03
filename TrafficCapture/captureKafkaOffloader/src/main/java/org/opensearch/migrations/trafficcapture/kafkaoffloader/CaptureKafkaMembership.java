@@ -4,12 +4,12 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.common.TopicPartition;
@@ -38,22 +38,22 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private final Thread pollThread;
 
     public CaptureKafkaMembership(
-        org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
-        String topic,
-        CaptureRoutingState routingState,
-        CaptureAssignmentPublisher publisher,
-        Runnable initialAssignmentCallback,
-        Consumer<Throwable> membershipFailureCallback,
-        Consumer<Throwable> unstableProcessFailureCallback
+        @NonNull org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
+        @NonNull String topic,
+        @NonNull CaptureRoutingState routingState,
+        @NonNull CaptureAssignmentPublisher publisher,
+        @NonNull Runnable initialAssignmentCallback,
+        @NonNull Consumer<Throwable> membershipFailureCallback,
+        @NonNull Consumer<Throwable> unstableProcessFailureCallback
     ) {
-        this.consumer = Objects.requireNonNull(consumer);
-        this.topic = Objects.requireNonNull(topic);
-        this.routingState = Objects.requireNonNull(routingState);
+        this.consumer = consumer;
+        this.topic = topic;
+        this.routingState = routingState;
         kafkaAssignment.addAll(routingState.assignedPartitions());
-        this.publisher = Objects.requireNonNull(publisher);
-        this.initialAssignmentCallback = Objects.requireNonNull(initialAssignmentCallback);
-        this.membershipFailureCallback = Objects.requireNonNull(membershipFailureCallback);
-        this.unstableProcessFailureCallback = Objects.requireNonNull(unstableProcessFailureCallback);
+        this.publisher = publisher;
+        this.initialAssignmentCallback = initialAssignmentCallback;
+        this.membershipFailureCallback = membershipFailureCallback;
+        this.unstableProcessFailureCallback = unstableProcessFailureCallback;
         pollThread = new Thread(this::runPollLoop, "capture-kafka-membership");
         pollThread.setDaemon(true);
     }

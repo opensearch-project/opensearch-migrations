@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 
+import lombok.NonNull;
 import org.apache.kafka.common.utils.Utils;
 
 /**
@@ -284,8 +285,7 @@ public final class CaptureRoutingState {
         return new PendingAssignment(assignmentSequence, writerNodeId, validatedPartitions);
     }
 
-    synchronized void activateAssignment(PendingAssignment assignment) {
-        Objects.requireNonNull(assignment);
+    synchronized void activateAssignment(@NonNull PendingAssignment assignment) {
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");
         }
@@ -317,8 +317,7 @@ public final class CaptureRoutingState {
         currentAssignment = new CurrentAssignment(assignment.writerNodeId(), assignment.partitions());
     }
 
-    public synchronized ConnectionRoute routeNewConnection(String connectionId) {
-        Objects.requireNonNull(connectionId);
+    public synchronized ConnectionRoute routeNewConnection(@NonNull String connectionId) {
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");
         }
@@ -352,8 +351,7 @@ public final class CaptureRoutingState {
         return route;
     }
 
-    synchronized void acceptTrafficSubmission(ConnectionRoute route, boolean terminal) {
-        Objects.requireNonNull(route);
+    synchronized void acceptTrafficSubmission(@NonNull ConnectionRoute route, boolean terminal) {
         var key = new ConnectionKey(route.writerNodeId(), route.connectionId());
         if (connectionRoutes.get(key) != route) {
             throw new CorruptedCaptureStateException("Connection route is not active: " + route);
@@ -373,8 +371,7 @@ public final class CaptureRoutingState {
         route.terminalSubmissionAccepted = terminal;
     }
 
-    synchronized void removeAfterTerminalAcknowledgement(ConnectionRoute route) {
-        Objects.requireNonNull(route);
+    synchronized void removeAfterTerminalAcknowledgement(@NonNull ConnectionRoute route) {
         if (!route.terminalSubmissionAccepted) {
             throw new CorruptedCaptureStateException(
                 "Connection route has no accepted terminal record: " + route
@@ -383,8 +380,7 @@ public final class CaptureRoutingState {
         removeRegisteredRoute(route);
     }
 
-    synchronized void abandonUnpublishedConnection(ConnectionRoute route) {
-        Objects.requireNonNull(route);
+    synchronized void abandonUnpublishedConnection(@NonNull ConnectionRoute route) {
         if (route.trafficSubmissionAccepted) {
             throw new CorruptedCaptureStateException(
                 "Cannot abandon a connection after accepting traffic publication: " + route
@@ -408,11 +404,10 @@ public final class CaptureRoutingState {
     }
 
     synchronized void acceptHeartbeatLogAppendTime(
-        WriterPartition writerPartition,
+        @NonNull WriterPartition writerPartition,
         long heartbeatLogAppendTime,
         Duration expirationInterval
     ) {
-        Objects.requireNonNull(writerPartition);
         var expirationMillis = requirePositive(expirationInterval, "expirationInterval").toMillis();
         if (heartbeatLogAppendTime <= 0) {
             throw new IllegalStateException(
@@ -449,11 +444,10 @@ public final class CaptureRoutingState {
     }
 
     synchronized void validateCriticalMutationTrafficAcknowledgement(
-        ConnectionRoute route,
+        @NonNull ConnectionRoute route,
         long observationLogAppendTime,
         Duration expirationInterval
     ) {
-        Objects.requireNonNull(route);
         var expirationMillis = requirePositive(expirationInterval, "expirationInterval").toMillis();
         if (observationLogAppendTime <= 0) {
             throw new IllegalStateException(
@@ -584,8 +578,7 @@ public final class CaptureRoutingState {
         return state;
     }
 
-    private List<Integer> validateAssignment(Collection<Integer> assignment) {
-        Objects.requireNonNull(assignment);
+    private List<Integer> validateAssignment(@NonNull Collection<Integer> assignment) {
         var unique = new TreeSet<Integer>();
         for (var partition : assignment) {
             validatePartition(partition);
@@ -602,16 +595,14 @@ public final class CaptureRoutingState {
         }
     }
 
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value);
+    private static String requireNonBlank(@NonNull String value, String name) {
         if (value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
     }
 
-    private static Duration requirePositive(Duration value, String name) {
-        Objects.requireNonNull(value);
+    private static Duration requirePositive(@NonNull Duration value, String name) {
         if (value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException(name + " must be positive");
         }

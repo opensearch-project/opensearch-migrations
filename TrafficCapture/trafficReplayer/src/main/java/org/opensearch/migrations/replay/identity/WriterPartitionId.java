@@ -8,8 +8,7 @@
 
 package org.opensearch.migrations.replay.identity;
 
-import java.util.Objects;
-
+import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
@@ -25,10 +24,8 @@ import org.apache.kafka.common.TopicPartition;
  *
  * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
  */
-public record WriterPartitionId(String writerNodeId, TopicPartition topicPartition) {
+public record WriterPartitionId(@NonNull String writerNodeId, @NonNull TopicPartition topicPartition) {
     public WriterPartitionId {
-        Objects.requireNonNull(writerNodeId, "writerNodeId");
-        Objects.requireNonNull(topicPartition, "topicPartition");
         if (writerNodeId.isEmpty()) {
             throw new IllegalArgumentException("writerNodeId must not be empty");
         }

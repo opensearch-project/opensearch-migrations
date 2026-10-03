@@ -1,13 +1,13 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.IntStream;
 
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.ToString;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.producer.Producer;
@@ -46,20 +46,17 @@ public final class TrafficTopicMetadata {
     }
 
     public static TrafficTopicMetadata discover(
-        Producer<String, byte[]> producer,
-        String topic
+        @NonNull Producer<String, byte[]> producer,
+        @NonNull String topic
     ) {
-        Objects.requireNonNull(producer);
-        Objects.requireNonNull(topic);
         return fromPartitionMetadata(topic, producer.partitionsFor(topic));
     }
 
     static TrafficTopicMetadata fromPartitionMetadata(
-        String topic,
-        List<PartitionInfo> discoveredPartitions
+        @NonNull String topic,
+        @NonNull List<PartitionInfo> discoveredPartitions
     ) {
-        Objects.requireNonNull(topic);
-        var partitionMetadata = Objects.requireNonNull(discoveredPartitions)
+        var partitionMetadata = discoveredPartitions
             .stream()
             .sorted(java.util.Comparator.comparingInt(PartitionInfo::partition))
             .toList();
@@ -93,11 +90,10 @@ public final class TrafficTopicMetadata {
     }
 
     static TrafficTopicMetadata fromTopicDescription(
-        String topic,
-        TopicDescription topicDescription
+        @NonNull String topic,
+        @NonNull TopicDescription topicDescription
     ) {
-        Objects.requireNonNull(topic);
-        var partitionMetadata = Objects.requireNonNull(topicDescription)
+        var partitionMetadata = topicDescription
             .partitions()
             .stream()
             .sorted(java.util.Comparator.comparingInt(partition -> partition.partition()))

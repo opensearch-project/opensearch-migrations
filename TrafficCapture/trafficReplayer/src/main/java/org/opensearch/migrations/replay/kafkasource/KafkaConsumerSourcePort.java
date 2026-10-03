@@ -13,12 +13,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.protobuf.ByteString;
+import lombok.NonNull;
 import org.apache.kafka.clients.consumer.CommitFailedException;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
@@ -41,9 +41,12 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
     private final Consumer<String, byte[]> consumer;
     private final Duration pollTimeout;
 
-    public KafkaConsumerSourcePort(Consumer<String, byte[]> consumer, Duration pollTimeout) {
-        this.consumer = Objects.requireNonNull(consumer, "consumer");
-        this.pollTimeout = Objects.requireNonNull(pollTimeout, "pollTimeout");
+    public KafkaConsumerSourcePort(
+        @NonNull Consumer<String, byte[]> consumer,
+        @NonNull Duration pollTimeout
+    ) {
+        this.consumer = consumer;
+        this.pollTimeout = pollTimeout;
     }
 
     @Override

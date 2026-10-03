@@ -6,7 +6,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +15,7 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,22 +34,16 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
         LoggerFactory.getLogger(ACTIVE_WORK_LOGGER_NAME);
 
     public record Report(
-        OutstandingOperationRegistry.Snapshot snapshot,
-        Duration elapsed
-    ) {
-        public Report {
-            Objects.requireNonNull(snapshot, "snapshot");
-            Objects.requireNonNull(elapsed, "elapsed");
-        }
-    }
+        @NonNull OutstandingOperationRegistry.Snapshot snapshot,
+        @NonNull Duration elapsed
+    ) {}
 
     record Status(
-        Instant observedAt,
+        @NonNull Instant observedAt,
         int activeCount,
         int longRunningCount
     ) {
         public Status {
-            Objects.requireNonNull(observedAt, "observedAt");
             if (activeCount < 0 || longRunningCount < 0
                 || longRunningCount > activeCount) {
                 throw new IllegalArgumentException(
@@ -105,20 +99,20 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
     }
 
     private ActiveContextMonitor(
-        Clock clock,
+        @NonNull Clock clock,
         Duration longRunningThreshold,
         Duration reportInterval,
-        Supplier<List<OutstandingOperationRegistry.Snapshot>> snapshotSupplier,
-        Consumer<Report> reporter,
-        Consumer<Status> statusReporter,
+        @NonNull Supplier<List<OutstandingOperationRegistry.Snapshot>> snapshotSupplier,
+        @NonNull Consumer<Report> reporter,
+        @NonNull Consumer<Status> statusReporter,
         ScheduledExecutorService scheduler
     ) {
-        this.clock = Objects.requireNonNull(clock, "clock");
+        this.clock = clock;
         this.longRunningThreshold = requirePositive(longRunningThreshold, "longRunningThreshold");
         this.reportInterval = requirePositive(reportInterval, "reportInterval");
-        this.snapshotSupplier = Objects.requireNonNull(snapshotSupplier, "snapshotSupplier");
-        this.reporter = Objects.requireNonNull(reporter, "reporter");
-        this.statusReporter = Objects.requireNonNull(statusReporter, "statusReporter");
+        this.snapshotSupplier = snapshotSupplier;
+        this.reporter = reporter;
+        this.statusReporter = statusReporter;
         this.scheduler = scheduler;
     }
 
@@ -211,8 +205,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
         );
     }
 
-    private static Duration requirePositive(Duration value, String name) {
-        Objects.requireNonNull(value, name);
+    private static Duration requirePositive(@NonNull Duration value, String name) {
         if (value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException(name + " must be positive");
         }

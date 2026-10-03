@@ -8,7 +8,7 @@
 
 package org.opensearch.migrations.replay.identity;
 
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * The protocol identity of a captured connection: {@code (writerNodeId, connectionId)}.
@@ -25,10 +25,8 @@ import java.util.Objects;
  * <p>Defined by {@code docs/captureAndReplay/replayerLowLevelDesign.md} section 1 and
  * {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
  */
-public record CapturedConnectionId(String writerNodeId, String connectionId) {
+public record CapturedConnectionId(@NonNull String writerNodeId, @NonNull String connectionId) {
     public CapturedConnectionId {
-        Objects.requireNonNull(writerNodeId, "writerNodeId");
-        Objects.requireNonNull(connectionId, "connectionId");
         if (writerNodeId.isEmpty()) {
             throw new IllegalArgumentException("writerNodeId must not be empty");
         }

@@ -9,7 +9,6 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
@@ -26,6 +25,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriterPartitionHeartbeat;
 
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -185,22 +185,22 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     CaptureKafkaPublisher(
-        Producer<String, byte[]> producer,
-        String topic,
-        CaptureRoutingState routingState,
+        @NonNull Producer<String, byte[]> producer,
+        @NonNull String topic,
+        @NonNull CaptureRoutingState routingState,
         int maximumKafkaMessageSize,
         Duration heartbeatInterval,
         Duration heartbeatExpirationInterval,
-        Clock clock,
-        CaptureKafkaWriteGate writeGate,
-        Consumer<Throwable> unstableProcessFailureCallback
+        @NonNull Clock clock,
+        @NonNull CaptureKafkaWriteGate writeGate,
+        @NonNull Consumer<Throwable> unstableProcessFailureCallback
     ) {
-        this.producer = Objects.requireNonNull(producer);
-        this.topic = Objects.requireNonNull(topic);
-        this.routingState = Objects.requireNonNull(routingState);
-        this.clock = Objects.requireNonNull(clock);
-        this.writeGate = Objects.requireNonNull(writeGate);
-        this.unstableProcessFailureCallback = Objects.requireNonNull(unstableProcessFailureCallback);
+        this.producer = producer;
+        this.topic = topic;
+        this.routingState = routingState;
+        this.clock = clock;
+        this.writeGate = writeGate;
+        this.unstableProcessFailureCallback = unstableProcessFailureCallback;
         if (maximumKafkaMessageSize <= KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES) {
             throw new IllegalArgumentException("maximumKafkaMessageSize is too small for Kafka record overhead");
         }
@@ -232,9 +232,9 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     @Override
-    public CompletableFuture<String> installAssignment(Collection<Integer> partitions) {
+    public CompletableFuture<String> installAssignment(@NonNull Collection<Integer> partitions) {
         var result = new CompletableFuture<String>();
-        var partitionSnapshot = List.copyOf(Objects.requireNonNull(partitions));
+        var partitionSnapshot = List.copyOf(partitions);
         executeOnPublisher(() -> {
             assignmentInstallations.addLast(new AssignmentInstallation(partitionSnapshot, result));
             startNextAssignmentInstallation();
@@ -305,12 +305,10 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     public CompletableFuture<RecordMetadata> publishTraffic(
-        CaptureRoutingState.ConnectionRoute route,
-        TrafficStream trafficStream,
+        @NonNull CaptureRoutingState.ConnectionRoute route,
+        @NonNull TrafficStream trafficStream,
         boolean finalRecord
     ) {
-        Objects.requireNonNull(route);
-        Objects.requireNonNull(trafficStream);
         if (!route.writerNodeId().equals(trafficStream.getNodeId())
             || !route.connectionId().equals(trafficStream.getConnectionId())) {
             var identityFailure = new CorruptedCaptureStateException(
@@ -351,10 +349,9 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     void validateCriticalMutationTrafficAcknowledgement(
-        CaptureRoutingState.ConnectionRoute route,
+        @NonNull CaptureRoutingState.ConnectionRoute route,
         RecordMetadata acknowledgement
     ) {
-        Objects.requireNonNull(route);
         try {
             if (acknowledgement == null
                 || acknowledgement.partition() != route.partition()
@@ -860,8 +857,8 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     @Override
-    public void stopAfterFailure(Throwable throwable) {
-        failPublisher(Objects.requireNonNull(throwable));
+    public void stopAfterFailure(@NonNull Throwable throwable) {
+        failPublisher(throwable);
     }
 
     private void failForThrowable(Throwable throwable) {
@@ -888,8 +885,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         return metadata.timestamp();
     }
 
-    private static Duration requirePositive(Duration value, String name) {
-        Objects.requireNonNull(value);
+    private static Duration requirePositive(@NonNull Duration value, String name) {
         if (value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException(name + " must be positive");
         }

@@ -13,7 +13,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.Objects;
+
+import lombok.NonNull;
 
 /**
  * Deterministic clock shared by replay tests.
@@ -25,7 +26,7 @@ public final class FakeClock extends Clock {
     private static final class State {
         private Instant now;
 
-        private State(Instant now) {
+        private State(@NonNull Instant now) {
             this.now = now;
         }
     }
@@ -37,8 +38,8 @@ public final class FakeClock extends Clock {
         this(Instant.EPOCH);
     }
 
-    public FakeClock(Instant initial) {
-        this(new State(Objects.requireNonNull(initial)), ZoneOffset.UTC);
+    public FakeClock(@NonNull Instant initial) {
+        this(new State(initial), ZoneOffset.UTC);
     }
 
     private FakeClock(State state, ZoneId zone) {
@@ -46,8 +47,7 @@ public final class FakeClock extends Clock {
         this.zone = zone;
     }
 
-    public Instant advance(Duration duration) {
-        Objects.requireNonNull(duration);
+    public Instant advance(@NonNull Duration duration) {
         if (duration.isNegative()) {
             throw new IllegalArgumentException("FakeClock cannot move backward");
         }
@@ -55,8 +55,7 @@ public final class FakeClock extends Clock {
         return state.now;
     }
 
-    public void set(Instant newTime) {
-        Objects.requireNonNull(newTime);
+    public void set(@NonNull Instant newTime) {
         if (newTime.isBefore(state.now)) {
             throw new IllegalArgumentException("FakeClock cannot move backward");
         }
@@ -69,8 +68,7 @@ public final class FakeClock extends Clock {
     }
 
     @Override
-    public Clock withZone(ZoneId requestedZone) {
-        Objects.requireNonNull(requestedZone);
+    public Clock withZone(@NonNull ZoneId requestedZone) {
         return requestedZone.equals(zone) ? this : new FakeClock(state, requestedZone);
     }
 

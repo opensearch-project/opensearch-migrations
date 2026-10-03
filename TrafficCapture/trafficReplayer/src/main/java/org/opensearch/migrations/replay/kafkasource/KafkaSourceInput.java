@@ -8,11 +8,11 @@
 
 package org.opensearch.migrations.replay.kafkasource;
 
-import java.util.Objects;
-
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+
+import lombok.NonNull;
 
 /**
  * Messages from replay intake to the Kafka source owner. Only the Kafka thread removes and applies them.
@@ -44,11 +44,7 @@ public sealed interface KafkaSourceInput {
      * <p>The Kafka source resumes the partition only when assignment, prior-generation cleanup, and lifecycle
      * state <em>also</em> permit reading. Those three pause reasons are independent and must not alias.</p>
      */
-    record RequestNextPartitionBatch(PartitionBatchRequestId requestId) implements KafkaSourceInput {
-        public RequestNextPartitionBatch {
-            Objects.requireNonNull(requestId, "requestId");
-        }
-
+    record RequestNextPartitionBatch(@NonNull PartitionBatchRequestId requestId) implements KafkaSourceInput {
         @Override
         public PartitionGenerationId generation() {
             return requestId.generation();
@@ -62,11 +58,7 @@ public sealed interface KafkaSourceInput {
      * target result, or retry policy may commit or retain a record — commit authority is computed by the Kafka
      * source alone, as a contiguous prefix from the observed-record head.</p>
      */
-    record RecordProcessingFinished(KafkaRecordId recordId) implements KafkaSourceInput {
-        public RecordProcessingFinished {
-            Objects.requireNonNull(recordId, "recordId");
-        }
-
+    record RecordProcessingFinished(@NonNull KafkaRecordId recordId) implements KafkaSourceInput {
         @Override
         public PartitionGenerationId generation() {
             return recordId.generation();
@@ -80,11 +72,7 @@ public sealed interface KafkaSourceInput {
      * records from the revoked assignment: cancellation cleanup never authorizes a commit
      * ({@code replayerLLD §6}).</p>
      */
-    record GenerationCleanupFinished(PartitionGenerationId generation) implements KafkaSourceInput {
-        public GenerationCleanupFinished {
-            Objects.requireNonNull(generation, "generation");
-        }
-    }
+    record GenerationCleanupFinished(@NonNull PartitionGenerationId generation) implements KafkaSourceInput {}
 
     /**
      * Replay intake detected invalid capture input at a specific Kafka partition and offset.
@@ -93,13 +81,10 @@ public sealed interface KafkaSourceInput {
      * path. The violating record is marked commit-ineligible and commits at and past its offset are blocked, so
      * a restart stops at the same record rather than skipping past it.</p>
      */
-    record CaptureProtocolViolationDetected(KafkaRecordId recordId, String diagnostic)
-        implements KafkaSourceInput {
-        public CaptureProtocolViolationDetected {
-            Objects.requireNonNull(recordId, "recordId");
-            Objects.requireNonNull(diagnostic, "diagnostic");
-        }
-
+    record CaptureProtocolViolationDetected(
+        @NonNull KafkaRecordId recordId,
+        @NonNull String diagnostic
+    ) implements KafkaSourceInput {
         @Override
         public PartitionGenerationId generation() {
             return recordId.generation();

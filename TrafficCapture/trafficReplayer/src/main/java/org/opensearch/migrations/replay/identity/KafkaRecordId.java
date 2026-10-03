@@ -8,7 +8,7 @@
 
 package org.opensearch.migrations.replay.identity;
 
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * One Kafka offset within one {@link PartitionGenerationId}.
@@ -25,9 +25,8 @@ import java.util.Objects;
  *
  * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
  */
-public record KafkaRecordId(PartitionGenerationId generation, long offset) {
+public record KafkaRecordId(@NonNull PartitionGenerationId generation, long offset) {
     public KafkaRecordId {
-        Objects.requireNonNull(generation, "generation");
         if (offset < 0) {
             throw new IllegalArgumentException("offset must not be negative: " + offset);
         }

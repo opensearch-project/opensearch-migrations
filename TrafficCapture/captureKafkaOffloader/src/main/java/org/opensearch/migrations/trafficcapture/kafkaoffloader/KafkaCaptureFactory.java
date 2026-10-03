@@ -211,26 +211,26 @@ public class KafkaCaptureFactory implements
     }
 
     KafkaCaptureFactory(
-        IRootKafkaOffloaderContext rootScope,
-        String captureActivationId,
-        Producer<String, byte[]> producer,
-        Consumer<String, byte[]> membershipConsumer,
-        String topicNameForTraffic,
+        @NonNull IRootKafkaOffloaderContext rootScope,
+        @NonNull String captureActivationId,
+        @NonNull Producer<String, byte[]> producer,
+        @NonNull Consumer<String, byte[]> membershipConsumer,
+        @NonNull String topicNameForTraffic,
         int messageSize,
         Duration trafficStreamFlushInterval,
         Duration heartbeatInterval,
         Duration heartbeatExpirationInterval,
         Duration topicMetadataDiscoveryRetryDelay,
         int minimumTopicPartitionCount,
-        Supplier<TopicPartitionProvisioner> topicPartitionProvisionerSupplier,
-        java.util.function.Consumer<Throwable> captureFailureCallback,
-        java.util.function.Consumer<Throwable> unstableProcessFailureCallback
+        @NonNull Supplier<TopicPartitionProvisioner> topicPartitionProvisionerSupplier,
+        @NonNull java.util.function.Consumer<Throwable> captureFailureCallback,
+        @NonNull java.util.function.Consumer<Throwable> unstableProcessFailureCallback
     ) {
-        this.rootScope = Objects.requireNonNull(rootScope);
-        this.captureActivationId = Objects.requireNonNull(captureActivationId);
-        this.producer = Objects.requireNonNull(producer);
-        this.membershipConsumer = Objects.requireNonNull(membershipConsumer);
-        this.topicNameForTraffic = Objects.requireNonNull(topicNameForTraffic);
+        this.rootScope = rootScope;
+        this.captureActivationId = captureActivationId;
+        this.producer = producer;
+        this.membershipConsumer = membershipConsumer;
+        this.topicNameForTraffic = topicNameForTraffic;
         this.trafficStreamFlushInterval = requirePositive(
             trafficStreamFlushInterval,
             "trafficStreamFlushInterval"
@@ -253,11 +253,9 @@ public class KafkaCaptureFactory implements
             throw new IllegalArgumentException("minimumTopicPartitionCount must not be negative");
         }
         this.minimumTopicPartitionCount = minimumTopicPartitionCount;
-        this.topicPartitionProvisioner = Objects.requireNonNull(
-            Objects.requireNonNull(topicPartitionProvisionerSupplier).get()
-        );
-        this.captureFailureCallback = Objects.requireNonNull(captureFailureCallback);
-        this.unstableProcessFailureCallback = Objects.requireNonNull(unstableProcessFailureCallback);
+        this.topicPartitionProvisioner = Objects.requireNonNull(topicPartitionProvisionerSupplier.get());
+        this.captureFailureCallback = captureFailureCallback;
+        this.unstableProcessFailureCallback = unstableProcessFailureCallback;
         this.bufferSize = checkedPayloadSize(messageSize);
         this.publisherFuture = new CompletableFuture<>();
         this.initializer = new ScheduledThreadPoolExecutor(1, runnable -> {
@@ -962,8 +960,7 @@ public class KafkaCaptureFactory implements
         return messageSize - KAFKA_MESSAGE_OVERHEAD_BYTES;
     }
 
-    private static Duration requirePositive(Duration value, String name) {
-        Objects.requireNonNull(value);
+    private static Duration requirePositive(@NonNull Duration value, String name) {
         if (value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException(name + " must be positive");
         }
@@ -971,14 +968,14 @@ public class KafkaCaptureFactory implements
     }
 
     private static TopicPartitionProvisioner provisioner(
-        Properties kafkaAdminProperties,
+        @NonNull Properties kafkaAdminProperties,
         int minimumTopicPartitionCount
     ) {
         if (minimumTopicPartitionCount == 0) {
             return TopicPartitionProvisioner.disabled();
         }
         return new KafkaAdminTopicPartitionProvisioner(
-            Admin.create(Objects.requireNonNull(kafkaAdminProperties))
+            Admin.create(kafkaAdminProperties)
         );
     }
 
@@ -1036,13 +1033,12 @@ public class KafkaCaptureFactory implements
         private final Admin admin;
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        private KafkaAdminTopicPartitionProvisioner(Admin admin) {
-            this.admin = Objects.requireNonNull(admin);
+        private KafkaAdminTopicPartitionProvisioner(@NonNull Admin admin) {
+            this.admin = admin;
         }
 
         @Override
-        public CompletableFuture<Void> increaseTo(String topic, int partitionCount) {
-            Objects.requireNonNull(topic);
+        public CompletableFuture<Void> increaseTo(@NonNull String topic, int partitionCount) {
             if (partitionCount <= 0) {
                 throw new IllegalArgumentException("partitionCount must be positive");
             }
@@ -1069,8 +1065,7 @@ public class KafkaCaptureFactory implements
         }
 
         @Override
-        public CompletableFuture<TrafficTopicMetadata> discoverMetadata(String topic) {
-            Objects.requireNonNull(topic);
+        public CompletableFuture<TrafficTopicMetadata> discoverMetadata(@NonNull String topic) {
             if (closed.get()) {
                 return CompletableFuture.failedFuture(
                     new IllegalStateException("Kafka topic partition provisioner is closed")

@@ -15,7 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.LongSupplier;
@@ -28,6 +27,7 @@ import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
@@ -248,35 +248,28 @@ public final class KafkaSourceOwner {
     }
 
     KafkaSourceOwner(
-        KafkaSourcePort port,
-        KafkaSourceInputQueue sourceInputs,
-        ReplayIntakeInputQueue intakeInputs,
-        WakeupController wakeupController,
-        Duration cancellationGrace,
-        LongSupplier monotonicNanos,
-        GraceIntervalWait graceWait,
-        Metrics metrics,
-        RecordContextFactory recordContextFactory,
-        ProtocolViolationHandler protocolViolationHandler,
-        Duration heartbeatInterval
+        @NonNull KafkaSourcePort port,
+        @NonNull KafkaSourceInputQueue sourceInputs,
+        @NonNull ReplayIntakeInputQueue intakeInputs,
+        @NonNull WakeupController wakeupController,
+        @NonNull Duration cancellationGrace,
+        @NonNull LongSupplier monotonicNanos,
+        @NonNull GraceIntervalWait graceWait,
+        @NonNull Metrics metrics,
+        @NonNull RecordContextFactory recordContextFactory,
+        @NonNull ProtocolViolationHandler protocolViolationHandler,
+        @NonNull Duration heartbeatInterval
     ) {
-        this.port = Objects.requireNonNull(port, "port");
-        this.sourceInputs = Objects.requireNonNull(sourceInputs, "sourceInputs");
-        this.intakeInputs = Objects.requireNonNull(intakeInputs, "intakeInputs");
-        this.wakeupController = Objects.requireNonNull(wakeupController, "wakeupController");
-        this.cancellationGrace = Objects.requireNonNull(cancellationGrace, "cancellationGrace");
-        this.monotonicNanos = Objects.requireNonNull(monotonicNanos, "monotonicNanos");
-        this.graceWait = Objects.requireNonNull(graceWait, "graceWait");
-        this.metrics = Objects.requireNonNull(metrics, "metrics");
-        this.recordContextFactory = Objects.requireNonNull(
-            recordContextFactory,
-            "recordContextFactory"
-        );
-        this.protocolViolationHandler = Objects.requireNonNull(
-            protocolViolationHandler,
-            "protocolViolationHandler"
-        );
-        Objects.requireNonNull(heartbeatInterval, "heartbeatInterval");
+        this.port = port;
+        this.sourceInputs = sourceInputs;
+        this.intakeInputs = intakeInputs;
+        this.wakeupController = wakeupController;
+        this.cancellationGrace = cancellationGrace;
+        this.monotonicNanos = monotonicNanos;
+        this.graceWait = graceWait;
+        this.metrics = metrics;
+        this.recordContextFactory = recordContextFactory;
+        this.protocolViolationHandler = protocolViolationHandler;
         if (cancellationGrace.isNegative()) {
             throw new IllegalArgumentException("cancellationGrace must not be negative");
         }

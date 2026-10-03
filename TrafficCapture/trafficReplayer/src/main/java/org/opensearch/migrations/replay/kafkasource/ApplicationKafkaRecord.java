@@ -8,14 +8,13 @@
 
 package org.opensearch.migrations.replay.kafkasource;
 
-import java.util.Objects;
-
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
+import lombok.NonNull;
 
 /**
  * One Kafka application record as the Kafka source observed it, carried to replay intake.
@@ -36,23 +35,23 @@ import com.google.protobuf.InvalidProtocolBufferException;
  * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 5.5.</p>
  */
 public record ApplicationKafkaRecord(
-    KafkaRecordId recordId,
+    @NonNull KafkaRecordId recordId,
     long logAppendTimeMillis,
     int serializedSizeBytes,
-    ByteString encodedEnvelope,
+    @NonNull ByteString encodedEnvelope,
     IReplayContexts.IKafkaRecordContext replayContext
 ) {
     public ApplicationKafkaRecord(
         KafkaRecordId recordId,
         long logAppendTimeMillis,
         int serializedSizeBytes,
-        CaptureRecord envelope
+        @NonNull CaptureRecord envelope
     ) {
         this(
             recordId,
             logAppendTimeMillis,
             serializedSizeBytes,
-            Objects.requireNonNull(envelope, "envelope").toByteString(),
+            envelope.toByteString(),
             null
         );
     }
@@ -61,21 +60,19 @@ public record ApplicationKafkaRecord(
         KafkaRecordId recordId,
         long logAppendTimeMillis,
         int serializedSizeBytes,
-        CaptureRecord envelope,
+        @NonNull CaptureRecord envelope,
         IReplayContexts.IKafkaRecordContext replayContext
     ) {
         this(
             recordId,
             logAppendTimeMillis,
             serializedSizeBytes,
-            Objects.requireNonNull(envelope, "envelope").toByteString(),
+            envelope.toByteString(),
             replayContext
         );
     }
 
     public ApplicationKafkaRecord {
-        Objects.requireNonNull(recordId, "recordId");
-        Objects.requireNonNull(encodedEnvelope, "encodedEnvelope");
         if (serializedSizeBytes < 0) {
             throw new IllegalArgumentException("serializedSizeBytes must not be negative: " + serializedSizeBytes);
         }
