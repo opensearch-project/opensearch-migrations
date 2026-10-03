@@ -603,22 +603,20 @@ public class SourceReconstructor {
                     continue;
                 }
                 for (String targetField : rankedTargets) {
+                    // A fan-in target holds the UNION of its contributors with no record of who
+                    // contributed what, so attributing it to one source fabricates data. Skip only
+                    // when the source has its own Lucene footprint (tiers 1-4 already failed, so the
+                    // doc truly had no value); footprint-less sources keep best-effort recovery.
+                    if (mappingContext.getCopyToSources(targetField).size() > 1
+                            && hasIndexedOrDocValuesFootprint(sourceMapping)) {
+                        continue;
+                    }
                     ProbeResult recovered = probeFieldValue(reader, docId, document, targetField,
                             mappingContext, termIndex);
                     if (recovered == null) {
                         continue;
                     }
-                    // Tiers 1/2/4 already shaped the value through the TARGET's mapping —
-                    // write it verbatim. Only the points/terms tier (Raw) still needs decoding,
-                    // and that decode runs through the SOURCE mapping so the JSON shape matches
-                    // the source field's declared type (date formatting, scaled_float division,
-                    // IP rendering, etc.).
-                    Object converted = switch (recovered) {
-                        case ProbeResult.Final f -> f.value();
-                        case ProbeResult.Raw r -> sourceMapping != null
-                                ? convertFallbackValue(r.raw(), sourceMapping)
-                                : null;
-                    };
+                    Object converted = convertProbeResult(recovered, sourceMapping);
                     if (converted != null) {
                         modified |= putNested(target, sourceField, converted);
                         break; // first-hit wins; stop iterating targets.
@@ -627,7 +625,66 @@ public class SourceReconstructor {
             }
         }
 
+        // 6. Preserve a fan-in target when its sources have no indexed or doc-values representation.
+        if (mappingContext != null) {
+            modified |= preserveUnattributedFanInTargets(
+                    target, reader, docId, document, mappingContext, termIndex);
+        }
+
         return modified;
+    }
+
+    private static boolean preserveUnattributedFanInTargets(Map<String, Object> target,
+            LuceneLeafReader reader, int docId, LuceneDocument document,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
+        boolean modified = false;
+        for (String targetField : mappingContext.getCopyToTargetFields()) {
+            List<String> sourceFields = mappingContext.getCopyToSources(targetField);
+            if (sourceFields.size() < 2 || hasNested(target, targetField)) {
+                continue;
+            }
+
+            boolean anySourceRecovered = false;
+            boolean allSourcesLackFootprint = true;
+            for (String sourceField : sourceFields) {
+                FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
+                if (sourceMapping == null || hasIndexedOrDocValuesFootprint(sourceMapping)) {
+                    allSourcesLackFootprint = false;
+                    break;
+                }
+                anySourceRecovered |= hasNested(target, sourceField);
+            }
+            if (!allSourcesLackFootprint || anySourceRecovered) {
+                continue;
+            }
+
+            ProbeResult recovered = probeFieldValue(
+                    reader, docId, document, targetField, mappingContext, termIndex);
+            if (recovered != null) {
+                Object converted = convertProbeResult(recovered, mappingContext.getFieldInfo(targetField));
+                if (converted != null) {
+                    modified |= putNested(target, targetField, converted);
+                }
+            }
+        }
+        return modified;
+    }
+
+    private static boolean hasIndexedOrDocValuesFootprint(FieldMappingInfo mappingInfo) {
+        return mappingInfo != null && (mappingInfo.indexed() || mappingInfo.docValues());
+    }
+
+    /**
+     * Final probe values already have the target field's shape. Raw values need conversion using
+     * the mapping of the field where the value will be written.
+     */
+    private static Object convertProbeResult(ProbeResult recovered, FieldMappingInfo outputMapping) {
+        return switch (recovered) {
+            case ProbeResult.Final f -> f.value();
+            case ProbeResult.Raw r -> outputMapping != null
+                    ? convertFallbackValue(r.raw(), outputMapping)
+                    : null;
+        };
     }
 
     /**

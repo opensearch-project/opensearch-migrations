@@ -10,11 +10,17 @@ metadata:
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "0"
+    # Delete on success (right after the hook completes) and clean up any leftover
+    # from a prior run before creating the next one. Deliberately NO 'hook-failed':
+    # a failed installer pod is kept so its logs can be inspected (kubectl logs). It
+    # is removed on the next install/upgrade via 'before-hook-creation', or manually.
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 1200
-  ttlSecondsAfterFinished: 600
+  # No ttlSecondsAfterFinished: the TTL controller can't tell success from failure,
+  # and successful jobs are already reaped by the hook-succeeded delete policy above.
+  # The only jobs a TTL would remove are the failed ones we want to keep for debugging.
   podFailurePolicy:
     rules:
       - action: Ignore

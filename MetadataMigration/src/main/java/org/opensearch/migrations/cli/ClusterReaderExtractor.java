@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.migrations.Flavor;
@@ -41,11 +42,21 @@ public class ClusterReaderExtractor {
 
         RepoUri parsedUri = arguments.repoUri != null ? RepoUri.parse(arguments.repoUri) : null;
 
-        if (parsedUri instanceof RepoUri.S3RepoUri && (arguments.s3Region == null || arguments.localDir == null)) {
-            throw new ParameterException("If an s3 repo is being used, --s3-region and --local-dir must be set");
-        }
-        if (parsedUri instanceof RepoUri.GcsRepoUri && arguments.localDir == null) {
-            throw new ParameterException("If a GCS repo is being used, --local-dir must be set");
+        switch (parsedUri) {
+            case RepoUri.S3RepoUri s -> {
+                if (arguments.s3Region == null || arguments.localDir == null) {
+                    throw new ParameterException("If an s3 repo is being used, --s3-region and --local-dir must be set");
+                }
+            }
+            case RepoUri.GcsRepoUri g -> {
+                if (arguments.localDir == null) {
+                    throw new ParameterException("If a GCS repo is being used, --local-dir must be set");
+                }
+            }
+            case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
+            // A null repoUri is valid here: the remote-source path is checked below.
+            // Required because a switch over a null selector throws NPE without it.
+            case null -> { /* fall through to the remote-source and version checks */ }
         }
 
         // Solr backup: prefer snapshot over remote when snapshot args are provided
@@ -93,23 +104,37 @@ public class ClusterReaderExtractor {
     private ClusterReader getSolrSnapshotReader(RepoUri parsedUri) {
         Path backupDir;
         List<String> collectionNames;
+        var dataDirByCollection = new LinkedHashMap<String, String>();
         switch (parsedUri) {
             case RepoUri.FileRepoUri f -> {
                 backupDir = Path.of(f.path());
-                collectionNames = discoverFileSystemCollections(backupDir);
+                var bare = SolrBackupLayout.classifyBareBackup(backupDir);
+                if (bare != null && bare.collectionName() != null) {
+                    collectionNames = List.of(bare.collectionName());
+                    dataDirByCollection.put(bare.collectionName(), bare.dataPath());
+                } else {
+                    collectionNames = discoverFileSystemCollections(backupDir);
+                }
             }
             case RepoUri.S3RepoUri s -> {
                 var s3Repo = createSolrS3Repo(s);
                 backupDir = s3Repo.getRepoRootDir();
-                collectionNames = s3Repo.listTopLevelDirectories();
-                for (var collection : collectionNames) {
-                    downloadZkBackupForCollection(s3Repo, collection);
+                var bare = s3Repo.detectBareSolrLayout();
+                if (bare != null && bare.collectionName() != null) {
+                    collectionNames = List.of(bare.collectionName());
+                    dataDirByCollection.put(bare.collectionName(), bare.dataPath());
+                    downloadZkBackupForDataDir(s3Repo, bare.dataPath());
+                } else {
+                    collectionNames = s3Repo.listTopLevelDirectories();
+                    for (var collection : collectionNames) {
+                        downloadZkBackupForCollection(s3Repo, collection);
+                    }
                 }
             }
             default -> throw new ParameterException("Solr snapshot requires --repo-uri with file:// or s3:// scheme");
         }
 
-        return buildSolrSnapshotReader(backupDir, collectionNames);
+        return buildSolrSnapshotReader(backupDir, collectionNames, dataDirByCollection);
     }
 
     private List<String> discoverFileSystemCollections(Path backupDir) {
@@ -142,7 +167,7 @@ public class ClusterReaderExtractor {
      *
      * Delegates layout resolution to {@link SolrBackupLayout#resolveCollectionDataPrefix}.
      */
-    private void downloadZkBackupForCollection(S3Repo s3Repo, String collection) {
+    void downloadZkBackupForCollection(S3Repo s3Repo, String collection) {
         var resolved = SolrBackupLayout.resolveCollectionDataPrefix(collection, s3Repo::listSubDirectories);
         if (resolved == null) {
             log.warn("No zk_backup directories found for collection '{}' in S3", collection);
@@ -151,10 +176,22 @@ public class ClusterReaderExtractor {
         s3Repo.downloadPrefix(resolved.joinWith(collection) + "/" + resolved.latestZkBackupName());
     }
 
-    private ClusterReader buildSolrSnapshotReader(Path backupDir, List<String> collectionNames) {
+    void downloadZkBackupForDataDir(S3Repo s3Repo, String dataDir) {
+        var zkName = SolrBackupLayout.findLatestZkBackupName(s3Repo.listSubDirectories(dataDir));
+        if (zkName == null) {
+            log.warn("No zk_backup found at bare Solr backup root '{}'", dataDir);
+            return;
+        }
+        s3Repo.downloadPrefix(SolrBackupLayout.joinPrefix(dataDir, zkName));
+    }
+
+    private ClusterReader buildSolrSnapshotReader(
+        Path backupDir, List<String> collectionNames, Map<String, String> dataDirByCollection
+    ) {
         var schemas = new LinkedHashMap<String, JsonNode>();
         for (var name : collectionNames) {
-            schemas.put(name, SolrSchemaXmlParser.findAndParse(backupDir.resolve(name)));
+            var dataDir = dataDirByCollection.getOrDefault(name, name);
+            schemas.put(name, SolrSchemaXmlParser.findAndParse(backupDir.resolve(dataDir)));
         }
 
         if (!arguments.dataFilterArgs.indexAllowlist.isEmpty()) {
@@ -162,7 +199,7 @@ public class ClusterReaderExtractor {
         }
 
         log.atInfo().setMessage("Solr snapshot reader: found {} collection(s) in {}").addArgument(schemas.size()).addArgument(backupDir).log();
-        return new SolrSnapshotReader(arguments.sourceVersion, backupDir, schemas);
+        return new SolrSnapshotReader(arguments.sourceVersion, backupDir, schemas, dataDirByCollection);
     }
 
     ClusterReader getRemoteReader(ConnectionContext connection) {

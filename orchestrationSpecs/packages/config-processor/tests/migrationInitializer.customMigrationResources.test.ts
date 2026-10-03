@@ -5,7 +5,7 @@ import { z } from "zod";
 
 describe('migration initializer CRD resource generation', () => {
     it('generates CR resources and UID enrichment script entries with expected names', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
@@ -168,7 +168,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('generates S3 captured traffic resources without creating a capture proxy', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
@@ -253,7 +253,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('labels approval gates with workflow name and generates cleanup script', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
@@ -340,6 +340,49 @@ describe('migration initializer CRD resource generation', () => {
         }
     });
 
+    it('creates the opt-in begin approval gate for the migration run', async () => {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
+            requireBeginApproval: true,
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: { default: { awsRegion: "us-east-2", repoPathUri: "s3://bucket/path" } },
+                        snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
+                    }
+                }
+            },
+            targetClusters: { target: { endpoint: "https://target.example.com" } },
+            snapshotMigrationConfigs: [{
+                fromSource: "source",
+                toTarget: "target",
+                perSnapshotConfig: {
+                    "snap1": [{ metadataMigrationConfig: {} }]
+                }
+            }]
+        };
+
+        const initializer = new MigrationInitializer();
+        const bundle = await initializer.generateMigrationBundle(config, 'my-workflow', {
+            runNumber: 52,
+            timestamp: new Date('2026-05-18T11:44:15Z'),
+        });
+        const beginGate = bundle.customMigrationResources.items.find(
+            (item: any) => item.kind === 'ApprovalGate' && item.metadata.name === 'begin'
+        );
+
+        expect(bundle.workflows.requireBeginApproval).toBe(true);
+        expect(beginGate).toBeDefined();
+        expect(beginGate.metadata.labels).toMatchObject({
+            [MigrationInitializer.APPROVAL_GATE_LABEL_KEY]: 'my-workflow',
+            [MigrationInitializer.WORKFLOW_NAME_LABEL]: 'my-workflow',
+            [MigrationInitializer.RUN_NUMBER_LABEL]: '52',
+            [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'MigrationRun',
+            [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: 'my-workflow-run-52',
+        });
+    });
+
     it('sanitizes MigrationRun names without regex backtracking on slash-heavy workflow names', async () => {
         const initializer = new MigrationInitializer();
         const migrationRun = (initializer as any).migrationRunMetadata({
@@ -352,7 +395,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('omits labels and label-based cleanup when no workflow name provided', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",
@@ -400,7 +443,7 @@ describe('migration initializer CRD resource generation', () => {
     });
 
     it('generates snapshot migration UID enrichment script even without kafka, proxies, or replays', async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
                     endpoint: "https://source.example.com",

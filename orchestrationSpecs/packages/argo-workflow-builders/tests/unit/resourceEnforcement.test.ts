@@ -61,30 +61,19 @@ describe('Resource Enforcement', () => {
         expect(testTemplate.container.resources).toStrictEqual(EXAMPLE_RESOURCES);
     });
 
-    it('should show compile-time error for container without resources', () => {
-        // NOTE: This test demonstrates that TypeScript shows a compile-time error
-        // when resources are missing. The @ts-expect-error directive below confirms
-        // that TypeScript correctly identifies the missing resources at compile-time.
-        //
-        // This is a COMPILE-TIME check using branded types - the code shows
-        // red squiggles in your IDE before you even run the code!
-        
+    it('should reject a container when no source provides resources', () => {
         WorkflowBuilder.create({
             k8sResourceName: 'test-workflow',
             serviceAccountName: 'default'
         })
-        .addTemplate('test', (
-            t => t.addContainer(
-                // @ts-expect-error - addResources() is missing causing compile error
-                c => c
-                    .addImageInfo('nginx:latest', 'IfNotPresent')
-                    .addCommand(['echo', 'hello'])
-                    .addArgs(['world'])
+        .addTemplate('test', t => t
+            // @ts-expect-error - neither the container nor a podSpecPatch supplies resources
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo', 'hello'])
+                .addArgs(['world'])
             )
-        ));
-        
-        // The @ts-expect-error above proves the type system is working correctly
-        // If you remove it, you'll see the red squiggles in your IDE
+        );
         expect(true).toBe(true);
     });
 

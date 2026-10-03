@@ -14,6 +14,7 @@ from console_link.models.cluster import Cluster, SIGV4_SIGNING_ENDPOINT_KEY
 from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
 
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS
+from ..parked_gate_detection import INNER_WORKFLOW_NAME, ParkedGateWatcher
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments  # noqa: F401 (re-exported)
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,8 @@ def _get_capture_proxy_readiness_status(namespace: str) -> tuple[str, str, str, 
     )
 
 
-def _raise_if_cdc_dependency_error(namespace: str, workflow_names: Optional[Sequence[str]] = None) -> None:
+def _raise_if_cdc_dependency_error(namespace: str, workflow_names: Optional[Sequence[str]] = None,
+                                   parked_gate_watcher: Optional[ParkedGateWatcher] = None) -> None:
     phase, message, _, _ = _get_capture_proxy_readiness_status(namespace)
     if phase == "Error":
         _dump_proxy_readiness_diagnostics(namespace)
@@ -165,6 +167,10 @@ def _raise_if_cdc_dependency_error(namespace: str, workflow_names: Optional[Sequ
     _raise_if_kafka_cluster_error(namespace)
     _raise_if_migration_resource_error(namespace)
     _raise_if_argo_workflow_error(namespace, workflow_names)
+    # A CaptureProxy or Replayer whose apply was VAP-denied leaves the workflow
+    # parked, not errored, so nothing above fires and the pod never appears.
+    if parked_gate_watcher:
+        parked_gate_watcher.check()
 
 
 def _raise_if_kafka_cluster_error(namespace: str) -> None:
@@ -425,6 +431,10 @@ def wait_for_replayer_consuming(
 ):
     """Wait until the replayer has joined the Kafka consumer group."""
     logger.info("Waiting for replayer pod readiness before checking Kafka consumer group...")
+    parked_gate_watcher = ParkedGateWatcher(
+        namespace=namespace,
+        workflow_names=[workflow_name, INNER_WORKFLOW_NAME],
+    )
     try:
         wait_for_pod_ready(
             namespace,
@@ -433,6 +443,7 @@ def wait_for_replayer_consuming(
             dependency_error_check=lambda: _raise_if_cdc_dependency_error(
                 namespace,
                 [workflow_name] if workflow_name else None,
+                parked_gate_watcher,
             ),
         )
     except TimeoutError:
@@ -442,7 +453,8 @@ def wait_for_replayer_consuming(
 
     start = time.time()
     while time.time() - start < timeout_seconds:
-        _raise_if_cdc_dependency_error(namespace, [workflow_name] if workflow_name else None)
+        _raise_if_cdc_dependency_error(namespace, [workflow_name] if workflow_name else None,
+                                       parked_gate_watcher)
         try:
             result = subprocess.run(
                 ["kubectl", "logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--tail=100"],

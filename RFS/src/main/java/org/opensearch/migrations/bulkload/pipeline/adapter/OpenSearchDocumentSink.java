@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -116,15 +117,42 @@ public class OpenSearchDocumentSink implements DocumentSink {
         if (transformer == null) {
             return ops;
         }
+        // Snapshot the original (pre-transformation) document bodies, keyed by document id,
+        // so we can re-attach them to the transformed ops below. The transformer round-trips
+        // ops through Maps (dropping the in-memory originalSource), and may reorder, add, or
+        // drop items, so correlation is by id rather than position.
+        Map<String, Map<String, Object>> originalById = new HashMap<>();
+        for (BulkOperationSpec op : ops) {
+            String id = op.getOriginalSource() != null ? documentIdOf(op) : null;
+            if (id != null) {
+                originalById.putIfAbsent(id, op.getOriginalSource());
+            }
+        }
         var asMaps = ops.stream()
             .map(op -> OBJECT_MAPPER.convertValue(op, Map.class))
             .toList();
         var transformed = transformer.transformJson(asMaps);
         if (transformed instanceof List) {
             return ((List<Map<String, Object>>) transformed).stream()
-                .map(item -> OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class))
+                .map(item -> {
+                    BulkOperationSpec op = OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class);
+                    // Re-attach the original source by id. If the transformer changed the id or
+                    // synthesized a new document, no original exists; leave it null and the failed document stream
+                    // will fall back to the transformed document body.
+                    String id = documentIdOf(op);
+                    Map<String, Object> original = id != null ? originalById.get(id) : null;
+                    if (original != null) {
+                        op.setOriginalSource(original);
+                    }
+                    return op;
+                })
                 .collect(Collectors.toList());
         }
         return ops;
+    }
+
+    private static String documentIdOf(BulkOperationSpec op) {
+        var meta = op.getOperation();
+        return meta != null ? meta.getId() : null;
     }
 }

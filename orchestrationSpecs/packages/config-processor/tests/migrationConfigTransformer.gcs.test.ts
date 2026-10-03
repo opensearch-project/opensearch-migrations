@@ -12,7 +12,7 @@ import { z } from "zod";
 describe('GCS repo routing', () => {
     const transformer = new MigrationConfigTransformer();
 
-    const baseGcsConfig: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+    const baseGcsConfig: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
         sourceClusters: {
             gcs_source: {
                 endpoint: "https://gcs-source.example.com",
@@ -79,7 +79,7 @@ describe('GCS repo routing', () => {
     });
 
     it('mixes S3 and GCS repos in the same output arrays', async () => {
-        const mixed: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const mixed: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 s3_source: {
                     endpoint: "https://s3-source.example.com",

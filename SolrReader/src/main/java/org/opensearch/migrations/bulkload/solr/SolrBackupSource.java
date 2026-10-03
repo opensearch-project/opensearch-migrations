@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
@@ -50,6 +51,7 @@ public class SolrBackupSource implements DocumentSource {
 
     private static final String INDEX_DIR_NAME = "index";
     private static final String SEGMENTS_FILE_PREFIX = "segments_";
+    private static final String SEGMENT_DATA_FILE_PREFIX = "_";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Path backupDir;
@@ -236,9 +238,17 @@ public class SolrBackupSource implements DocumentSource {
     }
 
     /**
-     * Read a Lucene index using a MappedDirectory (for SolrCloud UUID backups).
+     * Read a Lucene index using a MappedDirectory (for SolrCloud backups with shard metadata).
+     * Identity mappings (key == value) are safe on any Solr version and fall through to the
+     * standard reader path. Actual UUID remappings require Solr 8.9+ (SIP-12) and use
+     * IndexReader9's MappedDirectory support.
      */
     private Flux<Document> readLuceneIndexMapped(Path indexDir, Map<String, String> fileNameMapping, long startingDocOffset) {
+        boolean hasUuidRemapping = fileNameMapping.entrySet().stream()
+            .anyMatch(e -> !e.getKey().equals(e.getValue()));
+        if (!hasUuidRemapping) {
+            return readLuceneIndex(indexDir, startingDocOffset);
+        }
         if (solrMajorVersion < 8) {
             return Flux.error(new IllegalStateException(
                 "SolrCloud UUID-mapped (incremental) backups are not supported for Solr "
@@ -248,7 +258,6 @@ public class SolrBackupSource implements DocumentSource {
             var fsDir = FSDirectory.open(indexDir);
             var mappedDir = new MappedDirectory(fsDir, fileNameMapping);
 
-            // Find the segments file from the mapping
             var segmentsFile = fileNameMapping.keySet().stream()
                 .filter(name -> name.startsWith(SEGMENTS_FILE_PREFIX))
                 .findFirst()
@@ -256,6 +265,9 @@ public class SolrBackupSource implements DocumentSource {
 
             var reader = new IndexReader9(indexDir, false, null);
             var directoryReader = reader.getReader(mappedDir, segmentsFile);
+
+            assertNoOrphanedSegmentData(indexDir, directoryReader.maxDoc(), segmentsFile,
+                () -> mappedSegmentDataFiles(fileNameMapping));
 
             log.atInfo().setMessage("Reading Solr backup (mapped): {} docs in {} segments from {}")
                 .addArgument(directoryReader.maxDoc()).addArgument(directoryReader.leaves().size()).addArgument(indexDir).log();
@@ -274,6 +286,9 @@ public class SolrBackupSource implements DocumentSource {
             var reader = newLuceneReader(indexDir);
             var segmentsFile = findSegmentsFile(indexDir);
             var directoryReader = reader.getReader(segmentsFile);
+
+            assertNoOrphanedSegmentData(indexDir, directoryReader.maxDoc(), segmentsFile,
+                () -> listSegmentDataFiles(indexDir));
 
             log.atInfo().setMessage("Reading Solr backup: {} docs in {} segments from {}")
                 .addArgument(directoryReader.maxDoc()).addArgument(directoryReader.leaves().size()).addArgument(indexDir).log();
@@ -299,6 +314,50 @@ public class SolrBackupSource implements DocumentSource {
                         reader, docIdx, true, segDocBase, DocumentChangeType.INDEX, mappingContext))))
             .map(SolrBackupSource::toDocument)
             .doFinally(s -> scheduler.dispose());
+    }
+
+    /**
+     * Segment data unreferenced by the commit point reads as zero documents and no error.
+     * An empty collection has no segment data, so both conditions are required to throw.
+     *
+     * @throws SolrBackupReadException if the backup has segment data but no documents
+     */
+    private static void assertNoOrphanedSegmentData(Path indexDir, int maxDoc, String segmentsFile,
+                                                    Supplier<List<String>> segmentDataFiles) {
+        if (maxDoc > 0) {
+            return;
+        }
+        var dataFiles = segmentDataFiles.get();
+        if (dataFiles.isEmpty()) {
+            return;
+        }
+        throw new SolrBackupReadException(
+            "Backup at " + indexDir + " holds segment data (" + dataFiles.size() + " files, e.g. "
+                + dataFiles.get(0) + ") but its commit point " + segmentsFile + " enumerates no"
+                + " segments, so this shard would migrate zero documents. The backup is"
+                + " inconsistent: segment data was copied without a matching commit point."
+                + " A common cause is the Solr 6/7 SolrCloud BACKUP defect SOLR-9091 — if the"
+                + " source is Solr 6 or 7, re-take the backup against a named commit created with"
+                + " snapshotscli.sh and pass commitName to the BACKUP command.");
+    }
+
+    private static List<String> listSegmentDataFiles(Path dir) {
+        try (var stream = Files.list(dir)) {
+            return stream.map(p -> p.getFileName().toString())
+                .filter(name -> name.startsWith(SEGMENT_DATA_FILE_PREFIX))
+                .sorted()
+                .toList();
+        } catch (IOException e) {
+            throw new SolrBackupReadException("Failed to list directory: " + dir, e);
+        }
+    }
+
+    /** Mapped backups hold UUID filenames on disk, so the Lucene names come from the mapping keys. */
+    private static List<String> mappedSegmentDataFiles(Map<String, String> fileNameMapping) {
+        return fileNameMapping.keySet().stream()
+            .filter(name -> name.startsWith(SEGMENT_DATA_FILE_PREFIX))
+            .sorted()
+            .toList();
     }
 
     private static String findSegmentsFile(Path dir) {

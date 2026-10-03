@@ -444,8 +444,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceVersion", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addOptionalInput("sourceConfig", c =>
-            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
@@ -455,7 +453,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("workloadIdentityChecksum", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
-        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c =>
@@ -494,10 +491,9 @@ export const FullMigration = WorkflowBuilder.create({
                     }),
                 {when: {templateExp: expr.and(
                     expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
-                    expr.not(expr.dig(
+                    expr.not(expr.get(
                         expr.deserializeRecord(b.inputs.documentBackfillConfig),
-                        ["skipApproval"],
-                        false
+                        "skipApproval"
                     ))
                 )}}
             )
@@ -588,29 +584,26 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
                         sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
                         targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
-                        sourceConfig: expr.serialize(expr.makeDict({
-                            label: expr.get(snapshotMigrationConfig, "sourceLabel"),
-                            version: expr.get(snapshotMigrationConfig, "sourceVersion"),
-                            endpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
-                            allowInsecure: expr.dig(snapshotMigrationConfig, ["sourceAllowInsecure"], false),
-                            authConfig: expr.dig(snapshotMigrationConfig, ["sourceAuth"], expr.makeDict({}))
-                        })),
                         snapshotConfig: expr.serialize(expr.makeDict({
                             snapshotName: resolvedSnapshotName,
                             label: expr.get(snapshotRepoConfig, "label"),
                             repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
                         })),
                         migrationLabel: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        metadataMigrationConfig: expr.serialize(expr.dig(
-                            snapshotMigrationConfig,
-                            ["metadataMigrationConfig"],
-                            expr.makeDict({}) as any
-                        )),
-                        documentBackfillConfig: expr.serialize(expr.dig(
-                            snapshotMigrationConfig,
-                            ["documentBackfillConfig"],
-                            expr.makeDict({}) as any
-                        )),
+                        metadataMigrationConfig: expr.ternary(
+                            expr.hasKey(snapshotMigrationConfig, "metadataMigrationConfig"),
+                            expr.cast(expr.serialize(
+                                expr.getLoose(snapshotMigrationConfig, "metadataMigrationConfig")
+                            )).to<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>(),
+                            expr.empty<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>()
+                        ),
+                        documentBackfillConfig: expr.ternary(
+                            expr.hasKey(snapshotMigrationConfig, "documentBackfillConfig"),
+                            expr.cast(expr.serialize(
+                                expr.getLoose(snapshotMigrationConfig, "documentBackfillConfig")
+                            )).to<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>(),
+                            expr.empty<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>()
+                        ),
                         crdName: b.inputs.resourceName,
                         // Use the apiserver-assigned UID emitted by reconcileSnapshotMigrationResource
                         // (rather than b.inputs.resourceUid, which may be a placeholder like "imported"
@@ -620,7 +613,6 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
                         checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
                         workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
                     });
@@ -772,7 +764,12 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
-        .addSteps(b => b.addStepGroup(g => g
+        .addSteps(b => b
+            .addStep("approveBegin", ResourceManagement, "waitForUserApproval", c =>
+                    c.register({resourceName: expr.literal("begin")}),
+                {when: {templateExp: expr.get(expr.deserializeRecord(b.inputs.config), "requireBeginApproval")}}
+            )
+            .addStepGroup(g => g
                 .addStep("initializeRunMetadata", INTERNAL, "initializeRunMetadata", c =>
                     c.register({})
                 )

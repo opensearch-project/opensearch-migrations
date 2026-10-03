@@ -3,7 +3,7 @@
  *
  * Delegates to 'pipenv run app --delete-only', which runs the
  * customer-facing sequence (workflow reset -> helm uninstall -> PVCs ->
- * namespace). Call this FIRST. Safe for minikube and EKS.
+ * namespace). Call this FIRST. Safe for kind and EKS.
  * See libraries/testAutomation/testAutomation/test_runner.py::cleanup_deployment.
  *
  * Uses sh(returnStatus:) so Python failures don't cascade past the rest

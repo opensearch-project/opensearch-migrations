@@ -1,5 +1,6 @@
 import logging
 import subprocess
+from typing import Callable, List, Tuple
 
 import pytest
 
@@ -71,33 +72,110 @@ def setup_and_teardown(
 
     #-----Teardown-----
     logger.info("Performing teardown...")
+    _perform_teardown(
+        request=request,
+        keep_workflows=keep_workflows,
+        skip_workflow_reset=skip_workflow_reset,
+        dump_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
+        test_case=test_case,
+    )
+
+
+def _perform_teardown(request, keep_workflows, skip_workflow_reset, dump_all_workflow_output_artifacts,
+                      test_case: MATestBase) -> None:
+    """Dump diagnostics on failure, quiesce the workflow, then delete/reset/clean up.
+
+    Those steps are independent, and none may preempt the others — least of all the dump. On a
+    failed test the dump is the only record of *why*, and it cannot be reconstructed once the
+    workflow has been stopped and the namespace reset. A workflow parked on an unexpected
+    approval gate is exactly that hazard: it stays 'Running' forever, so the quiesce step's gate
+    check raises, and while it ran ahead of the dump it took the dump down with it. Each step is
+    now isolated, and any suppressed error is re-raised at the end so a broken teardown is still
+    reported rather than silently ignored.
+    """
+    teardown_errors: List[Tuple[str, BaseException]] = []
+
+    def teardown_step(description: str, step: Callable[[], None]) -> None:
+        try:
+            step()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as e:
+            # BaseException rather than Exception: pytest.fail() raises Failed, which derives
+            # from BaseException, and _run_workflow_reset uses it. An interrupt still aborts.
+            logger.error("Teardown step '%s' failed: %s", description, e, exc_info=True)
+            teardown_errors.append((description, e))
+
+    dumped = False
+
+    def dump_diagnostics(reason: str) -> None:
+        nonlocal dumped
+        if dumped:
+            return
+        dumped = True
+        logger.info(f"{reason} - printing workflow details for {test_case.workflow_name}")
+        # Stepped individually: save_namespace_diagnostics writes the artifacts Jenkins
+        # archives, so an earlier print failing must not cost us the saved copy.
+        teardown_step("print workflow status", lambda: test_case.argo_service.print_workflow_status(
+            workflow_name=test_case.workflow_name))
+        teardown_step("print migration resource status",
+                      test_case.argo_service.print_migration_resource_status)
+        teardown_step("print workflow details", lambda: test_case.argo_service.print_workflow_details(
+            workflow_name=test_case.workflow_name))
+        teardown_step("print namespace diagnostics", lambda: test_case.argo_service.print_namespace_diagnostics(
+            workflow_name=test_case.workflow_name,
+            include_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
+        ))
+        teardown_step("save namespace diagnostics", lambda: test_case.argo_service.save_namespace_diagnostics(
+            "./logs",
+            workflow_name=test_case.workflow_name,
+            include_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
+        ))
+
     if test_case.workflow_name:
-        status_result = test_case.argo_service.get_workflow_status(workflow_name=test_case.workflow_name)
-        if status_result.value.get("phase", "") not in ("Succeeded", "Failed", "Error", "Stopped", "Terminated"):
-            test_case.argo_service.stop_workflow(workflow_name=test_case.workflow_name)
-            test_case.argo_service.wait_for_ending_phase(workflow_name=test_case.workflow_name)
-        # On success the full workflow-status JSON and migration-resource YAML are just noise.
-        # Only dump them (along with the heavier details/diagnostics) when the test failed.
+        # Dump BEFORE quiescing, for two reasons. Nothing upstream can then preempt it, and a
+        # workflow that hasn't been stopped yet still shows the state that matters: the suspended
+        # node it is parked on, the gate name, which resource's apply was denied. stop_workflow
+        # tears that down. On the common failure the workflow has already reached a terminal
+        # phase, so quiesce is a no-op and the ordering makes no difference either way.
+        # On success the full workflow-status JSON and migration-resource YAML are just noise,
+        # which is why this is conditional at all.
         if request.node.rep_call and request.node.rep_call.failed:
-            logger.info(f"Test failed - printing workflow details for {test_case.workflow_name}")
-            test_case.argo_service.print_workflow_status(workflow_name=test_case.workflow_name)
-            test_case.argo_service.print_migration_resource_status()
-            test_case.argo_service.print_workflow_details(workflow_name=test_case.workflow_name)
-            test_case.argo_service.print_namespace_diagnostics(
-                workflow_name=test_case.workflow_name,
-                include_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
-            )
-            test_case.argo_service.save_namespace_diagnostics(
-                "./logs",
-                workflow_name=test_case.workflow_name,
-                include_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
-            )
+            dump_diagnostics("Test failed")
+        teardown_step("stop workflow and wait for it to end", lambda: _quiesce_workflow(test_case))
+        # A workflow that will not stop is a real defect even when every assertion passed —
+        # parking on an unapprovable gate is exactly that — and teardown is the last moment
+        # the namespace still holds the evidence.
+        if teardown_errors:
+            dump_diagnostics("Teardown failed")
         if not keep_workflows:
-            test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
+            teardown_step("delete workflow", lambda: test_case.argo_service.delete_workflow(
+                workflow_name=test_case.workflow_name))
     # Reset all migration CRDs before test-specific cleanup unless the outer runner is preserving the run.
     if not skip_workflow_reset:
-        _run_workflow_reset()
-    test_case.cleanup()
+        teardown_step("reset migration resources", _run_workflow_reset)
+    teardown_step("test case cleanup", test_case.cleanup)
+
+    if teardown_errors:
+        # A single error is re-raised as-is so callers and tests can still match on its type
+        # (a parked gate surfaces as ParkedApprovalGateError, not a generic wrapper).
+        if len(teardown_errors) == 1:
+            raise teardown_errors[0][1]
+        summary = "; ".join(f"{description}: {type(e).__name__}: {e}" for description, e in teardown_errors)
+        raise RuntimeError(f"{len(teardown_errors)} teardown steps failed: {summary}") from teardown_errors[0][1]
+
+
+def _quiesce_workflow(test_case: MATestBase) -> None:
+    """Stop the workflow and wait for it to reach a terminal phase.
+
+    Skipped when it has already ended. Raises ParkedApprovalGateError if the workflow is
+    parked on an approval gate the test never intended to sit on, since it would otherwise
+    never reach an ending phase at all.
+    """
+    status_result = test_case.argo_service.get_workflow_status(workflow_name=test_case.workflow_name)
+    if status_result.value.get("phase", "") not in ("Succeeded", "Failed", "Error", "Stopped", "Terminated"):
+        test_case.argo_service.stop_workflow(workflow_name=test_case.workflow_name)
+        test_case.argo_service.wait_for_ending_phase(workflow_name=test_case.workflow_name)
 
 
 def record_test(test_case: MATestBase, record_data) -> None:

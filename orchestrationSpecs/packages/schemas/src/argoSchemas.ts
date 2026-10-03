@@ -7,9 +7,11 @@ import {
     KAFKA_CLUSTER_CREATION_CONFIG,
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
+    OTEL_EXPORT_CONTROL_FIELD_MASK,
     REPO_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
     SOLR_COLLECTIONS_OPTION,
+    SOLR_TOPOLOGY_OPTION,
     SOURCE_CLUSTER_CONFIG,
     TARGET_CLUSTER_CONFIG,
     USER_CREATE_SNAPSHOT_OPTIONS,
@@ -159,6 +161,8 @@ export const CLUSTER_CONNECTION_IDENTITY = z.object({
     version: z.string(),
     endpoint: z.string(),
     allowInsecure: z.boolean(),
+    // Solr sources only; "" elsewhere.
+    solrContextPath: z.string(),
     authType: z.string(),
     authBasicSecretName: z.string(),
     authSigv4Region: z.string(),
@@ -174,7 +178,10 @@ export const COMPLETE_SNAPSHOT_CONFIG =
     }));
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true}).extend({
+    dropRefinements(USER_CREATE_SNAPSHOT_OPTIONS).omit({
+        snapshotPrefix: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
+    }).extend({
         mode: z.enum(["create", "import"]).default("create").optional()
             .describe("Workflow-internal snapshot/backup mode. 'create' (default) produces a new snapshot or " +
                 "backup of the source. 'import' is used only for Solr external-backup prepare: it runs " +
@@ -185,6 +192,8 @@ export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
         // than in USER_CREATE_SNAPSHOT_OPTIONS so the user-facing ES/OS snapshot schema does not
         // expose a Solr-only field (ES/OS users use indexAllowlist; Solr users use collectionAllowlist).
         solrCollections: SOLR_COLLECTIONS_OPTION.changeRestriction('impossible'),
+        // Solr-only, folded in by the config transformer from the user-facing `topology`.
+        solrTopology: SOLR_TOPOLOGY_OPTION.changeRestriction('impossible'),
     })
 );
 export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [
@@ -213,11 +222,18 @@ export const DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG =
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_METADATA_OPTIONS).omit({
         metadataTransforms: true,
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
+    }).extend({
+        ...FILE_SOURCE_RESOLVED_FIELDS,
+        skipEvaluateApproval: z.boolean(),
+        skipMigrateApproval: z.boolean(),
+    })
 );
+
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "resources",
     "skipEvaluateApproval",
     "skipMigrateApproval",
     "fileSourceVolumes",
@@ -227,7 +243,11 @@ export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
         documentTransforms: true,
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
+    }).extend({
+        ...FILE_SOURCE_RESOLVED_FIELDS,
+        skipApproval: z.boolean(),
+    })
 );
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "podReplicas",
@@ -257,7 +277,9 @@ const PROXY_RESOLVED_FIELDS = {
 } as const;
 
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.safeExtend(PROXY_RESOLVED_FIELDS)
+    dropRefinements(USER_PROXY_OPTIONS)
+        .omit(OTEL_EXPORT_CONTROL_FIELD_MASK)
+        .extend(PROXY_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
     "loggingConfigurationOverrideConfigMap",
@@ -274,9 +296,9 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
 
 // Resolved-only keys are the fields PROXY_RESOLVED_FIELDS adds over the user
 // schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). The CaptureProxy
-// CRD is projected from USER_PROXY_OPTIONS, so these are the top-level keys the CRD
-// does not define and that must be stripped from the CR. Derived from the shape so
-// the set stays in sync as PROXY_RESOLVED_FIELDS changes.
+// CRD is projected from the user proxy fields after dropping user-only OTEL controls,
+// so these are the additional top-level keys that must be stripped from the CR.
+// Derived from the shape so the set stays in sync as PROXY_RESOLVED_FIELDS changes.
 export const ARGO_PROXY_RESOLVED_ONLY_KEYS =
     Object.keys(PROXY_RESOLVED_FIELDS) as (keyof typeof PROXY_RESOLVED_FIELDS)[];
 
@@ -292,6 +314,7 @@ export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_REPLAYER_OPTIONS).omit({
         requestTransforms: true,
         tupleTransforms: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = [
@@ -384,7 +407,7 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     // When true, the proxy-setup approval gate is auto-skipped. The config
     // processor resolves this from proxy-level skipApproval first, then global
     // skipApprovals, then false.
-    skipApproval: z.boolean().default(false),
+    skipApproval: z.boolean(),
     resourceUid: z.string(),
 });
 
@@ -472,6 +495,7 @@ function makeResourceUidOptional<
 }
 
 export const ARGO_MIGRATION_CONFIG = z.object({
+    requireBeginApproval: z.boolean(),
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
     proxies: z.array(DENORMALIZED_PROXY_CONFIG).default([]),
     s3TrafficLoaders: z.array(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG).default([]),

@@ -32,10 +32,9 @@ def call(String jobName) {
         case 'main-solutions-cfn-create-vpc-test':    return '@hourly'
         case 'main-eks-byos-integ-test':              return 'H H(0-23)/6 * * *'
         case 'main-eks-aoss-search-integ-test':       return 'H H(0-23)/6 * * *'
-        case 'main-eks-aoss-timeseries-integ-test':   return 'H H(0-23)/6 * * *'
-        case 'main-eks-aoss-vector-integ-test':       return 'H H(0-23)/6 * * *'
         case 'main-eks-cdc-full-e2e-test':            return 'H H(0-23)/6 * * *'
         case 'main-eks-cdc-aoss-e2e-test':            return 'H H(0-23)/6 * * *'
+        case 'main-eks-cdc-k6-load-test':             return 'H H(0-23)/6 * * *'
     }
     return ''
 }

@@ -4,6 +4,9 @@
 
 This directory contains Jenkins pipeline "cover" files that serve as entry points for migration integration tests. These files are thin wrappers that load shared library functions from the `vars/` directory.
 
+Source build stages use a shared Maven/Gradle dependency cache. See
+[provisioning, configuration, validation, and rollback](../DEPENDENCY_CACHE.md).
+
 ## Job Name Override Pattern
 
 ### Purpose
@@ -86,6 +89,7 @@ functionName(jobName: jobNameOverride ?: null)
 | eksBYOSIntegTestCover.groovy | eksBYOSIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCdcAossFullE2eIntegTestCover.groovy | eksCdcAossIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCdcFullE2eIntegTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcK6LoadTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCreateVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksImportVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksIntegTestCover.groovy | eksIntegPipeline | JOB_NAME_OVERRIDE |
@@ -103,6 +107,8 @@ functionName(jobName: jobNameOverride ?: null)
 | rfsDefaultE2ETestCover.groovy | rfsDefaultE2ETest | JOB_NAME_OVERRIDE |
 | solutionsCFNTestCover.groovy | solutionsCFNTest | JOB_NAME_OVERRIDE |
 
+The time-series and vector AOSS cover files are retained as manual compatibility entry points. Their periodic schedules are disabled; the search cover file runs the combined three-collection suite.
+
 ### GitHub Actions Integration
 
 The `.github/workflows/jenkins_tests.yml` workflow handles both PR and post-merge triggers using a single file. It uses `github.event_name == 'push'` to select `main-*` prefixed job names for pushes to `main`, and `pr-*` prefixed job names for pull requests. Periodic cadences are separate and defined in code (see [Periodic Cron Schedules](#periodic-cron-schedules)).
@@ -114,13 +120,26 @@ Jobs triggered:
 - `k8s-local-opensearch1x-test` (PR and main)
 - `k8s-local-solr8x-test` (PR and main)
 - `k8s-local-solr-other-test` (PR and main)
+- `docker-compose-e2e-test` (PR and main)
 - `eks-integ-test` (PR with `run-eks-tests` label, and main)
-- `eks-cdc-*` (PR with `run-eks-tests` label, and main)
-- `eks-aoss-*` (PR with `run-aoss-tests` label, and main)
+- `eks-cdc-*` (PR with `run-eks-tests` label, and main). This includes `eks-cdc-k6-load-test`, which
+  runs test `0080` — a CDC migration whose traffic comes from a k6 load test. The test runner installs
+  the standalone k6LoadTest chart for any `008x` ID, so the job needs no extra flag
+- `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three collection types)
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
+- `eks-full-e2e-isolated-vpc-test` (PR with `run-eks-isolated-tests` label, and main)
 
 This ensures PR-triggered jobs don't conflict with post-merge jobs using the same pipeline code.
+
+#### Running label-gated tests on a PR
+
+To run the label-gated tests on a PR (e.g. while reviewing it), add the matching `run-*` label:
+
+- The label's jobs start immediately. The always-on jobs are not re-run, and no in-progress job is cancelled.
+- If that label's jobs are already running for the PR, the new jobs wait and run after the current ones finish.
+- Labels that don't start with `run-` (e.g. `dependencies` added by Dependabot) don't start any jobs.
+- Once a label is on the PR, its jobs also run on every later push.
 
 ### Jenkins Folder Structure
 

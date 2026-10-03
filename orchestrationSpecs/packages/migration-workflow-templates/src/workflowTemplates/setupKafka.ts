@@ -20,6 +20,7 @@ import {
 } from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 type KafkaConfig = z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>;
 const KAFKA_CLUSTER_LABEL = "migrations.opensearch.org/kafka-cluster";
@@ -123,12 +124,28 @@ function makeDeployKafkaNodePool(args: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
                 "migrations.opensearch.org/run-number": makeStringTypeProxy(args.migrationRunNumber),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(args.clusterName),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
             }
         },
-        spec: makeDirectTypeProxy(expr.mergeDicts(
-            expr.deserializeRecord(args.nodePoolSpec),
-            expr.makeDict({resources: expr.templateValue(DEFAULT_RESOURCES.KAFKA_BROKER)})
-        ))
+        spec: makeDirectTypeProxy(
+            expr.mergeDicts(
+                expr.mergeDicts(
+                    expr.makeDict({
+                        template: expr.makeDict({
+                            pod: expr.makeDict({
+                                metadata: expr.makeDict({
+                                    labels: expr.makeDict({
+                                        [MIGRATION_RESOURCE_UID_LABEL]: args.ownerUid,
+                                    }),
+                                }),
+                            }),
+                        }),
+                    }),
+                    expr.deserializeRecord(args.nodePoolSpec)
+                ),
+                expr.makeDict({resources: expr.templateValue(DEFAULT_RESOURCES.KAFKA_BROKER)})
+            )
+        )
     };
 }
 
@@ -191,6 +208,7 @@ function makeDeployKafkaClusterKraftManifest(args: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
                 "migrations.opensearch.org/run-number": makeStringTypeProxy(args.migrationRunNumber),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(args.clusterName),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
             },
             annotations: {
                 "strimzi.io/node-pools": "enabled",
@@ -206,7 +224,16 @@ function makeDeployKafkaClusterKraftManifest(args: {
             // SCRAM secret. See DEFAULT_RESOURCES.ENTITY_OPERATOR.
             entityOperator: {
                 topicOperator: {resources: DEFAULT_RESOURCES.ENTITY_OPERATOR},
-                userOperator: {resources: DEFAULT_RESOURCES.ENTITY_OPERATOR}
+                userOperator: {resources: DEFAULT_RESOURCES.ENTITY_OPERATOR},
+                template: {
+                    pod: {
+                        metadata: {
+                            labels: {
+                                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
+                            },
+                        },
+                    },
+                },
             }
         }
     };

@@ -1,8 +1,10 @@
 package org.opensearch.migrations.bulkload.solr;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailure;
 
@@ -12,6 +14,12 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import reactor.test.StepVerifier;
+import shadow.lucene9.org.apache.lucene.analysis.core.KeywordAnalyzer;
+import shadow.lucene9.org.apache.lucene.document.Field;
+import shadow.lucene9.org.apache.lucene.document.StringField;
+import shadow.lucene9.org.apache.lucene.index.IndexWriter;
+import shadow.lucene9.org.apache.lucene.index.IndexWriterConfig;
+import shadow.lucene9.org.apache.lucene.store.FSDirectory;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -260,6 +268,197 @@ class SolrBackupSourceTest {
                 && t.getMessage().contains("incremental")
                 && t.getMessage().contains("Solr 7"))
             .verify();
+    }
+
+    /**
+     * SOLR-9091 was reported against Solr 6 Cloud, and each major dispatches to a different
+     * Lucene reader (6 → IndexReader6, 7 → IndexReader7, 8/9 → IndexReader9), so each fixture is
+     * written with the matching Lucene version rather than assuming one stands in for the others.
+     */
+    @ParameterizedTest(name = "Solr {0}")
+    @ValueSource(ints = {6, 7, 8})
+    void orphanedSegmentDataWithEmptyCommitFailsLoudly(int solrMajor) throws IOException {
+        var indexDir = tempDir.resolve("idx");
+        writeIndex(indexDir, 3, solrMajor);
+        replaceCommitWithEmptyOne(indexDir, solrMajor);
+
+        var source = new SolrBackupSource(indexDir, "test", emptySchema(), solrMajor);
+        var partition = source.listPartitions("test").get(0);
+
+        var ex = assertThrows(SolrBackupReadException.class,
+            () -> source.readDocuments(partition, 0));
+        assertThat(ex, instanceOf(SnapshotReadFailure.class));
+        assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("SOLR-9091"));
+        assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("commitName"));
+    }
+
+    @ParameterizedTest(name = "Solr {0}")
+    @ValueSource(ints = {6, 7, 8})
+    void genuinelyEmptyIndexReadsAsZeroDocuments(int solrMajor) throws IOException {
+        // An empty collection is legal. Only orphaned segment data indicates a broken commit,
+        // so maxDoc()==0 on its own must not fail.
+        var indexDir = tempDir.resolve("idx");
+        writeIndex(indexDir, 0, solrMajor);
+
+        var source = new SolrBackupSource(indexDir, "test", emptySchema(), solrMajor);
+        var partition = source.listPartitions("test").get(0);
+
+        StepVerifier.create(source.readDocuments(partition, 0)).verifyComplete();
+    }
+
+    @ParameterizedTest(name = "Solr {0}")
+    @ValueSource(ints = {6, 7, 8})
+    void healthyIndexReadsAllDocuments(int solrMajor) throws IOException {
+        var indexDir = tempDir.resolve("idx");
+        writeIndex(indexDir, 3, solrMajor);
+
+        var source = new SolrBackupSource(indexDir, "test", emptySchema(), solrMajor);
+        var partition = source.listPartitions("test").get(0);
+
+        StepVerifier.create(source.readDocuments(partition, 0))
+            .expectNextCount(3)
+            .verifyComplete();
+    }
+
+    @Test
+    void mappedBackupWithOrphanedSegmentDataFailsLoudly() throws IOException {
+        var indexDir = tempDir.resolve("index");
+        var mapping = writeUuidMappedIndex(indexDir, 3, true);
+
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 9);
+        var partition = new SolrShardPartition("test", "shard1", indexDir, mapping);
+
+        var ex = assertThrows(SolrBackupReadException.class,
+            () -> source.readDocuments(partition, 0));
+        assertThat(ex, instanceOf(SnapshotReadFailure.class));
+        assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("SOLR-9091"));
+    }
+
+    @Test
+    void mappedBackupOfGenuinelyEmptyIndexReadsAsZeroDocuments() throws IOException {
+        // No _N.* entries in the mapping means there is no orphaned data to complain about.
+        var indexDir = tempDir.resolve("index");
+        var mapping = writeUuidMappedIndex(indexDir, 0, false);
+
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 9);
+        var partition = new SolrShardPartition("test", "shard1", indexDir, mapping);
+
+        StepVerifier.create(source.readDocuments(partition, 0)).verifyComplete();
+    }
+
+    @Test
+    void healthyMappedBackupReadsAllDocuments() throws IOException {
+        var indexDir = tempDir.resolve("index");
+        var mapping = writeUuidMappedIndex(indexDir, 3, false);
+
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 9);
+        var partition = new SolrShardPartition("test", "shard1", indexDir, mapping);
+
+        StepVerifier.create(source.readDocuments(partition, 0))
+            .expectNextCount(3)
+            .verifyComplete();
+    }
+
+    /**
+     * Builds the SolrCloud incremental (SIP-12) layout: physical files renamed to UUIDs plus a
+     * logical-to-physical mapping. With {@code breakCommit}, the mapped segments_N is an empty
+     * commit, so the UUID data files end up orphaned exactly as in the direct-path case.
+     */
+    private Map<String, String> writeUuidMappedIndex(Path indexDir, int docCount, boolean breakCommit)
+            throws IOException {
+        var staging = tempDir.resolve("staging");
+        writeIndex(staging, docCount, 9);
+        if (breakCommit) {
+            replaceCommitWithEmptyOne(staging, 9);
+        }
+
+        Files.createDirectories(indexDir);
+        var mapping = new java.util.LinkedHashMap<String, String>();
+        try (var files = Files.list(staging)) {
+            for (var file : files.toList()) {
+                var logicalName = file.getFileName().toString();
+                if (logicalName.equals("write.lock")) {
+                    continue;
+                }
+                var uuid = java.util.UUID.nameUUIDFromBytes(logicalName.getBytes(StandardCharsets.UTF_8)).toString();
+                Files.copy(file, indexDir.resolve(uuid));
+                mapping.put(logicalName, uuid);
+            }
+        }
+        return mapping;
+    }
+
+    /** Writes a real single-segment index with the Lucene version the given Solr major uses. */
+    private static void writeIndex(Path indexDir, int docCount, int solrMajor) throws IOException {
+        Files.createDirectories(indexDir);
+        switch (solrMajor) {
+            case 6 -> writeLucene6Index(indexDir, docCount);
+            case 7 -> writeLucene7Index(indexDir, docCount);
+            default -> writeLucene9Index(indexDir, docCount);
+        }
+    }
+
+    private static void writeLucene6Index(Path indexDir, int docCount) throws IOException {
+        try (var dir = shadow.lucene6.org.apache.lucene.store.FSDirectory.open(indexDir);
+             var writer = new shadow.lucene6.org.apache.lucene.index.IndexWriter(dir,
+                 new shadow.lucene6.org.apache.lucene.index.IndexWriterConfig(
+                     new shadow.lucene6.org.apache.lucene.analysis.core.KeywordAnalyzer()))) {
+            for (int i = 0; i < docCount; i++) {
+                var doc = new shadow.lucene6.org.apache.lucene.document.Document();
+                doc.add(new shadow.lucene6.org.apache.lucene.document.StringField(
+                    "id", "doc" + i, shadow.lucene6.org.apache.lucene.document.Field.Store.YES));
+                writer.addDocument(doc);
+            }
+            writer.commit();
+        }
+    }
+
+    private static void writeLucene7Index(Path indexDir, int docCount) throws IOException {
+        try (var dir = shadow.lucene7.org.apache.lucene.store.FSDirectory.open(indexDir);
+             var writer = new shadow.lucene7.org.apache.lucene.index.IndexWriter(dir,
+                 new shadow.lucene7.org.apache.lucene.index.IndexWriterConfig(
+                     new shadow.lucene7.org.apache.lucene.analysis.core.KeywordAnalyzer()))) {
+            for (int i = 0; i < docCount; i++) {
+                var doc = new shadow.lucene7.org.apache.lucene.document.Document();
+                doc.add(new shadow.lucene7.org.apache.lucene.document.StringField(
+                    "id", "doc" + i, shadow.lucene7.org.apache.lucene.document.Field.Store.YES));
+                writer.addDocument(doc);
+            }
+            writer.commit();
+        }
+    }
+
+    private static void writeLucene9Index(Path indexDir, int docCount) throws IOException {
+        try (var dir = FSDirectory.open(indexDir);
+             var writer = new IndexWriter(dir, new IndexWriterConfig(new KeywordAnalyzer()))) {
+            for (int i = 0; i < docCount; i++) {
+                var doc = new shadow.lucene9.org.apache.lucene.document.Document();
+                doc.add(new StringField("id", "doc" + i, Field.Store.YES));
+                writer.addDocument(doc);
+            }
+            writer.commit();
+        }
+    }
+
+    /**
+     * Reproduces SOLR-9091: overwrite the index's segments_N with a commit that enumerates no
+     * segments, leaving the _N.* data files with nothing referencing them.
+     */
+    private void replaceCommitWithEmptyOne(Path indexDir, int solrMajor) throws IOException {
+        var emptyDir = tempDir.resolve("empty-commit");
+        writeIndex(emptyDir, 0, solrMajor);
+
+        var emptyCommit = findSegmentsFile(emptyDir);
+        var realCommit = findSegmentsFile(indexDir);
+        Files.copy(emptyCommit, realCommit, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static Path findSegmentsFile(Path dir) throws IOException {
+        try (var files = Files.list(dir)) {
+            return files.filter(p -> p.getFileName().toString().startsWith("segments_"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("no segments_N in " + dir));
+        }
     }
 
     private static com.fasterxml.jackson.databind.JsonNode emptySchema() {

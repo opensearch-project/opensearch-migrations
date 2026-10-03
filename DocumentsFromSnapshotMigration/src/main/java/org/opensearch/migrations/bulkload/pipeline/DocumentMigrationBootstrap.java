@@ -20,11 +20,13 @@ import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -137,13 +139,19 @@ public class DocumentMigrationBootstrap {
         }
     }
 
-    private CompletionStatus runPartitionMigration(
+    // Package-private for end-to-end testing of the per-batch failed document stream flush gating (see
+    // DocumentMigrationBootstrapFailedDocumentStreamE2ETest); the public entry point is migrateOneShard.
+    CompletionStatus runPartitionMigration(
         IWorkCoordinator.WorkItemAndDuration workItem,
         PipelineConfig pipelineConfig,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
         var wi = workItem.getWorkItem();
         log.info("Pipeline acquired work item: {}", wi);
+
+        // Stamp failed document stream records emitted while processing this shard with its canonical work-item id
+        // (index + shard + checkpoint) so each terminal failure traces back to the work item.
+        targetClient.setFailedDocumentStreamWorkItem(wi.toString());
 
         if (workItemTimeProvider != null) {
             workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
@@ -174,6 +182,12 @@ public class DocumentMigrationBootstrap {
                     workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
                 }
             })
+            // Flush this batch's failures to S3 before its cursor advances the watermark; concatMap
+            // keeps it ordered and serial. Reactive, not .block(): onNext may run on a reactor-netty
+            // event loop thread where blocking throws.
+            .concatMap(cursor ->
+                flushFailedDocumentStreamForBatch(targetClient.getFailedDocumentStreamSink())
+                    .thenReturn(cursor))
             .doFinally(s -> finishScheduler.dispose())
             .subscribe(
                 cursor -> {
@@ -218,6 +232,7 @@ public class DocumentMigrationBootstrap {
                 context.recordPipelineError();
                 throw new RfsException("Partition migration failed for " + wi, error);
             }
+
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());
             context.recordBytesMigrated(totalBytesMigrated.get());
@@ -228,6 +243,18 @@ public class DocumentMigrationBootstrap {
         } finally {
             progressMonitor.close();
         }
+    }
+
+    /**
+     * Flush a batch's terminal failures to S3 before its progress is committed. The Mono errors on
+     * flush failure or the 5-minute timeout, aborting the migration so the work item isn't completed
+     * and a successor reprocesses and re-emits (at-least-once). Empty Mono when the stream is disabled.
+     */
+    static Mono<Void> flushFailedDocumentStreamForBatch(FailedDocumentStreamSink failedDocumentStreamSink) {
+        if (failedDocumentStreamSink == null) {
+            return Mono.empty();
+        }
+        return failedDocumentStreamSink.flush().timeout(Duration.ofMinutes(5));
     }
 
     private org.opensearch.migrations.bulkload.pipeline.model.Partition resolvePartition(

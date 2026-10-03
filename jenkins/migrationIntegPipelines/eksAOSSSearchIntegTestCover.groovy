@@ -1,4 +1,4 @@
-// AOSS Search Collection Integration Test
+// Combined AOSS collection integration test.
 // See vars/eksAOSSIntegPipeline.groovy for implementation details.
 
 def gitBranch = params.GIT_BRANCH ?: 'main'
@@ -21,4 +21,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
          remote: "${gitUrl}"])
 
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
-eksAOSSIntegPipeline(gitBranchDefault: gitBranch, collectionType: 'SEARCH', defaultStageId: 'aosss', jobName: jobNameOverride ?: 'pr-eks-aoss-search-integ-test')
+eksAOSSIntegPipeline(gitBranchDefault: gitBranch, defaultStageId: 'aosss', jobName: jobNameOverride ?: 'pr-eks-aoss-search-integ-test')

@@ -132,7 +132,27 @@ def get_cluster_and_auth(config_file, cluster_type):
     return cluster.endpoint, auth
 
 
-def generate_small_doc(doc_size_bytes=150):
+def generate_tenant_ids(num_tenants):
+    """Generate tenant ids: tenant-a ... tenant-z, tenant-aa, tenant-ab, ..."""
+    if num_tenants is None:
+        return None
+    if num_tenants < 1:
+        raise ValueError("num_tenants must be at least 1")
+
+    tenant_ids = []
+    for tenant_num in range(num_tenants):
+        label = ""
+        value = tenant_num
+        while True:
+            label = string.ascii_lowercase[value % 26] + label
+            value = value // 26 - 1
+            if value < 0:
+                break
+        tenant_ids.append(f"tenant-{label}")
+    return tenant_ids
+
+
+def generate_small_doc(doc_size_bytes=150, tenant_id=None):
     """Generate a small document of approximately the specified size"""
     # Base document structure
     doc = {
@@ -142,26 +162,32 @@ def generate_small_doc(doc_size_bytes=150):
         "value": random.randint(1, 1000),
         "category": random.choice(['A', 'B', 'C', 'D', 'E'])
     }
-    
+    if tenant_id:
+        doc["tenant_id"] = tenant_id
+
     # Calculate remaining bytes needed for message field
     base_size = len(json.dumps(doc))
-    remaining_bytes = max(20, doc_size_bytes - base_size - 20)  # Leave room for "message" field overhead
-    
+    # Leave room for "message" field overhead.
+    remaining_bytes = max(20, doc_size_bytes - base_size - 20)
+
     doc["message"] = ''.join(random.choices(string.ascii_letters + ' ', k=remaining_bytes))
     return doc
 
 
-def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150, batch_size=100):
+def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150,
+                     batch_size=100, num_tenants=None):
     """
     Insert bulk data into a cluster using the bulk API.
-    
+
     Args:
         cluster: Cluster object with endpoint and auth
         index_name: Name of the index to insert into
         num_docs: Total number of documents to insert
         doc_size_bytes: Approximate size of each document in bytes
         batch_size: Number of documents per batch request
-    
+        num_tenants: Optional number of tenant ids to distribute across generated
+            documents
+
     Returns:
         dict: Results including total_inserted, errors, and timing info
     """
@@ -175,13 +201,21 @@ def bulk_insert_data(cluster, index_name, num_docs, doc_size_bytes=150, batch_si
     # 403 from target, etc.) made the loop spin until the outer subprocess timeout.
     max_consecutive_zero_progress_batches = 5
     last_failure_summary = None
+    tenant_ids = generate_tenant_ids(num_tenants)
     start_time = time.time()
 
     try:
         while total_inserted < num_docs:
             # Generate batch of documents
             batch_docs = min(batch_size, num_docs - total_inserted)
-            docs = [generate_small_doc(doc_size_bytes) for _ in range(batch_docs)]
+            docs = [
+                generate_small_doc(
+                    doc_size_bytes,
+                    tenant_ids[(total_inserted + doc_num) % len(tenant_ids)]
+                    if tenant_ids else None
+                )
+                for doc_num in range(batch_docs)
+            ]
 
             # Prepare bulk request
             bulk_data = []

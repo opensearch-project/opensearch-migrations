@@ -5,6 +5,10 @@ repositoryUrl: "https://github.com/opensearch-project/opensearch-migrations.git"
 repositoryBranch: "main"
 buildImagesBaseImage: "amazoncorretto:21-al2023"
 awsEKSEnabled: false
+# EKS Auto Mode NodeClass that build-nodepool references. Override to match the migration
+# assistant release's aws.nodeClassName when a custom, tag-carrying NodeClass is in use --
+# the built-in "default" NodeClass cannot carry user tags.
+nodeClassName: default
 multiArchNative: false
 deployBuildkitPods: false
 keepJobAlive: false

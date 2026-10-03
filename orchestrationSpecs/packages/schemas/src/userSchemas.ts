@@ -312,30 +312,106 @@ function validatePipelineRawConfigConflict(
     }
 }
 
-const blankStringAsDisabled = (value: unknown) =>
-    typeof value === "string" && value.trim().length === 0 ? "" : value;
+export const DEFAULT_OTEL_METRICS_COLLECTOR_ENDPOINT = "http://otel-collector:4317";
 
-const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.string()]);
+export const OTEL_EXPORT_CONTROL_FIELD_MASK = {
+    otelTraceExportEnabled: true,
+    otelMetricsExportEnabled: true,
+} as const;
 
-const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
+const OTEL_COLLECTOR_ENDPOINT = z.string()
+    .refine(value => value.trim().length > 0, "OpenTelemetry collector endpoints must not be blank.");
 
-// Default is applied in the preprocess step rather than via .default().optional():
-// under zod >=4.4 that ordering no longer applies the default for an absent key,
-// and .optional().default() makes the input type required. Empty/blank strings
-// stay explicit disables, while omitted values default to the collector. The
-// metadata default keeps generated JSON/OpenAPI schemas useful for schema-driven
-// clients such as interactive config viewers.
-const optionalEndpointWithDefault = (defaultValue: string) =>
-    z.preprocess(
-        (value) => value === undefined ? defaultValue : blankStringAsDisabled(value),
-        OPTIONAL_ENDPOINT.optional()
-    ).meta({default: defaultValue});
+const OTEL_EXPORT_OPTIONS = {
+    otelTraceExportEnabled: z.boolean().optional()
+        .describe("Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled.")
+        .meta({default: false}),
+    otelTraceCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT.optional()
+        .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."),
+    otelMetricsExportEnabled: z.boolean().optional()
+        .describe(`Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses '${DEFAULT_OTEL_METRICS_COLLECTOR_ENDPOINT}'.`)
+        .meta({default: true}),
+    otelMetricsCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT.optional()
+        .describe("URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."),
+} as const;
 
-const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
-    .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export.");
+type OtelExportOptions = {
+    otelTraceExportEnabled?: boolean;
+    otelTraceCollectorEndpoint?: string;
+    otelMetricsExportEnabled?: boolean;
+    otelMetricsCollectorEndpoint?: string;
+};
 
-const OTEL_METRICS_COLLECTOR_ENDPOINT = optionalEndpointWithDefault("http://otel-collector:4317")
-    .describe("URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export.");
+function resolveOtelExportEnabled(
+    configuredValue: boolean | undefined,
+    collectorEndpoint: string | undefined,
+    defaultValue: boolean,
+): boolean {
+    return configuredValue ?? (collectorEndpoint !== undefined ? true : defaultValue);
+}
+
+function validateOtelExportOptions(ctx: z.RefinementCtx, data: OtelExportOptions) {
+    const traceExportEnabled = resolveOtelExportEnabled(
+        data.otelTraceExportEnabled,
+        data.otelTraceCollectorEndpoint,
+        false,
+    );
+    const metricsExportEnabled = resolveOtelExportEnabled(
+        data.otelMetricsExportEnabled,
+        data.otelMetricsCollectorEndpoint,
+        true,
+    );
+
+    if (traceExportEnabled && data.otelTraceCollectorEndpoint === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "'otelTraceCollectorEndpoint' is required when 'otelTraceExportEnabled' is true.",
+            path: ["otelTraceCollectorEndpoint"]
+        });
+    } else if (!traceExportEnabled && data.otelTraceCollectorEndpoint !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "'otelTraceCollectorEndpoint' cannot be set when 'otelTraceExportEnabled' is false.",
+            path: ["otelTraceCollectorEndpoint"]
+        });
+    }
+
+    if (!metricsExportEnabled && data.otelMetricsCollectorEndpoint !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "'otelMetricsCollectorEndpoint' cannot be set when 'otelMetricsExportEnabled' is false.",
+            path: ["otelMetricsCollectorEndpoint"]
+        });
+    }
+}
+
+function normalizeOtelExportOptions<T extends OtelExportOptions>(data: T): T {
+    const otelTraceExportEnabled = resolveOtelExportEnabled(
+        data.otelTraceExportEnabled,
+        data.otelTraceCollectorEndpoint,
+        false,
+    );
+    const otelMetricsExportEnabled = resolveOtelExportEnabled(
+        data.otelMetricsExportEnabled,
+        data.otelMetricsCollectorEndpoint,
+        true,
+    );
+
+    return {
+        ...data,
+        otelTraceExportEnabled,
+        otelMetricsExportEnabled,
+        ...(otelMetricsExportEnabled && data.otelMetricsCollectorEndpoint === undefined
+            ? {otelMetricsCollectorEndpoint: DEFAULT_OTEL_METRICS_COLLECTOR_ENDPOINT}
+            : {}),
+    } as T;
+}
+
+function withOtelExportOptions<T extends z.ZodObject<any>>(schema: T): T {
+    return schema
+        .superRefine((data, ctx) => validateOtelExportOptions(ctx, data))
+        .overwrite(data => normalizeOtelExportOptions(data)) as T;
+}
 
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
@@ -491,7 +567,7 @@ export const CONTAINER_RESOURCES = {
     cpu: CPU_QUANTITY.describe("CPU allocation for the container in Kubernetes millicores."),
     memory: MEMORY_QUANTITY.describe("Memory allocation for the container."),
     "ephemeral-storage": STORAGE_QUANTITY.optional()
-        .describe("Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration.")
+        .describe("Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes.")
 }
 
 export const RESOURCE_REQUIREMENTS = z.object({
@@ -584,9 +660,8 @@ export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.objec
 }))
     .describe("Kubernetes deployment-level options for the capture proxy.");
 
-export const USER_PROXY_PROCESS_OPTIONS = z.object({
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
+    ...OTEL_EXPORT_OPTIONS,
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format.")
         .checksumFor('snapshot', 'replayer')
@@ -634,15 +709,15 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .describe("Combined method and path pattern for capture suppression in 'METHOD /path' format.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
-}).describe("Process-level configuration options for the capture proxy application. These are passed as command-line arguments to the proxy container.");
+})).describe("Process-level configuration options for the capture proxy application. These are passed as command-line arguments to the proxy container.");
 
 export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
 export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTIONS);
 
-export const USER_PROXY_OPTIONS = withScalableServiceValidation(z.object({
+export const USER_PROXY_OPTIONS = withOtelExportOptions(withScalableServiceValidation(z.object({
     ...USER_PROXY_WORKFLOW_OPTIONS.shape,
     ...USER_PROXY_PROCESS_OPTIONS.shape,
-}))
+})))
     .describe("Process-level and deployment-level configuration options for the capture proxy.");
 
 export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
@@ -664,7 +739,7 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.ob
 }))
     .describe("Kubernetes deployment-level options for the traffic replayer.");
 
-export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
+export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('impossible'),
@@ -688,8 +763,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "illegal_argument_exception, resource_already_exists_exception."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    ...OTEL_EXPORT_OPTIONS,
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
@@ -746,12 +820,12 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .changeRestriction('gated'),
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."),
-}).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is read from Kafka and replayed to the target cluster.");
+})).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is read from Kafka and replayed to the target cluster.");
 
 export const USER_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(USER_REPLAYER_WORKFLOW_OPTIONS);
 export const USER_REPLAYER_PROCESS_OPTION_KEYS = getZodKeys(USER_REPLAYER_PROCESS_OPTIONS);
 
-export const USER_REPLAYER_OPTIONS = z.object({
+export const USER_REPLAYER_OPTIONS = withOtelExportOptions(z.object({
     ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
     ...USER_REPLAYER_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
@@ -782,7 +856,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
             path: ['lookaheadTimeSeconds']
         });
     }
-});
+}));
 
 // Internal (glue-layer) field: the config transformer folds the user-facing Solr
 // `collectionAllowlist` into this on the shared create-snapshot config. It is NOT a
@@ -793,8 +867,26 @@ export const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional(
         "transformer from the user-facing collectionAllowlist. When empty, CreateSnapshot auto-discovers all " +
         "live Solr collections/cores. Not user-configurable.");
 
+// A source-connection property, like endpoint — not a per-backup option.
+// The refinement mirrors SolrContextPath.normalize (Java) and normalize_solr_context_path (console),
+// so a value any of the three would reject is caught here first.
+export const SOLR_CONTEXT_PATH_OPTION = z.string()
+    .refine(v => !v.includes("://") && !v.includes("?") && !v.includes("#"),
+        "solrContextPath must be a path such as '/solr' (or empty when Solr is served at the root), " +
+        "not a URL or query string")
+    .default("/solr").optional()
+    .describe("The path Solr's APIs are served under, appended to this cluster's endpoint when building Solr " +
+        "URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a " +
+        "reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the " +
+        "host. Only valid on Solr sources.");
+
 const SOLR_COLLECTION_ALLOWLIST = z.array(z.string()).default([]).optional()
     .describe("Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores.");
+
+export const SOLR_TOPOLOGY_OPTION = z.enum(["cloud", "standalone"]).optional()
+    .describe("Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an " +
+        "externally-managed backup whose layout identifies neither, which is the common case since the schema is " +
+        "staged into the backup while preparing it. Supplying it also skips inference on a restricted source.");
 
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
@@ -808,9 +900,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
         .describe(LOGGING_CONFIG_OVERRIDE_DESC)
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
-export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = withOtelExportOptions(z.object({
+    ...OTEL_EXPORT_OPTIONS,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
@@ -830,28 +921,40 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
         .describe("[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. " +
             "Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.")
         .changeRestriction('impossible'),
-}).describe("Process-level options for the CreateSnapshot command, controlling which indices are snapshotted and rate limiting.");
+})).describe("Process-level options for the CreateSnapshot command, controlling which indices are snapshotted and rate limiting.");
 
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS);
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_PROCESS_OPTIONS);
 
-export const USER_CREATE_SNAPSHOT_OPTIONS = z.object({
+export const USER_CREATE_SNAPSHOT_OPTIONS = withOtelExportOptions(z.object({
     ...USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS.shape,
     ...USER_CREATE_SNAPSHOT_PROCESS_OPTIONS.shape,
-});
+}));
 
 export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    resources: z.preprocess(
+        (v) => deepmerge(
+            DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI,
+            (v ?? {}) as Partial<ResourceRequirementsType>
+        ),
+        RESOURCE_REQUIREMENTS
+    )
+        .describe("Kubernetes resource limits and requests for the metadata migration container. " +
+            "Partial overrides are deep-merged with the built-in defaults. " +
+            "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
+            "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
+        .default(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI),
     skipEvaluateApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
     skipMigrateApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster.")
 }).describe("Workflow-level options for metadata migration, controlling JVM settings and approval gates.");
 
-export const USER_METADATA_PROCESS_OPTIONS = z.object({
+export const USER_METADATA_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     componentTemplateAllowlist: z.array(z.string()).default([]).optional()
         .describe("List of component template names to include in the metadata migration. " +
             "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
@@ -871,8 +974,7 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "Only disable if metadata has parsing issues on snapshots that require strict version matching."),
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."),
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    ...OTEL_EXPORT_OPTIONS,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
@@ -895,12 +997,12 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "with soft-deletes) as _source. This field is transient and may not be present for all documents, " +
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .changeRestriction('impossible'),
-}).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
+})).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
 export const USER_METADATA_PROCESS_OPTION_KEYS = getZodKeys(USER_METADATA_PROCESS_OPTIONS);
 
-export const USER_METADATA_OPTIONS = z.object({
+export const USER_METADATA_OPTIONS = withOtelExportOptions(z.object({
     ...USER_METADATA_WORKFLOW_OPTIONS.shape,
     ...USER_METADATA_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
@@ -909,7 +1011,7 @@ export const USER_METADATA_OPTIONS = z.object({
         "transformerConfigBase64",
         "transformerConfigFile"
     ]);
-});
+}));
 
 export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
     ...scalableServiceWorkflowOptions(
@@ -940,11 +1042,12 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS. " +
-            "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
+            "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified.")
+        .default(DEFAULT_RESOURCES.RFS),
 }))
     .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
-export const USER_RFS_PROCESS_OPTIONS = z.object({
+export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
             "Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
@@ -990,8 +1093,7 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    ...OTEL_EXPORT_OPTIONS,
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
@@ -1030,6 +1132,25 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    failedDocumentStreamS3Prefix: z.string().default("rfs-failed-document-stream/").optional()
+        .describe("S3 key prefix for the failed document stream where terminal document failures are persisted. " +
+            "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
+            "Defaults to 'rfs-failed-document-stream/'."),
+    failedDocumentStreamS3Bucket: z.string().optional()
+        .describe("S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal " +
+            "document failures are not recorded; there is no separate enable flag and no default bucket."),
+    failedDocumentStreamS3Region: z.string().optional()
+        .describe("AWS region for the failed document stream S3 bucket. Resolved by the config processor before " +
+            "submission (user value, else the snapshot repo's region, else the deployment default). " +
+            "Ignored without a bucket."),
+    failedDocumentStreamS3Endpoint: z.string().optional()
+        .describe("Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by " +
+            "the config processor (user value, else the snapshot repo's endpoint, else the deployment default). " +
+            "Ignored without a bucket."),
+    failedDocumentStreamMaxBufferBytes: z.number().default(67108864).optional()
+        .describe("Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates " +
+            "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
+            "failures. Default 67108864 (64 MiB)."),
     positionGapStopword: z.string().default("a").optional()
         .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
             "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +
@@ -1043,12 +1164,28 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "Default: 'a'.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
-}).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
+})).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
+
+/**
+ * Deployment-level S3 defaults read from the cluster (the migrations-default-s3-config ConfigMap) by the
+ * submitter/initializer and passed to the config processor as an explicit input. This lets the processor
+ * resolve the effective failed-document-stream region/endpoint before MigrationRun.spec is created,
+ * instead of RFS discovering them from pod env at runtime.
+ */
+export const DEPLOYMENT_DEFAULTS_CONFIG = z.object({
+    defaultS3Bucket: z.string().optional()
+        .describe("Deployment-provisioned default S3 bucket (migrations-default-s3-config BUCKET_NAME). " +
+            "Not a fallback for the failed document stream — that bucket must be named explicitly."),
+    defaultS3Region: z.string().optional()
+        .describe("Deployment-provisioned default AWS region (migrations-default-s3-config AWS_REGION)."),
+    defaultS3Endpoint: z.string().optional()
+        .describe("Deployment-provisioned default S3 endpoint override, e.g. LocalStack (migrations-default-s3-config ENDPOINT_HTTP)."),
+}).describe("Deployment-level S3 defaults resolved before workflow submission.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);
 export const USER_RFS_PROCESS_OPTION_KEYS = getZodKeys(USER_RFS_PROCESS_OPTIONS);
 
-export const USER_RFS_OPTIONS = z.object({
+export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
     ...USER_RFS_WORKFLOW_OPTIONS.shape,
     ...USER_RFS_PROCESS_OPTIONS.shape,
 })
@@ -1059,7 +1196,7 @@ export const USER_RFS_OPTIONS = z.object({
             "docTransformerConfigBase64",
             "docTransformerConfigFile"
         ]);
-    })
+    }))
     .transform((data) => {
         const requestEphemeral = data.resources?.requests?.["ephemeral-storage"];
         const userRequestEphemeralStorageBytes = requestEphemeral
@@ -1349,19 +1486,19 @@ export const ELASTICSEARCH_SNAPSHOT_INFO = z.object({
 
 const SOLR_BACKUP_PROCESS_OPTIONS = {
     collectionAllowlist: SOLR_COLLECTION_ALLOWLIST,
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    topology: SOLR_TOPOLOGY_OPTION,
+    ...OTEL_EXPORT_OPTIONS,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
 } as const;
 
-export const SOLR_CREATE_BACKUP_OPTIONS = z.object({
+export const SOLR_CREATE_BACKUP_OPTIONS = withOtelExportOptions(z.object({
     snapshotPrefix: z.string().default("").optional()
         .describe("Prefix for auto-generated Solr backup names. When set, the backup name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."),
     ...SOLR_BACKUP_PROCESS_OPTIONS,
-}).describe("Configuration for creating a new Solr backup as part of the migration workflow.");
+})).describe("Configuration for creating a new Solr backup as part of the migration workflow.");
 
 export const SOLR_CREATE_BACKUP_CONFIG = z.object({
     repoName: z.string()
@@ -1370,13 +1507,13 @@ export const SOLR_CREATE_BACKUP_CONFIG = z.object({
         .describe("Configuration for creating a new Solr backup of the source cluster."),
 }).describe("Configuration to create a new Solr backup of the source cluster as part of the migration workflow.");
 
-export const SOLR_EXTERNAL_BACKUP_CONFIG = z.object({
+export const SOLR_EXTERNAL_BACKUP_CONFIG = withOtelExportOptions(z.object({
     externalBackupName: z.string()
         .describe("Name of a pre-existing Solr backup in the configured repository. The workflow prepares and validates this backup before metadata and document migration."),
     repoName: z.string()
         .describe("Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."),
     ...SOLR_BACKUP_PROCESS_OPTIONS,
-}).describe("Externally-managed Solr backup configuration. Solr backups are prepared and validated automatically; collectionAllowlist scopes the collections/cores to validate and migrate.");
+})).describe("Externally-managed Solr backup configuration. Solr backups are prepared and validated automatically; collectionAllowlist scopes the collections/cores to validate and migrate.");
 
 export const SOLR_BACKUP_CONFIG = z.union([
     SOLR_EXTERNAL_BACKUP_CONFIG,
@@ -1468,6 +1605,7 @@ const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
+    solrContextPath: SOLR_CONTEXT_PATH_OPTION,
     snapshotInfo: SNAPSHOT_INFO.optional()
         .describe("Source-specific snapshot or backup configuration for this source cluster. Required if any snapshot-based migrations reference this source.")
 }).describe("Connection and snapshot configuration for a source cluster.").superRefine((data, ctx) => {
@@ -1475,6 +1613,16 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     const repos = snapshotInfoRepoNames(data.snapshotInfo);
     const snapshots = snapshotInfoEntries(data.snapshotInfo);
     const snapshotInfoItemKey = snapshotVariant?.itemKey ?? "snapshots";
+
+    // Compared against the default, not checked for presence: the field is defaulted, so an unset
+    // ES/OS source is indistinguishable here from one that set "/solr".
+    if (data.solrContextPath !== undefined && data.solrContextPath !== "/solr" && !isSolrVersion(data.version)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `solrContextPath is only supported for Solr sources, but source version is '${data.version ?? "<unset>"}'`,
+            path: ['solrContextPath']
+        });
+    }
     if (data.snapshotInfo && snapshotVariant && !snapshotVariant.matchesSourceVersion(data.version)) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -1597,6 +1745,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
     z.object({
         skipApprovals : z.boolean().default(false).optional()
             .describe("Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."),
+        requireBeginApproval: z.boolean().default(false).optional()
+            .describe("When true, requires a manual approval before the migration workflow begins."),
         kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional()
             .describe("Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. " +
                 "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."),

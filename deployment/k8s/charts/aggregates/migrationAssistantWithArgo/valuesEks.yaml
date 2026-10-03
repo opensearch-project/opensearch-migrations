@@ -14,14 +14,10 @@ aws:
 
 cluster:
   dedicatedKarpenterNodePoolForMigrationConsole: true
-  # When true, deploys a custom Karpenter NodePool (general-work-pool) with conservative
-  # settings (WhenEmpty consolidation, 30m cooldown, 4xlarge max) instead of using the
-  # EKS Auto Mode general-purpose pool. Recommended for production stability.
+  # When true, deploys a custom Karpenter NodePool (general-work-pool), configured by
+  # workloadsNodePool in values.yaml (WhenEmpty consolidation), instead
+  # of using the EKS Auto Mode general-purpose pool. Recommended for production stability.
   useCustomKarpenterNodePool: true
-
-# Enable multi-arch for EKS
-workloadsNodePool:
-  architectures: ["amd64", "arm64"]
 
 tracing:
   backend: xray
@@ -148,6 +144,10 @@ metrics:
           receivers: [prometheus]
           processors: [batch]
           exporters: [awsemf/cadvisor, prometheus]
+
+logs:
+  sharedLogsVolume:
+    enabled: false
 
 charts:
   kube-prometheus-stack:

@@ -10,7 +10,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
-import {cloudProviderResolvedInput, CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {awsResourceTagsResolvedInput, cloudProviderResolvedInput, CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {
     ARGO_PROXY_WORKFLOW_OPTION_KEYS,
     ARGO_FILE_SOURCE_VOLUME,
@@ -40,6 +40,7 @@ import {
     SCALABLE_WORKLOAD_INPUTS,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -73,16 +74,33 @@ function makeOwnerReferences(
 function makeProxyServiceAnnotations(
     internetFacing: BaseExpression<boolean>,
     cloudProvider: BaseExpression<string>,
+    awsResourceTags: BaseExpression<string>,
 ) {
     const isGcp = expr.equals(cloudProvider, expr.literal("gcp"));
     const isAzure = expr.equals(cloudProvider, expr.literal("azure"));
 
-    const awsAnnotations = expr.makeDict({
+    // Deployer tags for the NLB and the target group, listeners and security group behind it. One
+    // comma-separated "Key=Value,Key2=Value2" string covers any number of tags, which is the format
+    // the annotation takes. This annotation is the only lever available: Auto Mode's load balancing
+    // controller is EKS-managed so its --default-tags flag is unreachable, and Services -- unlike
+    // Ingresses, which have IngressClassParams.spec.tags -- have no cluster-wide params object.
+    //
+    // Merged in rather than declared inline so that an unset tag string yields no annotation at all
+    // instead of an empty one, whose behaviour is not documented.
+    const tagAnnotations = expr.ternary(
+        expr.equals(awsResourceTags, expr.literal("")),
+        expr.makeDict({}),
+        expr.makeDict({
+            "service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags": awsResourceTags,
+        }),
+    );
+
+    const awsAnnotations = expr.mergeDicts(expr.makeDict({
         "service.beta.kubernetes.io/aws-load-balancer-type": expr.literal("external"),
         "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": expr.literal("ip"),
         "service.beta.kubernetes.io/aws-load-balancer-scheme":
             expr.ternary(internetFacing, expr.literal("internet-facing"), expr.literal("internal")),
-    });
+    }), tagAnnotations);
     const gcpAnnotations = expr.ternary(
         internetFacing,
         expr.makeDict({}),
@@ -112,6 +130,7 @@ function makeProxyServiceManifest(
     internetFacing: BaseExpression<boolean>,
     ownerUid: BaseExpression<string>,
     cloudProvider: BaseExpression<string>,
+    awsResourceTags: BaseExpression<string>,
 ) {
     return {
         apiVersion: "v1",
@@ -119,7 +138,7 @@ function makeProxyServiceManifest(
         metadata: {
             name: proxyName,
             ownerReferences: makeOwnerReferences(proxyName, ownerUid),
-            annotations: makeProxyServiceAnnotations(internetFacing, cloudProvider)
+            annotations: makeProxyServiceAnnotations(internetFacing, cloudProvider, awsResourceTags)
         },
         spec: {
             type: makeStringTypeProxy(serviceType),
@@ -317,6 +336,7 @@ function makeProxyDeploymentManifest(args: {
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
             },
         },
         spec: {
@@ -332,6 +352,7 @@ function makeProxyDeploymentManifest(args: {
                     "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                     "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                     "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                    [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
                 }},
                 spec: {
                     containers: [podConfig.container],
@@ -402,6 +423,9 @@ export const SetupCapture = WorkflowBuilder.create({
         // global workflow arguments). Defined once — not threaded through the workflow —
         // so there is no scattered "aws" default to drift out of sync.
         .addInputsFromRecord(cloudProviderResolvedInput())
+        // Same story for the deployer's AWS tags: resolved here, at the only place that creates a
+        // load balancer, straight from the provider-config ConfigMap.
+        .addInputsFromRecord(awsResourceTagsResolvedInput())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -413,6 +437,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     expr.deserializeRecord(b.inputs.internetFacing),
                     b.inputs.ownerUid,
                     b.inputs.cloudProvider,
+                    b.inputs.awsResourceTags,
                 )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
