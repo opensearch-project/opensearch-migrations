@@ -710,6 +710,13 @@ Control commands are written to a Valkey key and polled by VUs mid-run:
   `--extra-args --no-thresholds` is set. On a resource-constrained cluster, latency thresholds may
   breach even when every request succeeds — use `--no-thresholds` there.
 
+> **Rate thresholds need a denominator.** A k6 `Rate` divides by how many times it was recorded, so
+> a metric recorded on a fraction of iterations (sequences, deep paging) reaches a short run with
+> far fewer samples than one recorded on every request, and a single failure crosses it while the
+> same failure is invisible elsewhere. Those narrow metrics already add every failure to the broad
+> one alongside them, so they are kept for observability and left unthresholded. Add a rate
+> threshold only to a metric every iteration records.
+
 ---
 
 ## Observe & metrics
