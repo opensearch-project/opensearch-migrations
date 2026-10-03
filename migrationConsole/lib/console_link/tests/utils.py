@@ -9,7 +9,8 @@ def create_valid_cluster(endpoint: str = "https://opensearchtarget:9200",
                          auth_type: AuthMethod = AuthMethod.BASIC_AUTH,
                          version: Optional[str] = None,
                          details: Optional[Dict] = None,
-                         client_options: Optional[ClientOptions] = None):
+                         client_options: Optional[ClientOptions] = None,
+                         solr_context_path: Optional[str] = None):
 
     if details is None and auth_type == AuthMethod.BASIC_AUTH:
         details = {"username": "admin", "password": "myStrongPassword123!"}
@@ -21,4 +22,6 @@ def create_valid_cluster(endpoint: str = "https://opensearchtarget:9200",
     }
     if version:
         custom_cluster_config["version"] = version
+    if solr_context_path is not None:
+        custom_cluster_config["solr_context_path"] = solr_context_path
     return Cluster(config=custom_cluster_config, client_options=client_options)

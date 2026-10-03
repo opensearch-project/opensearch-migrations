@@ -48,6 +48,7 @@ public class BulkOperationConverter {
                     .routing(routing)
                     .build())
                 .document(document)
+                .originalSource(document)
                 .build();
         }
         return IndexOp.builder()
@@ -58,6 +59,7 @@ public class BulkOperationConverter {
                 .routing(routing)
                 .build())
             .document(document)
+            .originalSource(document)
             .build();
     }
 }

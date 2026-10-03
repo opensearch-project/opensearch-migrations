@@ -5,15 +5,23 @@ import {
     OVERALL_MIGRATION_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {z} from "zod";
-import {stringify} from "yaml";
+import {parse as parseYaml, stringify} from "yaml";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import {MigrationInitializer} from "../../src";
+import {MigrationConfigTransformer, MigrationInitializer} from "../../src";
 
 const TEST_NAMESPACE = "migration-crd-roundtrip";
 const MIGRATION_RUN_NAMESPACE = "migration-run-history";
 const DELETION_BOOKKEEPING_NAMESPACE = "deletion-bookkeeping";
+const FAILED_DOCUMENT_STREAM_NAMESPACE = "failed-document-stream";
+
+// What an AWS deployment provides via the migrations-default-s3-config ConfigMap.
+const DEPLOYMENT_DEFAULTS = {
+    defaultS3Bucket: "deployment-provisioned-bucket",
+    defaultS3Region: "us-east-1",
+    defaultS3Endpoint: "https://s3.us-east-1.amazonaws.com",
+};
 
 const CRD_KIND_TO_PLURAL: Record<string, string> = {
     ApprovalGate: "approvalgates",
@@ -135,6 +143,24 @@ function manifestForCreate(item: any) {
             namespace: TEST_NAMESPACE,
         },
     };
+}
+
+/** Production initializer path: transform with deployment defaults, write the bundle, read the CR back. */
+async function generateSnapshotMigrationManifest(config: z.infer<typeof OVERALL_MIGRATION_CONFIG>) {
+    const workflows = await new MigrationConfigTransformer(DEPLOYMENT_DEFAULTS).processFromObject(config);
+    const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "fds-bundle-"));
+    try {
+        await new MigrationInitializer().generateOutputFiles(
+            workflows, outputDir, config, "workflow-a", {runNumber: 1700000000000});
+        const resourcesDir = path.join(outputDir, "resources");
+        const file = fs.readdirSync(resourcesDir).find(f => f.includes("-snapshotmigration-"));
+        if (!file) {
+            throw new Error(`No SnapshotMigration manifest in ${resourcesDir}`);
+        }
+        return parseYaml(fs.readFileSync(path.join(resourcesDir, file), "utf8"));
+    } finally {
+        fs.rmSync(outputDir, {recursive: true, force: true});
+    }
 }
 
 function assertSpecRoundTrip(kind: string, name: string, expected: unknown, actual: unknown) {
@@ -442,5 +468,64 @@ describe("generated migration CRDs live compatibility", () => {
             ],
             "wait for DataSnapshot deletion after finalizer removal"
         );
+    });
+
+    test("leaves the failed document stream off when the config names no bucket", async () => {
+        await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
+        await execOrThrow(
+            container,
+            [
+                "kubectl",
+                "wait",
+                "--for=condition=Established",
+                "--timeout=90s",
+                "crd",
+                "-l",
+                "migrations.opensearch.org/generated=true",
+            ],
+            "wait for generated migration CRDs"
+        );
+        await execOrThrow(container, ["kubectl", "create", "namespace", FAILED_DOCUMENT_STREAM_NAMESPACE],
+            "create failed document stream namespace");
+
+        const applyAndReadSpec = async (manifest: any, label: string) => {
+            const named = {
+                ...manifest,
+                metadata: {...manifest.metadata, name: label, namespace: FAILED_DOCUMENT_STREAM_NAMESPACE},
+            };
+            await copyTextToContainer(container, stringify(named), `/tmp/sm-${label}.yaml`);
+            await execOrThrow(
+                container,
+                ["kubectl", "apply", "-f", `/tmp/sm-${label}.yaml`, "-n", FAILED_DOCUMENT_STREAM_NAMESPACE],
+                `apply SnapshotMigration/${label}`
+            );
+            const readBack = JSON.parse(await execOrThrow(
+                container,
+                ["kubectl", "get", `snapshotmigrations.migrations.opensearch.org/${label}`,
+                    "-n", FAILED_DOCUMENT_STREAM_NAMESPACE, "-o", "json"],
+                `read back SnapshotMigration/${label}`
+            ));
+            return readBack.spec;
+        };
+
+        const withoutBucket = await applyAndReadSpec(
+            await generateSnapshotMigrationManifest(sampleConfig()), "no-bucket");
+
+        // The deployment default must not leak in.
+        expect(withoutBucket.documentBackfillFailedDocumentStreamS3Bucket).toBeUndefined();
+        expect(withoutBucket.documentBackfillFailedDocumentStreamS3Region).toBeUndefined();
+        expect(withoutBucket.documentBackfillFailedDocumentStreamS3Endpoint).toBeUndefined();
+        expect(JSON.stringify(withoutBucket)).not.toContain(DEPLOYMENT_DEFAULTS.defaultS3Bucket);
+
+        // Control: an explicit bucket does reach the CR, so the assertions above aren't vacuous.
+        const configWithBucket = sampleConfig() as any;
+        configWithBucket.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig
+            .failedDocumentStreamS3Bucket = "user-named-bucket";
+        const withBucket = await applyAndReadSpec(
+            await generateSnapshotMigrationManifest(configWithBucket), "with-bucket");
+
+        expect(withBucket.documentBackfillFailedDocumentStreamS3Bucket).toBe("user-named-bucket");
+        expect(withBucket.documentBackfillFailedDocumentStreamS3Region).toBe("us-east-2");   // snapshot repo's
     });
 });

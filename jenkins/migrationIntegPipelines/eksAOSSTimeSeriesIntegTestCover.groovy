@@ -1,4 +1,4 @@
-// AOSS Time-Series Collection Integration Test
+// Compatibility entry point for the combined AOSS collection integration test.
 // See vars/eksAOSSIntegPipeline.groovy for implementation details.
 
 def gitBranch = params.GIT_BRANCH ?: 'main'
@@ -21,4 +21,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
          remote: "${gitUrl}"])
 
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
-eksAOSSIntegPipeline(gitBranchDefault: gitBranch, collectionType: 'TIMESERIES', defaultStageId: 'aosst', jobName: jobNameOverride ?: 'pr-eks-aoss-timeseries-integ-test')
+eksAOSSIntegPipeline(gitBranchDefault: gitBranch, defaultStageId: 'aosst', disablePeriodic: true, jobName: jobNameOverride ?: 'pr-eks-aoss-timeseries-integ-test')

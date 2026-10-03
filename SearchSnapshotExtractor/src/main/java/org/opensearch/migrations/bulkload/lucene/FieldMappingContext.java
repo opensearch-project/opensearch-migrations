@@ -274,6 +274,13 @@ public class FieldMappingContext {
     }
 
     /**
+     * Returns all fields that are the target of at least one {@code copy_to} edge.
+     */
+    public Set<String> getCopyToTargetFields() {
+        return sourcesByTarget.keySet();
+    }
+
+    /**
      * Returns just the source fields that have at least one {@code copy_to} edge declared.
      * Callers performing reverse-derivation should iterate this rather than the full mapping —
      * for indices with thousands of fields, that's an O(fields-with-copy_to) walk instead of

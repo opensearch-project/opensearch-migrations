@@ -2,7 +2,7 @@
 
 This guide describes the cloud-Kubernetes BuildKit path used by `deployment/k8s/aws/aws-bootstrap.sh --build`. The backend lives in [backends/eksKubernetesBuildkit.sh](backends/eksKubernetesBuildkit.sh) and uses `docker buildx` with the `kubernetes` driver to spin up amd64 + arm64 buildkit Pods on the cluster's `build-nodepool`. Images are pushed directly to the cluster's ECR registry.
 
-For the Docker-hosted local flow used by minikube and kind, see [README.md](README.md). The local flow runs the registry and BuildKit as Docker containers on the host and joins kind/minikube to the same Docker network — no in-cluster registry, no `kubectl port-forward`, no `--insecure-registry`.
+For the Docker-hosted local flow used by kind, see [README.md](README.md). The local flow runs the registry and BuildKit as Docker containers on the host and joins kind to the same Docker network — no in-cluster registry, no `kubectl port-forward`, no `--insecure-registry`.
 
 ## Prerequisites
 

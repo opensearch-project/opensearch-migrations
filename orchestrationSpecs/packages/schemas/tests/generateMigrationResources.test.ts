@@ -61,6 +61,26 @@ describe("generated migration resources", () => {
         }
     });
 
+    test("emits source auth restrictions only for DataSnapshot", () => {
+        const policy = (kind: string) => vaps.split("---").find(document =>
+            document.includes(`name: migrations-${kind.toLowerCase()}-policy`)
+        );
+        const sourceAuthFields = [
+            "sourceAuthType",
+            "sourceAuthBasicSecretName",
+            "sourceAuthSigv4Region",
+            "sourceAuthSigv4Service",
+            "sourceAuthMtlsClientSecretName",
+            "sourceAuthMtlsCaCertHash",
+        ];
+
+        for (const field of sourceAuthFields) {
+            expect(policy("CaptureProxy")).not.toContain(field);
+            expect(policy("SnapshotMigration")).not.toContain(field);
+            expect(policy("DataSnapshot")).toContain(field);
+        }
+    });
+
     test("keeps gated VAP approval tied to the migration run number annotation", () => {
         expect(vaps).toContain("'migrations.opensearch.org/approved-during-run' in object.metadata.annotations");
         expect(vaps).toContain("'migrations.opensearch.org/run-number' in object.metadata.labels");

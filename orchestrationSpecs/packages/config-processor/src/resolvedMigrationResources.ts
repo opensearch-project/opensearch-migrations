@@ -122,11 +122,12 @@ function stableEqual(left: unknown, right: unknown): boolean {
 // (via expr.dig(..., "")), but which are absent from the resolved config when the user omits them.
 // Fill them here so the resolved-resource parameters (MigrationRun history + dry-run preview) match
 // the spec actually applied to the live CR. Keep in sync with the "" defaults in resourceManagement.ts.
-const CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS = ["otelTraceCollectorEndpoint"] as const;
+const CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS =
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint"] as const;
 const METADATA_EMPTY_STRING_DEFAULT_FIELDS =
-    ["otelTraceCollectorEndpoint", "transformerConfig", "transformerConfigFile"] as const;
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "transformerConfig", "transformerConfigFile"] as const;
 const DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS =
-    ["otelTraceCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile"] as const;
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile"] as const;
 
 function withEmptyStringDefaults(
     value: Record<string, unknown> | undefined,
@@ -160,19 +161,21 @@ function prefixedKey(prefix: string, field: string): string {
 function connectionIdentityParameters(
     prefix: string,
     identity: Record<string, unknown>,
-    options: {includeVersion?: boolean} = {},
+    options: {includeVersion?: boolean; includeAuth?: boolean} = {},
 ): Record<string, unknown> {
     return {
         [prefixedKey(prefix, "label")]: identity.label,
         ...(options.includeVersion === false ? {} : {[prefixedKey(prefix, "version")]: identity.version}),
         [prefixedKey(prefix, "endpoint")]: identity.endpoint,
         [prefixedKey(prefix, "allowInsecure")]: identity.allowInsecure,
-        [prefixedKey(prefix, "authType")]: identity.authType,
-        [prefixedKey(prefix, "authBasicSecretName")]: identity.authBasicSecretName,
-        [prefixedKey(prefix, "authSigv4Region")]: identity.authSigv4Region,
-        [prefixedKey(prefix, "authSigv4Service")]: identity.authSigv4Service,
-        [prefixedKey(prefix, "authMtlsClientSecretName")]: identity.authMtlsClientSecretName,
-        [prefixedKey(prefix, "authMtlsCaCertHash")]: identity.authMtlsCaCertHash,
+        ...(options.includeAuth === false ? {} : {
+            [prefixedKey(prefix, "authType")]: identity.authType,
+            [prefixedKey(prefix, "authBasicSecretName")]: identity.authBasicSecretName,
+            [prefixedKey(prefix, "authSigv4Region")]: identity.authSigv4Region,
+            [prefixedKey(prefix, "authSigv4Service")]: identity.authSigv4Service,
+            [prefixedKey(prefix, "authMtlsClientSecretName")]: identity.authMtlsClientSecretName,
+            [prefixedKey(prefix, "authMtlsCaCertHash")]: identity.authMtlsCaCertHash,
+        }),
     };
 }
 
@@ -358,7 +361,7 @@ function captureProxyParameters(proxy: ProxyConfig): Record<string, unknown> {
         ...connectionIdentityParameters(
             "source",
             proxy.sourceConnectionIdentity as Record<string, unknown>,
-            {includeVersion: true}
+            {includeVersion: true, includeAuth: false}
         ),
         serviceType: proxy.proxyConfig.serviceType,
         ...omitFields(proxy.proxyConfig as Record<string, unknown>, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
@@ -380,6 +383,7 @@ function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknow
     const repo = item.repo;
     return {
         ...connectionIdentityParameters("source", sourceIdentity, {includeVersion: true}),
+        sourceSolrContextPath: sourceIdentity.solrContextPath ?? "",
         snapshotLabel: item.label,
         repoName: repo.repoName,
         repoPathUri: repo.repoPathUri,
@@ -418,7 +422,7 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
         ...connectionIdentityParameters(
             "source",
             migration.sourceConnectionIdentity as Record<string, unknown>,
-            {includeVersion: true}
+            {includeVersion: true, includeAuth: false}
         ),
         ...connectionIdentityParameters(
             "target",

@@ -7,6 +7,7 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrContextPath;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
@@ -139,6 +140,23 @@ public class CreateSnapshot {
                 required = false,
                 description = "Comma-separated list of Solr collection names to back up (required when source-type=solr)")
         public List<String> solrCollections = List.of();
+
+        @Parameter(
+                names = {"--solr-topology"},
+                required = false,
+                description = "Solr topology: 'cloud' or 'standalone'. Normally inferred, so only needed when "
+                    + "importing a backup whose layout identifies neither. Supplying it skips inference entirely, "
+                    + "which also avoids the Collections API on a permission-restricted source.")
+        public String solrTopology;
+
+        @Parameter(
+                names = {"--solr-context-path"},
+                required = false,
+                description = "The path Solr's APIs are served under, appended to --source-host when building Solr "
+                    + "URLs. Defaults to '/solr'; set this when Solr runs with a custom solr.contextPath or sits "
+                    + "behind a reverse proxy that rewrites the prefix. Pass an empty value when Solr is served at "
+                    + "the root of the host.")
+        public String solrContextPath = SolrContextPath.DEFAULT;
     }
 
     public static SnapshotMode getSnapshotMode(Args args) {
@@ -164,13 +182,26 @@ public class CreateSnapshot {
         );
 
         var parsedRepoUri = RepoUri.parse(arguments.repoUri);
-        if (parsedRepoUri instanceof RepoUri.S3RepoUri && arguments.s3Region == null) {
-            throw new ParameterException("If an s3 repo is being used, --s3-region must be set");
+        switch (parsedRepoUri) {
+            case RepoUri.S3RepoUri s -> {
+                if (arguments.s3Region == null) {
+                    throw new ParameterException("If an s3 repo is being used, --s3-region must be set");
+                }
+            }
+            // Snapshot creation writes to the repo, so unlike the read paths in
+            // ClusterReaderExtractor and RfsMigrateDocuments it needs no --local-dir.
+            case RepoUri.GcsRepoUri g -> { /* no additional arguments required */ }
+            case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
         }
         try {
             SnapshotMode.fromString(arguments.mode);
         } catch (IllegalArgumentException e) {
             throw new ParameterException("Invalid --mode value '" + arguments.mode + "'. Must be 'create' or 'import'.");
+        }
+        try {
+            SolrContextPath.normalize(arguments.solrContextPath);
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException("Invalid --solr-context-path value: " + e.getMessage());
         }
 
         var snapshotCreator = new CreateSnapshot(arguments, rootContext.createSnapshotCreateContext());

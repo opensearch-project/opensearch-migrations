@@ -10,12 +10,12 @@ node {
     download = true
 
     // Use this project's directories for node artifacts
-    workDir = file("${project.buildDir}/nodejs")
-    npmWorkDir = file("${project.buildDir}/npm")
+    workDir = project.layout.buildDirectory.dir("nodejs")
+    npmWorkDir = project.layout.buildDirectory.dir("npm")
 }
 
-def jsSrcDir = "${projectDir}/src"
-def jsDistDir = "${buildDir}/dist"
+def jsSrcDir = layout.projectDirectory.dir("src")
+def jsDistDir = layout.buildDirectory.dir("dist")
 
 tasks.register('installDependencies', NpmTask) {
     description = "Install Node.js dependencies"
@@ -58,5 +58,7 @@ configurations {
 }
 
 artifacts {
-    jsResources file: file("${buildDir}/dist"), builtBy: packageJs
+    jsResources(layout.buildDirectory.dir("dist")) {
+        builtBy(packageJs)
+    }
 }

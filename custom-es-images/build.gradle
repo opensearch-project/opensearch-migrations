@@ -44,7 +44,7 @@ versions.each { minor, info ->
 
     // Local docker build with cross-process FileLock to prevent parallel builds.
     // OS releases the lock automatically if the process dies; 4-minute timeout as safety net.
-    tasks.register("buildImage_es_${safeName}") {
+    (tasks as TaskContainer).register("buildImage_es_${safeName}") {
         group = 'docker'
         description = "Build ${imagePrefix}:${version}"
         inputs.file('dockerfiles/Dockerfile')

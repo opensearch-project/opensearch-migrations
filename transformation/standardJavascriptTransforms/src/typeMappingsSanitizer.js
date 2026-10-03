@@ -310,7 +310,9 @@ function rewriteCreateIndex(match, inputMap) {
 
 // Define regex patterns as constants
 const PUT_POST_DOC_REGEX = /(?:PUT|POST) \/([^/]*)\/([^/]*)\/(.*)/;
-const GET_DOC_REGEX = /GET \/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/([^/]+)$/;
+const TYPED_DOC_PATH_REGEX = /\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/(?!\.{1,2}(?:\/|$))([^-_+][^A-Z/*?"<>|,# ]*)\/([^/]+)$/;
+const GET_DOC_REGEX = new RegExp(`GET ${TYPED_DOC_PATH_REGEX.source}`);
+const DELETE_DOC_REGEX = new RegExp(`DELETE ${TYPED_DOC_PATH_REGEX.source}`);
 const BULK_REQUEST_REGEX = /(?:PUT|POST) \/_bulk/;
 const CREATE_INDEX_REGEX = /(?:PUT|POST) \/([^/]*)/;
 const INDEX_BULK_REQUEST_REGEX = /(?:PUT|POST) \/([^/]+)\/_bulk/;
@@ -474,6 +476,7 @@ function routeHttpRequest(source_document, context) {
             [BULK_REQUEST_REGEX, rewriteBulk, 'rewrite_bulk'],
             [PUT_POST_DOC_REGEX, rewriteDocRequest, 'rewrite_add_request_to_strip_types'],
             [GET_DOC_REGEX, rewriteDocRequest, 'rewrite_get_request_to_strip_types'],
+            [DELETE_DOC_REGEX, rewriteDocRequest, 'rewrite_delete_request_to_strip_types'],
             [CREATE_INDEX_REGEX, rewriteCreateIndex, 'rewrite_create_index']
         ]
     );

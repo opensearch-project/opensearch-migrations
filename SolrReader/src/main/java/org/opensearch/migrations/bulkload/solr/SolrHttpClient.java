@@ -82,7 +82,7 @@ public class SolrHttpClient {
     }
 
     /**
-     * GET a URL and return the raw HttpResponse (for status-code-only checks like isSolrCloud).
+     * GET a URL and return the raw HttpResponse, for callers that need the status code as well as the body.
      */
     public HttpResponse<String> getRaw(String url, Duration timeout)
         throws IOException, InterruptedException {

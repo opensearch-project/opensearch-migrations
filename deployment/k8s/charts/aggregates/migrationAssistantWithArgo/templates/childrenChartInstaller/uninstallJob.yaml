@@ -14,7 +14,9 @@ metadata:
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 900
-  ttlSecondsAfterFinished: 600
+  # No ttlSecondsAfterFinished: the TTL controller deletes failed jobs too. Keep a failed
+  # hook pod for debugging (kubectl logs); helm's hook-delete-policy above still cleans up
+  # on success and before the next install/upgrade.
   podFailurePolicy:
     rules:
       - action: Ignore
@@ -72,7 +74,9 @@ metadata:
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 900
-  ttlSecondsAfterFinished: 600
+  # No ttlSecondsAfterFinished: the TTL controller deletes failed jobs too. Keep a failed
+  # hook pod for debugging (kubectl logs); helm's hook-delete-policy above still cleans up
+  # on success and before the next install/upgrade.
   podFailurePolicy:
     rules:
       - action: Ignore

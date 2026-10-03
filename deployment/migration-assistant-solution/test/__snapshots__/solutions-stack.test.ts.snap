@@ -75,62 +75,7 @@ exports[`Solutions stack ECS stack with import VPC matches snapshot 1`] = `
     },
   },
   "Resources": {
-    "AppRegistry968496A3": {
-      "Properties": {
-        "Description": "Service Catalog application to track and manage all your resources for the solution test-solution",
-        "Name": {
-          "Fn::Join": [
-            "-",
-            [
-              "test-solution",
-              {
-                "Ref": "AWS::Region",
-              },
-              {
-                "Ref": "AWS::AccountId",
-              },
-              {
-                "Fn::Join": [
-                  "",
-                  [
-                    {
-                      "Ref": "Stage",
-                    },
-                    "-",
-                    {
-                      "Ref": "AWS::Region",
-                    },
-                  ],
-                ],
-              },
-            ],
-          ],
-        },
-        "Tags": {
-          "Solutions:ApplicationType": "AWS-Solutions",
-          "Solutions:SolutionID": "SO0000",
-          "Solutions:SolutionName": "test-solution",
-          "Solutions:SolutionVersion": "0.0.1",
-        },
-      },
-      "Type": "AWS::ServiceCatalogAppRegistry::Application",
-    },
-    "AppRegistryAssociation": {
-      "Properties": {
-        "Application": {
-          "Fn::GetAtt": [
-            "AppRegistry968496A3",
-            "Id",
-          ],
-        },
-        "Resource": {
-          "Ref": "AWS::StackId",
-        },
-        "ResourceType": "CFN_STACK",
-      },
-      "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
-    },
-    "BootstrapEC2Instance36A69AF723cb2ecc3dacad24": {
+    "BootstrapEC2Instance36A69AF71ab4340e4b468479": {
       "CreationPolicy": {
         "ResourceSignal": {
           "Count": 1,
@@ -150,14 +95,7 @@ exports[`Solutions stack ECS stack with import VPC matches snapshot 1`] = `
                   "Fn::Join": [
                     "",
                     [
-                      "echo "export MIGRATIONS_APP_REGISTRY_ARN=",
-                      {
-                        "Fn::GetAtt": [
-                          "AppRegistry968496A3",
-                          "Arn",
-                        ],
-                      },
-                      "; export MIGRATIONS_USER_AGENT=AwsSolution/SO0000/0.0.1; export VPC_ID=",
+                      "echo "export MIGRATIONS_USER_AGENT=AwsSolution/SO0000/0.0.1; export VPC_ID=",
                       {
                         "Ref": "VPCId",
                       },
@@ -326,7 +264,7 @@ npm install 2>&1
               "",
               [
                 "#!/bin/bash
-# fingerprint: 6e880182a0153a3c
+# fingerprint: 2ba45effaf199263
 (
   set +e
   /opt/aws/bin/cfn-init -v --region ",
@@ -337,7 +275,7 @@ npm install 2>&1
                 {
                   "Ref": "AWS::StackName",
                 },
-                " --resource BootstrapEC2Instance36A69AF723cb2ecc3dacad24 -c default
+                " --resource BootstrapEC2Instance36A69AF71ab4340e4b468479 -c default
   /opt/aws/bin/cfn-signal -e $? --region ",
                 {
                   "Ref": "AWS::Region",
@@ -346,7 +284,7 @@ npm install 2>&1
                 {
                   "Ref": "AWS::StackName",
                 },
-                " --resource BootstrapEC2Instance36A69AF723cb2ecc3dacad24
+                " --resource BootstrapEC2Instance36A69AF71ab4340e4b468479
   cat /var/log/cfn-init.log >&2
 )",
               ],
@@ -520,60 +458,6 @@ npm install 2>&1
       },
       "Type": "AWS::SSM::Document",
     },
-    "DefaultApplicationAttributesApplicationAttributeGroupAssociation5303e42e4390C82F1F85": {
-      "Properties": {
-        "Application": {
-          "Fn::GetAtt": [
-            "AppRegistry968496A3",
-            "Id",
-          ],
-        },
-        "AttributeGroup": {
-          "Fn::GetAtt": [
-            "DefaultApplicationAttributesFC1CC26B",
-            "Id",
-          ],
-        },
-      },
-      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation",
-    },
-    "DefaultApplicationAttributesFC1CC26B": {
-      "Properties": {
-        "Attributes": {
-          "applicationType": "AWS-Solutions",
-          "solutionID": "SO0000",
-          "solutionName": "test-solution",
-          "version": "0.0.1",
-        },
-        "Description": "Attribute group for solution information",
-        "Name": {
-          "Fn::Join": [
-            "-",
-            [
-              {
-                "Ref": "AWS::Region",
-              },
-              {
-                "Fn::Join": [
-                  "",
-                  [
-                    {
-                      "Ref": "Stage",
-                    },
-                    "-",
-                    {
-                      "Ref": "AWS::Region",
-                    },
-                  ],
-                ],
-              },
-              "attributes",
-            ],
-          ],
-        },
-      },
-      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroup",
-    },
   },
   "Rules": {
     "CheckBootstrapVersion": {
@@ -648,62 +532,7 @@ exports[`Solutions stack ECS stack with new VPC matches snapshot 1`] = `
     },
   },
   "Resources": {
-    "AppRegistry968496A3": {
-      "Properties": {
-        "Description": "Service Catalog application to track and manage all your resources for the solution test-solution",
-        "Name": {
-          "Fn::Join": [
-            "-",
-            [
-              "test-solution",
-              {
-                "Ref": "AWS::Region",
-              },
-              {
-                "Ref": "AWS::AccountId",
-              },
-              {
-                "Fn::Join": [
-                  "",
-                  [
-                    {
-                      "Ref": "Stage",
-                    },
-                    "-",
-                    {
-                      "Ref": "AWS::Region",
-                    },
-                  ],
-                ],
-              },
-            ],
-          ],
-        },
-        "Tags": {
-          "Solutions:ApplicationType": "AWS-Solutions",
-          "Solutions:SolutionID": "SO0000",
-          "Solutions:SolutionName": "test-solution",
-          "Solutions:SolutionVersion": "0.0.1",
-        },
-      },
-      "Type": "AWS::ServiceCatalogAppRegistry::Application",
-    },
-    "AppRegistryAssociation": {
-      "Properties": {
-        "Application": {
-          "Fn::GetAtt": [
-            "AppRegistry968496A3",
-            "Id",
-          ],
-        },
-        "Resource": {
-          "Ref": "AWS::StackId",
-        },
-        "ResourceType": "CFN_STACK",
-      },
-      "Type": "AWS::ServiceCatalogAppRegistry::ResourceAssociation",
-    },
-    "BootstrapEC2Instance36A69AF7ba4ca28033971592": {
+    "BootstrapEC2Instance36A69AF7dfab0e0844eda6de": {
       "CreationPolicy": {
         "ResourceSignal": {
           "Count": 1,
@@ -723,14 +552,7 @@ exports[`Solutions stack ECS stack with new VPC matches snapshot 1`] = `
                   "Fn::Join": [
                     "",
                     [
-                      "echo "export MIGRATIONS_APP_REGISTRY_ARN=",
-                      {
-                        "Fn::GetAtt": [
-                          "AppRegistry968496A3",
-                          "Arn",
-                        ],
-                      },
-                      "; export MIGRATIONS_USER_AGENT=AwsSolution/SO0000/0.0.1; export VPC_ID=",
+                      "echo "export MIGRATIONS_USER_AGENT=AwsSolution/SO0000/0.0.1; export VPC_ID=",
                       {
                         "Ref": "Vpc8378EB38",
                       },
@@ -894,7 +716,7 @@ npm install 2>&1
               "",
               [
                 "#!/bin/bash
-# fingerprint: b886ada016436950
+# fingerprint: 10488b463ccae0ac
 (
   set +e
   /opt/aws/bin/cfn-init -v --region ",
@@ -905,7 +727,7 @@ npm install 2>&1
                 {
                   "Ref": "AWS::StackName",
                 },
-                " --resource BootstrapEC2Instance36A69AF7ba4ca28033971592 -c default
+                " --resource BootstrapEC2Instance36A69AF7dfab0e0844eda6de -c default
   /opt/aws/bin/cfn-signal -e $? --region ",
                 {
                   "Ref": "AWS::Region",
@@ -914,7 +736,7 @@ npm install 2>&1
                 {
                   "Ref": "AWS::StackName",
                 },
-                " --resource BootstrapEC2Instance36A69AF7ba4ca28033971592
+                " --resource BootstrapEC2Instance36A69AF7dfab0e0844eda6de
   cat /var/log/cfn-init.log >&2
 )",
               ],
@@ -1087,60 +909,6 @@ npm install 2>&1
         },
       },
       "Type": "AWS::SSM::Document",
-    },
-    "DefaultApplicationAttributesApplicationAttributeGroupAssociation5303e42e4390C82F1F85": {
-      "Properties": {
-        "Application": {
-          "Fn::GetAtt": [
-            "AppRegistry968496A3",
-            "Id",
-          ],
-        },
-        "AttributeGroup": {
-          "Fn::GetAtt": [
-            "DefaultApplicationAttributesFC1CC26B",
-            "Id",
-          ],
-        },
-      },
-      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation",
-    },
-    "DefaultApplicationAttributesFC1CC26B": {
-      "Properties": {
-        "Attributes": {
-          "applicationType": "AWS-Solutions",
-          "solutionID": "SO0000",
-          "solutionName": "test-solution",
-          "version": "0.0.1",
-        },
-        "Description": "Attribute group for solution information",
-        "Name": {
-          "Fn::Join": [
-            "-",
-            [
-              {
-                "Ref": "AWS::Region",
-              },
-              {
-                "Fn::Join": [
-                  "",
-                  [
-                    {
-                      "Ref": "Stage",
-                    },
-                    "-",
-                    {
-                      "Ref": "AWS::Region",
-                    },
-                  ],
-                ],
-              },
-              "attributes",
-            ],
-          ],
-        },
-      },
-      "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroup",
     },
     "S3VpcEndpoint1F0CDE18": {
       "Properties": {

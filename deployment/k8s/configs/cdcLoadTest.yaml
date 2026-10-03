@@ -1,0 +1,67 @@
+# CDC (capture-and-replay) migration config — the default input to deployCdcLoadTestConfig.sh.
+#
+# An ordinary migration config: the same thing you would write by hand and feed to
+# `workflow configure edit`. Endpoints, versions, ports and names are all literal — edit them, or
+# pass your own file with -f. The script reads the resource names back out of the cluster, so any
+# CDC topology works without changing the script.
+#
+# The auth-begin / auth-end comment fences below are the ONE thing the script touches: `up
+# --no-auth` deletes the lines between them, for clusters deployed with testClusters/
+# valuesNoAuth.yaml. "No auth" has to mean the authConfig key is ABSENT — it is an optional union in
+# the schema, so an empty `authConfig: {}` fails validation. With the fences left in place this file
+# is valid YAML as it stands, and a config with no fences passes through untouched.
+#
+# The fence words are deliberately NOT written here with their leading '#', because the script
+# matches on that exact text and would treat this comment as the start of a block.
+
+# Capture-and-replay only: no snapshot, no metadata migration, no backfill.
+skipApprovals: true
+snapshotMigrationConfigs: []
+
+# Endpoints match the testClusters chart (deployment/k8s/charts/aggregates/testClusters).
+sourceClusters:
+  source1:
+    endpoint: "https://elasticsearch-master-headless:9200"
+    version: "ES 7.10.2"
+    allowInsecure: true
+    # auth-begin
+    authConfig:
+      basic:
+        secretName: source-creds
+    # auth-end
+
+targetClusters:
+  target1:
+    endpoint: "https://opensearch-cluster-master-headless:9200"
+    allowInsecure: true
+    # auth-begin
+    authConfig:
+      basic:
+        secretName: target-creds
+    # auth-end
+
+# An auto-created Strimzi cluster. Swap in an `existing:` block to point at a Kafka you already run.
+kafkaClusterConfiguration:
+  default:
+    autoCreate: {}
+
+traffic:
+  proxies:
+    capture-proxy:
+      source: source1
+      proxyConfig:
+        listenPort: 9201
+        noCapture: false
+        podReplicas: 1
+        # kind has no load-balancer controller, and the workflow's readiness gate waits for a
+        # LoadBalancer to report ingress — so LoadBalancer would hang there until it times out.
+        # On a cloud cluster, change this to LoadBalancer (or pass your own config with -f).
+        serviceType: ClusterIP
+
+  replayers:
+    replay1:
+      fromCapturedTraffic: capture-proxy
+      toTarget: target1
+      replayerConfig:
+        speedupFactor: 2
+        observedPacketConnectionTimeout: 30

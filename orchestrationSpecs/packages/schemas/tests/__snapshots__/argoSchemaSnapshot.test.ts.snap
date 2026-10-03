@@ -9,6 +9,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
       "items": {
         "type": "object",
         "properties": {
+          "requireBeginApproval": {
+            "type": "boolean"
+          },
           "kafkaClusters": {
             "type": "array",
             "items": {
@@ -229,6 +232,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
                       "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
                     },
+                    "solrContextPath": {
+                      "type": "string",
+                      "default": "/solr"
+                    },
                     "snapshotInfo": {
                       "anyOf": [
                         {
@@ -311,34 +318,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                                 "default": "",
                                                 "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                               },
+                                              "otelTraceExportEnabled": {
+                                                "type": "boolean",
+                                                "default": false,
+                                                "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                              },
                                               "otelTraceCollectorEndpoint": {
-                                                "anyOf": [
-                                                  {
-                                                    "type": "string",
-                                                    "enum": [
-                                                      ""
-                                                    ]
-                                                  },
-                                                  {
-                                                    "type": "string"
-                                                  }
-                                                ],
-                                                "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                                "type": "string",
+                                                "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                              },
+                                              "otelMetricsExportEnabled": {
+                                                "type": "boolean",
+                                                "default": true,
+                                                "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                               },
                                               "otelMetricsCollectorEndpoint": {
-                                                "anyOf": [
-                                                  {
-                                                    "type": "string",
-                                                    "enum": [
-                                                      ""
-                                                    ]
-                                                  },
-                                                  {
-                                                    "type": "string"
-                                                  }
-                                                ],
-                                                "default": "http://otel-collector:4317",
-                                                "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                                "type": "string",
+                                                "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                               },
                                               "indexAllowlist": {
                                                 "type": "array",
@@ -462,34 +458,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "default": [],
                                         "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                                       },
-                                      "otelTraceCollectorEndpoint": {
-                                        "anyOf": [
-                                          {
-                                            "type": "string",
-                                            "enum": [
-                                              ""
-                                            ]
-                                          },
-                                          {
-                                            "type": "string"
-                                          }
+                                      "topology": {
+                                        "type": "string",
+                                        "enum": [
+                                          "cloud",
+                                          "standalone"
                                         ],
-                                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                        "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
+                                      },
+                                      "otelTraceExportEnabled": {
+                                        "type": "boolean",
+                                        "default": false,
+                                        "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                      },
+                                      "otelTraceCollectorEndpoint": {
+                                        "type": "string",
+                                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                      },
+                                      "otelMetricsExportEnabled": {
+                                        "type": "boolean",
+                                        "default": true,
+                                        "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                       },
                                       "otelMetricsCollectorEndpoint": {
-                                        "anyOf": [
-                                          {
-                                            "type": "string",
-                                            "enum": [
-                                              ""
-                                            ]
-                                          },
-                                          {
-                                            "type": "string"
-                                          }
-                                        ],
-                                        "default": "http://otel-collector:4317",
-                                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                        "type": "string",
+                                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                       },
                                       "jvmArgs": {
                                         "type": "string",
@@ -531,34 +524,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             "default": [],
                                             "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                                           },
-                                          "otelTraceCollectorEndpoint": {
-                                            "anyOf": [
-                                              {
-                                                "type": "string",
-                                                "enum": [
-                                                  ""
-                                                ]
-                                              },
-                                              {
-                                                "type": "string"
-                                              }
+                                          "topology": {
+                                            "type": "string",
+                                            "enum": [
+                                              "cloud",
+                                              "standalone"
                                             ],
-                                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                            "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
+                                          },
+                                          "otelTraceExportEnabled": {
+                                            "type": "boolean",
+                                            "default": false,
+                                            "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                          },
+                                          "otelTraceCollectorEndpoint": {
+                                            "type": "string",
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                          },
+                                          "otelMetricsExportEnabled": {
+                                            "type": "boolean",
+                                            "default": true,
+                                            "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                           },
                                           "otelMetricsCollectorEndpoint": {
-                                            "anyOf": [
-                                              {
-                                                "type": "string",
-                                                "enum": [
-                                                  ""
-                                                ]
-                                              },
-                                              {
-                                                "type": "string"
-                                              }
-                                            ],
-                                            "default": "http://otel-collector:4317",
-                                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                            "type": "string",
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                           },
                                           "jvmArgs": {
                                             "type": "string",
@@ -642,6 +632,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -666,6 +659,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -821,7 +815,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -846,7 +840,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -873,33 +867,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                     },
                     "otelTraceCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                     },
                     "otelMetricsCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "default": "http://otel-collector:4317",
-                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                     },
                     "setHeader": {
                       "type": "array",
@@ -1363,8 +1336,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "type": "string"
                 },
                 "skipApproval": {
-                  "type": "boolean",
-                  "default": false
+                  "type": "boolean"
                 },
                 "resourceUid": {
                   "type": "string"
@@ -1380,6 +1352,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "topicConfigChecksum",
                 "checksumForSnapshot",
                 "checksumForReplayer",
+                "skipApproval",
                 "resourceUid"
               ]
             },
@@ -1566,6 +1539,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "allowInsecure": {
                             "type": "boolean"
                           },
+                          "solrContextPath": {
+                            "type": "string"
+                          },
                           "authType": {
                             "type": "string"
                           },
@@ -1590,6 +1566,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "version",
                           "endpoint",
                           "allowInsecure",
+                          "solrContextPath",
                           "authType",
                           "authBasicSecretName",
                           "authSigv4Region",
@@ -1610,33 +1587,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "default": ""
                           },
                           "otelTraceCollectorEndpoint": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  ""
-                                ]
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                            "type": "string",
+                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                           },
                           "otelMetricsCollectorEndpoint": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  ""
-                                ]
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "default": "http://otel-collector:4317",
-                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                            "type": "string",
+                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                           },
                           "indexAllowlist": {
                             "type": "array",
@@ -1671,6 +1627,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string"
                             },
                             "default": []
+                          },
+                          "solrTopology": {
+                            "type": "string",
+                            "enum": [
+                              "cloud",
+                              "standalone"
+                            ],
+                            "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source.",
+                            "changeRestriction": "impossible"
                           }
                         }
                       },
@@ -1861,6 +1826,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
                       "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
                     },
+                    "solrContextPath": {
+                      "type": "string",
+                      "default": "/solr"
+                    },
                     "label": {
                       "type": "string"
                     },
@@ -1967,13 +1936,82 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "resources": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "limits": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU allocation for the container in Kubernetes millicores."
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
+                        },
+                        "requests": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU allocation for the container in Kubernetes millicores."
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                        }
+                      },
+                      "default": {
+                        "limits": {
+                          "cpu": "500m",
+                          "memory": "1800Mi"
+                        },
+                        "requests": {
+                          "cpu": "500m",
+                          "memory": "1800Mi"
+                        }
+                      },
+                      "required": [
+                        "limits",
+                        "requests"
+                      ],
+                      "description": "Kubernetes resource limits and requests for the metadata migration container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
+                    },
                     "skipEvaluateApproval": {
-                      "type": "boolean",
-                      "description": "When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
+                      "type": "boolean"
                     },
                     "skipMigrateApproval": {
-                      "type": "boolean",
-                      "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
+                      "type": "boolean"
                     },
                     "componentTemplateAllowlist": {
                       "type": "array",
@@ -2005,33 +2043,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": 1
                     },
                     "otelTraceCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                     },
                     "otelMetricsCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "default": "http://otel-collector:4317",
-                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                     },
                     "output": {
                       "type": "string",
@@ -2161,7 +2178,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": []
                     }
-                  }
+                  },
+                  "required": [
+                    "skipEvaluateApproval",
+                    "skipMigrateApproval"
+                  ]
                 },
                 "documentBackfillConfig": {
                   "type": "object",
@@ -2185,8 +2206,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": ""
                     },
                     "skipApproval": {
-                      "type": "boolean",
-                      "description": "When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."
+                      "type": "boolean"
                     },
                     "useTargetClusterForWorkCoordination": {
                       "type": "boolean",
@@ -2213,7 +2233,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2238,7 +2258,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2246,6 +2266,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "memory"
                           ],
                           "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                        }
+                      },
+                      "default": {
+                        "limits": {
+                          "cpu": "3300m",
+                          "memory": "7000Mi"
+                        },
+                        "requests": {
+                          "cpu": "3300m",
+                          "memory": "7000Mi"
                         }
                       },
                       "required": [
@@ -2307,33 +2337,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": 85899345920
                     },
                     "otelTraceCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                     },
                     "otelMetricsCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "default": "http://otel-collector:4317",
-                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                     },
                     "serverGeneratedIds": {
                       "type": "string",
@@ -2379,6 +2388,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "useRecoverySource": {
                       "type": "boolean",
                       "default": false
+                    },
+                    "failedDocumentStreamS3Prefix": {
+                      "type": "string",
+                      "default": "rfs-failed-document-stream/"
+                    },
+                    "failedDocumentStreamS3Bucket": {
+                      "type": "string",
+                      "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
+                    },
+                    "failedDocumentStreamS3Region": {
+                      "type": "string",
+                      "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region, else the deployment default). Ignored without a bucket."
+                    },
+                    "failedDocumentStreamS3Endpoint": {
+                      "type": "string",
+                      "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint, else the deployment default). Ignored without a bucket."
+                    },
+                    "failedDocumentStreamMaxBufferBytes": {
+                      "type": "number",
+                      "default": 67108864
                     },
                     "positionGapStopword": {
                       "type": "string",
@@ -2484,7 +2513,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": []
                     }
-                  }
+                  },
+                  "required": [
+                    "skipApproval"
+                  ]
                 },
                 "sourceConnectionIdentity": {
                   "type": "object",
@@ -2500,6 +2532,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "allowInsecure": {
                       "type": "boolean"
+                    },
+                    "solrContextPath": {
+                      "type": "string"
                     },
                     "authType": {
                       "type": "string"
@@ -2525,6 +2560,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -2548,6 +2584,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -2572,6 +2611,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -2994,7 +3034,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -3019,7 +3059,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -3068,33 +3108,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": 360
                     },
                     "otelTraceCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                     },
                     "otelMetricsCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "default": "http://otel-collector:4317",
-                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                     },
                     "quiescentPeriodMs": {
                       "type": "number",
@@ -3395,6 +3414,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -3419,6 +3441,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -3453,7 +3476,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             },
             "default": []
           }
-        }
+        },
+        "required": [
+          "requireBeginApproval"
+        ]
       }
     }
   },
@@ -3471,6 +3497,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "type": "boolean",
       "default": false,
       "description": "Global fallback for skipping manual approval gates across the migration when a lower-level skipApproval setting is not defined."
+    },
+    "requireBeginApproval": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, requires a manual approval before the migration workflow begins."
     },
     "kafkaClusterConfiguration": {
       "type": "object",
@@ -3720,6 +3751,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
             "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
           },
+          "solrContextPath": {
+            "type": "string",
+            "default": "/solr",
+            "description": "The path Solr's APIs are served under, appended to this cluster's endpoint when building Solr URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host. Only valid on Solr sources."
+          },
           "snapshotInfo": {
             "anyOf": [
               {
@@ -3802,34 +3838,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "default": "",
                                       "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                     },
+                                    "otelTraceExportEnabled": {
+                                      "type": "boolean",
+                                      "default": false,
+                                      "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                    },
                                     "otelTraceCollectorEndpoint": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            ""
-                                          ]
-                                        },
-                                        {
-                                          "type": "string"
-                                        }
-                                      ],
-                                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                      "type": "string",
+                                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                    },
+                                    "otelMetricsExportEnabled": {
+                                      "type": "boolean",
+                                      "default": true,
+                                      "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                     },
                                     "otelMetricsCollectorEndpoint": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            ""
-                                          ]
-                                        },
-                                        {
-                                          "type": "string"
-                                        }
-                                      ],
-                                      "default": "http://otel-collector:4317",
-                                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                      "type": "string",
+                                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                     },
                                     "indexAllowlist": {
                                       "type": "array",
@@ -3953,34 +3978,31 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "default": [],
                               "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                             },
-                            "otelTraceCollectorEndpoint": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    ""
-                                  ]
-                                },
-                                {
-                                  "type": "string"
-                                }
+                            "topology": {
+                              "type": "string",
+                              "enum": [
+                                "cloud",
+                                "standalone"
                               ],
-                              "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                              "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
+                            },
+                            "otelTraceExportEnabled": {
+                              "type": "boolean",
+                              "default": false,
+                              "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                            },
+                            "otelTraceCollectorEndpoint": {
+                              "type": "string",
+                              "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                            },
+                            "otelMetricsExportEnabled": {
+                              "type": "boolean",
+                              "default": true,
+                              "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                             },
                             "otelMetricsCollectorEndpoint": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    ""
-                                  ]
-                                },
-                                {
-                                  "type": "string"
-                                }
-                              ],
-                              "default": "http://otel-collector:4317",
-                              "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                              "type": "string",
+                              "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                             },
                             "jvmArgs": {
                               "type": "string",
@@ -4022,34 +4044,31 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "default": [],
                                   "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                                 },
-                                "otelTraceCollectorEndpoint": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        ""
-                                      ]
-                                    },
-                                    {
-                                      "type": "string"
-                                    }
+                                "topology": {
+                                  "type": "string",
+                                  "enum": [
+                                    "cloud",
+                                    "standalone"
                                   ],
-                                  "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                  "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
+                                },
+                                "otelTraceExportEnabled": {
+                                  "type": "boolean",
+                                  "default": false,
+                                  "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                },
+                                "otelTraceCollectorEndpoint": {
+                                  "type": "string",
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                },
+                                "otelMetricsExportEnabled": {
+                                  "type": "boolean",
+                                  "default": true,
+                                  "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                 },
                                 "otelMetricsCollectorEndpoint": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        ""
-                                      ]
-                                    },
-                                    {
-                                      "type": "string"
-                                    }
-                                  ],
-                                  "default": "http://otel-collector:4317",
-                                  "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                  "type": "string",
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                 },
                                 "jvmArgs": {
                                   "type": "string",
@@ -4242,6 +4261,77 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": "",
                         "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                       },
+                      "resources": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                          "limits": {
+                            "type": "object",
+                            "properties": {
+                              "cpu": {
+                                "type": "string",
+                                "pattern": "^[0-9]+m$",
+                                "description": "CPU allocation for the container in Kubernetes millicores."
+                              },
+                              "memory": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Memory allocation for the container."
+                              },
+                              "ephemeral-storage": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
+                              }
+                            },
+                            "required": [
+                              "cpu",
+                              "memory"
+                            ],
+                            "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
+                          },
+                          "requests": {
+                            "type": "object",
+                            "properties": {
+                              "cpu": {
+                                "type": "string",
+                                "pattern": "^[0-9]+m$",
+                                "description": "CPU allocation for the container in Kubernetes millicores."
+                              },
+                              "memory": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Memory allocation for the container."
+                              },
+                              "ephemeral-storage": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
+                              }
+                            },
+                            "required": [
+                              "cpu",
+                              "memory"
+                            ],
+                            "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                          }
+                        },
+                        "default": {
+                          "limits": {
+                            "cpu": "500m",
+                            "memory": "1800Mi"
+                          },
+                          "requests": {
+                            "cpu": "500m",
+                            "memory": "1800Mi"
+                          }
+                        },
+                        "required": [
+                          "limits",
+                          "requests"
+                        ],
+                        "description": "Kubernetes resource limits and requests for the metadata migration container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
+                      },
                       "skipEvaluateApproval": {
                         "type": "boolean",
                         "description": "When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
@@ -4284,34 +4374,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": 1,
                         "description": "Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."
                       },
+                      "otelTraceExportEnabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                      },
                       "otelTraceCollectorEndpoint": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              ""
-                            ]
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ],
-                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                        "type": "string",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                      },
+                      "otelMetricsExportEnabled": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                       },
                       "otelMetricsCollectorEndpoint": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              ""
-                            ]
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ],
-                        "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                        "type": "string",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                       },
                       "output": {
                         "type": "string",
@@ -4734,7 +4813,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "ephemeral-storage": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -4759,7 +4838,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "ephemeral-storage": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -4767,6 +4846,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "memory"
                             ],
                             "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                          }
+                        },
+                        "default": {
+                          "limits": {
+                            "cpu": "3300m",
+                            "memory": "7000Mi"
+                          },
+                          "requests": {
+                            "cpu": "3300m",
+                            "memory": "7000Mi"
                           }
                         },
                         "required": [
@@ -5179,34 +5268,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.",
                         "changeRestriction": "gated"
                       },
+                      "otelTraceExportEnabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                      },
                       "otelTraceCollectorEndpoint": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              ""
-                            ]
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ],
-                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                        "type": "string",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                      },
+                      "otelMetricsExportEnabled": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                       },
                       "otelMetricsCollectorEndpoint": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              ""
-                            ]
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ],
-                        "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                        "type": "string",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                       },
                       "serverGeneratedIds": {
                         "type": "string",
@@ -5272,6 +5350,28 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "replayer"
                         ],
                         "changeRestriction": "impossible"
+                      },
+                      "failedDocumentStreamS3Prefix": {
+                        "type": "string",
+                        "default": "rfs-failed-document-stream/",
+                        "description": "S3 key prefix for the failed document stream where terminal document failures are persisted. Each RFS run writes under <prefix>/session=<workflow-uid>/. Defaults to 'rfs-failed-document-stream/'."
+                      },
+                      "failedDocumentStreamS3Bucket": {
+                        "type": "string",
+                        "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
+                      },
+                      "failedDocumentStreamS3Region": {
+                        "type": "string",
+                        "description": "AWS region for the failed document stream S3 bucket. Resolved by the config processor before submission (user value, else the snapshot repo's region, else the deployment default). Ignored without a bucket."
+                      },
+                      "failedDocumentStreamS3Endpoint": {
+                        "type": "string",
+                        "description": "Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by the config processor (user value, else the snapshot repo's endpoint, else the deployment default). Ignored without a bucket."
+                      },
+                      "failedDocumentStreamMaxBufferBytes": {
+                        "type": "number",
+                        "default": 67108864,
+                        "description": "Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates to a new S3 object. Bounds heap use when a shard produces a very large number of terminal failures. Default 67108864 (64 MiB)."
                       },
                       "positionGapStopword": {
                         "type": "string",
@@ -5387,7 +5487,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -5412,7 +5512,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -5438,34 +5538,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                   },
+                  "otelTraceExportEnabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                  },
                   "otelTraceCollectorEndpoint": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    "type": "string",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                  },
+                  "otelMetricsExportEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                   },
                   "otelMetricsCollectorEndpoint": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                    "type": "string",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                   },
                   "setHeader": {
                     "type": "array",
@@ -5979,7 +6068,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -6004,7 +6093,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -6058,34 +6147,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": 360,
                     "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
                   },
+                  "otelTraceExportEnabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                  },
                   "otelTraceCollectorEndpoint": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    "type": "string",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                  },
+                  "otelMetricsExportEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                   },
                   "otelMetricsCollectorEndpoint": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                    "type": "string",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                   },
                   "quiescentPeriodMs": {
                     "type": "number",

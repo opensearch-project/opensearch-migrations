@@ -17,6 +17,7 @@ import {
     ARGO_PROXY_OPTIONS,
     TRANSFORM_PIPELINE,
     TRANSFORM_CONTEXT_VALUE,
+    DEPLOYMENT_DEFAULTS_CONFIG,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -32,6 +33,9 @@ type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type SolrBackupNormalizedConfig = {
     externalBackupName?: string;
     collectionAllowlist: string[];
+    topology?: "cloud" | "standalone";
+    otelTraceExportEnabled?: boolean;
+    otelMetricsExportEnabled?: boolean;
     otelTraceCollectorEndpoint?: string;
     otelMetricsCollectorEndpoint?: string;
     jvmArgs?: string;
@@ -91,8 +95,15 @@ async function rewriteRepoEndpointIfLocalStack(
     repoName: string
 ): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
-    // GCS repos have no LocalStack-equivalent; the endpoint check is a no-op
-    // for gs:// URIs and the resulting useLocalStack stays false.
+    // The localstack:// rewrite below is an S3 addressing workaround, not a
+    // generic emulator feature: resolving the host to an IP forces the AWS SDK
+    // out of virtual-host-style addressing. See MetadataMigration/DEVELOPER_GUIDE.md.
+    //
+    // Path-style emulators need none of this. fake-gcs-server is reached through
+    // a plain http:// endpoint (see the gcs/ chart templates), and GcsRepo.create
+    // infers "emulator" from a non-empty endpoint and installs NoCredentials.
+    // So the check below is a no-op for gs:// URIs and useLocalStack stays false,
+    // not because GCS lacks an emulator, but because it does not need the rewrite.
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
@@ -415,6 +426,7 @@ function prepareMetadataConfig(
     const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
+        resources: rest.resources,
         skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
         skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
@@ -422,8 +434,61 @@ function prepareMetadataConfig(
     });
 }
 
+function trimToUndefined(value: unknown): string | undefined {
+    const trimmed = typeof value === "string" ? value.trim() : undefined;
+    return trimmed ? trimmed : undefined;
+}
+
+/**
+ * Resolve the failed-document-stream S3 region/endpoint before the workflow is created, so the
+ * destination is recorded in run history rather than discovered from pod env at runtime.
+ *
+ * The bucket is the stream's on/off switch and comes from the user's config alone — no default.
+ */
+export function resolveFailedDocumentStreamS3(
+    rest: Record<string, unknown>,
+    repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
+    deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>
+): Record<string, string | undefined> {
+    const bucket = trimToUndefined(rest.failedDocumentStreamS3Bucket);
+    const userRegion = trimToUndefined(rest.failedDocumentStreamS3Region);
+    const userEndpoint = trimToUndefined(rest.failedDocumentStreamS3Endpoint);
+
+    if (!bucket) {
+        // Stream off; clear orphan region/endpoint.
+        return {
+            failedDocumentStreamS3Bucket: undefined,
+            failedDocumentStreamS3Region: undefined,
+            failedDocumentStreamS3Endpoint: undefined,
+        };
+    }
+
+    const region = userRegion
+        ?? trimToUndefined(repoConfig?.awsRegion)
+        ?? trimToUndefined(deploymentDefaults.defaultS3Region);
+    const endpoint = userEndpoint
+        ?? trimToUndefined(repoConfig?.endpoint)
+        ?? trimToUndefined(deploymentDefaults.defaultS3Endpoint);
+
+    if (!region) {
+        throw new Error(
+            `failed document stream S3 bucket '${bucket}' was set but no region could be determined. ` +
+            `Set documentBackfillConfig.failedDocumentStreamS3Region, the snapshot repo's awsRegion, ` +
+            `or the deployment default region.`
+        );
+    }
+
+    return {
+        failedDocumentStreamS3Bucket: bucket,
+        failedDocumentStreamS3Region: region,
+        failedDocumentStreamS3Endpoint: endpoint,
+    };
+}
+
 function prepareDocumentBackfillConfig(
     config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
+    repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
+    deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>,
     skipApprovals: boolean
 ) {
     if (config === undefined) {
@@ -435,6 +500,7 @@ function prepareDocumentBackfillConfig(
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
+        ...resolveFailedDocumentStreamS3(rest, repoConfig, deploymentDefaults),
         skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
@@ -564,6 +630,7 @@ function normalizeSnapshotInfo(
                     } = backup;
                     const {
                         collectionAllowlist,
+                        topology,
                         ...createBackupOptions
                     } = createBackupConfig;
                     const normalizedCollectionAllowlist = collectionAllowlist ?? [];
@@ -575,10 +642,12 @@ function normalizeSnapshotInfo(
                                 createSnapshotConfig: {
                                     ...createBackupOptions,
                                     solrCollections: normalizedCollectionAllowlist,
+                                    ...(topology ? {solrTopology: topology} : {}),
                                 },
                             },
                             solrBackupConfig: {
                                 collectionAllowlist: normalizedCollectionAllowlist,
+                                ...(topology ? {topology} : {}),
                             },
                         },
                     ];
@@ -742,11 +811,13 @@ function solrCreateSnapshotConfigForBackup(snapshotDef: NormalizedSnapshotDefini
     const {
         externalBackupName: _externalBackupName,
         collectionAllowlist,
+        topology,
         ...runtimeOptions
     } = snapshotDef.solrBackupConfig;
     return {
         ...runtimeOptions,
         solrCollections: collectionAllowlist,
+        ...(topology ? {solrTopology: topology} : {}),
     };
 }
 
@@ -774,7 +845,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     typeof OVERALL_MIGRATION_CONFIG,
     typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH
 > {
-    constructor() {
+    constructor(private readonly deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG> = {}) {
         super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG_PRE_ENRICH);
     }
 
@@ -837,17 +908,19 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const proxiesWithChecksums = proxies.map(p => {
             const kafkaChecksum = kafkaChecksums.get(p.kafkaConfig.label) ?? '';
             const kafkaIdentity = MigrationConfigTransformer.kafkaClientIdentity(p.kafkaConfig as Record<string, unknown>);
+            const sourceConnectionIdentityWithoutAuth =
+                MigrationConfigTransformer.clusterConnectionIdentityWithoutAuth(p.sourceConnectionIdentity);
             const topicConfigChecksum = cs(
                 kafkaIdentity,
                 p.kafkaConfig.kafkaTopic,
                 p.kafkaConfig.topicSpecOverrides,
                 kafkaChecksum
             );
-            const sourceConnectionIdentityChecksum = cs(p.sourceConnectionIdentity);
+            const sourceConnectionIdentityChecksum = cs(sourceConnectionIdentityWithoutAuth);
             return {
                 ...p,
                 kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksum },
-                configChecksum: cs(p.sourceConnectionIdentity, p.proxyConfig, topicConfigChecksum),
+                configChecksum: cs(sourceConnectionIdentityWithoutAuth, p.proxyConfig, topicConfigChecksum),
                 topicConfigChecksum,
                 checksumForSnapshot: csDep(
                     PROXY_SCHEMA,
@@ -926,7 +999,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
             const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
-            const sourceConnectionIdentity = m.sourceConnectionIdentity;
+            const sourceConnectionIdentityWithoutAuth =
+                MigrationConfigTransformer.clusterConnectionIdentityWithoutAuth(m.sourceConnectionIdentity);
             const targetConnectionIdentity = m.targetConnectionIdentity;
             const snapshotRepoIdentity = MigrationConfigTransformer.repoIdentity(
                 (m.snapshotConfig.repoConfig ?? {}) as Record<string, unknown>
@@ -946,9 +1020,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 snapshotConfigChecksum,
                 resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
-                    sourceConnectionIdentity,
-                    m.metadataMigrationConfig ?? {},
-                    m.documentBackfillConfig ?? {},
+                    sourceConnectionIdentityWithoutAuth,
+                    m.metadataMigrationConfig,
+                    m.documentBackfillConfig,
                     targetConnectionIdentity,
                     snapshotConfigChecksum,
                     m.snapshotNameResolution,
@@ -956,7 +1030,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ),
                 checksumForReplayer: cs(targetConnectionIdentity, replayerMaterialPart),
                 workloadIdentityChecksum: cs(
-                    sourceConnectionIdentity,
+                    sourceConnectionIdentityWithoutAuth,
                     targetConnectionIdentity,
                     m.snapshotNameResolution,
                     snapshotRepoIdentity,
@@ -1014,6 +1088,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }));
 
         const output = {
+            requireBeginApproval: userConfig.requireBeginApproval ?? false,
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
             ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
             ...(s3LoadersWithChecksums.length > 0 ? { s3TrafficLoaders: s3LoadersWithChecksums } : {}),
@@ -1289,6 +1364,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
                         applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist),
+                        repoConfig,
+                        this.deploymentDefaults,
                         skipApprovals
                     );
                     results.push({
@@ -1489,7 +1566,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
+            solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
+        };
+    }
+
+    static clusterConnectionIdentityWithoutAuth(
+        connectionIdentity: Record<string, unknown>
+    ): Record<string, unknown> {
+        // Preserve the legacy no-auth hash shape so existing proxies do not redeploy
+        // once when source auth is removed from their deployment contract.
+        return {
+            label: connectionIdentity.label ?? "",
+            version: connectionIdentity.version ?? "",
+            endpoint: connectionIdentity.endpoint ?? "",
+            allowInsecure: connectionIdentity.allowInsecure ?? false,
+            solrContextPath: connectionIdentity.solrContextPath ?? "",
+            authType: "none",
+            authBasicSecretName: "",
+            authSigv4Region: "",
+            authSigv4Service: "",
+            authMtlsClientSecretName: "",
+            authMtlsCaCertHash: "",
         };
     }
 

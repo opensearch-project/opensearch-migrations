@@ -221,6 +221,18 @@ def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     assert str(total_shards) in value.value[1]
 
 
+def test_ecs_rfs_get_status_deep_check_threads_has_failed_documents(ecs_rfs_backfill, mocker):
+    # Presence must reach get_detailed_status for the plain-text path.
+    mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+                        return_value=DeploymentStatus(desired=1, running=1, pending=0))
+    mock_detailed = mocker.patch('console_link.models.backfill_rfs.get_detailed_status',
+                                 autospec=True, return_value="detail")
+
+    ecs_rfs_backfill.get_status(deep_check=True, has_failed_documents=True)
+
+    assert mock_detailed.call_args.kwargs["has_failed_documents"] is True
+
+
 def test_ecs_rfs_deep_status_check_failure(ecs_rfs_backfill, mocker, caplog):
     mocked_instance_status = DeploymentStatus(
         desired=1,
@@ -404,3 +416,32 @@ class TestComputeDerivedValues:
         assert percentage_completed == 50.0
         assert eta_ms is None  # No ETA when paused
         assert finished_iso is None  # Not completed yet
+
+    def test_completed_with_failed_documents(self):
+        """A completed backfill with failed documents reports COMPLETED_WITH_ERRORS."""
+        _, _, _, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, 10, 10, None, False, has_failed_documents=True
+        )
+        assert status == StepStateWithPause.COMPLETED_WITH_ERRORS
+
+    def test_completed_with_no_failed_documents(self):
+        """No failures leaves a completed backfill as COMPLETED."""
+        _, _, _, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, 10, 10, None, False, has_failed_documents=False
+        )
+        assert status == StepStateWithPause.COMPLETED
+
+    def test_completed_without_failed_document_stream(self):
+        """No stream configured (None) must not be guessed as an error."""
+        _, _, _, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, 10, 10, None, False, has_failed_documents=None
+        )
+        assert status == StepStateWithPause.COMPLETED
+
+    def test_in_progress_ignores_failed_documents(self):
+        """A still-running backfill is never promoted, regardless of failures."""
+        started_epoch = int(datetime.now(timezone.utc).timestamp()) - 3600
+        _, _, _, status = compute_dervived_values(
+            self.mock_cluster, self.test_index, 10, 5, started_epoch, True, has_failed_documents=True
+        )
+        assert status == StepStateWithPause.RUNNING

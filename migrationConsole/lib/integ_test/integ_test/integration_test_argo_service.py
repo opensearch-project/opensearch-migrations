@@ -25,6 +25,7 @@ from console_link.workflow.commands.artifact_store import (
 from console_link.models.cluster import Cluster
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.command_result import CommandResult
+from .parked_gate_detection import INNER_WORKFLOW_NAME, ParkedGateWatcher
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,27 @@ class WorkflowEndedBeforeSuspend(Exception):
 class IntegrationTestArgoService:
     def __init__(self, namespace: str = "ma"):
         self.namespace = namespace
+        # Approval gates this test intends to sit on. Empty by default: a gate
+        # blocking a wait means the workflow needs an approval the test isn't
+        # going to give, so the wait loops treat it as a failure rather than
+        # burning the whole timeout. A test that approves its own step gates, or
+        # deliberately exercises park-and-recover, lists those gate names here
+        # before starting the wait.
+        self.expected_parked_gate_names: List[str] = []
+
+    def parked_gate_watcher_for(self, workflow_name: str) -> ParkedGateWatcher:
+        """Watch both the polled workflow and the inner migration workflow.
+
+        Tests poll the outer test wrapper (configure/monitor/evaluate), but the
+        reconcile steps that can park live in the inner `migration-workflow` that
+        configureAndSubmitWorkflow.sh submits. Checking only the polled workflow
+        would miss every park.
+        """
+        return ParkedGateWatcher(
+            namespace=self.namespace,
+            workflow_names=[workflow_name, INNER_WORKFLOW_NAME],
+            expected_gate_names=self.expected_parked_gate_names,
+        )
 
     def start_workflow(
         self,
@@ -588,6 +610,7 @@ class IntegrationTestArgoService:
     def wait_for_suspend(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 5) -> CommandResult:
         start_time = time.time()
         last_status_info: Optional[Dict[str, Any]] = None
+        parked_gate_watcher = self.parked_gate_watcher_for(workflow_name)
 
         while time.time() - start_time < timeout_seconds:
             status_result = self.get_workflow_status(workflow_name)
@@ -604,9 +627,14 @@ class IntegrationTestArgoService:
             elif phase in ENDING_ARGO_PHASES:
                 raise WorkflowEndedBeforeSuspend(workflow_name=workflow_name, phase=phase)
 
+            # A workflow parked on a VAP-denial approval gate stays 'Running'
+            # forever, so this is the only exit that isn't the full timeout.
+            parked_gate_watcher.check()
+
             time.sleep(interval)
 
-        error_message = self._format_suspend_timeout_message(workflow_name, timeout_seconds, last_status_info)
+        error_message = self._format_suspend_timeout_message(
+            workflow_name, timeout_seconds, last_status_info, parked_gate_watcher.summarize_last_seen())
         try:
             diagnostics = self.collect_namespace_diagnostics(
                 workflow_name=workflow_name,
@@ -622,17 +650,21 @@ class IntegrationTestArgoService:
         workflow_name: str,
         timeout_seconds: int,
         status_info: Optional[Dict[str, Any]],
+        parked_gates: str = "",
     ) -> str:
         message = f"Workflow {workflow_name} did not reach suspended state in timeout of {timeout_seconds} seconds"
         if not status_info:
             return f"{message}; no workflow status was observed"
 
         details = _format_workflow_timeout_status_details(status_info)
+        if parked_gates:
+            details.append(f"unconfirmed_parked_gates={parked_gates}")
         return f"{message}; last status: " + ", ".join(details)
 
     def wait_for_ending_phase(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 5) -> CommandResult:
         start_time = time.time()
         last_status_info: Optional[Dict[str, Any]] = None
+        parked_gate_watcher = self.parked_gate_watcher_for(workflow_name)
 
         while time.time() - start_time < timeout_seconds:
             status_result = self.get_workflow_status(workflow_name)
@@ -645,9 +677,15 @@ class IntegrationTestArgoService:
             if phase in ENDING_ARGO_PHASES:
                 return CommandResult(success=True, value=f"Workflow {workflow_name} has reached an ending phase of "
                                                          f"{phase}")
+
+            # A workflow parked on a VAP-denial approval gate stays 'Running'
+            # forever, so this is the only exit that isn't the full timeout.
+            parked_gate_watcher.check()
+
             time.sleep(interval)
 
-        error_message = self._format_ending_timeout_message(workflow_name, timeout_seconds, last_status_info)
+        error_message = self._format_ending_timeout_message(
+            workflow_name, timeout_seconds, last_status_info, parked_gate_watcher.summarize_last_seen())
         try:
             diagnostics = self.collect_namespace_diagnostics(
                 workflow_name=workflow_name,
@@ -663,12 +701,15 @@ class IntegrationTestArgoService:
         workflow_name: str,
         timeout_seconds: int,
         status_info: Optional[Dict[str, Any]],
+        parked_gates: str = "",
     ) -> str:
         message = f"Workflow {workflow_name} did not reach ending state in timeout of {timeout_seconds} seconds"
         if not status_info:
             return f"{message}; no workflow status was observed"
 
         details = _format_workflow_timeout_status_details(status_info)
+        if parked_gates:
+            details.append(f"unconfirmed_parked_gates={parked_gates}")
         return f"{message}; last status: " + ", ".join(details)
 
     def get_cluster_from_configmap(self, configmap_name_prefix: str,

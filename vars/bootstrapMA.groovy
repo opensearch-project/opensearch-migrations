@@ -26,7 +26,19 @@
  *       subnetIds: "subnet-a,subnet-b",
  *       createVpcEndpoints: true,
  *       // Optional — mirror images from another ECR:
- *       maImagesSource: "ecr-registry-url"
+ *       maImagesSource: "ecr-registry-url",
+ *       // Optional — tag everything the deployment creates, including the EC2 instances,
+ *       // EBS volumes and load balancers EKS Auto Mode provisions later. Mutually
+ *       // exclusive with resolveBootstrap(useGeneralNodePool: true).
+ *       resourceTags: "Key=Value,Key2=Value2",
+ *       // Optional, TEST ONLY — also DENY the cluster role from creating anything untagged.
+ *       enforceTagsOnCreateForTests: true,
+ *       // Optional — override the chart's general-work-pool NodePool. Keys are those under
+ *       // workloadsNodePool in the chart's values.yaml; passed to aws-bootstrap.sh as a
+ *       // --helm-values file, so it goes through the same cluster check a deployer's would.
+ *       // Has no effect with resolveBootstrap(useGeneralNodePool: true), which skips that pool.
+ *       // Pair with verifyWorkloadNodePool() to assert the NodePool and its nodes match.
+ *       workloadsNodePool: [architectures: ["arm64"], minInstanceGeneration: 7]
  *   )
  */
 def call(Map config = [:]) {
@@ -58,6 +70,24 @@ def call(Map config = [:]) {
     def endpointFlag = config.createVpcEndpoints ? '--create-vpc-endpoints' : ''
     def imageSourceFlag = config.maImagesSource ? "--ma-images-source ${config.maImagesSource}" : ''
 
+    // Deployer tags. Passing these makes aws-bootstrap.sh set CloudFormation stack tags AND stand
+    // up a tagged Auto Mode NodeClass, so it is incompatible with resolveBootstrap's
+    // useGeneralNodePool (which selects the built-in pool that --tags has to delete).
+    def resourceTagsFlag = config.resourceTags ? "--tags '${config.resourceTags}'" : ''
+    // TEST ONLY: turns the tag requirement into a hard IAM Deny on the cluster role, so an untagged
+    // create fails at the moment it happens -- the same way a deployer SCP that requires tags on
+    // create behaves. Only meaningful alongside resourceTags.
+    def enforceTagsFlag = config.enforceTagsOnCreateForTests ? '--enforce-tags-on-create-for-tests' : ''
+
+    // general-work-pool overrides. JSON is valid YAML, so writeJSON produces a values file helm
+    // reads directly. Absolute path because the release bootstrap runs from /tmp.
+    def helmValuesFlag = ''
+    if (config.workloadsNodePool) {
+        def workloadValuesFile = "tmp/workloads-nodepool-overrides.yaml"
+        writeJSON file: workloadValuesFile, json: [workloadsNodePool: config.workloadsNodePool], pretty: 2
+        helmValuesFlag = "--helm-values '${pwd()}/${workloadValuesFile}'"
+    }
+
     sh """
         ${bootstrap.script} \
           ${deployFlag} \
@@ -69,6 +99,9 @@ def call(Map config = [:]) {
           ${vpcFlags} \
           ${endpointFlag} \
           ${imageSourceFlag} \
+          ${resourceTagsFlag} \
+          ${enforceTagsFlag} \
+          ${helmValuesFlag} \
           --skip-console-exec \
           --skip-setting-k8s-context \
           --kubectl-context "${kubectlContext}" \

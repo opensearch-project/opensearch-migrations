@@ -82,6 +82,29 @@ SIGV4_SCHEMA = {
     }
 }
 
+DEFAULT_SOLR_CONTEXT_PATH = "/solr"
+
+
+def normalize_solr_context_path(context_path: Optional[str]) -> str:
+    """Normalize the path Solr is served under to "" or a "/"-prefixed path with no trailing slash.
+
+    None means unset and yields the stock "/solr"; an explicit empty value means Solr is served
+    at the root of the host. Kept in parity with SolrContextPath.normalize on the Java side so a
+    value the CLI would reject fails here too, rather than silently building a malformed URL.
+    """
+    if context_path is None:
+        return DEFAULT_SOLR_CONTEXT_PATH
+    path = context_path.strip()
+    if "://" in path or "?" in path or "#" in path:
+        raise ValueError(
+            "Solr context path must be a path such as '/solr' (or empty when Solr is served at the "
+            f"root), not a URL or query string: {context_path}")
+    path = path.rstrip("/")
+    if not path:
+        return ""
+    return path if path.startswith("/") else "/" + path
+
+
 SCHEMA = {
     "cluster": {
         "type": "dict",
@@ -89,6 +112,7 @@ SCHEMA = {
             "endpoint": {"type": "string", "required": True},
             "allow_insecure": {"type": "boolean", "required": False},
             "version": {"type": "string", "required": False},
+            "solr_context_path": {"type": "string", "required": False},
             SIGV4_SIGNING_ENDPOINT_KEY: {"type": "string", "required": False},
             "no_auth": NO_AUTH_SCHEMA,
             "basic_auth": BASIC_AUTH_SCHEMA,
@@ -114,6 +138,7 @@ SOURCE_CLUSTER_SCHEMA = {
             "endpoint": {"type": "string", "required": True},
             "allow_insecure": {"type": "boolean", "required": False},
             "version": {"type": "string", "required": False},
+            "solr_context_path": {"type": "string", "required": False},
             SIGV4_SIGNING_ENDPOINT_KEY: {"type": "string", "required": False},
             "no_auth": NO_AUTH_SCHEMA,
             "basic_auth": BASIC_AUTH_SCHEMA,
@@ -142,6 +167,7 @@ class Cluster:
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
     allow_insecure: bool = False
+    solr_context_path: str = DEFAULT_SOLR_CONTEXT_PATH
     client_options: Optional[ClientOptions] = None
 
     def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
@@ -153,6 +179,7 @@ class Cluster:
         self.config = config
         self.endpoint = config["endpoint"]
         self.version = config.get("version", None)
+        self.solr_context_path = normalize_solr_context_path(config.get("solr_context_path"))
         self.allow_insecure = config.get("allow_insecure", False) if self.endpoint.startswith(
             "https") else config.get("allow_insecure", True)
         if 'no_auth' in config:

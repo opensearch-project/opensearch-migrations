@@ -21,7 +21,7 @@ conditionalPackageInstalls:
 
   # Packages for testing and local development
   localstack: true
-  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for minikube/kind testing
+  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for local testing
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false
@@ -67,11 +67,37 @@ aws:
   region: us-east-2
   account: "123456789012"
 
+  # Tags to stamp onto the AWS resources that EKS Auto Mode provisions for this release:
+  # EC2 instances, EBS volumes and the load balancers/target groups behind any Service or
+  # Ingress. Auto Mode creates those at runtime rather than through CloudFormation, so
+  # CloudFormation stack tags never reach them -- they have to be declared here instead.
+  # aws-bootstrap.sh populates this from its --tags flag; set it directly when installing
+  # the chart by hand. Requires the cluster IAM role to allow user tags on Auto Mode
+  # resources (the solution CloudFormation template grants this) and requires
+  # aws.nodeClassName to name a custom NodeClass, since the built-in "default" NodeClass
+  # is owned by EKS and cannot carry tags.
+  # Keys reserved by EKS/Karpenter are rejected: kubernetes.io/cluster/*, karpenter.sh/*,
+  # eks.amazonaws.com/*.
+  resourceTags: {}
+    # CostCenter: "1234"
+    # Owner: platform-team
+
+  # NodeClass that every NodePool in this chart references. "default" is the NodeClass EKS
+  # Auto Mode provisions for its built-in NodePools; it cannot be edited, so tagging nodes
+  # means pointing this at a custom NodeClass (aws-bootstrap.sh creates one when --tags is
+  # given) and disabling the built-in NodePools, whose nodes always use "default".
+  nodeClassName: default
+
 cloudProvider: ""
 
 gcp:
   project: ""
   serviceAccountEmail: ""
+  # GKE cluster name and location, used by the fluent-bit stackdriver output to
+  # tag Cloud Logging entries with the correct k8s_container resource. Populated
+  # from Terraform on GKE; empty elsewhere.
+  clusterName: ""
+  clusterLocation: ""
 
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
@@ -80,13 +106,37 @@ cluster:
   useCustomKarpenterNodePool: false
 
 # Migrations NodePool configuration (EKS only)
+# Instance requirements default to unconstrained: an empty list or null omits the requirement, so
+# EKS Auto Mode may pick any instance type it supports. Auto Mode still bounds that choice: it only
+# launches supported families, never nano/micro/small sizes, and nothing with a single CPU
+# (https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html#auto-supported-instances).
 workloadsNodePool:
-  architectures: []  # Empty = no constraint (Karpenter picks). Set ["amd64"] or ["arm64"] to restrict.
-  # These limits are keep the entire aggregate compute size under these values.
-  # This is an arbiter on total cost that a deployment can consume per unit of time
-  limits:
-    cpu: "64000m"
-    memory: "128Gi"
+  architectures: []  # e.g. ["arm64"] for Graviton only.
+  # With no capacity type, Auto Mode prioritizes reserved, then spot, then on-demand
+  # (https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#auto-supported-labels),
+  # so spot will be used where available. A spot interruption stops the migration work on that
+  # node; set ["on-demand"] for long-running migrations that must not be interrupted.
+  capacityTypes: []
+  instanceCategories: []  # e.g. ["c", "m", "r"] for compute, general purpose and memory optimized.
+  minInstanceGeneration: null  # Inclusive, e.g. 5 means generation 5 and newer. 0 or null omits it.
+  instanceSizes: []  # e.g. ["large", "xlarge", "2xlarge"].
+  # Caps the total cpu and memory of every node in this pool, and so what the deployment can spend
+  # per unit of time. Unset by default: with no limits, Auto Mode provisions until the account's
+  # EC2 vCPU quotas stop it (https://karpenter.sh/docs/concepts/nodepools/#speclimits).
+  # e.g. {cpu: "64000m", memory: "128Gi"}. Setting only one key caps only that resource.
+  limits: {}
+  # When this block is set, EKS's NodePool CRD requires consolidateAfter, and an unset
+  # consolidationPolicy defaults to WhenEmptyOrUnderutilized. Set `disruption: null` to omit the
+  # block and take Auto Mode's defaults for both
+  # (https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#_disruption).
+  disruption:
+    # Only empty nodes are consolidated, so running migration pods are never moved to repack nodes.
+    # The Auto Mode default, WhenEmptyOrUnderutilized, would move them.
+    consolidationPolicy: WhenEmpty
+    # EKS's NodePool CRD requires consolidateAfter whenever a disruption block is set, so this spells
+    # out the value EKS itself defaults to when the block is omitted: remove empty nodes right away.
+    # Set e.g. 30m to keep an empty node around for the next migration step.
+    consolidateAfter: 0s
 
 # Worker fleets: migration-console-identical pods on bigger hardware.
 # Dormant at replicas: 0. Scale up with: kubectl scale deployment/worker-fleet-<name> --replicas=N
@@ -124,7 +174,7 @@ gcsBucketConfiguration:
   bucketOperationImage: "google/cloud-sdk:latest"
   bucketOperationImagePullPolicy: "IfNotPresent"
   serviceAccountName: "migrations-service-account"
-  useLocalGcs: false   # set true for minikube/kind; wires fake-gcs-server as the GCS endpoint
+  useLocalGcs: false   # set true for kind; wires fake-gcs-server as the GCS endpoint
   localGcsEndpoint: "fake-gcs-server"  # K8s service name for fake-gcs-server
 
 kafkaExternal:
@@ -165,7 +215,7 @@ extraOtelConfiguration:
       - xray
 
 # Shared OTEL collector image used by the metrics and trace collectors.
-otelCollectorImage: "public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"
+otelCollectorImage: "public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0"
 
 # For OTEL Operator
 otelConfiguration:
@@ -200,7 +250,7 @@ metrics:
                 credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
               tls_config:
                 ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-                insecure_skip_verify: true # Minikube uses self-signed certs
+                insecure_skip_verify: true # kind uses self-signed certs
               kubernetes_sd_configs:
                 - role: node
               relabel_configs:
@@ -430,7 +480,7 @@ charts:
           enabled: false # default
         collectorImage:
           repository: "public.ecr.aws/aws-observability/aws-otel-collector"
-          tag: "0.43.2"
+          tag: "v0.49.0"
 
 
   strimzi-kafka-operator:

@@ -74,8 +74,15 @@ For example, if LocalStack is running on port 4566:
 
 > **Note:** If you use `http://localhost:4566` instead, you may see the error:
 > `Cannot find the snapshot repository root in S3 bucket`. Switching to `127.0.0.1` resolves this.
+> The cause is S3 addressing: with a resolvable hostname the AWS SDK uses virtual-host-style
+> URLs (`http(s)://<bucket>.<host>/...`), which LocalStack does not serve. An IP literal forces
+> path-style addressing (`http(s)://<host>/<bucket>/...`), which it does.
 
 For Kubernetes deployments, the orchestration layer supports a `localstack://` protocol prefix that automatically resolves the hostname to an IP address. See the [Deploying to Kubernetes](https://github.com/opensearch-project/opensearch-migrations/wiki/Deploying-to-Kubernetes) wiki for details.
+
+Because it exists for S3 addressing, this prefix is S3-specific. Object stores whose clients
+address buckets through the URL path do not need it: the GCS chart templates point at
+`fake-gcs-server` with a plain `http://` endpoint and no rewrite.
 
 ### On-Disk Snapshot
 

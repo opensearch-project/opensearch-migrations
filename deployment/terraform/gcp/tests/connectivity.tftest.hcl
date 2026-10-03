@@ -3,6 +3,10 @@
 
 variables {
   project = "test-project"
+  # Dummy token so the google provider skips Application Default Credentials
+  # lookup — these are plan-only tests and must run without cloud credentials
+  # (e.g. in CI).
+  access_token = "test-token-not-used"
 }
 
 # Mock the data source to avoid GCP API calls during testing
