@@ -11,122 +11,92 @@ package org.opensearch.migrations.replay.kafka;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
-import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
-import org.opensearch.migrations.replay.tracing.ChannelContextManager;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.testutils.TrafficStreamFixtures;
-import org.opensearch.migrations.tracing.ActiveContextTracker;
-import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
-import org.opensearch.migrations.tracing.CompositeContextTracker;
-import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
-import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
 
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 @Slf4j
 class HttpTransactionDumperTest {
 
-    private static final RootReplayerContext ROOT_CONTEXT = new RootReplayerContext(
-        RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(OtelCollectorEndpoints.empty(), "test", "test"),
-        new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+    private static final ConnectionProcessingId CONNECTION = new ConnectionProcessingId(
+        new PartitionGenerationId(new TopicPartition("traffic", 0), 3),
+        new CapturedConnectionId("node1", "conn1"),
+        2
     );
-
-    private static Timestamp ts(long epochSeconds) {
-        return Timestamp.newBuilder().setSeconds(epochSeconds).build();
-    }
-
-    private PojoTrafficStreamAndKey wrapWithKafkaKey(TrafficStream ts, int partition, long offset) {
-        var channelContextManager = new ChannelContextManager(ROOT_CONTEXT);
-        var key = new TrafficStreamKeyWithKafkaRecordId(
-            tsk -> {
-                var channelCtx = channelContextManager.retainOrCreateContext(tsk);
-                return ROOT_CONTEXT.createTrafficStreamContextForKafkaSource(channelCtx, "key", 0);
-            },
-            ts,
-            new PojoKafkaCommitOffsetData(0, partition, offset)
-        );
-        return new PojoTrafficStreamAndKey(ts, key);
-    }
 
     @Test
     void testCompleteRequestResponse() {
         var baos = new ByteArrayOutputStream();
-        var dumper = new HttpTransactionDumper(new PrintStream(baos));
+        var finishedRequests = new ArrayList<ReplayRequestId>();
+        var dumper = new HttpTransactionDumper(new PrintStream(baos), "", finishedRequests::add);
+        var request = new HttpMessageAndTimestamp.Request(Instant.ofEpochSecond(100));
+        request.add("GET /_cat/indices HTTP/1.1\r\nHost: localhost\r\n\r\n"
+            .getBytes(StandardCharsets.UTF_8));
+        request.setLastPacketTimestamp(Instant.ofEpochSecond(101));
+        var response = new HttpMessageAndTimestamp.Response(Instant.ofEpochSecond(102));
+        response.add("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+            .getBytes(StandardCharsets.UTF_8));
+        response.setLastPacketTimestamp(Instant.ofEpochSecond(103));
+        var interim = new HttpMessageAndTimestamp.InterimResponse(Instant.ofEpochSecond(101));
+        interim.add("HTTP/1.1 103 Early Hints\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        interim.setLastPacketTimestamp(Instant.ofEpochSecond(101));
+        var requestId = new ReplayRequestId(CONNECTION, 7);
 
-        var ts = TrafficStreamFixtures.makeHttpRequestResponseTrafficStream(
-            "node1",
-            "conn1",
-            "GET /_cat/indices HTTP/1.1\r\nHost: localhost\r\n\r\n",
-            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+        dumper.onRequestReconstituted(
+            requestId,
+            7,
+            request,
+            Instant.ofEpochSecond(100),
+            Instant.ofEpochSecond(101),
+            1_000L
         );
-
-        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
-            Duration.ofSeconds(30), "test", dumper);
-        accumulator.accept(wrapWithKafkaKey(ts, 0, 42));
-        accumulator.close();
+        dumper.onSourceInterimResponse(requestId, interim);
+        dumper.onSourceResponseComplete(requestId, response, true);
+        dumper.onCapturedClose(CONNECTION, 1, Instant.ofEpochSecond(104));
 
         var output = baos.toString(StandardCharsets.UTF_8);
         log.info("dump-http output:\n{}", output);
 
         var lines = output.strip().split("\n");
-        // Should have REQ, RSP, and CLOSED lines
-        Assertions.assertTrue(lines.length >= 2, "Expected at least 2 lines, got: " + lines.length);
+        Assertions.assertEquals(4, lines.length, "REQ, INT, RSP, and CLOSED must each be visible");
 
-        boolean hasReq = false, hasRsp = false;
+        boolean hasReq = false, hasInterim = false, hasRsp = false, hasClose = false;
         for (var line : lines) {
             if (line.contains("REQ")) {
                 hasReq = true;
                 Assertions.assertTrue(line.contains("GET /_cat/indices HTTP/1.1"));
                 Assertions.assertTrue(line.contains("nc:node1.conn1:"));
-                Assertions.assertTrue(line.contains("p:"));
-                Assertions.assertTrue(line.contains("o:"));
-                Assertions.assertTrue(line.contains("0"), "partition value");
-                Assertions.assertTrue(line.contains("42"), "offset value");
+                Assertions.assertTrue(line.contains("p:0"), "partition value");
+                Assertions.assertTrue(line.contains("o:      "), "a transaction has no single Kafka offset");
+            }
+            if (line.contains("INT")) {
+                hasInterim = true;
+                Assertions.assertTrue(line.contains("HTTP/1.1 103 Early Hints"));
             }
             if (line.contains("RSP")) {
                 hasRsp = true;
                 Assertions.assertTrue(line.contains("HTTP/1.1 200 OK"));
             }
+            if (line.contains("CLOSED")) {
+                hasClose = true;
+            }
         }
         Assertions.assertTrue(hasReq, "Missing REQ line");
+        Assertions.assertTrue(hasInterim, "Missing INT line");
         Assertions.assertTrue(hasRsp, "Missing RSP line");
-    }
-
-    @Test
-    void testExpiredConnection() {
-        var baos = new ByteArrayOutputStream();
-        var dumper = new HttpTransactionDumper(new PrintStream(baos));
-
-        // A read with no EOM — will expire when accumulator closes
-        var ts = TrafficStream.newBuilder()
-            .setNodeId("node1").setConnectionId("conn2").setNumber(0)
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(200))
-                .setRead(ReadObservation.newBuilder()
-                    .setData(ByteString.copyFrom("GET /partial HTTP/1.1\r\n", StandardCharsets.UTF_8))))
-            .build();
-
-        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
-            Duration.ofSeconds(30), "test", dumper);
-        accumulator.accept(wrapWithKafkaKey(ts, 1, 99));
-        accumulator.close();
-
-        var output = baos.toString(StandardCharsets.UTF_8);
-        log.info("expired output:\n{}", output);
-
-        // The accumulator should fire onTrafficStreamsExpired for the incomplete read
-        // (no REQ line since EOM was never reached)
-        Assertions.assertTrue(output.contains("EXPIRED") || output.isEmpty(),
-            "Expected EXPIRED or empty output for incomplete read, got: " + output);
+        Assertions.assertTrue(hasClose, "Missing CLOSED line");
+        Assertions.assertEquals(List.of(requestId), finishedRequests);
     }
 
     @Test

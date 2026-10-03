@@ -37,12 +37,18 @@ public class CodedOutputStreamSizeUtil {
         Instant timestamp,
         int observationFieldNumber,
         int dataFieldNumber,
-        ByteBuf buf
+        ByteBuf buf,
+        long connectionObservationSequence
     ) {
         // Timestamp required bytes
         int tsContentSize = getSizeOfTimestamp(timestamp);
         int tsTagAndContentSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize)
             + tsContentSize;
+
+        int orderingMetadataSize = CodedOutputStream.computeUInt64Size(
+            TrafficObservation.CONNECTIONOBSERVATIONSEQUENCE_FIELD_NUMBER,
+            connectionObservationSequence
+        );
 
         // Capture required bytes
         int dataSize = computeByteBufRemainingSize(dataFieldNumber, buf);
@@ -50,7 +56,7 @@ public class CodedOutputStreamSizeUtil {
 
         // Observation and closing index required bytes
         return bytesNeededForObservationAndClosingIndex(
-            tsTagAndContentSize + captureTagAndContentSize,
+            tsTagAndContentSize + orderingMetadataSize + captureTagAndContentSize,
             Integer.MAX_VALUE
         );
     }

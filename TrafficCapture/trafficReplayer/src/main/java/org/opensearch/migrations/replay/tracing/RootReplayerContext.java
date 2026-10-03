@@ -1,29 +1,31 @@
 package org.opensearch.migrations.replay.tracing;
 
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
 import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
+import lombok.NonNull;
 
 @Getter
 public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {
     public static final String SCOPE_NAME = "replayer";
 
-    public final KafkaConsumerContexts.AsyncListeningContext.MetricInstruments asyncListeningInstruments;
-    public final KafkaConsumerContexts.TouchScopeContext.MetricInstruments touchInstruments;
     public final KafkaConsumerContexts.PollScopeContext.MetricInstruments pollInstruments;
     public final KafkaConsumerContexts.CommitScopeContext.MetricInstruments commitInstruments;
     public final KafkaConsumerContexts.KafkaCommitScopeContext.MetricInstruments kafkaCommitInstruments;
-
-    public final TrafficSourceContexts.ReadChunkContext.MetricInstruments readChunkInstruments;
-    public final TrafficSourceContexts.BackPressureBlockContext.MetricInstruments backPressureInstruments;
-    public final TrafficSourceContexts.WaitForNextSignal.MetricInstruments waitForNextSignalInstruments;
-
-    public final ReplayContexts.ChannelKeyContext.MetricInstruments channelKeyInstruments;
+    public final KafkaConsumerContexts.RebalanceCallbackScopeContext.MetricInstruments
+        rebalanceCallbackInstruments;
+    public final ReplayIntakeMetrics replayIntakeMetrics;
+    public final TargetAttemptPermitMetrics targetAttemptPermitMetrics;
+    public final KafkaCommitStateMetrics kafkaCommitStateMetrics;
+    public final ReplayProcessFatalMetrics replayProcessFatalMetrics;
+    public final ReplayContexts.ConnectionContext.MetricInstruments channelKeyInstruments;
     public final ReplayContexts.KafkaRecordContext.MetricInstruments kafkaRecordInstruments;
     public final ReplayContexts.TrafficStreamLifecycleContext.MetricInstruments trafficStreamLifecycleInstruments;
     public final ReplayContexts.HttpTransactionContext.MetricInstruments httpTransactionInstruments;
@@ -39,21 +41,27 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final ReplayContexts.TupleHandlingContext.MetricInstruments tupleHandlingInstruments;
     public final ReplayContexts.SocketContext.MetricInstruments socketInstruments;
 
-    public RootReplayerContext(OpenTelemetry sdk, IContextTracker contextTracker) {
+    public RootReplayerContext(@NonNull OpenTelemetry sdk) {
+        this(
+            sdk,
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+        );
+    }
+
+    public RootReplayerContext(@NonNull OpenTelemetry sdk, @NonNull IContextTracker contextTracker) {
         super(SCOPE_NAME, contextTracker, sdk);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
-        asyncListeningInstruments = KafkaConsumerContexts.AsyncListeningContext.makeMetrics(meter);
-        touchInstruments = KafkaConsumerContexts.TouchScopeContext.makeMetrics(meter);
         pollInstruments = KafkaConsumerContexts.PollScopeContext.makeMetrics(meter);
         commitInstruments = KafkaConsumerContexts.CommitScopeContext.makeMetrics(meter);
         kafkaCommitInstruments = KafkaConsumerContexts.KafkaCommitScopeContext.makeMetrics(meter);
-
-        readChunkInstruments = TrafficSourceContexts.ReadChunkContext.makeMetrics(meter);
-        backPressureInstruments = TrafficSourceContexts.BackPressureBlockContext.makeMetrics(meter);
-        waitForNextSignalInstruments = TrafficSourceContexts.WaitForNextSignal.makeMetrics(meter);
-
-        channelKeyInstruments = ReplayContexts.ChannelKeyContext.makeMetrics(meter);
+        rebalanceCallbackInstruments =
+            KafkaConsumerContexts.RebalanceCallbackScopeContext.makeMetrics(meter);
+        replayIntakeMetrics = new ReplayIntakeMetrics(meter);
+        targetAttemptPermitMetrics = new TargetAttemptPermitMetrics(meter);
+        kafkaCommitStateMetrics = new KafkaCommitStateMetrics(meter);
+        replayProcessFatalMetrics = new ReplayProcessFatalMetrics(meter);
+        channelKeyInstruments = ReplayContexts.ConnectionContext.makeMetrics(meter);
         socketInstruments = ReplayContexts.SocketContext.makeMetrics(meter);
         kafkaRecordInstruments = ReplayContexts.KafkaRecordContext.makeMetrics(meter);
         trafficStreamLifecycleInstruments = ReplayContexts.TrafficStreamLifecycleContext.makeMetrics(meter);
@@ -71,30 +79,29 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     }
 
     @Override
-    public TrafficSourceContexts.ReadChunkContext createReadChunkContext() {
-        return new TrafficSourceContexts.ReadChunkContext(this, null);
+    public IReplayContexts.IConnectionContext createConnectionContext(
+        @NonNull ConnectionProcessingId connectionProcessingId
+    ) {
+        return new ReplayContexts.ConnectionContext(this, connectionProcessingId);
     }
 
-    public IReplayContexts.IChannelKeyContext createChannelContext(ISourceTrafficChannelKey tsk) {
-        return new ReplayContexts.ChannelKeyContext(this, null, tsk);
+    @Override
+    public IReplayContexts.IKafkaRecordContext createKafkaRecordContext(
+        @NonNull KafkaRecordId recordId,
+        int serializedSizeBytes
+    ) {
+        return new ReplayContexts.KafkaRecordContext(this, recordId, serializedSizeBytes);
+    }
+
+    public IKafkaConsumerContexts.IPollScopeContext createPollContext() {
+        return new KafkaConsumerContexts.PollScopeContext(this, null);
     }
 
     public IKafkaConsumerContexts.ICommitScopeContext createCommitContext() {
         return new KafkaConsumerContexts.CommitScopeContext(this, null);
     }
 
-    public IReplayContexts.ITrafficStreamsLifecycleContext createTrafficStreamContextForStreamSource(
-        IReplayContexts.IChannelKeyContext channelCtx,
-        ITrafficStreamKey tsk
-    ) {
-        return new InputStreamOfTraffic.IOSTrafficStreamContext(this, channelCtx, tsk);
-    }
-
-    public IReplayContexts.IKafkaRecordContext createTrafficStreamContextForKafkaSource(
-        IReplayContexts.IChannelKeyContext channelCtx,
-        String recordId,
-        int kafkaRecordSize
-    ) {
-        return new ReplayContexts.KafkaRecordContext(this, channelCtx, recordId, kafkaRecordSize);
+    public IKafkaConsumerContexts.IRebalanceCallbackScopeContext createRebalanceCallbackContext() {
+        return new KafkaConsumerContexts.RebalanceCallbackScopeContext(this);
     }
 }

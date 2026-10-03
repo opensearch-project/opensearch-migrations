@@ -20,6 +20,7 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_MESSAGE_TIMESTAMP_TYPE: LogAppendTime
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       # Allow large messages (8MB) on the broker
       KAFKA_MESSAGE_MAX_BYTES: 8388608
@@ -56,6 +57,8 @@ services:
       - "/usr/share/captureProxy/config/pub.pem"
       - "--sslKeyFile"
       - "/usr/share/captureProxy/config/key.pem"
+      - "--max-connection-duration-seconds"
+      - "130"
       - "--suppressCaptureForMethod"
       - "GET"
       - "--kafkaPropertyFile"
@@ -106,11 +109,7 @@ services:
       - "logging-group-default"
       - "--kafkaPropertyFile"
       - "/tmp/kafka-consumer.properties"
-      - "--lookahead-time-window"
-      - "400"
-      - "--packet-timeout-seconds"
-      - "300"
-      - "--max-concurrent-requests"
+      - "--maxConcurrentRequests"
       - "200"
 
 volumes:

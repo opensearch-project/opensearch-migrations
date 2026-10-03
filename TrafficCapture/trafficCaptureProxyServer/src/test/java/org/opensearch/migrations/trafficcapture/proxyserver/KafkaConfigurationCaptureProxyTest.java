@@ -1,9 +1,18 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.io.IOException;
+import java.net.ConnectException;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -91,11 +100,47 @@ public class KafkaConfigurationCaptureProxyTest {
         ) {
             failureMode.apply(kafkaProxy);
 
+            if (failureMode.blocksStartup()) {
+                assertListenerWaitsForKafkaRecovery(captureProxy, failureMode);
+                return;
+            }
+
             captureProxy.start();
 
             var latency = assertBasicCalls(captureProxy, DEFAULT_NUMBER_OF_CALLS);
 
             assertLessThan(PROXY_EXPECTED_MAX_LATENCY_MS, latency.toMillis());
+        }
+    }
+
+    private void assertListenerWaitsForKafkaRecovery(
+        CaptureProxyContainer captureProxy,
+        FailureMode failureMode
+    ) {
+        try (var startupExecutor = Executors.newSingleThreadExecutor()) {
+            var startup = CompletableFuture.runAsync(captureProxy::start, startupExecutor);
+            var listeningPort = captureProxy.waitForListeningPort(Duration.ofSeconds(1));
+
+            Assertions.assertThrows(
+                TimeoutException.class,
+                () -> startup.get(1, TimeUnit.SECONDS),
+                "startup must remain pending until Kafka can establish a usable assignment"
+            );
+            try (var socket = new Socket()) {
+                Assertions.assertThrows(
+                    ConnectException.class,
+                    () -> socket.connect(new InetSocketAddress("localhost", listeningPort), 500),
+                    "the operating system must refuse connections before the first usable assignment"
+                );
+            }
+
+            failureMode.clear(kafkaProxy);
+            startup.get(30, TimeUnit.SECONDS);
+
+            var latency = assertBasicCalls(captureProxy, DEFAULT_NUMBER_OF_CALLS);
+            assertLessThan(PROXY_EXPECTED_MAX_LATENCY_MS, latency.toMillis());
+        } catch (IOException | InterruptedException | ExecutionException | TimeoutException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -187,6 +232,46 @@ public class KafkaConfigurationCaptureProxyTest {
         }
     }
 
+    @Test
+    public void testLogAppendTimeTopicPassesCapabilityProbe() {
+        try (
+            var captureProxy = new CaptureProxyContainer(
+                toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                toxiproxyTestBase.getProxyUrlHttp(kafkaProxy)
+            )
+        ) {
+            captureProxy.start();
+            assertBasicCalls(captureProxy, 1);
+        }
+    }
+
+    @Test
+    public void testFatalKafkaFailureIsObservableWithoutHaltingTheTestJvm() throws Exception {
+        var topic = "fatal-kafka-failure-" + UUID.randomUUID();
+        kafkaTestBase.createTrafficTopic(topic);
+        try (
+            var captureProxy = new CaptureProxyContainer(
+                () -> toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                () -> toxiproxyTestBase.getProxyUrlHttp(kafkaProxy),
+                Stream.of(
+                    "--kafkaTopic", topic,
+                    "--heartbeat-interval-seconds", "1",
+                    "--heartbeat-expiration-interval-seconds", "30"
+                )
+            )
+        ) {
+            captureProxy.start();
+            kafkaTestBase.rejectAllProducesToTopic(topic);
+
+            assertEquals(
+                CaptureProxy.CAPTURE_FAILURE_EXIT_CODE,
+                captureProxy.waitForFatalExit(Duration.ofSeconds(20))
+            );
+        } finally {
+            kafkaTestBase.deleteTopic(topic);
+        }
+    }
+
     private Duration assertBasicCalls(CaptureProxyContainer proxy, int numberOfCalls) {
         return assertBasicCalls(CaptureProxyContainer.getUriFromContainer(proxy), numberOfCalls);
     }
@@ -214,27 +299,46 @@ public class KafkaConfigurationCaptureProxyTest {
     }
 
     public enum FailureMode {
-        LATENCY((proxy) -> proxy.toxics().latency("latency", ToxicDirection.UPSTREAM, 5000)),
-        BANDWIDTH((proxy) -> proxy.toxics().bandwidth("bandwidth", ToxicDirection.DOWNSTREAM, 1)),
-        TIMEOUT((proxy) -> proxy.toxics().timeout("timeout", ToxicDirection.UPSTREAM, 5000)),
-        SLICER((proxy) -> {
+        LATENCY(true, (proxy) -> proxy.toxics().latency("latency", ToxicDirection.UPSTREAM, 5000)),
+        BANDWIDTH(false, (proxy) -> proxy.toxics().bandwidth("bandwidth", ToxicDirection.DOWNSTREAM, 1)),
+        TIMEOUT(true, (proxy) -> proxy.toxics().timeout("timeout", ToxicDirection.UPSTREAM, 5000)),
+        SLICER(false, (proxy) -> {
             proxy.toxics().slicer("slicer_down", ToxicDirection.DOWNSTREAM, 1, 1000);
             proxy.toxics().slicer("slicer_up", ToxicDirection.UPSTREAM, 1, 1000);
         }),
-        SLOW_CLOSE((proxy) -> proxy.toxics().slowClose("slow_close", ToxicDirection.UPSTREAM, 5000)),
-        RESET_PEER((proxy) -> proxy.toxics().resetPeer("reset_peer", ToxicDirection.UPSTREAM, 5000)),
-        LIMIT_DATA((proxy) -> proxy.toxics().limitData("limit_data", ToxicDirection.UPSTREAM, 10)),
-        DISCONNECT(Proxy::disable);
+        SLOW_CLOSE(false, (proxy) -> proxy.toxics().slowClose("slow_close", ToxicDirection.UPSTREAM, 5000)),
+        RESET_PEER(true, (proxy) -> proxy.toxics().resetPeer("reset_peer", ToxicDirection.UPSTREAM, 5000)),
+        LIMIT_DATA(true, (proxy) -> proxy.toxics().limitData("limit_data", ToxicDirection.UPSTREAM, 10)),
+        DISCONNECT(true, Proxy::disable);
 
+        private final boolean blocksStartup;
         private final ThrowingConsumer<Proxy> failureModeApplier;
 
-        FailureMode(ThrowingConsumer<Proxy> applier) {
+        FailureMode(boolean blocksStartup, ThrowingConsumer<Proxy> applier) {
+            this.blocksStartup = blocksStartup;
             this.failureModeApplier = applier;
+        }
+
+        public boolean blocksStartup() {
+            return blocksStartup;
         }
 
         public void apply(Proxy proxy) {
             try {
                 this.failureModeApplier.accept(proxy);
+            } catch (Throwable t) {
+                throw new RuntimeException(t);
+            }
+        }
+
+        public void clear(Proxy proxy) {
+            try {
+                if (!proxy.isEnabled()) {
+                    proxy.enable();
+                }
+                for (var toxic : proxy.toxics().getAll()) {
+                    toxic.remove();
+                }
             } catch (Throwable t) {
                 throw new RuntimeException(t);
             }

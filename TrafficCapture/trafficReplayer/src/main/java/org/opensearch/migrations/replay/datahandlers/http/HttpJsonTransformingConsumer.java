@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -48,9 +50,11 @@ import lombok.extern.slf4j.Slf4j;
 public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsumer<TransformedOutputAndResult<R>> {
     public static final int HTTP_MESSAGE_NUM_SEGMENTS = 2;
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
+    private static final String FILTERED_REQUEST_FUTURE_LABEL =
+        "HttpJsonTransformingConsumer.filteredRequest";
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
-    private IReplayContexts.IRequestTransformationContext transformationContext;
+    private final IReplayContexts.IRequestTransformationContext transformationContext;
     private Exception lastConsumeException;
 
     /**
@@ -69,9 +73,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         IJsonTransformer transformer,
         IAuthTransformerFactory authTransformerFactory,
         IPacketFinalizingConsumer<R> transformedPacketReceiver,
-        IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext
+        IReplayContexts.IRequestTransformationContext transformationContext
     ) {
-        transformationContext = httpTransactionContext.createTransformationContext();
+        this.transformationContext = transformationContext;
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
@@ -130,10 +134,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             channel.finishAndReleaseAll();
             channel.close();
             transformationContext.onTransformSkip();
-            transformationContext.close();
             return TextTrackedFuture.completedFuture(
                 new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped()),
-                () -> "HttpJsonTransformingConsumer.filteredRequest"
+                () -> FILTERED_REQUEST_FUTURE_LABEL
             );
         } catch (Exception e) {
             if (hasRequestFilteredCause(e)) {
@@ -141,10 +144,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 channel.finishAndReleaseAll();
                 channel.close();
                 transformationContext.onTransformSkip();
-                transformationContext.close();
                 return TextTrackedFuture.completedFuture(
                     new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped()),
-                    () -> "HttpJsonTransformingConsumer.filteredRequest"
+                    () -> FILTERED_REQUEST_FUTURE_LABEL
                 );
             }
             this.transformationContext.addCaughtException(e);
@@ -205,8 +207,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             );
 
             transformationContext.onTransformSuccess();
-            transformationContext.close();
-
             // R is ByteBufListProducer in production — this cast is safe because
             // SigningByteBufListProducer extends ByteBufListProducer
             var result = (TransformedOutputAndResult<R>) (TransformedOutputAndResult<?>)
@@ -231,7 +231,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             new NettyJsonToByteBufHandler(Collections.unmodifiableList(chunkSizes))
         );
         ch.writeInbound(signedHeaders);
-        ch.writeInbound(io.netty.handler.codec.http.LastHttpContent.EMPTY_LAST_CONTENT);
         ch.finish();
 
         var packets = new ByteBufList();
@@ -278,16 +277,24 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         }
         return offloadingHandler.getPacketReceiverCompletionFuture().getDeferredFutureThroughHandle((v, t) -> {
             if (t != null) {
-                transformationContext.onTransformFailure();
                 t = TrackedFuture.unwindPossibleCompletionException(t);
+                if (hasRequestFilteredCause(t)) {
+                    transformationContext.onTransformSkip();
+                    return TextTrackedFuture.completedFuture(
+                        new TransformedOutputAndResult<>(
+                            null,
+                            HttpRequestTransformationStatus.skipped()
+                        ),
+                        () -> FILTERED_REQUEST_FUTURE_LABEL
+                    );
+                }
+                transformationContext.onTransformFailure();
                 if (t instanceof NoContentException) {
                     return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                 } else {
-                    transformationContext.close();
                     throw new CompletionException(t);
                 }
             } else {
-                transformationContext.close();
                 transformationContext.onTransformSuccess();
                 return TextTrackedFuture.completedFuture(v, () -> "transformedHttpMessageValue");
             }
@@ -321,13 +328,12 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             } else {
                 transformationContext.onTransformSkip();
             }
-            transformationContext.close();
         }, () -> "HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
     }
 
     private static HttpRequestTransformationStatus makeStatusForRedrive(Throwable reason) {
         return reason == null
-            ? HttpRequestTransformationStatus.skipped() : HttpRequestTransformationStatus.makeError(reason);
+            ? HttpRequestTransformationStatus.completed() : HttpRequestTransformationStatus.makeError(reason);
     }
 
     private static boolean hasRequestFilteredCause(Throwable t) {

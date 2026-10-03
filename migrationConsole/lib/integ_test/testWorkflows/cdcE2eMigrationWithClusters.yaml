@@ -63,14 +63,20 @@ spec:
         value: "120"
       - name: speedup-factor
         value: "20"
-      - name: observed-packet-timeout
-        value: "30"
       - name: replayer-config-overrides
         value: "{}"
       - name: pre-snapshot-proxy-submit
         value: "false"
       - name: capture-proxy-service-type
         value: "LoadBalancer"
+      - name: capture-proxy-pod-replicas
+        value: "1"
+      - name: kafka-broker-replicas
+        value: "3"
+      - name: traffic-topic-partitions
+        value: "2"
+      - name: replayer-pod-replicas
+        value: "1"
       - name: otel-trace-collector-endpoint
         value: ""
       - name: client-auth-pem-base64
@@ -208,6 +214,12 @@ spec:
                       key: migrationConsolePullPolicy
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: captureProxyPodReplicas
+                  value: "{{workflow.parameters.capture-proxy-pod-replicas}}"
+                - name: kafkaBrokerReplicas
+                  value: "{{workflow.parameters.kafka-broker-replicas}}"
+                - name: trafficTopicPartitions
+                  value: "{{workflow.parameters.traffic-topic-partitions}}"
                 - name: otelTraceCollectorEndpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
                 - name: clientAuthPemBase64
@@ -254,8 +266,6 @@ spec:
                   value: "{{steps.generate-base-config.outputs.parameters.migrationConfigBase64}}"
                 - name: speedupFactor
                   value: "{{workflow.parameters.speedup-factor}}"
-                - name: observedPacketTimeout
-                  value: "{{workflow.parameters.observed-packet-timeout}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -270,6 +280,14 @@ spec:
                   value: "{{workflow.parameters.replayer-config-overrides}}"
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: captureProxyPodReplicas
+                  value: "{{workflow.parameters.capture-proxy-pod-replicas}}"
+                - name: kafkaBrokerReplicas
+                  value: "{{workflow.parameters.kafka-broker-replicas}}"
+                - name: trafficTopicPartitions
+                  value: "{{workflow.parameters.traffic-topic-partitions}}"
+                - name: replayerPodReplicas
+                  value: "{{workflow.parameters.replayer-pod-replicas}}"
                 - name: otelTraceCollectorEndpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
                 - name: clientAuthPemBase64

@@ -1,9 +1,12 @@
 package org.opensearch.migrations.trafficcapture;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -12,6 +15,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializerTest.StreamManager.NullStreamManager;
@@ -19,6 +23,7 @@ import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -29,6 +34,8 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.concurrent.DefaultEventExecutor;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.NonNull;
@@ -43,7 +50,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 @WrapWithNettyLeakDetection(repetitions = 4)
 class StreamChannelConnectionCaptureSerializerTest {
 
-    public static final String TEST_TRAFFIC_STREAM_ID_STRING = "Test";
+    public static final String TEST_TRAFFIC_RECORD_ID_STRING = "Test";
     public static final String TEST_NODE_ID_STRING = "test_node_id";
 
     // Reference Timestamp chosen in the future with nanosecond precision resemble an upper bound on space overhead
@@ -59,10 +66,11 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         return TrafficStream.newBuilder()
             .setNodeId(TEST_NODE_ID_STRING)
-            .setConnectionId(TEST_TRAFFIC_STREAM_ID_STRING)
+            .setConnectionId(TEST_TRAFFIC_RECORD_ID_STRING)
             .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
+                    .setConnectionObservationSequence(1)
                     .setClose(CloseObservation.newBuilder().build())
                     .build()
             )
@@ -71,6 +79,7 @@ class StreamChannelConnectionCaptureSerializerTest {
 
             (((TrafficObservation.newBuilder()
                 .setTs(fixedTimestamp)
+                .setConnectionObservationSequence(1)
                 .setWrite(WriteObservation.newBuilder().build())
                 .build()).getSerializedSize() + 2 // add 2 for subStream Overhead
             ) * readWriteEventCount) + averageDataPacketSize * readWriteEventCount;
@@ -80,11 +89,12 @@ class StreamChannelConnectionCaptureSerializerTest {
         var fixedTimestamp = Timestamp.newBuilder().setSeconds(t.getEpochSecond()).setNanos(t.getNano()).build();
         return TrafficStream.newBuilder()
             .setNodeId(TEST_NODE_ID_STRING)
-            .setConnectionId(TEST_TRAFFIC_STREAM_ID_STRING)
+            .setConnectionId(TEST_TRAFFIC_RECORD_ID_STRING)
             .setNumberOfThisLastChunk(1)
             .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
+                    .setConnectionObservationSequence(1)
                     .setRead(
                         ReadObservation.newBuilder()
                             .setData(ByteString.copyFrom(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8)))
@@ -95,12 +105,14 @@ class StreamChannelConnectionCaptureSerializerTest {
             .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
+                    .setConnectionObservationSequence(2)
                     .setRead(ReadObservation.newBuilder().build())
                     .build()
             )
             .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
+                    .setConnectionObservationSequence(3)
                     .setConnectionException(
                         ConnectionExceptionObservation.newBuilder().setMessage(FAKE_EXCEPTION_DATA).build()
                     )
@@ -109,12 +121,14 @@ class StreamChannelConnectionCaptureSerializerTest {
             .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
+                    .setConnectionObservationSequence(4)
                     .setConnectionException(ConnectionExceptionObservation.newBuilder().build())
                     .build()
             )
             .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
+                    .setConnectionObservationSequence(5)
                     .setEndOfMessageIndicator(
                         EndOfMessageIndication.newBuilder().setFirstLineByteLength(17).setHeadersByteLength(72).build()
                     )
@@ -123,6 +137,7 @@ class StreamChannelConnectionCaptureSerializerTest {
             .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
+                    .setConnectionObservationSequence(6)
                     .setClose(CloseObservation.newBuilder().build())
                     .build()
             )
@@ -206,6 +221,83 @@ class StreamChannelConnectionCaptureSerializerTest {
     }
 
     @Test
+    void wholeInterimResponsePreservesExactBytes() throws Exception {
+        var responseBytes = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n"
+            .getBytes(StandardCharsets.US_ASCII);
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 4096);
+        var buffer = Unpooled.wrappedBuffer(responseBytes);
+
+        serializer.addInterimResponseEvent(REFERENCE_TIMESTAMP, buffer);
+        serializer.flushCommitAndResetStream(true).get();
+        buffer.release();
+
+        var observations = outputBuffersCreated.stream()
+            .flatMap(bytes -> {
+                try {
+                    return TrafficStream.parseFrom(bytes).getSubStreamList().stream();
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            })
+            .toList();
+        Assertions.assertEquals(1, observations.size());
+        Assertions.assertTrue(observations.get(0).hasInterimResponse());
+        Assertions.assertArrayEquals(
+            responseBytes,
+            observations.get(0).getInterimResponse().getData().toByteArray()
+        );
+    }
+
+    @Test
+    void segmentedInterimResponsePreservesExactBytesAndTerminatesWithSegmentEnd() throws Exception {
+        var responseBytes = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n".repeat(20)
+            .getBytes(StandardCharsets.US_ASCII);
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        var streamOverheadBytes = CodedOutputStream.computeStringSize(
+            TrafficStream.CONNECTIONID_FIELD_NUMBER,
+            TEST_TRAFFIC_RECORD_ID_STRING
+        ) + CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, TEST_NODE_ID_STRING);
+        var spaceNeededForFlush = CodedOutputStream.computeInt32Size(
+            TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
+            responseBytes.length
+        );
+        var bufferSize = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(
+            REFERENCE_TIMESTAMP,
+            TrafficObservation.INTERIMRESPONSESEGMENT_FIELD_NUMBER,
+            InterimResponseSegmentObservation.DATA_FIELD_NUMBER,
+            Unpooled.wrappedBuffer(responseBytes, 0, 8),
+            1
+        ) + streamOverheadBytes + spaceNeededForFlush;
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, bufferSize);
+        var buffer = Unpooled.wrappedBuffer(responseBytes);
+
+        serializer.addInterimResponseEvent(REFERENCE_TIMESTAMP, buffer);
+        serializer.flushCommitAndResetStream(true).get();
+        buffer.release();
+
+        var observations = new ArrayList<TrafficObservation>();
+        for (var bytes : outputBuffersCreated) {
+            observations.addAll(TrafficStream.parseFrom(bytes).getSubStreamList());
+        }
+        var reconstructed = new ByteArrayOutputStream();
+        observations.stream()
+            .filter(TrafficObservation::hasInterimResponseSegment)
+            .forEach(observation ->
+                reconstructed.writeBytes(observation.getInterimResponseSegment().getData().toByteArray()));
+
+        Assertions.assertArrayEquals(responseBytes, reconstructed.toByteArray());
+        Assertions.assertTrue(
+            observations.get(observations.size() - 1).hasSegmentEnd(),
+            "segmented interim response must have an explicit terminal marker"
+        );
+        Assertions.assertTrue(
+            observations.stream().noneMatch(TrafficObservation::hasWrite),
+            "interim bytes must not fall back to ordinary Write"
+        );
+    }
+
+    @Test
     public void testWriteObservationWithSpaceForOneByteAtATime() throws IOException, ExecutionException,
         InterruptedException {
         var packetData = FAKE_READ_PACKET_DATA.repeat(5);
@@ -216,7 +308,7 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         var streamOverheadBytes = CodedOutputStream.computeStringSize(
             TrafficStream.CONNECTIONID_FIELD_NUMBER,
-            TEST_TRAFFIC_STREAM_ID_STRING
+            TEST_TRAFFIC_RECORD_ID_STRING
         ) + CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, TEST_NODE_ID_STRING);
         var spaceNeededForFlush = CodedOutputStream.computeInt32Size(
             TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
@@ -227,7 +319,8 @@ class StreamChannelConnectionCaptureSerializerTest {
             REFERENCE_TIMESTAMP,
             TrafficObservation.WRITESEGMENT_FIELD_NUMBER,
             WriteSegmentObservation.DATA_FIELD_NUMBER,
-            Unpooled.wrappedBuffer(packetBytes, 0, packetBytes.length / numberOfChunks)
+            Unpooled.wrappedBuffer(packetBytes, 0, packetBytes.length / numberOfChunks),
+            1
         ) + streamOverheadBytes + spaceNeededForFlush;
 
         assert CodedOutputStreamSizeUtil.computeByteBufRemainingSizeNoTag(
@@ -265,7 +358,7 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         var streamOverheadBytes = CodedOutputStream.computeStringSize(
             TrafficStream.CONNECTIONID_FIELD_NUMBER,
-            TEST_TRAFFIC_STREAM_ID_STRING
+            TEST_TRAFFIC_RECORD_ID_STRING
         ) + CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, TEST_NODE_ID_STRING);
         var spaceNeededForFlush = CodedOutputStream.computeInt32Size(
             TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
@@ -276,7 +369,8 @@ class StreamChannelConnectionCaptureSerializerTest {
             REFERENCE_TIMESTAMP,
             TrafficObservation.WRITESEGMENT_FIELD_NUMBER,
             WriteSegmentObservation.DATA_FIELD_NUMBER,
-            Unpooled.buffer()
+            Unpooled.buffer(),
+            1
         ) + streamOverheadBytes + spaceNeededForFlush;
 
         var serializer = createSerializerWithTestHandler(outputBuffersCreated, bufferSizeWithoutSpaceForBytes);
@@ -353,14 +447,15 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         var streamOverheadBytes = CodedOutputStream.computeStringSize(
             TrafficStream.CONNECTIONID_FIELD_NUMBER,
-            TEST_TRAFFIC_STREAM_ID_STRING
+            TEST_TRAFFIC_RECORD_ID_STRING
         ) + CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, TEST_NODE_ID_STRING) + 2;
 
         var bufferSizeToGetDesiredChunks = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(
             REFERENCE_TIMESTAMP,
             1,
             2,
-            Unpooled.wrappedBuffer(dataBytes, 0, dataBytes.length / numberOfChunks)
+            Unpooled.wrappedBuffer(dataBytes, 0, dataBytes.length / numberOfChunks),
+            1
         ) + streamOverheadBytes;
 
         var serializer = createSerializerWithTestHandler(outputBuffersCreated, bufferSizeToGetDesiredChunks);
@@ -425,7 +520,7 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         var serializer = new StreamChannelConnectionCaptureSerializer<>(
             TEST_NODE_ID_STRING,
-            TEST_TRAFFIC_STREAM_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
             new NullStreamManager()
         );
 
@@ -467,13 +562,172 @@ class StreamChannelConnectionCaptureSerializerTest {
         Assertions.assertEquals(1, outputBuffersCreated.size());
         var onlyBuffer = outputBuffersList.get(0);
         var reconstitutedTrafficStream = TrafficStream.parseFrom(onlyBuffer);
-        Assertions.assertEquals(TEST_TRAFFIC_STREAM_ID_STRING, reconstitutedTrafficStream.getConnectionId());
+        Assertions.assertEquals(TEST_TRAFFIC_RECORD_ID_STRING, reconstitutedTrafficStream.getConnectionId());
         Assertions.assertEquals(TEST_NODE_ID_STRING, reconstitutedTrafficStream.getNodeId());
         Assertions.assertEquals(6, reconstitutedTrafficStream.getSubStreamCount());
         Assertions.assertEquals(1, reconstitutedTrafficStream.getNumberOfThisLastChunk());
         Assertions.assertFalse(reconstitutedTrafficStream.hasNumber());
 
         Assertions.assertEquals(groundTruth, reconstitutedTrafficStream);
+    }
+
+    @Test
+    public void testObservationsCarryContiguousConnectionSequence() throws Exception {
+        var outputBuffers = new ConcurrentLinkedQueue<ByteBuffer>();
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
+            new StreamManager(1024 * 1024, outputBuffers)
+        );
+
+        var firstBytes = Unpooled.wrappedBuffer(new byte[] { 1 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, firstBytes);
+        firstBytes.release();
+        serializer.addCloseEvent(REFERENCE_TIMESTAMP);
+        serializer.flushCommitAndResetStream(true).get();
+
+        var record = TrafficStream.parseFrom(outputBuffers.element());
+        Assertions.assertEquals(2, record.getSubStreamCount());
+        Assertions.assertEquals(1, record.getSubStream(0).getConnectionObservationSequence());
+        Assertions.assertEquals(2, record.getSubStream(1).getConnectionObservationSequence());
+    }
+
+    @Test
+    void trafficStreamFlushDeadlineStartsWithFirstObservationAndIsNotExtendedByProgress() throws Exception {
+        var outputBuffers = new ConcurrentLinkedQueue<ByteBuffer>();
+        var nowNanos = new AtomicLong();
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
+            new SynchronousStreamManager(1024 * 1024, outputBuffers),
+            Duration.ofMillis(5),
+            ignored -> {},
+            nowNanos::get
+        );
+        var channel = new EmbeddedChannel();
+        serializer.bindToConnectionEventLoop(channel.eventLoop(), Assertions::fail);
+
+        var firstBytes = Unpooled.wrappedBuffer(new byte[] { 1 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, firstBytes);
+        firstBytes.release();
+
+        nowNanos.set(Duration.ofMillis(4).toNanos());
+        channel.advanceTimeBy(4, java.util.concurrent.TimeUnit.MILLISECONDS);
+        channel.runScheduledPendingTasks();
+        Assertions.assertTrue(outputBuffers.isEmpty());
+
+        var secondBytes = Unpooled.wrappedBuffer(new byte[] { 2 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, secondBytes);
+        secondBytes.release();
+
+        nowNanos.set(Duration.ofMillis(5).toNanos());
+        channel.advanceTimeBy(1, java.util.concurrent.TimeUnit.MILLISECONDS);
+        channel.runScheduledPendingTasks();
+
+        Assertions.assertEquals(1, outputBuffers.size());
+        var flushed = TrafficStream.parseFrom(outputBuffers.element());
+        Assertions.assertEquals(2, flushed.getSubStreamCount());
+        Assertions.assertEquals(1, flushed.getNumber());
+        Assertions.assertEquals(1, flushed.getSubStream(0).getConnectionObservationSequence());
+        Assertions.assertEquals(2, flushed.getSubStream(1).getConnectionObservationSequence());
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void observationAtDeadlineDetachesExpiredRecordBeforeAppending() throws Exception {
+        var outputBuffers = new ConcurrentLinkedQueue<ByteBuffer>();
+        var nowNanos = new AtomicLong();
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
+            new SynchronousStreamManager(1024 * 1024, outputBuffers),
+            Duration.ofMillis(5),
+            ignored -> {},
+            nowNanos::get
+        );
+        var channel = new EmbeddedChannel();
+        serializer.bindToConnectionEventLoop(channel.eventLoop(), Assertions::fail);
+
+        var firstBytes = Unpooled.wrappedBuffer(new byte[] { 1 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, firstBytes);
+        firstBytes.release();
+
+        nowNanos.set(Duration.ofMillis(5).toNanos());
+        channel.advanceTimeBy(5, java.util.concurrent.TimeUnit.MILLISECONDS);
+        var secondBytes = Unpooled.wrappedBuffer(new byte[] { 2 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, secondBytes);
+        secondBytes.release();
+
+        Assertions.assertEquals(1, outputBuffers.size());
+        var firstRecord = TrafficStream.parseFrom(outputBuffers.element());
+        Assertions.assertEquals(1, firstRecord.getSubStreamCount());
+        Assertions.assertEquals(1, firstRecord.getSubStream(0).getConnectionObservationSequence());
+
+        serializer.flushCommitAndResetStream(true).get();
+        Assertions.assertEquals(2, outputBuffers.size());
+        var records = outputBuffers.stream().map(buffer -> {
+            try {
+                return TrafficStream.parseFrom(buffer);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }).sorted(Comparator.comparingInt(StreamChannelConnectionCaptureSerializerTest::getIndexForTrafficStream))
+            .toList();
+        Assertions.assertEquals(2, records.get(1).getSubStream(0).getConnectionObservationSequence());
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void periodicFlushDoesNotPublishAnEmptyTrafficStream() {
+        var outputBuffers = new ConcurrentLinkedQueue<ByteBuffer>();
+        var nowNanos = new AtomicLong(Duration.ofMinutes(1).toNanos());
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
+            new SynchronousStreamManager(1024 * 1024, outputBuffers),
+            Duration.ofMillis(5),
+            ignored -> {},
+            nowNanos::get
+        );
+        var channel = new EmbeddedChannel();
+        serializer.bindToConnectionEventLoop(channel.eventLoop(), Assertions::fail);
+
+        channel.advanceTimeBy(1, java.util.concurrent.TimeUnit.HOURS);
+        channel.runScheduledPendingTasks();
+
+        Assertions.assertTrue(outputBuffers.isEmpty());
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void mutableConnectionStateRejectsCallsOutsideItsOwningEventLoop() throws Exception {
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
+            new NullStreamManager(),
+            Duration.ofSeconds(5)
+        );
+        var eventLoop = new DefaultEventExecutor();
+        try {
+            eventLoop.submit(
+                () -> serializer.bindToConnectionEventLoop(eventLoop, Assertions::fail)
+            ).get();
+
+            Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> serializer.addEndOfFirstLineIndicator(10)
+            );
+            Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> serializer.addEndOfHeadersIndicator(20)
+            );
+            Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> serializer.validateCriticalMutationTrafficAcknowledgement(null)
+            );
+        } finally {
+            eventLoop.shutdownGracefully().sync();
+        }
     }
 
     @Test
@@ -509,6 +763,12 @@ class StreamChannelConnectionCaptureSerializerTest {
             }
         }
         Assertions.assertEquals(1, foundEndOfSegments);
+        for (int i = 0; i < observations.size(); ++i) {
+            Assertions.assertEquals(
+                i + 1,
+                observations.get(i).getConnectionObservationSequence()
+            );
+        }
     }
 
     @Test
@@ -542,22 +802,56 @@ class StreamChannelConnectionCaptureSerializerTest {
     }
 
     @Test
-    public void testAssertionErrorDuringInitializationWhenInitializeWithTooLargeId() {
-        final String realNodeId = "b671d2f2-577b-414e-9eb4-8bc3e89ee182";
-        final String realKafkaConnectionId = "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2";
-
-        // Prepending "a" to a realNodeId to create a larger than expected id to trigger failure
-        final String tooLargeNodeId = 'a' + realNodeId;
-
+    public void testLongProductionIdsAreSerializedWithoutAnArtificialLimit() throws Exception {
+        final String writerNodeId = "capture_4b917989-a0e8-48a2-8de9-49d556660acc:123456789";
+        final String connectionId = "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2";
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
-        Assertions.assertThrows(
-            AssertionError.class,
-            () -> new StreamChannelConnectionCaptureSerializer<>(
-                "a" + tooLargeNodeId,
-                realKafkaConnectionId,
-                new StreamManager(getEstimatedTrafficStreamByteSize(0, 0), outputBuffersCreated)
-            )
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            writerNodeId,
+            connectionId,
+            new StreamManager(1024, outputBuffersCreated)
         );
+
+        serializer.addCloseEvent(REFERENCE_TIMESTAMP);
+        serializer.flushCommitAndResetStream(true).get();
+
+        var stream = TrafficStream.parseFrom(outputBuffersCreated.element());
+        Assertions.assertEquals(writerNodeId, stream.getNodeId());
+        Assertions.assertEquals(connectionId, stream.getConnectionId());
+    }
+
+    @Test
+    void intentionallyDroppedRequestAdvancesSuccessorStreamBaseline() throws Exception {
+        var outputBuffers = new ConcurrentLinkedQueue<ByteBuffer>();
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
+            new StreamManager(1024, outputBuffers)
+        );
+
+        var droppedPrefix = Unpooled.wrappedBuffer(new byte[] { 1 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, droppedPrefix);
+        droppedPrefix.release();
+        serializer.cancelCaptureForCurrentRequest(REFERENCE_TIMESTAMP);
+        serializer.flushCommitAndResetStream(false).get();
+
+        var successor = Unpooled.wrappedBuffer(new byte[] { 2 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, successor);
+        successor.release();
+        serializer.flushCommitAndResetStream(true).get();
+
+        var records = outputBuffers.stream().map(buffer -> {
+            try {
+                return TrafficStream.parseFrom(buffer);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }).sorted(Comparator.comparingInt(StreamChannelConnectionCaptureSerializerTest::getIndexForTrafficStream))
+            .toList();
+
+        Assertions.assertEquals(2, records.size());
+        Assertions.assertTrue(records.get(0).getSubStream(1).hasRequestDropped());
+        Assertions.assertEquals(1, records.get(1).getPriorRequestsReceived());
     }
 
     @ParameterizedTest
@@ -703,7 +997,7 @@ class StreamChannelConnectionCaptureSerializerTest {
     ) {
         return new StreamChannelConnectionCaptureSerializer<>(
             TEST_NODE_ID_STRING,
-            TEST_TRAFFIC_STREAM_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
             new StreamManager(bufferSize, outputBuffers)
         );
     }
@@ -786,6 +1080,36 @@ class StreamChannelConnectionCaptureSerializerTest {
                 return CompletableFuture.completedFuture(null);
             }
 
+        }
+    }
+
+    static class SynchronousStreamManager extends OrderedStreamLifecyleManager<Void> {
+        private final int bufferSize;
+        private final ConcurrentLinkedQueue<ByteBuffer> outputBuffers;
+
+        SynchronousStreamManager(int bufferSize, ConcurrentLinkedQueue<ByteBuffer> outputBuffers) {
+            this.bufferSize = bufferSize;
+            this.outputBuffers = outputBuffers;
+        }
+
+        @Override
+        public CodedOutputStreamHolder createStream() {
+            return new CodedOutputStreamAndByteBufferWrapper(bufferSize);
+        }
+
+        @Override
+        protected CompletableFuture<Void> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+            var wrapper = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
+            try {
+                wrapper.getOutputStream().flush();
+            } catch (IOException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            var buffer = wrapper.getByteBuffer();
+            buffer.position(0);
+            buffer.limit(wrapper.getOutputStream().getTotalBytesWritten());
+            outputBuffers.add(buffer);
+            return CompletableFuture.completedFuture(null);
         }
     }
 }

@@ -310,11 +310,12 @@ The replayer has no downstream dependencies — nothing waits on it. The checksu
 | `spec.otelTraceCollectorEndpoint` | Safe | Trace export config | Yes (rolling) | ❌ |
 | `spec.otelMetricsCollectorEndpoint` | Safe | Metrics export config | Yes (rolling) | ❌ |
 | `spec.speedupFactor` | Safe | Replay rate tuning | Yes (rolling) | ❌ |
-| `spec.lookaheadTimeSeconds` | Safe | Buffer tuning | Yes (rolling) | ❌ |
-| `spec.maxConcurrentRequests` | Safe | Performance tuning | Yes (rolling) | ❌ |
-| `spec.numClientThreads` | Safe | Performance tuning | Yes (rolling) | ❌ |
-| `spec.observedPacketConnectionTimeout` | Safe | Timeout tuning | Yes (rolling) | ❌ |
-| `spec.quiescentPeriodMs` | Safe | Timing tuning | Yes (rolling) | ❌ |
+| `spec.maxConcurrentRequests` | Safe | Maximum simultaneous target HTTP requests | Yes (rolling) | ❌ |
+| `spec.numClientThreads` | Safe | Absolute target event-loop workers; 0 uses Netty's processor-based default | Yes (rolling) | ❌ |
+| `spec.heartbeatExpirationIntervalSeconds` | Safe | Broker-time heartbeat expiration interval `E` | Yes (rolling) | ❌ |
+| `spec.maximumBackwardSkewSeconds` | Safe | Permitted Kafka broker timestamp regression `S` | Yes (rolling) | ❌ |
+| `spec.sourceResponseRetryWindowSeconds` | Safe | Broker-time source-response retry window `W` | Yes (rolling) | ❌ |
+| `spec.readyRequestsBufferPerThread` | Safe | Retry-ready request buffer `P` per target event-loop thread | Yes (rolling) | ❌ |
 | `spec.targetServerResponseTimeoutSeconds` | Safe | Timeout tuning | Yes (rolling) | ❌ |
 | `spec.userAgent` | Safe | Cosmetic | Yes (rolling) | ❌ |
 

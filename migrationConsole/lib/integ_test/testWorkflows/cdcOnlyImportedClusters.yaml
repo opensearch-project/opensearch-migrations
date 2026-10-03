@@ -107,7 +107,7 @@ spec:
               | del(.no_auth)
             ')
 
-            # speedupFactor and observedPacketConnectionTimeout are parameterized for testing
+            # speedupFactor is parameterized for testing
             CDC_CONFIG=$(jq -n \
               --argjson source "$SOURCE_CLUSTER" \
               --argjson target "$TARGET_CLUSTER" \
@@ -117,7 +117,15 @@ spec:
                 "sourceClusters": { "source1": $source },
                 "targetClusters": { "target1": $target },
                 "snapshotMigrationConfigs": [],
-                "kafkaClusterConfiguration": { "default": { "autoCreate": {} } },
+                "kafkaClusterConfiguration": {
+                  "default": {
+                    "autoCreate": {
+                      "topicSpecOverrides": {
+                        "partitions": 3
+                      }
+                    }
+                  }
+                },
                 "traffic": {
                   "proxies": {
                     "capture-proxy": {
@@ -137,7 +145,6 @@ spec:
                       "fromCapturedTraffic": "capture-proxy",
                       "toTarget": "target1",
                       "replayerConfig": ({
-                        "observedPacketConnectionTimeout": 30,
                         "speedupFactor": {{workflow.parameters.speedup-factor}}
                       } + (if $otelTraceCollectorEndpoint != "" then {
                         "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint

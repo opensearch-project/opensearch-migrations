@@ -2,9 +2,9 @@ package org.opensearch.migrations.replay.tracing;
 
 import java.time.Instant;
 
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
@@ -71,12 +71,38 @@ public interface IReplayContexts {
         public static final String TUPLE_COMPARISON = "tupleComparison";
     }
 
+    final class TraceAttributes {
+        private TraceAttributes() {}
+
+        public static final AttributeKey<String> TOPIC = AttributeKey.stringKey("replay.kafka.topic");
+        public static final AttributeKey<Long> PARTITION = AttributeKey.longKey("replay.kafka.partition");
+        public static final AttributeKey<Long> GENERATION =
+            AttributeKey.longKey("replay.partition.generation");
+        public static final AttributeKey<Long> KAFKA_OFFSET =
+            AttributeKey.longKey("replay.kafka.offset");
+        public static final AttributeKey<String> RECORD_DISPOSITION =
+            AttributeKey.stringKey("replay.kafka.record.disposition");
+        public static final AttributeKey<String> WRITER_NODE =
+            AttributeKey.stringKey("replay.capture.writerNode");
+        public static final AttributeKey<String> CONNECTION =
+            AttributeKey.stringKey("replay.capture.connection");
+        public static final AttributeKey<Long> CONNECTION_LIFETIME =
+            AttributeKey.longKey("replay.connection.lifetime");
+        public static final AttributeKey<Long> TRAFFIC_STREAM_NUMBER =
+            AttributeKey.longKey("replay.capture.trafficStream");
+        public static final AttributeKey<Long> REQUEST_ORDINAL =
+            AttributeKey.longKey("replay.request.ordinal");
+    }
+
+    enum RecordDisposition {
+        COMMITTED,
+        COMMIT_INELIGIBLE,
+        GENERATION_ENDED_UNCOMMITTED
+    }
+
     interface IAccumulationScope extends IScopedInstrumentationAttributes {}
 
-    interface IChannelKeyContext
-        extends
-            IAccumulationScope,
-            org.opensearch.migrations.tracing.commoncontexts.IConnectionContext {
+    interface IConnectionContext extends IAccumulationScope {
         String ACTIVITY_NAME = ActivityNames.CHANNEL;
 
         @Override
@@ -84,25 +110,30 @@ public interface IReplayContexts {
             return ACTIVITY_NAME;
         }
 
-        // do not add this as a property
-        // because its components are already being added in the IConnectionContext implementation
-        ISourceTrafficChannelKey getChannelKey();
-
-        default String getConnectionId() {
-            return getChannelKey().getConnectionId();
-        }
-
-        default String getNodeId() {
-            return getChannelKey().getNodeId();
-        }
+        ConnectionProcessingId getConnectionProcessingId();
 
         ISocketContext createSocketContext();
 
         void addFailedChannelCreation();
+
+        @Override
+        default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+            var connectionId = getConnectionProcessingId();
+            var generation = connectionId.generation();
+            var captured = connectionId.capturedConnectionId();
+            return builder
+                .put(TraceAttributes.TOPIC, generation.topicPartition().topic())
+                .put(TraceAttributes.PARTITION, generation.topicPartition().partition())
+                .put(TraceAttributes.GENERATION, generation.localSequence())
+                .put(TraceAttributes.WRITER_NODE, captured.writerNodeId())
+                .put(TraceAttributes.CONNECTION, captured.connectionId())
+                .put(TraceAttributes.CONNECTION_LIFETIME, connectionId.localSequence());
+        }
     }
 
-    interface ISocketContext extends IAccumulationScope, IWithTypedEnclosingScope<IChannelKeyContext> {
-        public static final String ACTIVITY_NAME = ActivityNames.TCP_CONNECTION;
+    interface ISocketContext
+        extends IAccumulationScope, IWithTypedEnclosingScope<IConnectionContext> {
+        String ACTIVITY_NAME = ActivityNames.TCP_CONNECTION;
 
         @Override
         default String getActivityName() {
@@ -110,7 +141,7 @@ public interface IReplayContexts {
         }
     }
 
-    interface IKafkaRecordContext extends IAccumulationScope, IWithTypedEnclosingScope<IChannelKeyContext> {
+    interface IKafkaRecordContext extends IAccumulationScope {
         String ACTIVITY_NAME = ActivityNames.RECORD_LIFETIME;
 
         @Override
@@ -118,22 +149,26 @@ public interface IReplayContexts {
             return ACTIVITY_NAME;
         }
 
-        static final AttributeKey<String> RECORD_ID_KEY = AttributeKey.stringKey("recordId");
+        KafkaRecordId getRecordId();
 
-        String getRecordId();
+        ITrafficStreamsLifecycleContext createTrafficStreamContext(long trafficStreamNumber);
+
+        void complete(RecordDisposition disposition);
 
         @Override
         default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
-            return IAccumulationScope.super.fillAttributesForSpansBelow(builder.put(RECORD_ID_KEY, getRecordId()));
+            var recordId = getRecordId();
+            var generation = recordId.generation();
+            return builder
+                .put(TraceAttributes.TOPIC, generation.topicPartition().topic())
+                .put(TraceAttributes.PARTITION, generation.topicPartition().partition())
+                .put(TraceAttributes.GENERATION, generation.localSequence())
+                .put(TraceAttributes.KAFKA_OFFSET, recordId.offset());
         }
-
-        ITrafficStreamsLifecycleContext createTrafficLifecyleContext(ITrafficStreamKey tsk);
     }
 
     interface ITrafficStreamsLifecycleContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<IChannelKeyContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<IKafkaRecordContext> {
         String ACTIVITY_NAME = ActivityNames.TRAFFIC_STREAM_LIFETIME;
 
         @Override
@@ -141,31 +176,24 @@ public interface IReplayContexts {
             return ACTIVITY_NAME;
         }
 
-        ITrafficStreamKey getTrafficStreamKey();
+        long getTrafficStreamNumber();
 
-        IChannelKeyContext getChannelKeyContext();
-
-        default String getConnectionId() {
-            return getChannelKey().getConnectionId();
-        }
-
-        default ISourceTrafficChannelKey getChannelKey() {
-            return getChannelKeyContext().getChannelKey();
-        }
-
-        IReplayerHttpTransactionContext createHttpTransactionContext(
-            UniqueReplayerRequestKey requestKey,
+        IRequestContext createRequestContext(
+            ReplayRequestId requestId,
             Instant sourceTimestamp
         );
+
+        @Override
+        default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+            return builder.put(TraceAttributes.TRAFFIC_STREAM_NUMBER, getTrafficStreamNumber());
+        }
     }
 
-    interface IReplayerHttpTransactionContext
+    interface IRequestContext
         extends
             org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext,
             IAccumulationScope,
-            IWithTypedEnclosingScope<IChannelKeyContext> {
-        AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
-
+            IWithTypedEnclosingScope<ITrafficStreamsLifecycleContext> {
         String ACTIVITY_NAME = ActivityNames.HTTP_TRANSACTION;
 
         @Override
@@ -173,33 +201,19 @@ public interface IReplayContexts {
             return ACTIVITY_NAME;
         }
 
-        UniqueReplayerRequestKey getReplayerRequestKey();
+        ReplayRequestId getRequestId();
 
-        IChannelKeyContext getChannelKeyContext();
+        ConnectionProcessingId getConnectionProcessingId();
+
+        long getCapturedRequestOrdinal();
+
+        void onRequestReconstituted();
 
         Instant getTimeOfOriginalRequest();
 
-        default String getConnectionId() {
-            return getChannelKey().getConnectionId();
-        }
-
-        default ISourceTrafficChannelKey getChannelKey() {
-            return getChannelKeyContext().getChannelKey();
-        }
-
-        default long getSourceRequestIndex() {
-            return getReplayerRequestKey().getSourceRequestIndex();
-        }
-
-        default long replayerRequestIndex() {
-            return getReplayerRequestKey().getReplayerRequestIndex();
-        }
-
         @Override
-        default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
-            return org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext.super.fillAttributesForSpansBelow(
-                builder
-            ).put(REPLAYER_REQUEST_INDEX_KEY, replayerRequestIndex());
+        default long getSourceRequestIndex() {
+            return getCapturedRequestOrdinal();
         }
 
         IRequestAccumulationContext createRequestAccumulationContext();
@@ -213,12 +227,17 @@ public interface IReplayContexts {
         ITargetRequestContext createTargetRequestContext();
 
         ITupleHandlingContext createTupleContext();
+
+        @Override
+        default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
+            return org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext.super
+                .fillAttributesForSpansBelow(builder)
+                .put(TraceAttributes.REQUEST_ORDINAL, getCapturedRequestOrdinal());
+        }
     }
 
     interface IRequestAccumulationContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<IRequestContext> {
         String ACTIVITY_NAME = ActivityNames.ACCUMULATING_REQUEST;
 
         @Override
@@ -228,9 +247,7 @@ public interface IReplayContexts {
     }
 
     interface IResponseAccumulationContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<IRequestContext> {
         String ACTIVITY_NAME = ActivityNames.ACCUMULATING_RESPONSE;
 
         @Override
@@ -240,9 +257,7 @@ public interface IReplayContexts {
     }
 
     interface IRequestTransformationContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<IRequestContext> {
         String ACTIVITY_NAME = ActivityNames.TRANSFORMATION;
 
         @Override
@@ -286,9 +301,7 @@ public interface IReplayContexts {
     }
 
     interface IScheduledContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<IRequestContext> {
         String ACTIVITY_NAME = ActivityNames.SCHEDULED;
 
         @Override
@@ -298,15 +311,17 @@ public interface IReplayContexts {
     }
 
     interface ITargetRequestContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<IRequestContext> {
         String ACTIVITY_NAME = ActivityNames.TARGET_TRANSACTION;
 
         @Override
         default String getActivityName() {
             return ACTIVITY_NAME;
         }
+
+        ReplayRequestId getRequestId();
+
+        ConnectionProcessingId getConnectionProcessingId();
 
         void onBytesSent(int size);
 
@@ -322,9 +337,7 @@ public interface IReplayContexts {
     }
 
     interface IRequestConnectingContext
-        extends
-        IAccumulationScope,
-        IWithTypedEnclosingScope<ITargetRequestContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.REQUEST_CONNECTING;
 
         @Override
@@ -334,9 +347,7 @@ public interface IReplayContexts {
     }
 
     interface IRequestSendingContext
-        extends
-        IAccumulationScope,
-        IWithTypedEnclosingScope<ITargetRequestContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.REQUEST_SENDING;
 
         @Override
@@ -346,9 +357,7 @@ public interface IReplayContexts {
     }
 
     interface IWaitingForHttpResponseContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<ITargetRequestContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.WAITING_FOR_RESPONSE;
 
         @Override
@@ -358,9 +367,7 @@ public interface IReplayContexts {
     }
 
     interface IReceivingHttpResponseContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<ITargetRequestContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.RECEIVING_RESPONSE;
 
         @Override
@@ -370,16 +377,14 @@ public interface IReplayContexts {
     }
 
     interface ITupleHandlingContext
-        extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends IAccumulationScope, IWithTypedEnclosingScope<IRequestContext> {
         String ACTIVITY_NAME = ActivityNames.TUPLE_COMPARISON;
         AttributeKey<Long> SOURCE_STATUS_CODE_KEY = AttributeKey.longKey("sourceStatusCode");
         AttributeKey<Long> TARGET_STATUS_CODE_KEY = AttributeKey.longKey("targetStatusCode");
         AttributeKey<Boolean> STATUS_CODE_MATCH_KEY = AttributeKey.booleanKey("statusCodesMatch");
         AttributeKey<String> METHOD_KEY = AttributeKey.stringKey("method");
-        AttributeKey<String> HTTP_VERSION_KEY = AttributeKey.stringKey("version"); // for the span, not metric
-        AttributeKey<String> ENDPOINT_KEY = AttributeKey.stringKey("endpoint"); // for the span, not metric
+        AttributeKey<String> HTTP_VERSION_KEY = AttributeKey.stringKey("version");
+        AttributeKey<String> ENDPOINT_KEY = AttributeKey.stringKey("endpoint");
 
         @Override
         default String getActivityName() {
@@ -394,10 +399,10 @@ public interface IReplayContexts {
 
         void setEndpoint(String endpointUrl);
 
-        void setHttpVersion(String string);
+        void setHttpVersion(String httpVersion);
 
-        default UniqueReplayerRequestKey getReplayerRequestKey() {
-            return getLogicalEnclosingScope().getReplayerRequestKey();
+        default ReplayRequestId getRequestId() {
+            return getLogicalEnclosingScope().getRequestId();
         }
     }
 }

@@ -3,7 +3,7 @@ import {VpcDetails} from "../network-stack";
 import {ISecurityGroup, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
+import {ELBTargetGroup, MigrationServiceCore, MigrationServiceCoreProps} from "./migration-service-core";
 import {StreamingSourceType} from "../streaming-source-type";
 import {
     MigrationSSMParameter,
@@ -85,6 +85,19 @@ function getDestinationEndpoint(scope: Construct, config: DestinationConfig, pro
     }
 }
 
+function deploymentConfiguration(
+    props: CaptureProxyProps
+): Pick<MigrationServiceCoreProps, "minHealthyPercent" | "maxHealthyPercent"> {
+    const desiredCount = props.taskInstanceCount ?? 0;
+    if (props.streamingSourceType === StreamingSourceType.DISABLED || desiredCount === 0) {
+        return {};
+    }
+    return {
+        minHealthyPercent: 100,
+        maxHealthyPercent: Math.ceil(100 * (desiredCount + 1) / desiredCount),
+    };
+}
+
 export class CaptureProxyStack extends MigrationServiceCore {
     public static readonly DEFAULT_PROXY_PORT = 9200;
 
@@ -134,6 +147,12 @@ export class CaptureProxyStack extends MigrationServiceCore {
                 parameter: MigrationSSMParameter.KAFKA_BROKERS,
             });
             appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--kafkaConnection", brokerEndpoints)
+            appendArgArrayIfNotInExtraArgs(
+                commandArgs,
+                extraArgsDict,
+                "--minimumKafkaTopicPartitions",
+                Math.max((props.taskInstanceCount ?? 0) + 1, 1).toString()
+            )
         }
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--enableMSKAuth")
@@ -157,7 +176,8 @@ export class CaptureProxyStack extends MigrationServiceCore {
             taskCpuUnits: 2048,
             taskMemoryLimitMiB: 4096,
             ...(props.jvmArgs ? { environment: { "JDK_JAVA_OPTIONS": props.jvmArgs } } : {}),
-            ...props
+            ...props,
+            ...deploymentConfiguration(props)
         });
     }
 }

@@ -2,20 +2,25 @@ package org.opensearch.migrations.tracing;
 
 import java.time.Instant;
 
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+
+import org.apache.kafka.common.TopicPartition;
+
 
 public class TestContext extends RootReplayerContext implements AutoCloseable {
 
     public static final String TEST_NODE_ID = "testNodeId";
     public static final String DEFAULT_TEST_CONNECTION = "testConnection";
+    private static final TopicPartition TEST_TOPIC_PARTITION = new TopicPartition("test-fixture", 0);
+
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
-    public final ChannelContextManager channelContextManager = new ChannelContextManager(this);
-    private final Object channelContextManagerLock = new Object();
+    private long nextSyntheticRecordOffset;
 
     public static TestContext withTracking(boolean tracing, boolean metrics) {
         return new TestContext(new InMemoryInstrumentationBundle(tracing, metrics), new BacktracingContextTracker());
@@ -34,43 +39,36 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
         this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
     }
 
-    public IReplayContexts.ITrafficStreamsLifecycleContext createTrafficStreamContextForTest(ITrafficStreamKey tsk) {
-        synchronized (channelContextManagerLock) {
-            return createTrafficStreamContextForStreamSource(channelContextManager.retainOrCreateContext(tsk), tsk);
-        }
-    }
-
     public BacktracingContextTracker getBacktracingContextTracker() {
         return (BacktracingContextTracker) getContextTracker();
     }
 
     @Override
     public void close() {
-        // Assertions.assertEquals("", contextTracker.getAllRemainingActiveScopes().entrySet().stream()
-        // .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()));
         getBacktracingContextTracker().close();
         inMemoryInstrumentationBundle.close();
     }
 
-    public final IReplayContexts.IReplayerHttpTransactionContext getTestConnectionRequestContext(int replayerIdx) {
+    public final IReplayContexts.IRequestContext getTestConnectionRequestContext(int replayerIdx) {
         return getTestConnectionRequestContext(DEFAULT_TEST_CONNECTION, replayerIdx);
     }
 
-    public IReplayContexts.IReplayerHttpTransactionContext getTestConnectionRequestContext(
+    public IReplayContexts.IRequestContext getTestConnectionRequestContext(
         String connectionId,
         int replayerIdx
     ) {
-        var rk = new UniqueReplayerRequestKey(
-            PojoTrafficStreamKeyAndContext.build(
-                TEST_NODE_ID,
-                connectionId,
-                0,
-                this::createTrafficStreamContextForTest
-            ),
-            0,
-            replayerIdx
+        var generation = new PartitionGenerationId(TEST_TOPIC_PARTITION, 0);
+        var connection = new ConnectionProcessingId(
+            generation,
+            new CapturedConnectionId(TEST_NODE_ID, connectionId),
+            0
         );
-        return rk.trafficStreamKey.getTrafficStreamsContext().createHttpTransactionContext(rk, Instant.EPOCH);
+        var requestId = new ReplayRequestId(connection, replayerIdx);
+        var recordContext = createKafkaRecordContext(
+            new KafkaRecordId(generation, nextSyntheticRecordOffset++),
+            0
+        );
+        return recordContext.createTrafficStreamContext(0).createRequestContext(requestId, Instant.EPOCH);
     }
 
     public IReplayContexts.ITupleHandlingContext getTestTupleContext() {

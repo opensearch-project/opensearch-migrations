@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
@@ -34,6 +36,17 @@ public class HttpMessageAndTimestamp {
 
     public static class Response extends HttpMessageAndTimestamp {
         public Response(Instant firstPacketTimestamp) {
+            super(firstPacketTimestamp);
+        }
+
+        @Override
+        public String toString() {
+            return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.RESPONSE));
+        }
+    }
+
+    public static class InterimResponse extends HttpMessageAndTimestamp {
+        public InterimResponse(Instant firstPacketTimestamp) {
             super(firstPacketTimestamp);
         }
 

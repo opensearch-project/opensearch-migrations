@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.replay.netty.InterimHttpResponseHandler;
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
@@ -249,9 +250,12 @@ public class HttpByteBufFormatter {
                                                    Stream<ByteBuf> byteBufStream,
                                                    ChannelHandler... handlers) {
         EmbeddedChannel channel = new EmbeddedChannel(
-            msgType == HttpMessageType.REQUEST ? new HttpRequestDecoder() : new HttpResponseDecoder(),
-            new HttpContentDecompressor(0)
+            msgType == HttpMessageType.REQUEST ? new HttpRequestDecoder() : new HttpResponseDecoder()
         );
+        if (msgType == HttpMessageType.RESPONSE) {
+            channel.pipeline().addLast(new InterimHttpResponseHandler());
+        }
+        channel.pipeline().addLast(new HttpContentDecompressor(0));
         for (var h : handlers) {
             channel.pipeline().addLast(h);
         }

@@ -30,6 +30,8 @@ CDC_SOURCE_TARGET_COMBINATIONS = CDC_MIGRATION_COMBINATIONS
 PROXY_READY_TIMEOUT_SECONDS = 3600
 REPLAYER_POD_READY_BUFFER_SECONDS = 20 * 60
 DEFAULT_REPLAYER_POD_READY_TIMEOUT_SECONDS = PROXY_READY_TIMEOUT_SECONDS + REPLAYER_POD_READY_BUFFER_SECONDS
+CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS = 120
+CONSUMER_GROUP_ASSIGNMENT_TIMEOUT_SECONDS = 300
 FAILED_DEPENDENCY_PHASES = {"Error", "Failed"}
 MIGRATION_WORKFLOW_PREFIX = "migration-workflow"
 
@@ -92,7 +94,7 @@ def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int
     raise TimeoutError(f"No pod with label '{label_selector}' reached Ready within {timeout_seconds}s")
 
 
-def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200):
+def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200, *, workflow_name: str):
     """Wait until the CaptureProxy CR is Ready.
 
     The workflow owns pod, Service, endpoint, and load-balancer readiness.
@@ -117,6 +119,7 @@ def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200):
             _dump_proxy_readiness_diagnostics(namespace)
             raise RuntimeError(f"captureproxy/{PROXY_RESOURCE_NAME} entered Error phase: {message}")
         _raise_if_kafka_cluster_error(namespace)
+        _raise_if_argo_workflow_error(namespace, [workflow_name])
 
         elapsed = int(time.monotonic() - (deadline - timeout_seconds))
         logger.info(
@@ -424,7 +427,7 @@ def _dump_argo_workflow_diagnostics(namespace: str) -> None:
 
 def wait_for_replayer_consuming(
     namespace: str,
-    timeout_seconds: int = 120,
+    timeout_seconds: int = CONSUMER_GROUP_ASSIGNMENT_TIMEOUT_SECONDS,
     interval: int = 5,
     pod_ready_timeout_seconds: int = DEFAULT_REPLAYER_POD_READY_TIMEOUT_SECONDS,
     workflow_name: Optional[str] = None,
@@ -456,17 +459,13 @@ def wait_for_replayer_consuming(
         _raise_if_cdc_dependency_error(namespace, [workflow_name] if workflow_name else None,
                                        parked_gate_watcher)
         try:
-            result = subprocess.run(
-                ["kubectl", "logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--tail=100"],
-                capture_output=True, text=True, timeout=15
-            )
-            for line in result.stdout.split("\n"):
-                if "KafkaHeartbeat" in line and "partitions=" in line:
-                    logger.info("Replayer is actively consuming from Kafka")
-                    return
+            if _consumer_group_has_active_assignment():
+                logger.info("Replayer has an active Kafka consumer-group assignment")
+                return
         except Exception as e:
-            logger.debug("Replayer log check failed: %s", e)
+            logger.debug("Replayer consumer-group check failed: %s", e)
         time.sleep(interval)
+    _emit_describe_snapshot("replayer-readiness-timeout", None, 30)
     log_replayer_diagnostics(namespace)
     raise TimeoutError(
         f"Replayer did not join Kafka consumer group within {timeout_seconds}s. "
@@ -492,6 +491,75 @@ def log_replayer_diagnostics(namespace: str):
                 logger.info("%s stderr:\n%s", command, result.stderr.strip())
         except Exception as e:
             logger.info("Failed to collect replayer diagnostics for kubectl %s: %s", " ".join(args), e)
+
+
+def _heartbeat_reports_progress(line: str) -> bool:
+    required_summary_fields = (
+        "generation=",
+        "partitions=",
+        "inflight=",
+        "commitHead=",
+        "commitTail=",
+        "queueSize=",
+        "polls=",
+        "emptyPolls=",
+        "commits=",
+        "readyToCommit=",
+        "pendingCommitPartitions=",
+        "recordsRead=",
+        "recordsCommitted=",
+    )
+    if "KafkaHeartbeat" not in line:
+        return False
+    heartbeat_message = line.split("KafkaHeartbeat", 1)[1]
+    partition_states_marker = " partitionStates="
+    if partition_states_marker not in heartbeat_message:
+        return False
+    summary, partition_states_and_shutdown = heartbeat_message.split(partition_states_marker, 1)
+    has_summary_fields = all(field in summary for field in required_summary_fields)
+    has_shutdown_field = " shutdown=" in partition_states_and_shutdown
+    if not has_summary_fields or not has_shutdown_field:
+        return False
+    for token in summary.split():
+        if token.startswith("recordsRead="):
+            try:
+                return int(token.removeprefix("recordsRead=").rstrip(",")) > 0
+            except ValueError:
+                return False
+    return False
+
+
+def assert_replayer_heartbeat_logging(namespace: str, timeout_seconds: int = 45,
+                                      interval_seconds: float = 2.0) -> None:
+    """Require the deployed replayer to emit its periodic progress contract.
+
+    This is an observability assertion only. Readiness and drain use Kafka's
+    consumer-group state and never depend on this log.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last_logs = ""
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                ["kubectl", "logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--since=90s"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            last_logs = result.stdout or ""
+            if result.returncode == 0 and any(
+                _heartbeat_reports_progress(line) for line in last_logs.splitlines()
+            ):
+                logger.info("Observed deployed KafkaHeartbeat progress contract")
+                return
+        except Exception as e:  # noqa: BLE001 - preserve diagnostics on an assertion path
+            logger.debug("Replayer heartbeat log check failed: %s", e)
+        time.sleep(interval_seconds)
+    log_replayer_diagnostics(namespace)
+    raise AssertionError(
+        f"Replayer did not emit a KafkaHeartbeat progress line within {timeout_seconds}s. "
+        f"Last captured logs:\n{last_logs[-4000:]}"
+    )
 
 
 def _dump_kafka_readiness_diagnostics(namespace: str) -> None:
@@ -541,8 +609,10 @@ def run_generate_data(cluster: str, index_name: str, num_docs: int):
     logger.info("generate-data output: %s", result.stdout.strip())
 
 
-def _run_describe_consumer_group(group_name: Optional[str],
-                                 probe_timeout_seconds: int = 15) -> Optional[str]:
+def _run_describe_consumer_group(
+    group_name: Optional[str],
+    probe_timeout_seconds: int = CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS,
+) -> Optional[str]:
     """Run `console kafka describe-consumer-group` and return its stdout, or
     None if the group does not exist / the command failed / timed out.
 
@@ -594,8 +664,25 @@ def _iter_native_describe_rows(describe_output: str):
         yield {col: tokens[idx] for col, idx in header_indices.items()}
 
 
-def _consumer_group_max_lag(group_name: Optional[str] = None,
-                            probe_timeout_seconds: int = 15) -> Optional[int]:
+def _consumer_group_has_active_assignment(
+    group_name: Optional[str] = None,
+    probe_timeout_seconds: int = CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS,
+) -> bool:
+    """Return whether Kafka reports at least one partition assigned to a live consumer."""
+    out = _run_describe_consumer_group(group_name, probe_timeout_seconds)
+    if out is None:
+        return False
+    return any(
+        row.get("PARTITION", "-") not in ("", "-") and
+        row.get("CONSUMER-ID", "-") not in ("", "-")
+        for row in _iter_native_describe_rows(out)
+    )
+
+
+def _consumer_group_max_lag(
+    group_name: Optional[str] = None,
+    probe_timeout_seconds: int = CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS,
+) -> Optional[int]:
     """Return the maximum LAG across all partitions in the consumer-group
     describe table, or None if the group is missing / the describe failed /
     no parseable LAG values are present.

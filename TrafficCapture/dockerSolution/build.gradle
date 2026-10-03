@@ -94,4 +94,13 @@ static TaskProvider<Sync> getMigrationConsoleSyncTask(Project project, String do
 
 dockerCompose {
     useComposeFiles = ['src/main/docker/docker-compose.yml']
+    def kafkaRunId = UUID.randomUUID().toString()
+    environment.put(
+        'KAFKA_TRAFFIC_TOPIC',
+        System.getenv('KAFKA_TRAFFIC_TOPIC') ?: "logging-traffic-topic-${kafkaRunId}"
+    )
+    environment.put(
+        'KAFKA_TRAFFIC_GROUP_ID',
+        System.getenv('KAFKA_TRAFFIC_GROUP_ID') ?: "logging-group-${kafkaRunId}"
+    )
 }

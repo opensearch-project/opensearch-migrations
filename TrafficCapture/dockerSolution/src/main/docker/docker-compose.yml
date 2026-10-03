@@ -18,8 +18,10 @@ services:
       CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 2
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_MESSAGE_TIMESTAMP_TYPE: LogAppendTime
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
 
   elasticsearch:
@@ -40,6 +42,8 @@ services:
     command:
       - "--kafkaConnection"
       - "kafka:9092"
+      - "--kafkaTopic"
+      - "${KAFKA_TRAFFIC_TOPIC:-logging-traffic-topic}"
       - "--destinationUri"
       - "https://elasticsearch:9200"
       - "--insecureDestination"
@@ -49,6 +53,10 @@ services:
       - "/usr/share/captureProxy/config/pub.pem"
       - "--sslKeyFile"
       - "/usr/share/captureProxy/config/key.pem"
+      - "--max-connection-duration-seconds"
+      - "130"
+      - "--heartbeat-interval-seconds"
+      - "2"
     depends_on:
       - kafka
       - elasticsearch
@@ -89,9 +97,12 @@ services:
       - "--kafka-traffic-brokers"
       - "kafka:9092"
       - "--kafka-traffic-topic"
-      - "logging-traffic-topic"
+      - "${KAFKA_TRAFFIC_TOPIC:-logging-traffic-topic}"
       - "--kafka-traffic-group-id"
-      - "logging-group-default"
+      - "${KAFKA_TRAFFIC_GROUP_ID:-logging-group-default}"
+      - "--request-filter-config"
+      - >-
+        {"JsonJMESPathPredicateProvider":{"script":"URI != '/_search/scroll'"}}
       - "--transformer-config"
       - '[{"TypeMappingSanitizationTransformerProvider":{"sourceProperties":{"version":{"major":7,"minor":10}}}}]'
 

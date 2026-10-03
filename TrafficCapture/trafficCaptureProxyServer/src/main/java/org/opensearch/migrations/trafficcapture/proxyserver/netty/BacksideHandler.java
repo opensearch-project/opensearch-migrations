@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +22,16 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        writeBackChannel.writeAndFlush(msg);
+        writeBackChannel.writeAndFlush(msg).addListener((ChannelFutureListener) future -> {
+            if (!future.isSuccess()) {
+                log.atError()
+                    .setCause(future.cause())
+                    .setMessage("Closing proxy connection after a target-to-client write failed")
+                    .log();
+                FrontsideHandler.closeAndFlush(writeBackChannel);
+                FrontsideHandler.closeAndFlush(ctx.channel());
+            }
+        });
     }
 
     @Override
@@ -41,6 +51,7 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
         log.atError().setCause(cause).setMessage("Caught error for channel: {}")
             .addArgument(() -> ctx.channel().id().asLongText())
             .log();
+        FrontsideHandler.closeAndFlush(writeBackChannel);
         FrontsideHandler.closeAndFlush(ctx.channel());
     }
 }

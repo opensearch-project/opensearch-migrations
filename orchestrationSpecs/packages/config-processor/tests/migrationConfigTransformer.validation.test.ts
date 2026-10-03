@@ -389,6 +389,11 @@ describe('MigrationConfigTransformer validation', () => {
             label: "default",
             kafkaTopic: "loaded-dump",
             managedByWorkflow: true,
+            topicSpecOverrides: expect.objectContaining({
+                config: expect.objectContaining({
+                    "message.timestamp.type": "CreateTime",
+                }),
+            }),
             configChecksum: expect.stringMatching(/^[a-f0-9]{16}$/)
         }));
 
@@ -1003,7 +1008,7 @@ describe('MigrationConfigTransformer validation', () => {
                     },
                 },
                 topicSpecOverrides: {
-                    partitions: 1,
+                    partitions: 2,
                     replicas: 3,
                     config: {
                         "retention.ms": 604800000,
@@ -1024,6 +1029,84 @@ describe('MigrationConfigTransformer validation', () => {
                 }
             }
         });
+    });
+
+    it('should default workflow-managed live proxy topics to LogAppendTime', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        partitions: 2,
+                        replicas: 3,
+                        config: {
+                            "retention.ms": 12345,
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies[0].kafkaConfig.topicSpecOverrides).toEqual({
+            partitions: 2,
+            replicas: 3,
+            config: {
+                "retention.ms": 12345,
+                "segment.bytes": 1073741824,
+                "message.timestamp.type": "LogAppendTime",
+            },
+        });
+    });
+
+    it('should reject an explicit CreateTime override for workflow-managed live proxy topics', () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        config: {
+                            "message.timestamp.type": "CreateTime",
+                        },
+                    },
+                },
+            },
+        };
+
+        expect(() => transformer.validateInput(config)).toThrow(
+            /'message.timestamp.type' to be 'LogAppendTime'/
+        );
+    });
+
+    it('should reject an explicit LogAppendTime override for workflow-managed BYOC topics', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs = [];
+        config.traffic = {
+            s3Sources: {
+                "loaded-dump": {
+                    s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
+                    awsRegion: "us-east-1",
+                    sourceLabel: "detached-source",
+                },
+            },
+            replayers: {},
+        };
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        config: {
+                            "message.timestamp.type": "LogAppendTime",
+                        },
+                    },
+                },
+            },
+        };
+
+        expect(() => transformer.validateInput(config)).toThrow(
+            /'message.timestamp.type' to be 'CreateTime'/
+        );
     });
 
     it('should require a CA secret for existing SCRAM-managed Kafka clusters', () => {

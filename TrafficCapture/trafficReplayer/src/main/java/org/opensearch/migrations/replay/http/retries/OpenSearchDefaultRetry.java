@@ -1,52 +1,62 @@
 package org.opensearch.migrations.replay.http.retries;
 
 import java.io.IOException;
-import java.util.Optional;
-import java.util.regex.Pattern;
+import java.time.Duration;
+import java.util.LinkedHashSet;
+import java.util.OptionalInt;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.HttpByteBufFormatter;
-import org.opensearch.migrations.replay.IRequestResponsePacketPair;
-import org.opensearch.migrations.replay.RequestSenderOrchestrator;
-import org.opensearch.migrations.utils.TextTrackedFuture;
-import org.opensearch.migrations.utils.TrackedFuture;
+import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
+import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.async.ByteBufferFeeder;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import lombok.Value;
+import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 
+
+/**
+ * Deployed OpenSearch retry policy for the rebuilt request owner.
+ *
+ * <p>The transformed request is classified once during preparation. Retry evaluation therefore
+ * retains the inherited bulk semantics without reparsing or borrowing the request's owned buffers.
+ */
 @Slf4j
-public class OpenSearchDefaultRetry extends DefaultRetry {
-
-    private static final Pattern bulkPathMatcher = Pattern.compile("^(/[^/]*)?/_bulk(/.*)?$");
-    private final BulkItemErrorClassifier errorClassifier;
-
-    public OpenSearchDefaultRetry() {
-        this(new BulkItemErrorClassifier());
-    }
-
-    public OpenSearchDefaultRetry(BulkItemErrorClassifier errorClassifier) {
-        this.errorClassifier = errorClassifier;
-    }
-
-    enum BulkResponseAnalysis {
+public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPolicy<
+    NettyPacketToHttpConsumer.PreparedRequest,
+    AggregatedRawResponse,
+    HttpMessageAndTimestamp.Response
+> {
+    public enum BulkResponseAnalysis {
         /** No errors at all */
         NO_ERRORS,
         /** Has errors, but at least one is retryable */
         HAS_RETRYABLE_ERRORS,
         /** Has errors, but ALL are non-retryable */
         ONLY_NON_RETRYABLE_ERRORS
+    }
+
+    @Value
+    @Accessors(fluent = true)
+    public static class BulkResponseInspection {
+        BulkResponseAnalysis analysis;
+        Set<String> errorTypes;
     }
 
     /**
@@ -72,6 +82,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         private boolean parseFailed = false;
 
         private boolean foundTypeInCurrentError = false;
+        private final Set<String> errorTypes = new LinkedHashSet<>();
 
         @SneakyThrows
         public BulkResponseAnalyzer(BulkItemErrorClassifier errorClassifier) {
@@ -83,6 +94,10 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         BulkResponseAnalysis getAnalysis() {
             return result;
+        }
+
+        Set<String> getErrorTypes() {
+            return Set.copyOf(errorTypes);
         }
 
         @Override
@@ -186,6 +201,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 hasAnyError = true;
                 foundTypeInCurrentError = true;
                 var errorType = parser.getValueAsString();
+                errorTypes.add(errorType);
                 if (!errorClassifier.isNonRetryable(errorType)) {
                     log.atDebug().setMessage("Found retryable bulk item error type: {}")
                         .addArgument(errorType).log();
@@ -221,51 +237,168 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
     }
 
     BulkResponseAnalysis analyzeBulkResponse(ByteBuf responseByteBuf) {
-        var analyzer = new BulkResponseAnalyzer(errorClassifier);
-        HttpByteBufFormatter.processHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
-            Stream.of(responseByteBuf), analyzer);
-        return analyzer.getAnalysis();
+        return inspectBulkResponse(responseByteBuf).analysis();
     }
 
+    public BulkResponseInspection inspectBulkResponse(ByteBuf responseByteBuf) {
+        return inspectBulkResponse(responseByteBuf, errorClassifier);
+    }
+
+    public static BulkResponseInspection inspectBulkResponse(
+        ByteBuf responseByteBuf,
+        BulkItemErrorClassifier errorClassifier
+    ) {
+        var analyzer = new BulkResponseAnalyzer(errorClassifier);
+        HttpByteBufFormatter.processHttpMessageFromBufs(
+            HttpByteBufFormatter.HttpMessageType.RESPONSE,
+            Stream.of(responseByteBuf),
+            analyzer
+        );
+        return new BulkResponseInspection(analyzer.getAnalysis(), analyzer.getErrorTypes());
+    }
+
+    private static final int MAXIMUM_BACKOFF_SHIFT = 62;
+    private static final Duration INITIAL_RETRY_DELAY = Duration.ofMillis(100);
+    private static final Duration MAXIMUM_RETRY_DELAY = Duration.ofSeconds(300);
+
+    private final BulkItemErrorClassifier errorClassifier;
+
+    public OpenSearchDefaultRetry() {
+        this(new BulkItemErrorClassifier());
+    }
+
+    public OpenSearchDefaultRetry(@NonNull BulkItemErrorClassifier errorClassifier) {
+        this.errorClassifier = errorClassifier;
+    }
 
     @Override
-    public TrackedFuture<String, RequestSenderOrchestrator.RetryDirective>
-    shouldRetry(@NonNull ByteBuf targetRequestBytes,
-                @NonNull AggregatedRawResponse currentResponse,
-                @NonNull TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
-
-        var targetRequestByteBuf = Unpooled.wrappedBuffer(targetRequestBytes);
-        var parsedRequest = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0);
-        if (parsedRequest == null ||
-            !bulkPathMatcher.matcher(parsedRequest.uri()).matches())
-        {
-            return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
+    public boolean requiresSourceResponse(
+        NettyPacketToHttpConsumer.PreparedRequest preparedRequest,
+        AggregatedRawResponse targetResponse
+    ) {
+        var status = targetStatus(targetResponse);
+        if (status.isEmpty()) {
+            return false;
         }
-
-        var targetStatusCode = Optional.ofNullable(currentResponse.getRawResponse())
-            .map(r -> r.status().code());
-
-        // If target returned 429 or 5xx for a bulk request, retry immediately without parsing the response body
-        if (targetStatusCode.map(code -> code == 429 || code / 100 == 5).orElse(false)) {
-            return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
-                () -> "target returned 429/5xx for bulk request, retrying");
-        }
-
-        // do a more granular check.  If the raw response wasn't present, then just push it to the superclass
-        // since it isn't going to be any kind of response, let alone a bulk one
-        if (targetStatusCode.map(code -> code == 200).orElse(false)) {
-            var analysis = analyzeBulkResponse(currentResponse.getResponseAsByteBuf());
-            if (analysis != null) {
-                if (analysis == BulkResponseAnalysis.HAS_RETRYABLE_ERRORS) {
-                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
-                        () -> "bulk response has retryable errors, retrying");
-                }
-                return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
-                    () -> "bulk response has no retryable errors");
+        if (preparedRequest.retryRequestKind()
+            == NettyPacketToHttpConsumer.PreparedRequest.RetryRequestKind.BULK) {
+            var code = status.getAsInt();
+            if (code == 200 || code == 429 || code / 100 == 5) {
+                return false;
             }
-            // Couldn't parse response body — fall through to superclass status code comparison
         }
-
-        return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
+        return !retryIsUnnecessaryGivenStatusCode(status.getAsInt());
     }
+
+    @Override
+    public RetryDecision decide(
+        NettyPacketToHttpConsumer.PreparedRequest preparedRequest,
+        AggregatedRawResponse targetResponse,
+        RequestReplayOwner.RetrySourceResponse<HttpMessageAndTimestamp.Response> sourceResponse
+    ) {
+        var status = targetStatus(targetResponse);
+        if (status.isEmpty()) {
+            return new RetryDecision.RetryRequired();
+        }
+        var targetStatus = status.getAsInt();
+        if (preparedRequest.retryRequestKind()
+            == NettyPacketToHttpConsumer.PreparedRequest.RetryRequestKind.BULK) {
+            if (targetStatus == 429 || targetStatus / 100 == 5) {
+                return new RetryDecision.RetryRequired();
+            }
+            if (targetStatus == 200) {
+                var inspection = inspectBulkResponse(targetResponse, errorClassifier);
+                if (inspection.analysis() == BulkResponseAnalysis.HAS_RETRYABLE_ERRORS) {
+                    return new RetryDecision.RetryRequired();
+                }
+                if (inspection.analysis() != null) {
+                    return new RetryDecision.TargetServerAttemptsFinished();
+                }
+            }
+        }
+        if (retryIsUnnecessaryGivenStatusCode(targetStatus)) {
+            return new RetryDecision.TargetServerAttemptsFinished();
+        }
+        var sourceStatus = sourceStatus(sourceResponse);
+        if (sourceStatus.isEmpty()) {
+            return new RetryDecision.RetryRequired();
+        }
+        return targetStatus >= 300 && sourceStatus.getAsInt() < 300
+            ? new RetryDecision.RetryRequired()
+            : new RetryDecision.TargetServerAttemptsFinished();
+    }
+
+    @Override
+    public Duration retryDelay(int completedAttemptCount) {
+        if (completedAttemptCount <= 0) {
+            throw new IllegalArgumentException("completedAttemptCount must be positive");
+        }
+        var shift = Math.min(completedAttemptCount - 1, MAXIMUM_BACKOFF_SHIFT);
+        var multiplier = 1L << shift;
+        final long delayMillis;
+        try {
+            delayMillis = Math.multiplyExact(
+                INITIAL_RETRY_DELAY.toMillis(),
+                multiplier
+            );
+        } catch (ArithmeticException overflow) {
+            return MAXIMUM_RETRY_DELAY;
+        }
+        return Duration.ofMillis(
+            Math.min(delayMillis, MAXIMUM_RETRY_DELAY.toMillis())
+        );
+    }
+
+    private static BulkResponseInspection inspectBulkResponse(
+        AggregatedRawResponse response,
+        BulkItemErrorClassifier errorClassifier
+    ) {
+        var responseBytes = response.getResponseAsByteBuf();
+        try {
+            return inspectBulkResponse(responseBytes, errorClassifier);
+        } finally {
+            if (responseBytes.refCnt() > 0) {
+                responseBytes.release();
+            }
+        }
+    }
+
+    private static boolean retryIsUnnecessaryGivenStatusCode(int statusCode) {
+        return switch (statusCode) {
+            case 200, 201, 401, 403 -> true;
+            default -> statusCode >= 300 && statusCode < 400;
+        };
+    }
+
+    private static OptionalInt targetStatus(AggregatedRawResponse response) {
+        return response.getRawResponse() == null
+            ? OptionalInt.empty()
+            : OptionalInt.of(response.getRawResponse().status().code());
+    }
+
+    private static OptionalInt sourceStatus(
+        RequestReplayOwner.RetrySourceResponse<HttpMessageAndTimestamp.Response> source
+    ) {
+        if (!(source
+            instanceof RequestReplayOwner.CompleteSourceResponseForRetry<
+                HttpMessageAndTimestamp.Response
+            > complete)) {
+            return OptionalInt.empty();
+        }
+        var responseBytes = complete.response().asByteBuf();
+        try {
+            var parsed = HttpByteBufFormatter.processHttpMessageFromBufs(
+                HttpByteBufFormatter.HttpMessageType.RESPONSE,
+                Stream.of(responseBytes)
+            );
+            return parsed instanceof HttpResponse response
+                ? OptionalInt.of(response.status().code())
+                : OptionalInt.empty();
+        } finally {
+            if (responseBytes.refCnt() > 0) {
+                responseBytes.release();
+            }
+        }
+    }
+
 }

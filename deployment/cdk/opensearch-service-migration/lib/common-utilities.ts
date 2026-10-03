@@ -194,10 +194,20 @@ export function createMSKProducerIAMPolicies(scope: Construct, partition: string
         actions: [
             "kafka-cluster:CreateTopic",
             "kafka-cluster:DescribeTopic",
+            "kafka-cluster:AlterTopic",
             "kafka-cluster:WriteData"
         ]
     })
-    return [mskClusterConnectPolicy, mskTopicProducerPolicy]
+    const mskClusterAllGroupArn = `arn:${partition}:kafka:${region}:${accountId}:group/${mskClusterName}/*`
+    const mskProducerMembershipGroupPolicy = new PolicyStatement({
+        effect: Effect.ALLOW,
+        resources: [mskClusterAllGroupArn],
+        actions: [
+            "kafka-cluster:AlterGroup",
+            "kafka-cluster:DescribeGroup"
+        ]
+    })
+    return [mskClusterConnectPolicy, mskTopicProducerPolicy, mskProducerMembershipGroupPolicy]
 }
 
 export function createAwsDistroForOtelPushInstrumentationPolicy(includeXrayTracePermissions = false): PolicyStatement {

@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+
+
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -29,11 +31,11 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
     // final Boolean value indicates if the handler received a LastHttpContent or EndOfInput message
     TrackedFuture<String, Boolean> currentFuture;
     private AtomicReference<TrackedFuture<String, TransformedOutputAndResult<R>>> packetReceiverCompletionFutureRef;
-    IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext;
+    IReplayContexts.IRequestContext httpTransactionContext;
 
     public NettySendByteBufsToPacketHandlerHandler(
         IPacketFinalizingConsumer<R> packetReceiver,
-        IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext
+        IReplayContexts.IRequestContext httpTransactionContext
     ) {
         this.packetReceiver = packetReceiver;
         this.packetReceiverCompletionFutureRef = new AtomicReference<>();

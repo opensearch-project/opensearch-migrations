@@ -314,7 +314,7 @@ class Test0042CdcFullE2eMountableTransforms(MATestBase):
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for capture-proxy to be ready...")
-        wait_for_proxy_ready(ns, timeout_seconds)
+        wait_for_proxy_ready(ns, timeout_seconds, workflow_name=self.workflow_name)
 
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=ns, timeout_seconds=300, workflow_name=self.workflow_name)

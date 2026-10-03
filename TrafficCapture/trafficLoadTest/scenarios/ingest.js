@@ -18,6 +18,7 @@
  *   DURATION           — test duration for constant-arrival-rate executor;
  *                        ignored when EXECUTOR=ramping-arrival-rate (stages define duration)
  *   BULK_BATCH_SIZE    — documents per _bulk call
+ *   DOCUMENT_ID_PREFIX — namespace for replay-stable IDs from one distributed test run
  *   SEQUENCE_FRACTION  — share of iterations run as a create→update→query→delete sequence
  *                        (0.0 disables sequences; default 0.15)
  *   BULK_FRACTION      — share of non-sequence iterations sent as _bulk (default 0.70;
@@ -26,6 +27,8 @@
  *   NO_CONNECTION_REUSE — "true" to disable keep-alive at the k6 transport level for all VUs
  *                         (noConnectionReuse: true); use alongside CONNECTION_MODE=spread for a
  *                         guaranteed per-request TCP teardown independent of server behaviour
+ *   RETRY_ENABLED     — "true" to retry transient write failures with the same document IDs
+ *   RETRY_WINDOW_SECONDS — maximum time spent retrying one logical request
  *   EXECUTOR           — "constant-arrival-rate" (default) or "ramping-arrival-rate"
  *   RAMP_STAGES        — JSON array of k6 stage objects when EXECUTOR=ramping-arrival-rate
  *                        e.g. '[{"duration":"2m","target":150},{"duration":"1m","target":0}]'
@@ -36,7 +39,8 @@
  */
 
 import http from '../lib/http-client.js';
-import { check } from 'k6';
+import { check, sleep } from 'k6';
+import exec from 'k6/execution';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import * as nycTaxisDocs from '../lib/data/nyc_taxis/documents.js';
 import * as logsDocs     from '../lib/data/logs_data/documents.js';
@@ -52,6 +56,7 @@ const bulkRequests     = new Counter('ingest_bulk_requests');
 const singleRequests   = new Counter('ingest_single_doc_requests');
 const sequenceRequests = new Counter('ingest_sequence_requests');
 const ingestErrors     = new Rate('ingest_errors');
+const retryAttempts    = new Counter('ingest_retry_attempts');
 const sequenceErrors   = new Rate('ingest_sequence_errors');
 const bulkBatchDocs    = new Trend('ingest_bulk_batch_docs');
 
@@ -69,8 +74,17 @@ const VUS             = parseInt(CFG.INGEST_VUS          || '20');
 const MAX_VUS         = parseInt(CFG.INGEST_MAX_VUS      || '100');
 const DURATION        = CFG.DURATION            || '5m';
 const BATCH_SIZE      = parseInt(CFG.BULK_BATCH_SIZE     || '20');
+const DOCUMENT_ID_PREFIX = CFG.DOCUMENT_ID_PREFIX        || 'k6';
 const SEQ_FRACTION    = parseFloat(CFG.SEQUENCE_FRACTION || '0.15');
 const BULK_FRACTION   = parseFloat(CFG.BULK_FRACTION     || '0.70');
+const RETRY_ENABLED   = (CFG.RETRY_ENABLED || 'false') === 'true';
+const RETRY_WINDOW_SECONDS = parseInt(CFG.RETRY_WINDOW_SECONDS || '300');
+const RETRY_ATTEMPT_TIMEOUT_SECONDS = parseInt(CFG.RETRY_ATTEMPT_TIMEOUT_SECONDS || '10');
+const RETRY_BACKOFF_SECONDS = parseFloat(CFG.RETRY_BACKOFF_SECONDS || '1');
+const GRACEFUL_STOP = CFG.GRACEFUL_STOP || '30s';
+const HTTP_REQ_FAILED_THRESHOLD = CFG.HTTP_REQ_FAILED_THRESHOLD || 'rate<0.05';
+const INGEST_ERROR_THRESHOLD = CFG.INGEST_ERROR_THRESHOLD || 'rate<0.05';
+const DROPPED_ITERATIONS_THRESHOLD = CFG.DROPPED_ITERATIONS_THRESHOLD || 'count>=0';
 const CONNECTION_MODE     = CFG.CONNECTION_MODE           || 'pinned';
 const NO_CONNECTION_REUSE = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
 const LATENCY_THRESHOLDS_ENABLED = (CFG.LATENCY_THRESHOLDS_ENABLED || 'true') === 'true';
@@ -90,6 +104,7 @@ const ingestScenario = EXECUTOR === 'ramping-arrival-rate'
       timeUnit: '1s',
       preAllocatedVUs: VUS,
       maxVUs: MAX_VUS,
+      gracefulStop: GRACEFUL_STOP,
       stages: RAMP_STAGES,
     }
   : {
@@ -99,6 +114,7 @@ const ingestScenario = EXECUTOR === 'ramping-arrival-rate'
       duration: DURATION,
       preAllocatedVUs: VUS,
       maxVUs: MAX_VUS,
+      gracefulStop: GRACEFUL_STOP,
     };
 
 // ── k6 options ─────────────────────────────────────────────────────────────
@@ -111,9 +127,10 @@ export const options = {
   },
 
   thresholds: {
-    'http_req_failed':                       ['rate<0.05'],
-    'ingest_errors':                         ['rate<0.05'],
+    'http_req_failed':                       [HTTP_REQ_FAILED_THRESHOLD],
+    'ingest_errors':                         [INGEST_ERROR_THRESHOLD],
     'ingest_sequence_errors':                ['rate<0.05'],
+    'dropped_iterations':                    [DROPPED_ITERATIONS_THRESHOLD],
     ...(LATENCY_THRESHOLDS_ENABLED ? {
       'http_req_duration{name:bulk_write}':  ['p(95)<3000'],
       'http_req_duration{name:single_doc}':  ['p(95)<2000'],
@@ -166,38 +183,84 @@ function doSequence() {
   ingestErrors.add(success ? 0 : 1);
 }
 
-function sendBulk() {
-  const { body, docCount } = docs.randomBulkBatch(INDEX, BATCH_SIZE);
+function stableId(kind, item = 0) {
+  return `${DOCUMENT_ID_PREFIX}-${kind}-${exec.vu.idInTest}-${exec.scenario.iterationInTest}-${item}`;
+}
 
-  const res = http.post(
+function bulkSucceeded(res) {
+  if (res.status !== 200) return false;
+  try { return JSON.parse(res.body).errors === false; } catch (_) { return false; }
+}
+
+function writeSucceeded(res) {
+  return res.status === 200 || res.status === 201;
+}
+
+function isRetryable(res) {
+  return res.status === 0 || res.status === 200 || res.status === 408 ||
+    res.status === 429 || res.status >= 500;
+}
+
+function requestWithRetry(method, url, body, params, succeeded) {
+  const deadline = Date.now() + RETRY_WINDOW_SECONDS * 1000;
+  let res;
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    const requestParams = RETRY_ENABLED
+      ? {
+          ...params,
+          timeout: `${Math.max(
+            1,
+            Math.min(RETRY_ATTEMPT_TIMEOUT_SECONDS * 1000, remainingMs),
+          )}ms`,
+        }
+      : params;
+    res = http.request(method, url, body, requestParams);
+    if (succeeded(res) || !RETRY_ENABLED || !isRetryable(res) || Date.now() >= deadline) {
+      return res;
+    }
+    retryAttempts.add(1);
+    sleep(Math.min(RETRY_BACKOFF_SECONDS, Math.max(0, (deadline - Date.now()) / 1000)));
+  }
+}
+
+function sendBulk() {
+  const { body, docCount } = docs.randomBulkBatch(
+    INDEX, BATCH_SIZE, (item) => stableId('bulk', item),
+  );
+  const res = requestWithRetry(
+    'POST',
     `${PROXY_URL}/_bulk`,
     body,
     { ...connParams, tags: { name: 'bulk_write' } },
+    bulkSucceeded,
   );
+  const success = bulkSucceeded(res);
 
   bulkBatchDocs.add(docCount);
   bulkRequests.add(1);
-  ingestErrors.add(res.status >= 400 ? 1 : 0);
+  ingestErrors.add(success ? 0 : 1);
 
   check(res, {
-    'bulk status 200': (r) => r.status === 200,
-    'bulk no item errors': (r) => {
-      try { return JSON.parse(r.body).errors === false; } catch (_) { return false; }
-    },
+    'bulk eventually succeeded': bulkSucceeded,
   });
 }
 
 function sendSingleDoc() {
-  const res = http.post(
-    `${PROXY_URL}/${INDEX}/_doc`,
-    JSON.stringify(docs.randomDocument()),
+  const body = JSON.stringify(docs.randomDocument());
+  const res = requestWithRetry(
+    'PUT',
+    `${PROXY_URL}/${INDEX}/_doc/${stableId('single')}`,
+    body,
     { ...connParams, tags: { name: 'single_doc' } },
+    writeSucceeded,
   );
+  const success = writeSucceeded(res);
 
   singleRequests.add(1);
-  ingestErrors.add(res.status >= 400 ? 1 : 0);
+  ingestErrors.add(success ? 0 : 1);
 
   check(res, {
-    'single doc created (201)': (r) => r.status === 201,
+    'single doc eventually written': writeSucceeded,
   });
 }

@@ -19,6 +19,7 @@ import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -267,24 +268,35 @@ public class ReplayerProcessExitTest {
                 var trafficStream = TrafficStream.newBuilder()
                     .setConnectionId("conn-" + i)
                     .setNodeId("node1")
-                    .addSubStream(TrafficObservation.newBuilder().setTs(ts)
+                    .addSubStream(TrafficObservation.newBuilder()
+                        .setConnectionObservationSequence(1)
+                        .setTs(ts)
                         .setRead(ReadObservation.newBuilder()
                             .setData(ByteString.copyFrom(
                                 ("GET /" + i + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
                                     .getBytes(StandardCharsets.UTF_8)))))
-                    .addSubStream(TrafficObservation.newBuilder().setTs(ts)
+                    .addSubStream(TrafficObservation.newBuilder()
+                        .setConnectionObservationSequence(2)
+                        .setTs(ts)
                         .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
                             .setFirstLineByteLength(14)
                             .setHeadersByteLength(42)))
-                    .addSubStream(TrafficObservation.newBuilder().setTs(ts)
+                    .addSubStream(TrafficObservation.newBuilder()
+                        .setConnectionObservationSequence(3)
+                        .setTs(ts)
                         .setWrite(WriteObservation.newBuilder()
                             .setData(ByteString.copyFrom(
                                 "HTTP/1.1 200 OK\r\n\r\n".getBytes(StandardCharsets.UTF_8)))))
-                    .addSubStream(TrafficObservation.newBuilder().setTs(ts)
+                    .addSubStream(TrafficObservation.newBuilder()
+                        .setConnectionObservationSequence(4)
+                        .setTs(ts)
                         .setClose(CloseObservation.getDefaultInstance()))
                     .build();
 
-                producer.send(new ProducerRecord<>(TOPIC, trafficStream.toByteArray()));
+                producer.send(new ProducerRecord<>(
+                    TOPIC,
+                    CaptureRecord.newBuilder().setTrafficStream(trafficStream).build().toByteArray()
+                ));
                 try {
                     Thread.sleep(PRODUCE_INTERVAL.toMillis());
                 } catch (InterruptedException e) {
@@ -315,7 +327,6 @@ public class ReplayerProcessExitTest {
             "--tuple-max-per-file", "1",
             "--tuple-max-buffer-seconds", "1",
             "--speedup-factor", "10",
-            "-t", "5",
         };
 
         log.info("Launching replayer: {}", Arrays.toString(args));
