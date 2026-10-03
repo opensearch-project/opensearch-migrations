@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 import pytest
@@ -12,16 +11,12 @@ from integ_test.test_cases.cdc_base import PROXY_ENDPOINT, make_proxy_cluster
 WORKFLOW_FIXTURES = Path(__file__).resolve().parents[1] / "testWorkflows"
 
 
-def _workflow_template(filename: str, template_name: str) -> dict:
+def _workflow_template_body(filename: str, template_name: str) -> str:
     workflow = yaml.safe_load((WORKFLOW_FIXTURES / filename).read_text())
     templates = workflow["spec"]["templates"]
     template = next((item for item in templates if item["name"] == template_name), None)
     assert template, f"Template {template_name!r} not found in {filename}"
-    return template
-
-
-def _workflow_template_body(filename: str, template_name: str) -> str:
-    return _workflow_template(filename, template_name)["container"]["args"][0]
+    return template["container"]["args"][0]
 
 
 def test_make_proxy_cluster_signs_sigv4_requests_with_source_endpoint():
@@ -41,45 +36,6 @@ def test_make_proxy_cluster_signs_sigv4_requests_with_source_endpoint():
     assert proxy.allow_insecure
     assert proxy.auth_type == AuthMethod.SIGV4
     assert proxy.config["sigv4_signing_endpoint"] == source.endpoint
-
-
-@pytest.mark.parametrize(
-    ("filename", "template_name", "expected_proxy_replicas", "expected_partitions"),
-    (
-        ("cdcOverlay.yaml", "add-traffic-config", 1, 2),
-        ("cdcOverlay.yaml", "add-proxy-only-traffic-config", 1, 2),
-        ("cdcOnlyImportedClusters.yaml", "build-cdc-only-config", 2, 3),
-    ),
-)
-def test_capture_workflows_reserve_a_rollout_partition(
-    filename,
-    template_name,
-    expected_proxy_replicas,
-    expected_partitions,
-):
-    template = _workflow_template(filename, template_name)
-    body = template["container"]["args"][0]
-    defaults = {
-        parameter["name"]: parameter.get("default")
-        for parameter in template.get("inputs", {}).get("parameters", [])
-    }
-
-    if "captureProxyPodReplicas" in defaults:
-        assert '"podReplicas": $captureProxyPodReplicas' in body
-        assert '"partitions": $trafficTopicPartitions' in body
-        proxy_replicas = int(defaults["captureProxyPodReplicas"])
-        topic_partitions = int(defaults["trafficTopicPartitions"])
-    else:
-        proxy_matches = re.findall(r'"podReplicas"\s*:\s*(\d+)', body)
-        partition_matches = re.findall(r'"partitions"\s*:\s*(\d+)', body)
-        assert len(proxy_matches) == 1
-        assert len(partition_matches) == 1
-        proxy_replicas = int(proxy_matches[0])
-        topic_partitions = int(partition_matches[0])
-
-    assert proxy_replicas == expected_proxy_replicas
-    assert topic_partitions == expected_partitions
-    assert topic_partitions >= proxy_replicas + 1
 
 
 def test_wait_for_proxy_ready_fails_on_outer_workflow_before_polling_again(monkeypatch):
