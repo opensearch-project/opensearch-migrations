@@ -1,0 +1,62 @@
+import org.gradle.api.artifacts.dsl.RepositoryHandler
+import org.gradle.authentication.http.BasicAuthentication
+
+// A configured cache must serve both Maven Central and the Gradle Plugin Portal.
+// Use the same repository for detached configurations (Spotless), buildSrc, and plugins.
+ext.configureMavenRepositories = { RepositoryHandler handler, boolean plugins ->
+    def repositoryUrl = providers.environmentVariable('MAVEN_REPOSITORY_URL').orNull
+    if (repositoryUrl == null) {
+        if (plugins) {
+            handler.gradlePluginPortal()
+        } else {
+            handler.mavenCentral()
+        }
+        return
+    }
+
+    URI endpoint
+    try {
+        endpoint = new URI(repositoryUrl)
+    } catch (URISyntaxException ignored) {
+        throw new GradleException('MAVEN_REPOSITORY_URL must be an absolute HTTP(S) URL without credentials, query, or fragment')
+    }
+    if (!(endpoint.scheme in ['http', 'https']) || !endpoint.host ||
+            endpoint.userInfo != null || endpoint.query != null || endpoint.fragment != null) {
+        throw new GradleException('MAVEN_REPOSITORY_URL must be an absolute HTTP(S) URL without credentials, query, or fragment')
+    }
+
+    def repositoryUsername = providers.environmentVariable('MAVEN_REPOSITORY_USERNAME').orNull
+    def repositoryPassword = providers.environmentVariable('MAVEN_REPOSITORY_PASSWORD').orNull
+    def repositoryPasswordFile = providers.environmentVariable('MAVEN_REPOSITORY_PASSWORD_FILE').orNull
+    if (repositoryPassword != null && repositoryPasswordFile != null) {
+        throw new GradleException('Set only one of MAVEN_REPOSITORY_PASSWORD and MAVEN_REPOSITORY_PASSWORD_FILE')
+    }
+    if (repositoryPasswordFile != null) {
+        try {
+            repositoryPassword = new File(repositoryPasswordFile).getText('UTF-8').trim()
+        } catch (IOException | SecurityException ignored) {
+            throw new GradleException('MAVEN_REPOSITORY_PASSWORD_FILE must name a readable, nonempty file')
+        }
+        if (!repositoryPassword) {
+            throw new GradleException('MAVEN_REPOSITORY_PASSWORD_FILE must name a readable, nonempty file')
+        }
+    }
+    if ((repositoryUsername != null) != (repositoryPassword != null) ||
+            repositoryUsername == '' || repositoryPassword == '') {
+        throw new GradleException('Set MAVEN_REPOSITORY_USERNAME and one password source, or neither')
+    }
+
+    handler.maven {
+        name = 'dependencyCache'
+        url = endpoint
+        if (repositoryUsername != null) {
+            credentials {
+                username = repositoryUsername
+                password = repositoryPassword
+            }
+            authentication {
+                basic(BasicAuthentication)
+            }
+        }
+    }
+}
