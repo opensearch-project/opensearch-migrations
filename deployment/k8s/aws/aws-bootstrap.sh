@@ -550,6 +550,20 @@ validate_args() {
     echo "  Pass --region <region>, set AWS_CFN_REGION, or run 'aws configure'." >&2
     exit 1
   fi
+
+  # A mistyped --helm-values path would otherwise only surface at the cluster check after CFN,
+  # 15+ minutes into a first deploy.
+  if [[ -n "$extra_helm_values" ]]; then
+    local f
+    local -a files
+    IFS=',' read -ra files <<< "$extra_helm_values"
+    for f in "${files[@]}"; do
+      if [[ ! -f "$f" || ! -r "$f" ]]; then
+        echo "Error: --helm-values file '$f' does not exist or is not readable." >&2
+        exit 1
+      fi
+    done
+  fi
 }
 
 validate_args
@@ -790,6 +804,10 @@ fi
 
 # Exit if any tool was missing and not resolved
 [ "$missing" -ne 0 ] && exit 1
+
+# The deployer's own --helm-values files. extra_helm_values also collects files the script
+# generates later (tags, private ECR), so keep this copy for the cluster check after CFN.
+user_helm_values="$extra_helm_values"
 
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
@@ -1042,6 +1060,40 @@ if [[ "$skip_setting_k8s_context" == "true" ]]; then
 else
   kubectl config use-context "${KUBE_CONTEXT}" >/dev/null 2>&1
 fi
+
+# --- validate --helm-values against the cluster ---
+# This is the first point the cluster is reachable, and it comes before anything slow or
+# cluster-mutating: the Auto Mode compute changes for --tags, image mirroring and --build. Render
+# general-work-pool from the chart and the deployer's --helm-values files, and have the API server
+# check it against the NodePool CRD that EKS Auto Mode installs. --dry-run=server persists nothing,
+# so a bad value fails in seconds. Only the NodePool is checked: it is what the overrides
+# configure, and the rest of the chart needs values (images, private ECR, TLS) that don't exist yet.
+validate_helm_values_against_cluster() {
+  [[ -z "$user_helm_values" || "$use_general_node_pool" == "true" ]] && return 0
+  resolve_chart_source
+
+  local eks_values nodepool f
+  local -a values_args files
+  if [[ -f "$ma_chart_dir" ]]; then
+    eks_values=$(tar -xzOf "$ma_chart_dir" migration-assistant/valuesEks.yaml)
+  else
+    eks_values=$(<"$ma_chart_dir/valuesEks.yaml")
+  fi
+  IFS=',' read -ra files <<< "$user_helm_values"
+  for f in "${files[@]}"; do values_args+=(-f "$f"); done
+
+  echo "Validating general-work-pool from --helm-values (${user_helm_values}) against the cluster..."
+  nodepool=$(helm template "$namespace" "$ma_chart_dir" --kube-version 1.35.0 -f - "${values_args[@]}" \
+    --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set aws.account="$AWS_ACCOUNT" \
+    --show-only templates/resources/aws/workloadsNodePool.yaml <<< "$eks_values") \
+    || { echo "Error: failed to render general-work-pool from --helm-values." >&2; exit 1; }
+  kubectl --context="$KUBE_CONTEXT" apply --dry-run=server -f - <<< "$nodepool" >/dev/null \
+    || { echo "Error: the cluster rejected general-work-pool as rendered from --helm-values:" >&2
+         echo "$nodepool" >&2
+         echo "  Nothing was changed. Fix the workloadsNodePool values and re-run the bootstrap." >&2
+         exit 1; }
+}
+validate_helm_values_against_cluster
 
 # =============================================================================
 # Tag propagation to EKS Auto Mode resources

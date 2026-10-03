@@ -1,10 +1,9 @@
-package org.opensearch.migrations.bulkload;
+package org.opensearch.migrations.testfixtures;
 
 import java.util.List;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer.ContainerVersion;
 
 import lombok.experimental.UtilityClass;
 

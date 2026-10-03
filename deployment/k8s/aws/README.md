@@ -112,6 +112,66 @@ script resolves the correct CloudFormation exports. `--build` and `--version`
 are mutually exclusive. Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for
 the existing-VPC and other deployment options.
 
+## Configuring the general workload NodePool
+
+The EKS deployment's main workload pool, `general-work-pool`, can be tuned by
+passing a Helm values override file through `--helm-values`:
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --skip-cfn-deploy \
+  --stage dev \
+  --region us-east-2 \
+  --helm-values ./deployment/k8s/aws/examples/nodepool-overrides.yaml
+```
+
+By default the pool leaves instance selection, including the capacity type,
+to EKS Auto Mode, within the instance types Auto Mode supports. With no
+capacity type, Auto Mode prefers spot over on-demand, and a spot interruption
+stops the migration work on that node; set `capacityTypes: ["on-demand"]` for
+migrations that must not be interrupted. The sample file at
+[`examples/nodepool-overrides.yaml`](./examples/nodepool-overrides.yaml)
+narrows the pool to on-demand c/m/r instances of generation 5 and newer, up to
+`4xlarge`. It sets each of these fields:
+
+- `workloadsNodePool.architectures`
+- `workloadsNodePool.capacityTypes`
+- `workloadsNodePool.instanceCategories`
+- `workloadsNodePool.minInstanceGeneration`
+- `workloadsNodePool.instanceSizes`
+- `workloadsNodePool.limits.cpu`
+- `workloadsNodePool.limits.memory`
+- `workloadsNodePool.disruption.consolidationPolicy`
+- `workloadsNodePool.disruption.consolidateAfter`
+
+Values files follow normal Helm merge behavior: map fields merge by key, scalar
+conflicts are resolved by the later source, and list fields replace the full
+default list. For example, overriding `workloadsNodePool.disruption.consolidateAfter`
+alone keeps the default `consolidationPolicy`, while overriding `instanceSizes`
+requires supplying the full desired size list.
+
+The pool has no `limits` by default, so its size is bounded only by the
+account's EC2 vCPU quotas. Set `workloadsNodePool.limits.cpu` and/or
+`workloadsNodePool.limits.memory` to cap it.
+
+Disruption defaults to `consolidationPolicy: WhenEmpty`, so running migration
+pods are never moved to repack nodes, with `consolidateAfter: 0s`, so empty
+nodes are removed right away. EKS requires `consolidateAfter` whenever
+`disruption` is set. Setting `workloadsNodePool.disruption: null` leaves the
+block out and uses Auto Mode's defaults (`WhenEmptyOrUnderutilized`, `0s`),
+which do move running pods.
+
+To check an override file without deploying, run
+[`examples/check-nodepool-overrides.sh`](./examples/check-nodepool-overrides.sh)
+with it. The script runs `helm lint` and prints the NodePool that would be
+rendered. It only needs `helm`. The bootstrap itself checks that each
+`--helm-values` file exists before doing anything else. Once the cluster
+exists, and before it mirrors or builds images, it also renders
+`general-work-pool` from those files and validates it against the cluster's
+NodePool CRD with a server-side dry run, which catches values EKS would reject
+(for example an invalid `consolidateAfter`). The dry run is skipped with
+`--use-general-node-pool`, which does not create the pool.
+
 ## Common subcommands
 
 ```bash

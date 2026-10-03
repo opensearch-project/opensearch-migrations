@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Shared Maven Central and Gradle Plugin Portal cache for Jenkins agents
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: opensearch-migrations
+    AllowedPattern: '[a-z][a-z0-9-]{0,48}[a-z0-9]'
+  AgentRoleName:
+    Type: String
+    Description: Existing Jenkins EC2 agent IAM role; may assume the dedicated cache reader
+
+Resources:
+  Domain:
+    Type: AWS::CodeArtifact::Domain
+    Properties:
+      DomainName: !Ref DomainName
+      Tags:
+        - Key: Project
+          Value: opensearch-migrations
+        - Key: Purpose
+          Value: ci-dependency-cache
+
+  MavenCentral:
+    Type: AWS::CodeArtifact::Repository
+    Properties:
+      DomainName: !GetAtt Domain.Name
+      RepositoryName: maven-central
+      ExternalConnections:
+        - public:maven-central
+
+  GradlePlugins:
+    Type: AWS::CodeArtifact::Repository
+    Properties:
+      DomainName: !GetAtt Domain.Name
+      RepositoryName: gradle-plugins
+      ExternalConnections:
+        - public:maven-gradleplugins
+
+  BuildDependencies:
+    Type: AWS::CodeArtifact::Repository
+    Properties:
+      DomainName: !GetAtt Domain.Name
+      RepositoryName: build-dependencies
+      Upstreams:
+        - !GetAtt MavenCentral.Name
+        - !GetAtt GradlePlugins.Name
+
+  CacheReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${DomainName}-maven-reader'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AgentRoleName}'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-dependencies
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: codeartifact:GetAuthorizationToken
+                Resource: !GetAtt Domain.Arn
+              - Effect: Allow
+                Action: sts:GetServiceBearerToken
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    sts:AWSServiceName: codeartifact.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - codeartifact:GetRepositoryEndpoint
+                  - codeartifact:ReadFromRepository
+                Resource: !GetAtt BuildDependencies.Arn
+
+  AgentReadPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub '${AWS::StackName}-read'
+      Roles:
+        - !Ref AgentRoleName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !GetAtt CacheReaderRole.Arn
+
+Outputs:
+  DomainName:
+    Value: !GetAtt Domain.Name
+  RepositoryName:
+    Value: !GetAtt BuildDependencies.Name
+  ReaderRoleArn:
+    Value: !GetAtt CacheReaderRole.Arn
+  RepositoryEndpoint:
+    Value: !Sub 'https://${DomainName}-${AWS::AccountId}.d.codeartifact.${AWS::Region}.${AWS::URLSuffix}/maven/build-dependencies/'
