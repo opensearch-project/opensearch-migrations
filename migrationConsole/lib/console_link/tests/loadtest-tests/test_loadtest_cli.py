@@ -1203,7 +1203,7 @@ class TestRenderedChartMatchesTheValues:
     def test_every_profile_renders_a_template(self):
         assert set(self._rendered()) == {f"k6-{p}" for p in _chart_values()["profiles"]}
 
-    def test_connection_mode_suite_renders_required_inputs_and_replay_stable_bulk_ids(self):
+    def test_connection_mode_suite_renders_required_inputs_and_replay_stable_document_ids(self):
         suite = self._rendered(
             "templates/k6-ingest-connection-modes.yaml"
         )["k6-ingest-connection-modes"]
@@ -1216,14 +1216,15 @@ class TestRenderedChartMatchesTheValues:
             template for template in suite["spec"]["templates"]
             if template["name"] == "run-tester"
         )
-        assert run_tester["activeDeadlineSeconds"] == 10800
+        assert run_tester["activeDeadlineSeconds"] == 14400
         child = yaml.safe_load(run_tester["resource"]["manifest"])
         child_parameters = {
             parameter["name"]: parameter["value"]
             for parameter in child["spec"]["arguments"]["parameters"]
         }
-        assert child_parameters["BULK_EXPLICIT_IDS"] == "true"
-        assert child_parameters["BULK_ID_PREFIX"] == "{{inputs.parameters.name}}"
+        assert child_parameters["DOCUMENT_ID_PREFIX"] == (
+            "{{workflow.name}}-{{inputs.parameters.name}}"
+        )
 
     def test_the_parameters_and_the_runner_env_are_the_same_set(self):
         for name, template in sorted(self._rendered().items()):

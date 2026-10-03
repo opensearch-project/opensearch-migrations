@@ -43,9 +43,9 @@ _TOPIC_PARTITION = re.compile(
 
 def _pod_ready(pod):
     return (
-        pod.status.phase == "Running"
-        and pod.metadata.deletion_timestamp is None
-        and any(
+        pod.status.phase == "Running" and
+        pod.metadata.deletion_timestamp is None and
+        any(
             condition.type == "Ready" and condition.status == "True"
             for condition in (pod.status.conditions or [])
         )
@@ -56,11 +56,11 @@ def _deployment_ready(deployment):
     desired = deployment.spec.replicas or 0
     status = deployment.status
     return (
-        (status.observed_generation or 0) >= (deployment.metadata.generation or 0)
-        and (status.updated_replicas or 0) == desired
-        and (status.ready_replicas or 0) == desired
-        and (status.available_replicas or 0) == desired
-        and not (status.unavailable_replicas or 0)
+        (status.observed_generation or 0) >= (deployment.metadata.generation or 0) and
+        (status.updated_replicas or 0) == desired and
+        (status.ready_replicas or 0) == desired and
+        (status.available_replicas or 0) == desired and
+        not (status.unavailable_replicas or 0)
     )
 
 
@@ -108,11 +108,11 @@ def _topic_partitions(description):
 def _topic_fully_replicated(description, expected_partitions, expected_replicas):
     partitions = _topic_partitions(description)
     return (
-        len(partitions) == expected_partitions
-        and all(
-            state["leader"] >= 0
-            and len(state["replicas"]) == expected_replicas
-            and set(state["isr"]) == set(state["replicas"])
+        len(partitions) == expected_partitions and
+        all(
+            state["leader"] >= 0 and
+            len(state["replicas"]) == expected_replicas and
+            set(state["isr"]) == set(state["replicas"])
             for state in partitions.values()
         )
     )
