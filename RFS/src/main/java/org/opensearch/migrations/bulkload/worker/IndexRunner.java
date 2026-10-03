@@ -6,6 +6,7 @@ import java.util.List;
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.transformers.IndexTransformationException;
@@ -28,6 +29,19 @@ public class IndexRunner {
     private final Transformer transformer;
     private final List<String> indexAllowlist;
     private final AwarenessAttributeSettings awarenessAttributeSettings;
+    /** Null unless the target is a collection-routed serverless endpoint */
+    private final ServerlessCollectionRouting collectionRouting;
+
+    public IndexRunner(
+        String snapshotName,
+        IndexMetadata.Factory metadataFactory,
+        IndexCreator indexCreator,
+        Transformer transformer,
+        List<String> indexAllowlist,
+        AwarenessAttributeSettings awarenessAttributeSettings
+    ) {
+        this(snapshotName, metadataFactory, indexCreator, transformer, indexAllowlist, awarenessAttributeSettings, null);
+    }
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
@@ -92,7 +106,9 @@ public class IndexRunner {
                                        ICreateIndexContext context,
                                        IndexMetadata transformedMetadata) {
         try {
-            return indexCreator.create(transformedMetadata, mode, awarenessAttributeSettings, context);
+            // Route by the source index name so metadata and documents land in the same collection
+            var serverlessCollection = collectionRouting == null ? null : collectionRouting.resolveRequired(indexName);
+            return indexCreator.create(transformedMetadata, mode, awarenessAttributeSettings, context, serverlessCollection);
         } catch (Exception e) {
             log.atError()
                 .setMessage("Index Creation failed for index \"{}\"")

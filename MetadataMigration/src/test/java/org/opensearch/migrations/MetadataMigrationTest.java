@@ -3,7 +3,12 @@ package org.opensearch.migrations;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
+import org.opensearch.migrations.commands.EvaluateArgs;
+import org.opensearch.migrations.commands.MigrateArgs;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -154,5 +159,33 @@ public class MetadataMigrationTest {
             assertThat(closeableLogSetup.getLogEvents().stream().anyMatch(
                 event -> event.contains("Starting Metadata Evaluation")), equalTo(true));
         }
+    }
+
+    @Test
+    void inlineJson_collectionRoutingArgsParseAsTheWorkflowSendsThem() throws Exception {
+        // The workflow sends the routing table as a JSON string and the target flag as a boolean
+        var routing = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"shared-config\", \"collection\": \"common\"}]}";
+        var migrateArgs = new MigrateArgs();
+        JsonCommandLineParser.newBuilder()
+            .addObject(new MetadataArgs())
+            .addCommand(migrateArgs)
+            .addCommand(new EvaluateArgs())
+            .build()
+            .parse(new String[] {
+                "migrate",
+                "---INLINE-JSON",
+                new ObjectMapper().writeValueAsString(Map.of(
+                    "targetHost", "https://123456789012.aoss.us-east-1.on.aws",
+                    "targetAwsRegion", "us-east-1",
+                    "targetAwsServiceSigningName", "aoss",
+                    "targetCollectionRouted", true,
+                    "collectionRouting", routing
+                ))
+            });
+
+        assertThat(migrateArgs.collectionRouting, equalTo(routing));
+        assertThat(migrateArgs.targetArgs.toConnectionContext().isCollectionRouted(), equalTo(true));
+        var parsed = ServerlessCollectionRouting.forTarget(migrateArgs.collectionRouting, migrateArgs.targetArgs.collectionRouted);
+        assertThat(parsed.orElseThrow().resolve("shared-config"), equalTo(Optional.of("common")));
     }
 }

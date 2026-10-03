@@ -2,9 +2,11 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -26,9 +28,13 @@ import reactor.util.retry.Retry;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
@@ -292,5 +298,26 @@ class OpenSearchClientFactoryTest {
         verify(restClient, times(1)).getConnectionContext();
         verify(restClient, times(1)).getAsync("", null);
         verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void getClusterVersion_collectionRoutedTarget_skipsRootRequest() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+
+        var version = openSearchClientFactory.getClusterVersion();
+
+        assertEquals(Flavor.AMAZON_SERVERLESS_OPENSEARCH, version.getFlavor());
+        verifyNoInteractions(restClient);
+    }
+
+    @Test
+    void detectServerlessCollectionType_sendsCollectionHeader() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        var error = "{\"error\":\"KNN features not supported on TIMESERIES collection type\"}";
+        when(restClient.putAsync(anyString(), anyString(),
+            eq(Map.of("x-amz-aoss-collection-name", List.of("logs"))), isNull()))
+            .thenReturn(Mono.just(new HttpResponse(400, "", Map.of(), error)));
+
+        assertEquals(ServerlessCollectionType.TIMESERIES, openSearchClientFactory.detectServerlessCollectionType("logs"));
     }
 }

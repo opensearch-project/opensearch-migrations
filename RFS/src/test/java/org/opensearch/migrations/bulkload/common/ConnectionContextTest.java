@@ -246,4 +246,31 @@ class ConnectionContextTest {
 
         assertThrows(IllegalArgumentException.class, coordinatorArgs::toConnectionContext);
     }
+
+    @Test
+    void collectionRoutedTarget_requiresAossSigV4() {
+        var routed = ConnectionContextTestParams.builder()
+            .host("https://123456789012.aoss.us-east-1.on.aws")
+            .awsRegion("us-east-1")
+            .awsServiceSigningName("aoss")
+            .collectionRouted(true)
+            .build()
+            .toConnectionContext();
+        assertTrue(routed.isCollectionRouted());
+        assertEquals("Enabled", routed.toUserFacingData().get("Collection Routed"));
+
+        var esSigning = ConnectionContextTestParams.builder()
+            .host("https://123456789012.aoss.us-east-1.on.aws")
+            .awsRegion("us-east-1")
+            .awsServiceSigningName("es")
+            .collectionRouted(true)
+            .build();
+        assertThrows(IllegalArgumentException.class, esSigning::toConnectionContext);
+
+        var noAuth = ConnectionContextTestParams.builder()
+            .host("https://123456789012.aoss.us-east-1.on.aws")
+            .collectionRouted(true)
+            .build();
+        assertThrows(IllegalArgumentException.class, noAuth::toConnectionContext);
+    }
 }
