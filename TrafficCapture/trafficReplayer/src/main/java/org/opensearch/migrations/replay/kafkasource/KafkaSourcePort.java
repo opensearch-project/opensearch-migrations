@@ -19,16 +19,15 @@ import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
- * Every Kafka operation {@code KafkaSourceOwner} performs, and nothing else. Valid only on the Kafka thread.
+ * Isolates the Kafka client operations used by the source state machine from the state machine itself.
  *
- * <p>The owner holds this rather than a {@code KafkaConsumer} for the same reason
- * {@code TargetConnectionOwner} holds a {@code TargetChannelPort}: the owner's logic — demand, pause
- * reasons, commit positions, the revocation sequence — is what needs proving, and it can be driven entirely
- * through these calls. A real consumer and the deterministic fixture supply the same interface.
+ * <p>The port exposes polling, pause and resume, committed-position lookup, bounded and asynchronous commit,
+ * and close. Returned records intentionally lack process-local generations; attaching current ownership is
+ * an architectural decision made after polling, not Kafka-client metadata.</p>
  *
- * <p>Deliberately absent: {@code wakeup()} and anything that inspects queued source inputs. Wakeup is
- * {@link WakeupController}'s decision, not an operation the owner performs mid-loop, and inputs arrive
- * through {@link KafkaSourceInputQueue}.
+ * <p>Commit results preserve whether an operation was rejected before acceptance or may already have
+ * reached the broker. Wakeup is deliberately outside this interface because it is synchronization for
+ * escaping a poll, not a source-state operation, and must be governed by a separate phase-aware controller.</p>
  */
 public interface KafkaSourcePort {
 

@@ -7,8 +7,14 @@ import java.util.function.Consumer;
 import lombok.NonNull;
 
 /**
- * Process-lifetime gate that linearizes admission to the Kafka publisher against a terminal
- * publisher failure.
+ * Establishes a single process-wide ordering between accepted Kafka submissions and terminal
+ * capture failure. Once tripped, the first failure becomes canonical and every later submission is
+ * rejected with that same cause; a submission admitted earlier remains part of the publisher's
+ * in-flight work rather than being silently forgotten.
+ *
+ * <p>Failure listeners observe the irreversible transition exactly once, including listeners
+ * registered after it happened. This keeps independent capture components from making conflicting
+ * decisions about whether the process may still claim authoritative capture.
  */
 final class CaptureKafkaWriteGate {
     private Throwable terminalFailure;

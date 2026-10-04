@@ -45,15 +45,16 @@ class CaptureKafkaPublisherTest {
     private static final Duration LONG_EXPIRATION_INTERVAL = Duration.ofDays(2);
 
     @Test
-    void initialHeartbeatsMustAllBeAcknowledgedBeforeAssignmentBecomesUsable() throws Exception {
+    void initialHeartbeatsMustAllBeAcknowledgedBeforeRoutingGenerationBecomesUsable()
+        throws Exception {
         var producer = producer(false);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 3);
         try (var publisher = publisher(producer, routingState)) {
-            var install = publisher.installAssignment(List.of(0, 2));
+            var install = publisher.initializeRoutingGeneration(List.of(0, 2));
             awaitHistorySize(producer, 2);
 
             assertFalse(install.isDone());
-            assertEquals(List.of(), routingState.assignedPartitions());
+            assertEquals(List.of(), routingState.activeRoutingPartitions());
             assertHeartbeat(producer.history().get(0), "activation:1", 0, LONG_HEARTBEAT_INTERVAL);
             assertHeartbeat(producer.history().get(1), "activation:1", 2, LONG_HEARTBEAT_INTERVAL);
 
@@ -62,17 +63,18 @@ class CaptureKafkaPublisherTest {
             assertTrue(producer.completeNext());
 
             assertEquals("activation:1", install.get(1, TimeUnit.SECONDS));
-            assertEquals(List.of(0, 2), routingState.assignedPartitions());
+            assertEquals(List.of(0, 2), routingState.activeRoutingPartitions());
         }
     }
 
     @Test
-    void replacementAssignmentsAreInstalledInMembershipCallbackOrder() throws Exception {
+    void replacementRoutingGenerationsAreInitializedInMembershipCallbackOrder()
+        throws Exception {
         var producer = producer(false);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 2);
         try (var publisher = publisher(producer, routingState)) {
-            var first = publisher.installAssignment(List.of(0));
-            var second = publisher.installAssignment(List.of(1));
+            var first = publisher.initializeRoutingGeneration(List.of(0));
+            var second = publisher.initializeRoutingGeneration(List.of(1));
             awaitHistorySize(producer, 1);
 
             assertFalse(first.isDone());
@@ -87,7 +89,7 @@ class CaptureKafkaPublisherTest {
             assertTrue(producer.completeNext());
             assertEquals("activation:2", second.get(1, TimeUnit.SECONDS));
             assertEquals("activation:2", routingState.currentWriterNodeId());
-            assertEquals(List.of(1), routingState.assignedPartitions());
+            assertEquals(List.of(1), routingState.activeRoutingPartitions());
         }
     }
 
@@ -109,7 +111,7 @@ class CaptureKafkaPublisherTest {
             writeGate,
             ignored -> {}
         )) {
-            var install = publisher.installAssignment(List.of(0));
+            var install = publisher.initializeRoutingGeneration(List.of(0));
             awaitHistorySize(producer, 1);
 
             var failure = assertThrows(
@@ -118,12 +120,12 @@ class CaptureKafkaPublisherTest {
             ).getCause();
             assertInstanceOf(TimeoutException.class, failure);
             assertSame(failure, terminalFailure.get());
-            assertEquals(List.of(), routingState.assignedPartitions());
+            assertEquals(List.of(), routingState.activeRoutingPartitions());
             assertEquals(1, producer.history().size(), "The application never resubmits a timed-out send");
 
             assertTrue(producer.completeNext(), "Kafka may acknowledge after the application deadline");
             Thread.sleep(25);
-            assertEquals(List.of(), routingState.assignedPartitions());
+            assertEquals(List.of(), routingState.activeRoutingPartitions());
             assertEquals(1, producer.history().size());
         }
     }
@@ -146,9 +148,9 @@ class CaptureKafkaPublisherTest {
         )) {
             assertEquals(
                 "activation:1",
-                publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS)
+                publisher.initializeRoutingGeneration(List.of(0)).get(1, TimeUnit.SECONDS)
             );
-            assertEquals(List.of(0), routingState.assignedPartitions());
+            assertEquals(List.of(0), routingState.activeRoutingPartitions());
         }
     }
 
@@ -175,7 +177,7 @@ class CaptureKafkaPublisherTest {
             ignored -> {}
         )) {
             try {
-                var assignment = publisher.installAssignment(List.of(0));
+                var initialization = publisher.initializeRoutingGeneration(List.of(0));
                 assertTrue(producer.sendEntered.await(1, TimeUnit.SECONDS));
                 assertFalse(
                     terminalFailureObserved.await(150, TimeUnit.MILLISECONDS),
@@ -187,11 +189,11 @@ class CaptureKafkaPublisherTest {
 
                 assertInstanceOf(TimeoutException.class, terminalFailure.get());
                 assertSame(terminalFailure.get(), writeGate.failureIfNotWritable());
-                assertEquals(List.of(), routingState.assignedPartitions());
+                assertEquals(List.of(), routingState.activeRoutingPartitions());
 
                 var failure = assertThrows(
                     ExecutionException.class,
-                    () -> assignment.get(1, TimeUnit.SECONDS)
+                    () -> initialization.get(1, TimeUnit.SECONDS)
                 ).getCause();
                 assertInstanceOf(TimeoutException.class, failure);
             } finally {
@@ -215,7 +217,7 @@ class CaptureKafkaPublisherTest {
             CaptureKafkaWriteGate.unrestricted(),
             ignored -> {}
         )) {
-            var install = publisher.installAssignment(List.of(0));
+            var install = publisher.initializeRoutingGeneration(List.of(0));
             awaitHistorySize(producer, 1);
             assertTrue(producer.completeNext());
             install.get(1, TimeUnit.SECONDS);
@@ -248,7 +250,7 @@ class CaptureKafkaPublisherTest {
             writeGate,
             ignored -> {}
         )) {
-            publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
+            publisher.initializeRoutingGeneration(List.of(0)).get(1, TimeUnit.SECONDS);
             awaitHistorySize(producer, 2);
             awaitValue(terminalFailure, 1, TimeUnit.SECONDS);
 
@@ -318,7 +320,7 @@ class CaptureKafkaPublisherTest {
             installAndAcknowledge(producer, publisher, List.of(0));
             var oldRoute = routingState.routeNewConnection("connection");
 
-            var replacement = publisher.installAssignment(List.of(0));
+            var replacement = publisher.initializeRoutingGeneration(List.of(0));
             awaitHistorySize(producer, 2);
             assertTrue(producer.completeNext());
             assertEquals("activation:2", replacement.get(1, TimeUnit.SECONDS));
@@ -524,7 +526,7 @@ class CaptureKafkaPublisherTest {
         List<Integer> partitions
     ) throws Exception {
         var expectedHistory = producer.history().size() + partitions.size();
-        var install = publisher.installAssignment(partitions);
+        var install = publisher.initializeRoutingGeneration(partitions);
         awaitHistorySize(producer, expectedHistory);
         for (int ignored : partitions) {
             assertTrue(producer.completeNext());

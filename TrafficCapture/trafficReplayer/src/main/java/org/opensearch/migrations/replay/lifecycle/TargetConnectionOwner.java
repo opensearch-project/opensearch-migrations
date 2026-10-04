@@ -45,7 +45,20 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
 /**
- * Event-loop-confined owner of one process-local target connection and its request registry.
+ * Preserves captured connection ordering while coordinating all replay requests in one local connection
+ * lifetime.
+ *
+ * <p>Requests and the captured close enter ordinal-ordered admission and execution queues. Preparation may
+ * begin shortly before a request's mapped replay time, but target turns begin in captured order and only
+ * after an application-wide attempt permit is acquired. Per-request state machines handle retries and tuple
+ * durability, while this owner controls the shared target channel, write milestones, active turn, and when
+ * later pipelined work may advance.</p>
+ *
+ * <p>The source lifetime distinguishes explicit close, broker-time expiration, orderly shutdown, and forced
+ * cancellation. Each path stops admission and tears down timers, permits, requests, and the channel according
+ * to its evidence and deadline semantics. The owner terminates only after every request cleanup, required
+ * lifecycle delivery, and channel close has settled, preventing a draining generation from leaving
+ * asynchronous work attached to a successor lifetime.</p>
  */
 public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private static final Duration PREPARATION_LEAD = Duration.ofSeconds(1);

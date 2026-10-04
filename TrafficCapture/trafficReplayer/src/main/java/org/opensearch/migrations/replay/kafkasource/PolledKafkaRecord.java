@@ -15,16 +15,16 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.NonNull;
 
 /**
- * One record as Kafka returned it, before any process-local identity is attached.
+ * Represents one record exactly as returned by a Kafka poll, before local ownership is attached.
  *
- * <p>This exists so that {@link KafkaSourcePort} never needs to know a partition generation.
- * {@code kafkaLLD §5} makes {@code KafkaSourceOwner} the sole authority on generations, and the adapter
- * previously took a {@code Map<TopicPartition, PartitionGenerationId>} in order to stamp records itself — a
- * second mutable copy of state the owner already holds and which nothing populated. The owner stamps instead,
- * turning each of these into an {@link ApplicationKafkaRecord} under the generation it knows is current.
+ * <p>The value preserves offset, broker {@code LogAppendTime}, serialized size, and the encoded capture
+ * envelope because those Kafka-level facts cannot be reconstructed later. It deliberately carries no topic,
+ * partition, or generation; the surrounding poll result supplies the partition and the source state machine
+ * stamps the generation that is current when the batch is accepted.</p>
  *
- * <p>Carries the broker timestamp and serialized size because those come from Kafka metadata and cannot be
- * recovered later; everything else intake needs is inside the still-encoded envelope.
+ * <p>This separation keeps the Kafka adapter free of replay ownership state and prevents two mutable copies
+ * of the partition-generation mapping. The resulting {@link ApplicationKafkaRecord} is therefore the first
+ * form that combines broker data with process-local identity.</p>
  */
 public record PolledKafkaRecord(
     long offset,

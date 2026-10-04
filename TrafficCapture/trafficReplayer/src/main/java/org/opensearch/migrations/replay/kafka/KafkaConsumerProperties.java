@@ -18,8 +18,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 
 /**
- * Consumer properties assembled from CLI configuration, shared by everything in this module that opens a
- * Kafka consumer.
+ * Builds the common Kafka consumer configuration used by replay and diagnostic read modes.
+ *
+ * <p>The baseline selects string keys, byte-array values, earliest-offset startup, and explicit commit
+ * control. An optional properties file may customize that baseline, after which connection identity and
+ * authentication supplied by the workflow are applied so they cannot silently disagree with the selected
+ * brokers or consumer group.</p>
+ *
+ * <p>Cooperative sticky rebalancing is installed only when the supplied properties do not choose another
+ * assignor. This gives normal replay incremental partition movement by default while retaining an explicit
+ * escape hatch for environments that require a different Kafka strategy.</p>
  */
 @Slf4j
 public class KafkaConsumerProperties {

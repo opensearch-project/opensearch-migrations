@@ -111,7 +111,7 @@ class CaptureKafkaMembershipKafkaTest {
                 Assertions.assertEquals(pendingWriter, newRoute.writerNodeId());
                 Assertions.assertNotEquals(initialWriter, newRoute.writerNodeId());
                 Assertions.assertTrue(
-                    routingState.assignedPartitions().contains(newRoute.partition())
+                    routingState.activeRoutingPartitions().contains(newRoute.partition())
                 );
                 first.factory().getPublisher().abandonUnpublishedConnection(newRoute);
                 assertEveryRecordUsesEnvelopeWithoutHeaders(first.producer().history());

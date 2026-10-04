@@ -6,11 +6,15 @@ import java.util.function.BooleanSupplier;
 import lombok.NonNull;
 
 /**
- * Always-enabled check that mutable owner state is accessed only from its designated thread.
+ * Enforces the single-writer thread-confinement rule used by replay state owners.
  *
- * <p>Use {@link #guard(Runnable)} for an owner executor whose thread is discovered on its first
- * task. Use {@link #OwnerThreadGuard(String, BooleanSupplier)} when the mailbox or event loop can
- * directly report whether the current thread is its owner.
+ * <p>For an executor without a direct thread predicate, the first guarded task atomically binds the owner
+ * thread and every later task must run there. For event loops and dedicated mailboxes that already know
+ * whether the current thread is valid, the guard delegates to that predicate.</p>
+ *
+ * <p>The checks remain enabled in production. A wrong-thread mutation is an architectural invariant failure,
+ * not a debug-only assertion, because it can reorder lifecycle transitions or race exact record and resource
+ * accounting.</p>
  */
 public final class OwnerThreadGuard {
     private final String ownerDescription;

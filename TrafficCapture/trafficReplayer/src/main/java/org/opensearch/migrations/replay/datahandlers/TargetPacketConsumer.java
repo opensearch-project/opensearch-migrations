@@ -8,7 +8,16 @@ import io.netty.buffer.ByteBuf;
 import lombok.NonNull;
 
 /**
- * Target-only packet boundary whose expected transport outcomes are explicit values.
+ * Defines the asynchronous boundary where encoded request packets are handed to a target connection.
+ *
+ * <p>Submitting bytes and obtaining an HTTP response are different outcomes: a packet may be accepted for
+ * transport even though the connection later closes without producing a response. The sealed
+ * {@link PacketSendOutcome} hierarchy represents both expected results as values, leaving exceptional
+ * completion for broken invariants and unexpected implementation failures.</p>
+ *
+ * <p>The visitor makes handling exhaustive as new outcome types are introduced. That keeps retry,
+ * connection, and request-lifecycle state machines from accidentally treating a normal no-response case
+ * as an unclassified asynchronous exception.</p>
  */
 public interface TargetPacketConsumer extends IPacketFinalizingConsumer<AggregatedRawResponse> {
     sealed interface PacketSendOutcome

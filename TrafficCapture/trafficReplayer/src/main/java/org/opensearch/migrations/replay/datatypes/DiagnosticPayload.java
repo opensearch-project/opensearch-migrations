@@ -5,7 +5,16 @@ import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import lombok.NonNull;
 
 /**
- * Independently retained request packets used for evidence and diagnostics.
+ * Owns a retained copy of request packets whose lifetime is controlled by diagnostic processing.
+ *
+ * <p>Failure evidence may need the request bytes after the target attempt and its prepared request have
+ * completed. This wrapper separates that lifetime from replay execution: the packets remain readable until
+ * the diagnostic payload is closed, and access after close is rejected rather than exposing released
+ * Netty buffers.</p>
+ *
+ * <p>Closing the payload releases its retained buffers exactly once and records the corresponding resource
+ * transition. Diagnostics can therefore outlive normal request cleanup without leaking memory or borrowing
+ * ownership implicitly.</p>
  */
 public final class DiagnosticPayload implements AutoCloseable {
     private final ByteBufList packets;

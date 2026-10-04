@@ -24,11 +24,16 @@ import io.netty.channel.EventLoop;
 import lombok.NonNull;
 
 /**
- * Event-loop-confined registry for correctness-linked asynchronous operations.
+ * Tracks asynchronous work whose completion is required for a replay owner to make progress or terminate.
  *
- * <p>Registration precedes submission. An entry remains registered until the owning event loop
- * applies the typed completion, including any required receiver handling. Immutable snapshots are
- * published for activity diagnostics without exposing mutable owner state.</p>
+ * <p>An operation is registered before submission and remains active until its typed result has been applied
+ * on the owning event loop, not merely until an external future resolves. Stable operation ids and explicit
+ * wait reasons make duplicate, stale, or missing completions detectable and identify whether the owner is
+ * preparing, waiting on a permit, performing I/O, delaying a retry, or delivering a result.</p>
+ *
+ * <p>All mutation is event-loop confined, but each change publishes an immutable snapshot for diagnostics
+ * on other threads. Observability can therefore explain an apparently stuck owner without exposing its maps
+ * to races or granting diagnostic code authority over lifecycle state.</p>
  */
 public final class OutstandingOperationRegistry {
     public enum OperationType {

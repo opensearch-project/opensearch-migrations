@@ -15,20 +15,16 @@ import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import lombok.NonNull;
 
 /**
- * Messages from replay intake to the Kafka source owner. Only the Kafka thread removes and applies them.
+ * Defines the immutable commands and completion evidence applied to Kafka-source state.
  *
- * <p>The family is closed and exhaustively switched: correctness-critical switches over it contain no
- * {@code default} branch, so adding a variant breaks every handling site rather than being silently ignored
- * ({@code replayerLLD §4}).</p>
+ * <p>The events request one partition batch, report that a record's dependent work is finished, confirm
+ * cleanup of a retired generation, or identify a poison capture record. The sealed vocabulary keeps source
+ * transitions exhaustive and prevents arbitrary callbacks from mutating demand, commit, or lifecycle state
+ * outside the Kafka thread.</p>
  *
- * <p>The queue does not accept a callback or a {@code Runnable}. Such a value would hide which Kafka-source
- * fields it can change and would bypass the exhaustive switch — which is the property this family exists to
- * provide, not an incidental style choice.</p>
- *
- * <p>Required submission reports acceptance. Queue rejection or an unexpected failure to submit is
- * process-fatal; the queue is never allowed to discard an input silently.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 4.2.</p>
+ * <p>Every event is generation-qualified, allowing stale messages to be distinguished from work for the
+ * current ownership period. In particular, record completion is the sole input that can advance commit
+ * eligibility, while generation cleanup releases a read barrier but grants no commit authority.</p>
  */
 public sealed interface KafkaSourceInput {
 

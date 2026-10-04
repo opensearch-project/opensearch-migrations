@@ -7,15 +7,20 @@ import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
 
 /**
- * Removes interim HTTP responses from a decoded response stream.
+ * Filters informational HTTP responses so target aggregation sees one terminal response per request.
  *
- * <p>HTTP 101 is intentionally preserved because it changes protocols instead of preceding another
- * HTTP response. The replayer does not support the upgraded protocol, but treating 101 as terminal
- * allows that exchange to fail promptly instead of waiting for a response that will never arrive.
+ * <p>When a decoded 1xx response begins, the handler releases that response and all following content through
+ * its {@link LastHttpContent}, then resumes forwarding the stream. This prevents an interim response such as
+ * {@code 100 Continue} from being mistaken for the target attempt's final result or consuming the request's
+ * response slot.</p>
+ *
+ * <p>{@code 101 Switching Protocols} is preserved because it is terminal for HTTP rather than a prelude to
+ * another HTTP response. Replay does not support the upgraded protocol, but forwarding 101 allows that
+ * unsupported exchange to terminate explicitly instead of waiting forever for a later response.</p>
  *
  * <p>TODO(POST1): Preserve target interim responses through target aggregation and tuple output instead of
  * discarding them here. Use https://github.com/opensearch-project/opensearch-migrations/pull/3000 as the
- * implementation starting point.
+ * implementation starting point.</p>
  */
 public class InterimHttpResponseHandler extends ChannelInboundHandlerAdapter {
     private boolean discardingInterimResponse;

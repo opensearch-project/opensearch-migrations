@@ -42,7 +42,19 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
 /**
- * Exhaustive event-loop-confined lifecycle owner for one replay request.
+ * Runs the complete event-loop-confined lifecycle state machine for one replay request.
+ *
+ * <p>The request is prepared, waits for its connection turn and an application-wide attempt permit, performs
+ * a target attempt, and may wait for source-response evidence and a retry delay before trying again. Target
+ * attempt history and the final source response evolve independently; once the terminal target result and
+ * final source result are known, the owner builds a tuple and waits for durable output before declaring
+ * request processing complete.</p>
+ *
+ * <p>Each asynchronous edge is registered before submission and its result is posted back to the owner event
+ * loop before state changes. Graceful cancellation stops work that can still be abandoned and escalates at
+ * its deadline; forced cancellation aborts transport, tuple, timers, and waits while retaining resources
+ * until their cleanup boundaries settle. Separate connection-turn, processing, and cleanup milestones let
+ * ordering, Kafka record retention, and generation teardown progress at their correct times.</p>
  */
 public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     public sealed interface RetrySourceResponse<F>

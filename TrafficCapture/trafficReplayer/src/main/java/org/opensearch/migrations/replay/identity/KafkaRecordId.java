@@ -11,19 +11,15 @@ package org.opensearch.migrations.replay.identity;
 import lombok.NonNull;
 
 /**
- * One Kafka offset within one {@link PartitionGenerationId}.
+ * Identifies one observation of a Kafka offset during one local partition-ownership generation.
  *
- * <p>The generation is a component rather than a flattened {@code (topic, partition, offset)} triple, and
- * that matters for more than tidiness: it makes this identity name a <em>read event</em> rather than a
- * position in the log. An offset reread under a later generation is a different {@code KafkaRecordId}, owes
- * its own terminal disposition, and contributes separately to record accounting. Flattening the generation
- * into loose fields, as the prior implementation did, lets two reads of one offset compare equal.</p>
+ * <p>The identity names a read event rather than merely a position in the Kafka log. If an offset is read
+ * again after ownership changes, the new {@link PartitionGenerationId} produces a different record id, so
+ * both observations receive their own terminal disposition and accounting.</p>
  *
- * <p>This identity is only well-formed as a read event because nothing is reread <em>within</em> one
- * generation. The observed-record queue enforces that by refusing an offset at or below the greatest it has
- * already seen for the generation.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
+ * <p>Within a generation, offsets are accepted only in strictly increasing order. That invariant makes
+ * the generation-and-offset pair an exact key for record ownership, commit eligibility, and metrics even
+ * when rebalances cause the same log position to be revisited later.</p>
  */
 public record KafkaRecordId(@NonNull PartitionGenerationId generation, long offset) {
     public KafkaRecordId {

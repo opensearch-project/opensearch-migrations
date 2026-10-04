@@ -3,7 +3,13 @@ package org.opensearch.migrations.trafficcapture;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Supports the capture protocol required before a planned proxy shutdown may close its sink.
+ * Defines the capture side of planned proxy shutdown. Orderly retirement first removes eligibility
+ * for new captured connections, then lets already accepted connections finish and retires the
+ * writer state that proves their records are complete.
+ *
+ * <p>The returned future represents that durable drain, not general process cleanup. Closing the
+ * underlying sink before it completes could strand accepted traffic or end a writer's heartbeat
+ * history before its connections have reached a terminal record.
  */
 public interface IOrderlyRetirableCaptureFactory {
     /**

@@ -4,6 +4,17 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import lombok.NonNull;
 
+/**
+ * Makes reference-counted replay payload ownership observable and exactly-once at the Java object boundary.
+ *
+ * <p>Each tracker records one owned handle together with its buffer and byte counts. Closing atomically
+ * claims release authority, invokes the actual Netty-buffer releaser, and publishes the matching negative
+ * accounting only after release succeeds. A duplicate close is reported without releasing twice.</p>
+ *
+ * <p>If release throws, the tracker reopens and reports an invariant failure so cleanup can be retried rather
+ * than falsely claiming the resource is closed. Metrics callbacks are isolated from ownership transitions;
+ * failed observability must never create a leak or change release behavior.</p>
+ */
 public final class ResourceOwnership {
     private ResourceOwnership() {}
 

@@ -17,34 +17,18 @@ import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import lombok.NonNull;
 
 /**
- * Decides when {@code KafkaConsumer.wakeup()} may be issued.
+ * Coordinates safe use of {@code KafkaConsumer.wakeup()} across polling and protected Kafka operations.
  *
- * <p>Wakeup carries no command and changes no source state. It only asks the Kafka thread to stop waiting
- * in {@code poll()} and inspect {@link KafkaSourceInputQueue}, so the queue is always written before a
- * wakeup is considered — see {@code kafkaLLD §5.4}.
+ * <p>A wakeup carries no command; it only shortens a blocking poll so the Kafka thread can inspect its input
+ * queue. The controller models whether the thread is running, polling, inside a rebalance callback, or
+ * inside another protected operation. Requests received in a protected phase are deferred until that phase
+ * exits, preventing routine control input from interrupting commits or rebalance state transitions.</p>
  *
- * <p>Wakeup is <strong>not</strong> safe to issue at arbitrary times. Delivered during a rebalance callback
- * or another Kafka operation it would interrupt an operation that must complete, so in those phases the
- * controller records that a wakeup is pending and issues nothing. Leaving a phase checks for a pending
- * wakeup and issues one then, which is why {@link #leaveRebalanceCallback} and
- * {@link #leaveProtectedOperation} must be called even on a failure path.
- *
- * <p>At most one wakeup is outstanding at a time. Many submissions while the Kafka thread sits in one
- * {@code poll()} coalesce into the single wakeup that poll already needs, and
- * {@link #leavePollAndConsumeWakeup()} is what clears it. That call is mandatory even when {@code poll()}
- * returned normally rather than throwing {@code WakeupException}: an unconsumed wakeup would otherwise
- * interrupt whatever Kafka operation ran next, which is the one thing wakeup must never do.
- *
- * <p>This state is shared by construction — any thread submits, only the Kafka thread polls — so unlike
- * owner state it cannot be confined to one thread. It is guarded by this object's monitor, held only for
- * the state transition itself.
- *
- * <p>Every phase is a scoped instrumentation context and every decision a counter, because the properties
- * that matter here are about <em>timing</em> and cannot be read off the final state: that a wakeup actually
- * shortened a long poll, that one never landed during a rebalance callback, that repeated submissions
- * produced one wakeup rather than several. The {@code kafkaPoll} span's duration is the observable form of
- * "a queued input wakes a long poll promptly", which is otherwise only visible as a test that takes as long
- * as its poll timeout.
+ * <p>At most one wakeup is outstanding. Concurrent submissions coalesce, and every poll exit consumes the
+ * outstanding signal even if the poll returned records instead of throwing {@code WakeupException}; this
+ * prevents a stale wakeup from striking the next Kafka operation. The small shared state machine is
+ * synchronized because submissions and poll-phase transitions occur on different threads, and it records
+ * phase timing so delayed or misplaced wakeups remain observable.</p>
  */
 public final class WakeupController {
 

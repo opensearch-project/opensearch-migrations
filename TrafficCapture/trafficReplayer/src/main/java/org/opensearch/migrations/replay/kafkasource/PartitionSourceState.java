@@ -17,18 +17,18 @@ import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
- * One assigned partition generation's source state, held by {@code KafkaSourceOwner} and confined to the
- * Kafka thread. Defined by {@code kafkaLLD §5.1}.
+ * Holds Kafka-thread state for one local partition-ownership generation.
  *
- * <p>Three conditions independently prohibit reading: no outstanding batch request, prior-generation
- * cleanup pending, and lifecycle state no longer permitting intake. They are stored separately and
- * <strong>must not alias</strong> — clearing one never clears another — because each is cleared by a
- * different message from a different owner. Collapsing them into one boolean is how a partition resumes
- * while another reason still forbids reading.
+ * <p>Readability is the conjunction of independent facts: the bootstrap or an explicit batch request
+ * provides demand, prior-generation cleanup must be complete, and the generation lifecycle must still allow
+ * intake. Those reasons remain separate so clearing one cannot accidentally resume a partition while another
+ * still forbids reading. The state also remembers the pause command last applied to Kafka, since pause state
+ * must be reestablished after ownership changes.</p>
  *
- * <p>{@link #isKafkaPaused()} tracks what Kafka was actually told, so the owner calls {@code pause} or
- * {@code resume} only on a change. Kafka does not preserve pause state across an assignment change, so this
- * is reset rather than trusted after a rebalance.
+ * <p>The generation owns its observed-record commit queue and commit-accounting evidence. Finished records
+ * move through unsubmitted, rejected-before-acceptance, uncertain, and acknowledged categories without
+ * converting uncertainty back into certainty. This makes shutdown and rebalance diagnostics conserve every
+ * observed record even when a commit result cannot be known.</p>
  */
 public final class PartitionSourceState {
 

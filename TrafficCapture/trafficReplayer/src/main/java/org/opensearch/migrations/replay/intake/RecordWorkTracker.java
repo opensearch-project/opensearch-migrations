@@ -15,19 +15,16 @@ import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import lombok.NonNull;
 
 /**
- * One Kafka record's outstanding work — {@code kafkaLLD §8.1}.
+ * Tracks when one observed Kafka record is safe to report as fully processed.
  *
- * <p>Holds exactly the four fields {@code §8.1} names: the record's identity, whether it still accepts new
- * associations, the associations themselves, and whether completion has been emitted. Operations that span
- * records belong to {@link PartitionIntakeState}, which owns {@code §6}'s
- * {@code recordTrackersByKafkaRecordId} together with the reverse index {@code §8.3} needs.
+ * <p>While the record is being applied, intake attaches every logical operation that depends on any of its
+ * observations. The tracker is then closed to new associations, and each operation removes its association
+ * when its durable lifecycle milestone is reached. The record becomes complete only when both conditions
+ * hold: application has ended and no association remains.</p>
  *
- * <p>An <em>association</em> means one named replay-intake operation still needs this record's observation
- * before the whole record can finish. It is bookkeeping inside replay intake and is never passed to target
- * or tuple code.
- *
- * <p>Confined to the replay-intake thread. The thread guard lives on the owning {@link PartitionIntakeState}
- * rather than being repeated per record.
+ * <p>A completion latch makes that transition exactly-once. This is more than local bookkeeping: emitting
+ * completion twice or before all dependencies finish could let the Kafka source advance its contiguous
+ * commit prefix past data that replay still needs.</p>
  */
 final class RecordWorkTracker {
 

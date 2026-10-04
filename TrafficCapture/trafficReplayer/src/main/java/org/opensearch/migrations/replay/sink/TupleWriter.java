@@ -33,10 +33,17 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
 /**
- * Owns physical retries for one logical {@link WriteTuple} link.
+ * Converts one logical replay tuple into a durable sink result despite transient physical-write failures.
  *
- * <p>The writer is event-loop-confined. A bounded worker layer may place independent logical
- * writes on separate owners without changing the logical contract represented here.</p>
+ * <p>On its event loop, the writer transforms each tuple once, treats an intentional transform drop as a
+ * durable logical result, or submits the transformed value to the physical sink. Failed physical writes are
+ * retried after policy-controlled delays while the same logical operation remains registered; success ends
+ * the operation only when the sink's completion stage confirms durability.</p>
+ *
+ * <p>Cancellation stops pending retry timers and returns a typed cancelled result, while fatal transformation
+ * or state-machine failures remain exceptional. Tuple resources are released exactly once at the logical
+ * terminal boundary. During generation grace, reference-counted eager flushing reduces the chance that
+ * buffered durable output outlives the bounded revocation window.</p>
  */
 public final class TupleWriter<T> {
     public static final Duration DEFAULT_INITIAL_RETRY_DELAY =

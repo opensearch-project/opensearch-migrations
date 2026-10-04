@@ -4,6 +4,17 @@ import java.time.Duration;
 
 import lombok.NonNull;
 
+/**
+ * Bounds the resources consumed by an HTTP request that has started but has not reached its message
+ * boundary. The duration limit prevents a slow stream from holding capture state indefinitely,
+ * while separate header and total-byte limits stop unbounded buffering before request semantics
+ * are known.
+ *
+ * <p>These limits protect both forwarding and faithful capture: exceeding one ends the incomplete
+ * request through the normal terminal path instead of allowing memory growth or inventing a
+ * partially captured request. A zero duration is permitted for configurations that require an
+ * immediate assembly deadline.
+ */
 public record IncompleteRequestLimits(
     @NonNull Duration maximumAssemblyDuration,
     long maximumHeaderBytes,

@@ -288,7 +288,7 @@ public class KafkaCaptureFactory implements
         );
         CaptureKafkaPublisher readyPublisher;
         CaptureRoutingState.ConnectionRoute route = null;
-        IllegalStateException unavailableBeforeAssignment = null;
+        IllegalStateException unavailableBeforeRoutingReady = null;
         synchronized (initializationLock) {
             if (closed.get()) {
                 throw new IllegalStateException("Kafka capture factory is closed");
@@ -302,8 +302,9 @@ public class KafkaCaptureFactory implements
             }
             readyPublisher = publisher;
             if (readyPublisher == null) {
-                unavailableBeforeAssignment = new IllegalStateException(
-                    "Kafka capture is not accepting new connections before its first group assignment"
+                unavailableBeforeRoutingReady = new IllegalStateException(
+                    "Kafka capture is not accepting new connections before its first routing "
+                        + "generation is ready"
                 );
             } else {
                 try {
@@ -314,9 +315,9 @@ public class KafkaCaptureFactory implements
                 }
             }
         }
-        if (unavailableBeforeAssignment != null) {
-            failCapture(unavailableBeforeAssignment);
-            throw unavailableBeforeAssignment;
+        if (unavailableBeforeRoutingReady != null) {
+            failCapture(unavailableBeforeRoutingReady);
+            throw unavailableBeforeRoutingReady;
         }
         return createRoutedOffloader(ctx, Objects.requireNonNull(route), readyPublisher);
     }
@@ -733,7 +734,10 @@ public class KafkaCaptureFactory implements
         initializer.shutdown();
         initializedMembership.start();
         log.atInfo()
-            .setMessage("Kafka capture metadata is ready; waiting for the first proxy-group assignment")
+            .setMessage(
+                "Kafka capture metadata is ready; waiting for the first routing generation "
+                    + "to become usable"
+            )
             .log();
     }
 
@@ -758,8 +762,8 @@ public class KafkaCaptureFactory implements
             }
             publisherFuture.complete(initializedPublisher);
             log.atInfo()
-                .setMessage("Initialized Kafka capture from proxy-group assignment {}")
-                .addArgument(initializedPublisher.getRoutingState().assignedPartitions())
+                .setMessage("Initialized Kafka capture with routing partitions {}")
+                .addArgument(initializedPublisher.getRoutingState().activeRoutingPartitions())
                 .log();
         } catch (RuntimeException e) {
             failCapture(e);
@@ -803,8 +807,8 @@ public class KafkaCaptureFactory implements
     }
 
     /**
-     * Stops assignment changes and waits until all captured connections and assignment-scoped
-     * writers have completed the orderly retirement protocol. The caller remains responsible for
+     * Stops Kafka membership changes and waits until all captured connections and writer-partition
+     * lanes have completed the orderly retirement protocol. The caller remains responsible for
      * process-level warning and termination deadlines and for subsequently calling {@link #close()}.
      */
     @Override

@@ -16,7 +16,14 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.RetriableException;
 
 /**
- * Owns the Kafka consumer used only for proxy membership and partition assignment.
+ * Maintains Kafka group membership for load-balancing newly accepted source connections. The
+ * consumer is deliberately paused and never processes traffic records; its partition set is input
+ * to a new routing generation, not an ownership boundary for connections that already exist.
+ *
+ * <p>A nonempty Kafka assignment is made usable only after its routing generation has persisted an
+ * initial heartbeat on every writer-partition lane. Revocations, partition loss, and later
+ * membership failure do not invalidate immutable routes from an earlier generation, so existing
+ * connections can drain without changing writer identity or partition.
  */
 @Slf4j
 public final class CaptureKafkaMembership implements ConsumerRebalanceListener, AutoCloseable {
@@ -26,12 +33,12 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private final org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer;
     private final String topic;
     private final CaptureRoutingState routingState;
-    private final CaptureAssignmentPublisher publisher;
-    private final Runnable initialAssignmentCallback;
+    private final CaptureRoutingGenerationPublisher routingGenerationPublisher;
+    private final Runnable initialRoutingReadyCallback;
     private final Consumer<Throwable> membershipFailureCallback;
     private final Consumer<Throwable> unstableProcessFailureCallback;
     private final Set<Integer> kafkaAssignment = new HashSet<>();
-    private final AtomicBoolean initialAssignmentReported = new AtomicBoolean();
+    private final AtomicBoolean initialRoutingReadyReported = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean started = new AtomicBoolean();
     private final CompletableFuture<Void> stopped = new CompletableFuture<>();
@@ -41,17 +48,17 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         @NonNull org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
         @NonNull String topic,
         @NonNull CaptureRoutingState routingState,
-        @NonNull CaptureAssignmentPublisher publisher,
-        @NonNull Runnable initialAssignmentCallback,
+        @NonNull CaptureRoutingGenerationPublisher routingGenerationPublisher,
+        @NonNull Runnable initialRoutingReadyCallback,
         @NonNull Consumer<Throwable> membershipFailureCallback,
         @NonNull Consumer<Throwable> unstableProcessFailureCallback
     ) {
         this.consumer = consumer;
         this.topic = topic;
         this.routingState = routingState;
-        kafkaAssignment.addAll(routingState.assignedPartitions());
-        this.publisher = publisher;
-        this.initialAssignmentCallback = initialAssignmentCallback;
+        kafkaAssignment.addAll(routingState.activeRoutingPartitions());
+        this.routingGenerationPublisher = routingGenerationPublisher;
+        this.initialRoutingReadyCallback = initialRoutingReadyCallback;
         this.membershipFailureCallback = membershipFailureCallback;
         this.unstableProcessFailureCallback = unstableProcessFailureCallback;
         pollThread = new Thread(this::runPollLoop, "capture-kafka-membership");
@@ -82,20 +89,20 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         if (kafkaAssignment.isEmpty()) {
             return;
         }
-        var assignmentSnapshot = List.copyOf(kafkaAssignment);
-        publisher.installAssignment(assignmentSnapshot)
+        var kafkaAssignmentSnapshot = List.copyOf(kafkaAssignment);
+        routingGenerationPublisher.initializeRoutingGeneration(kafkaAssignmentSnapshot)
             .whenComplete((writerNodeId, failure) -> {
                 if (failure != null) {
-                    publisher.stopAfterFailure(failure);
+                    routingGenerationPublisher.stopAfterFailure(failure);
                     return;
                 }
                 log.atInfo()
-                    .setMessage("Installed proxy assignment writer {} for partitions {}")
+                    .setMessage("Initialized proxy routing writer {} for partitions {}")
                     .addArgument(writerNodeId)
-                    .addArgument(routingState.assignedPartitions())
+                    .addArgument(routingState.activeRoutingPartitions())
                     .log();
-                if (initialAssignmentReported.compareAndSet(false, true)) {
-                    initialAssignmentCallback.run();
+                if (initialRoutingReadyReported.compareAndSet(false, true)) {
+                    initialRoutingReadyCallback.run();
                 }
             });
     }
@@ -133,7 +140,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
                 .setCause(e)
                 .setMessage(
                     "Transient Kafka membership poll failure; "
-                        + "continuing with the last usable assignment while polling retries"
+                        + "continuing with the active routing generation while polling retries"
                 )
                 .log();
             return true;
@@ -171,12 +178,12 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
 
     private void handleMembershipFailure(Throwable failure) {
         if (closed.compareAndSet(false, true)) {
-            if (initialAssignmentReported.get()) {
+            if (initialRoutingReadyReported.get()) {
                 log.atError()
                     .setCause(failure)
                     .setMessage(
-                        "Kafka membership stopped after the initial assignment; "
-                            + "continuing capture with the last completed assignment"
+                        "Kafka membership stopped after initial routing became usable; "
+                            + "continuing capture with the active routing generation"
                     )
                     .log();
             } else {

@@ -20,13 +20,17 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import lombok.NonNull;
 
 /**
- * The only boundary allowed to mutate a target channel for a connection owner.
+ * Defines the transport boundary for target attempts on one replayed connection.
  *
- * <p>An attempt owns channel reuse/reconnect, captured packet pacing, immediate-before-attempt
- * signing, request writes, and response aggregation. Its completion is always a typed
- * {@link TargetAttemptOutcome}. Implementations create no-response values at this boundary after
- * any channel teardown required by that outcome has completed. Unexpected failures complete
- * exceptionally and are process-fatal to the owner.</p>
+ * <p>Starting an attempt encompasses channel reuse or reconnection, request signing at send time, captured
+ * packet pacing, request writes, and aggregation of the corresponding target response. Write milestones
+ * expose when the first and final packets enter transport so connection ordering can advance at the same
+ * boundaries as the original protocol stream.</p>
+ *
+ * <p>Expected transport failures and missing responses complete as typed {@link TargetAttemptOutcome}
+ * values, after any channel teardown needed to make later reuse safe. Aborting an attempt likewise completes
+ * only after unsafe framing has been discarded. Exceptional completion is reserved for failures that make
+ * the transport state machine itself unreliable.</p>
  */
 public interface TargetChannelPort<P, R> {
     record AttemptInput<P>(

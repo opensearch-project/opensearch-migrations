@@ -15,17 +15,16 @@ import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import lombok.NonNull;
 
 /**
- * How {@code onPartitionsRevoked} waits out its grace interval.
+ * Waits for source-control input during a deadline-bounded Kafka revocation grace period.
  *
- * <p>Injected rather than called directly on {@link KafkaSourceInputQueue}, because {@code kafkaLLD §15.1}
- * requires the deadline to be measured with <em>one</em> process-local monotonic clock and a raw
- * {@code Object.wait} cannot honour that. Waiting always elapses in real time, so a deadline expressed on an
- * injected clock and a wait measured on the system clock are two sources for one deadline no matter how the
- * arithmetic is arranged. The only way to have a single source is to make the waiting itself injectable, which
- * is the same reason clocks, event loops and coordination are injected everywhere else in this rebuild.
+ * <p>The grace deadline belongs to one monotonic clock, while ordinary blocking primitives measure elapsed
+ * real time internally. This abstraction keeps the decision on the deadline's clock: the production
+ * implementation waits in bounded slices, wakes immediately when the source queue is signalled, and
+ * rechecks the monotonic deadline after every slice.</p>
  *
- * <p>The implementation returns when either an input is available or the deadline has passed <em>according to
- * the clock that created it</em>. Nothing else is a correct answer.
+ * <p>As a result, queued completion or cleanup events can still be applied while the rebalance callback is
+ * protected from Kafka wakeups, and clock control remains deterministic in tests. The wait returns only
+ * because input is available or the supplied deadline has actually passed.</p>
  */
 public interface GraceIntervalWait {
 

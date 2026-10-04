@@ -18,8 +18,17 @@ import lombok.NonNull;
 import org.apache.kafka.common.utils.Utils;
 
 /**
- * Owns assignment-scoped writer identities, immutable connection routes, local connection
- * registries, and accepted heartbeat broker-time baselines.
+ * Models the process-local routing and retirement state independently of Kafka I/O. A routing
+ * generation creates a fresh writer identity and one writer-partition state per eligible
+ * partition; it becomes active only after those partitions have established broker-time
+ * heartbeats.
+ *
+ * <p>New connections receive an immutable writer identity and partition from the active
+ * generation. When another generation becomes active, the old writer partitions move through
+ * {@code DRAINING}, {@code RETIRING}, and {@code RETIRED} while their original connections finish.
+ * The registries and heartbeat baselines are checked on every transition so duplicate connection
+ * ownership, stale acknowledgements, or premature retirement is treated as corrupted process
+ * state rather than recoverable Kafka failure.
  */
 public final class CaptureRoutingState {
     enum WriterStatus {
@@ -110,23 +119,23 @@ public final class CaptureRoutingState {
         }
     }
 
-    static final class PendingAssignment {
-        private final long assignmentSequence;
+    static final class PendingRoutingGeneration {
+        private final long generationSequence;
         private final String writerNodeId;
         private final List<Integer> partitions;
 
-        private PendingAssignment(
-            long assignmentSequence,
+        private PendingRoutingGeneration(
+            long generationSequence,
             String writerNodeId,
             List<Integer> partitions
         ) {
-            this.assignmentSequence = assignmentSequence;
+            this.generationSequence = generationSequence;
             this.writerNodeId = writerNodeId;
             this.partitions = partitions;
         }
 
-        long assignmentSequence() {
-            return assignmentSequence;
+        long generationSequence() {
+            return generationSequence;
         }
 
         String writerNodeId() {
@@ -197,11 +206,11 @@ public final class CaptureRoutingState {
         }
     }
 
-    private static final class CurrentAssignment {
+    private static final class ActiveRoutingGeneration {
         private final String writerNodeId;
         private final List<Integer> partitions;
 
-        private CurrentAssignment(String writerNodeId, List<Integer> partitions) {
+        private ActiveRoutingGeneration(String writerNodeId, List<Integer> partitions) {
             this.writerNodeId = writerNodeId;
             this.partitions = partitions;
         }
@@ -219,7 +228,7 @@ public final class CaptureRoutingState {
             if (this == other) {
                 return true;
             }
-            if (!(other instanceof CurrentAssignment that)) {
+            if (!(other instanceof ActiveRoutingGeneration that)) {
                 return false;
             }
             return Objects.equals(writerNodeId, that.writerNodeId)
@@ -233,7 +242,7 @@ public final class CaptureRoutingState {
 
         @Override
         public String toString() {
-            return "CurrentAssignment[writerNodeId="
+            return "ActiveRoutingGeneration[writerNodeId="
                 + writerNodeId
                 + ", partitions="
                 + partitions
@@ -250,8 +259,8 @@ public final class CaptureRoutingState {
     private final Map<WriterPartition, WriterPartitionState> writerPartitions = new HashMap<>();
     private final Map<ConnectionKey, ConnectionRoute> connectionRoutes = new HashMap<>();
     private CompletableFuture<Void> noConnections = CompletableFuture.completedFuture(null);
-    private CurrentAssignment currentAssignment;
-    private long assignmentSequence;
+    private ActiveRoutingGeneration activeRoutingGeneration;
+    private long routingGenerationSequence;
     private boolean shuttingDown;
 
     public CaptureRoutingState(String captureActivationId, int topicPartitionCount) {
@@ -262,16 +271,20 @@ public final class CaptureRoutingState {
         this.topicPartitionCount = topicPartitionCount;
     }
 
-    synchronized PendingAssignment prepareAssignment(Collection<Integer> partitions) {
+    synchronized PendingRoutingGeneration prepareRoutingGeneration(
+        Collection<Integer> partitions
+    ) {
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");
         }
-        var validatedPartitions = validateAssignment(partitions);
+        var validatedPartitions = validateRoutingPartitions(partitions);
         if (validatedPartitions.isEmpty()) {
-            throw new IllegalArgumentException("A usable Kafka assignment must contain at least one partition");
+            throw new IllegalArgumentException(
+                "A routing generation must contain at least one partition"
+            );
         }
-        assignmentSequence = Math.incrementExact(assignmentSequence);
-        var writerNodeId = captureActivationId + ":" + assignmentSequence;
+        routingGenerationSequence = Math.incrementExact(routingGenerationSequence);
+        var writerNodeId = captureActivationId + ":" + routingGenerationSequence;
         for (var partition : validatedPartitions) {
             var key = new WriterPartition(writerNodeId, partition);
             var previous = writerPartitions.putIfAbsent(
@@ -282,65 +295,80 @@ public final class CaptureRoutingState {
                 throw new CorruptedCaptureStateException("Writer partition was already prepared: " + key);
             }
         }
-        return new PendingAssignment(assignmentSequence, writerNodeId, validatedPartitions);
+        return new PendingRoutingGeneration(
+            routingGenerationSequence,
+            writerNodeId,
+            validatedPartitions
+        );
     }
 
-    synchronized void activateAssignment(@NonNull PendingAssignment assignment) {
+    synchronized void activateRoutingGeneration(
+        @NonNull PendingRoutingGeneration generation
+    ) {
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");
         }
-        for (var writerPartition : assignment.writerPartitions()) {
+        for (var writerPartition : generation.writerPartitions()) {
             var state = requireWriterPartition(writerPartition);
             if (state.status != WriterStatus.INITIALIZING
                 || state.lastAcceptedHeartbeatLogAppendTime == null) {
                 throw new CorruptedCaptureStateException(
-                    "Writer partition is not ready for assignment activation: " + writerPartition
+                    "Writer partition is not ready for routing activation: " + writerPartition
                 );
             }
         }
-        if (currentAssignment != null) {
-            for (var partition : currentAssignment.partitions()) {
+        if (activeRoutingGeneration != null) {
+            for (var partition : activeRoutingGeneration.partitions()) {
                 var oldState = requireWriterPartition(
-                    new WriterPartition(currentAssignment.writerNodeId(), partition)
+                    new WriterPartition(activeRoutingGeneration.writerNodeId(), partition)
                 );
                 if (oldState.status != WriterStatus.CURRENT) {
                     throw new CorruptedCaptureStateException(
-                        "Current assignment contains a non-current writer partition: " + oldState.key()
+                        "Active routing generation contains a non-current writer partition: "
+                            + oldState.key()
                     );
                 }
                 oldState.status = WriterStatus.DRAINING;
             }
         }
-        for (var writerPartition : assignment.writerPartitions()) {
+        for (var writerPartition : generation.writerPartitions()) {
             requireWriterPartition(writerPartition).status = WriterStatus.CURRENT;
         }
-        currentAssignment = new CurrentAssignment(assignment.writerNodeId(), assignment.partitions());
+        activeRoutingGeneration = new ActiveRoutingGeneration(
+            generation.writerNodeId(),
+            generation.partitions()
+        );
     }
 
     public synchronized ConnectionRoute routeNewConnection(@NonNull String connectionId) {
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");
         }
-        if (currentAssignment == null) {
-            throw new IllegalStateException("Kafka capture has no usable assignment for new connections");
+        if (activeRoutingGeneration == null) {
+            throw new IllegalStateException(
+                "Kafka capture has no active routing generation for new connections"
+            );
         }
-        int partition = currentAssignment.partitions().get(
-            positiveHash(connectionId) % currentAssignment.partitions().size()
+        int partition = activeRoutingGeneration.partitions().get(
+            positiveHash(connectionId) % activeRoutingGeneration.partitions().size()
         );
-        var writerPartition = new WriterPartition(currentAssignment.writerNodeId(), partition);
+        var writerPartition = new WriterPartition(
+            activeRoutingGeneration.writerNodeId(),
+            partition
+        );
         var state = requireWriterPartition(writerPartition);
         if (state.status != WriterStatus.CURRENT) {
             throw new CorruptedCaptureStateException(
                 "New connection routed to a writer partition that is not current: " + writerPartition
             );
         }
-        var key = new ConnectionKey(currentAssignment.writerNodeId(), connectionId);
+        var key = new ConnectionKey(activeRoutingGeneration.writerNodeId(), connectionId);
         if (connectionRoutes.containsKey(key) || !state.connectionIds.add(connectionId)) {
             throw new CorruptedCaptureStateException(
                 "Connection "
                     + connectionId
                     + " is already registered for writer "
-                    + currentAssignment.writerNodeId()
+                    + activeRoutingGeneration.writerNodeId()
             );
         }
         if (connectionRoutes.isEmpty()) {
@@ -515,10 +543,10 @@ public final class CaptureRoutingState {
             );
         }
         shuttingDown = true;
-        if (currentAssignment != null) {
-            for (var partition : currentAssignment.partitions()) {
+        if (activeRoutingGeneration != null) {
+            for (var partition : activeRoutingGeneration.partitions()) {
                 var state = requireWriterPartition(
-                    new WriterPartition(currentAssignment.writerNodeId(), partition)
+                    new WriterPartition(activeRoutingGeneration.writerNodeId(), partition)
                 );
                 if (state.status != WriterStatus.CURRENT) {
                     throw new CorruptedCaptureStateException(
@@ -527,7 +555,7 @@ public final class CaptureRoutingState {
                 }
                 state.status = WriterStatus.DRAINING;
             }
-            currentAssignment = null;
+            activeRoutingGeneration = null;
         }
     }
 
@@ -539,19 +567,23 @@ public final class CaptureRoutingState {
 
     synchronized void beginShutdown() {
         shuttingDown = true;
-        currentAssignment = null;
+        activeRoutingGeneration = null;
     }
 
     synchronized int size() {
         return connectionRoutes.size();
     }
 
-    synchronized List<Integer> assignedPartitions() {
-        return currentAssignment == null ? List.of() : currentAssignment.partitions();
+    synchronized List<Integer> activeRoutingPartitions() {
+        return activeRoutingGeneration == null
+            ? List.of()
+            : activeRoutingGeneration.partitions();
     }
 
     synchronized String currentWriterNodeId() {
-        return currentAssignment == null ? null : currentAssignment.writerNodeId();
+        return activeRoutingGeneration == null
+            ? null
+            : activeRoutingGeneration.writerNodeId();
     }
 
     synchronized Set<String> writerNodeIds() {
@@ -578,12 +610,12 @@ public final class CaptureRoutingState {
         return state;
     }
 
-    private List<Integer> validateAssignment(@NonNull Collection<Integer> assignment) {
+    private List<Integer> validateRoutingPartitions(@NonNull Collection<Integer> partitions) {
         var unique = new TreeSet<Integer>();
-        for (var partition : assignment) {
+        for (var partition : partitions) {
             validatePartition(partition);
             if (!unique.add(partition)) {
-                throw new IllegalArgumentException("assignedPartitions must be unique");
+                throw new IllegalArgumentException("routing partitions must be unique");
             }
         }
         return List.copyOf(unique);

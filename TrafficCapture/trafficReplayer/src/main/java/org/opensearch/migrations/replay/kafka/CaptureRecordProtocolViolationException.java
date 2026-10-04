@@ -9,10 +9,12 @@
 package org.opensearch.migrations.replay.kafka;
 
 /**
- * Raised when a Kafka application record is not exactly one recognized CaptureRecord envelope.
+ * Indicates that a Kafka value cannot be interpreted as exactly one recognized capture-protocol envelope.
  *
- * <p>S14 installs the bounded process-level protocol-violation drain. Until then this exception
- * deliberately fails the current source operation instead of dropping or trial-decoding the record.
+ * <p>Malformed, empty, or unknown payloads cannot be skipped safely because later offsets may depend on the
+ * missing connection and request state. This exception preserves that distinction from ordinary transport
+ * failures so replay can stop record admission, keep the offending offset uncommitted, drain already-admitted
+ * side effects for a bounded interval, and terminate diagnostically.</p>
  */
 public class CaptureRecordProtocolViolationException extends IllegalArgumentException {
     public CaptureRecordProtocolViolationException(String message) {

@@ -11,15 +11,14 @@ package org.opensearch.migrations.replay.identity;
 import lombok.NonNull;
 
 /**
- * One request by replay intake for the next available batch from one partition generation.
+ * Correlates one demand for records with the next delivered batch from a partition generation.
  *
- * <p>{@code localSequence} is allocated by replay intake and is never serialized.</p>
+ * <p>Replay intake permits at most one unresolved demand per generation. The local sequence turns that
+ * rule into an explicit correlation check: a non-empty batch must satisfy exactly the request that caused
+ * the partition to be resumed, while stale or duplicate deliveries can be rejected.</p>
  *
- * <p>This identity is what makes "at most one outstanding batch request per partition generation" checkable
- * rather than assumed, and what lets a delivered batch be matched to exactly one request. An empty poll does
- * not resolve a request, so the same id stays outstanding across polls until records actually arrive.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
+ * <p>An empty Kafka poll does not satisfy the demand, so the same id remains outstanding across polls until
+ * records arrive. The id is process-local coordination state and is never serialized into capture data.</p>
  */
 public record PartitionBatchRequestId(@NonNull PartitionGenerationId generation, long localSequence) {
     public PartitionBatchRequestId {

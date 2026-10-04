@@ -26,16 +26,18 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Source-side HTTP assembly for one process-local connection lifetime — {@code kafkaLLD §9}.
+ * Reconstructs source-side HTTP messages for one process-local captured-connection lifetime.
  *
- * <p>Owns only what {@code §9} lists: the sequence baseline, the request parser and its incomplete state,
- * response parser state per {@code ReplayRequestId}, the current captured request ordinal, the continuity
- * state the {@code TrafficStream} supplied, and the lifetime. It owns no target channel, target attempt,
- * tuple, Kafka consumer, or commit position, and it does no record accounting — that is
- * {@link PartitionIntakeState}'s, and this class reports which association each observation belongs to so the
- * caller can record it.
+ * <p>Traffic observations are applied in strict capture-sequence order through phases for discarding an
+ * inherited message tail, waiting between requests, assembling a request, and assembling its source
+ * response. Capture continuity fields establish the initial request ordinal and whether parsing may begin
+ * immediately; request end markers allocate stable request identities, while later read, close, exception,
+ * and drop observations delimit response state without pretending to parse response framing.</p>
  *
- * <p>Confined to the replay-intake thread by its owner.
+ * <p>The class owns only message-assembly state. Each applied observation returns the record associations
+ * that must be added, relabelled, or completed, allowing partition-level accounting to remain separate.
+ * Explicit close, broker-time expiration, and generation cancellation end assembly with different evidence
+ * semantics so downstream processing can distinguish an observed source boundary from replay giving up.</p>
  */
 @Slf4j
 public final class SourceConnectionState {

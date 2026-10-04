@@ -36,15 +36,18 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Sole owner of replay-intake state and of applying source records — {@code kafkaLLD §3}, {@code §7}.
+ * Serializes all source-side replay decisions on one owner thread.
  *
- * <p>Runs one thread. Every input arrives through {@link ReplayIntakeInputQueue}, is removed only here, and is
- * applied completely before the next is removed ({@code §3}'s intake loop). Nothing else changes intake state,
- * which is what makes the maps in {@link PartitionIntakeState} safe without locks.
+ * <p>Each queued event is applied completely before the next begins. For record batches, the owner validates
+ * broker time, resolves retry and writer-expiration boundaries, decodes capture envelopes, reconstructs
+ * connection traffic, records every dependency on the source records, and only then reevaluates demand for
+ * more input. Per-generation state can consequently use ordinary maps while preserving exact backpressure
+ * and commit accounting.</p>
  *
- * <p>Failure is not a return value. An input that cannot be applied is an invariant failure, reported to the
- * process-failure boundary per {@code replayerLLD §4} rather than logged and skipped: intake is the only place
- * that knows which records are still owed, so a swallowed failure there is silent record loss.
+ * <p>The owner also coordinates generation cancellation and latches the first capture-protocol violation,
+ * after which no additional records are admitted. An input that cannot be applied is treated as a fatal
+ * invariant failure rather than skipped: losing one transition here would make the system unable to prove
+ * which records are still retained or safe to commit.</p>
  */
 @Slf4j
 public final class ReplayIntakeOwner {

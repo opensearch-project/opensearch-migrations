@@ -11,19 +11,16 @@ package org.opensearch.migrations.replay.identity;
 import lombok.NonNull;
 
 /**
- * The protocol identity of a captured connection: {@code (writerNodeId, connectionId)}.
+ * Identifies one connection in the captured-traffic protocol as
+ * {@code (writerNodeId, connectionId)}.
  *
- * <p>Both components are required. A {@code connectionId} is only unique within the writer that minted it,
- * so a bare connection id is not an identity — two proxies can independently produce the same one, and
- * treating them as equal merges two unrelated captured connections.</p>
+ * <p>A connection id is minted independently by each capture writer and is therefore unique only within
+ * that writer. Keeping the writer id in the key prevents records from different proxies that happened to
+ * choose the same connection id from being assembled into one connection.</p>
  *
- * <p>This is a <em>protocol</em> identity, carried in the capture stream. It is not a process-local
- * lifetime: one {@code CapturedConnectionId} may be replayed as several
- * {@link ConnectionProcessingId} lifetimes if broker-time expiration ends one while a later observation
- * starts another.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerLowLevelDesign.md} section 1 and
- * {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
+ * <p>This identity describes what was captured, not one local replay lifetime. If broker-time expiration
+ * closes local processing and a later record reopens the same captured connection, each lifetime receives
+ * a separate {@link ConnectionProcessingId} while retaining this protocol identity.</p>
  */
 public record CapturedConnectionId(@NonNull String writerNodeId, @NonNull String connectionId) {
     public CapturedConnectionId {

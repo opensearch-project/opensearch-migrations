@@ -23,11 +23,17 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import lombok.NonNull;
 
 /**
- * Enforces the application-wide limit on target attempts without blocking a connection event loop.
+ * Enforces the application-wide target-attempt concurrency limit without blocking connection event loops.
  *
- * <p>The composition root owns the shared active-attempt counter and supplies this provider to every
- * connection owner. Pending acquisitions are provider-owned until they either produce a permit or are
- * cancelled. Queue order is deliberately not part of the contract.</p>
+ * <p>Acquisition first tries to reserve capacity with an atomic counter. If the limit is full, the request
+ * enters a concurrent pending queue and completes later when another permit is released; cancellation races
+ * are resolved by an acquisition state machine so a cancelled waiter cannot consume capacity and an acquired
+ * permit cannot be lost.</p>
+ *
+ * <p>A permit is the ownership token for one active attempt and releases its reservation exactly once when
+ * closed. Counter underflow, overflow, duplicate completion, or failed delivery is treated as a fatal
+ * invariant violation because any of those would make the configured concurrency bound untrustworthy.
+ * Queue ordering is intentionally not promised—the contract is bounded progress, not fairness.</p>
  */
 public final class TargetAttemptPermitProvider {
     @FunctionalInterface

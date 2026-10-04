@@ -17,15 +17,17 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 /**
- * Where source assembly's results go.
+ * Defines the non-blocking handoff from captured-source reconstruction to downstream replay processing.
  *
- * <p>This is the replay-intake side of {@code connLLD §3}'s connection-input link. Production construction
- * routes each method to the process-local {@code TargetConnectionOwner} selected by the complete
- * {@code ConnectionProcessingId}. Source interim responses remain on this source-observation seam and are
- * not routed into target aggregation.
+ * <p>The events preserve the source facts needed after Kafka records have been decoded: reconstituted
+ * requests, interim and final source responses, captured closes, broker-time expiration, and generation
+ * cancellation. Request and connection identities keep those facts attached to the exact local lifetime
+ * that produced them.</p>
  *
- * <p>Called only on the replay-intake thread, synchronously from within one record's application, so an
- * implementation must not block.
+ * <p>Final-response delivery and retry-policy input are deliberately separate one-shot signals. A response
+ * may remain useful for tuple output after the bounded retry window has frozen its retry input as
+ * unavailable. Likewise, an incomplete response describes replay abandoning assembly, not proof that the
+ * captured source completed a response.</p>
  */
 public interface SourceAssemblySink {
 

@@ -24,10 +24,18 @@ import org.opensearch.migrations.replay.lifecycle.OwnerThreadGuard;
 import lombok.NonNull;
 
 /**
- * Kafka-owner state for one partition generation's records in observed poll order.
+ * Computes the committable prefix of records observed during one partition generation.
  *
- * <p>Physical Kafka offsets may contain gaps. Commit eligibility therefore advances through the
- * deque of records actually observed by this consumer, never through assumed numeric offsets.
+ * <p>Records are registered in increasing poll order and may finish out of order as replay work completes.
+ * A completion marks its entry, then removes only the consecutive completed entries at the deque head; the
+ * last removed offset plus one becomes the next safe Kafka position. Physical offset gaps are harmless
+ * because the algorithm follows records actually returned by Kafka rather than assuming every numeric
+ * offset was observed.</p>
+ *
+ * <p>A protocol-violating record can instead be marked permanently commit-ineligible. It remains at the
+ * head as a barrier even after later records settle, ensuring no commit skips the poison offset and a restart
+ * sees the same failure. All transitions are confined to the Kafka owner thread and reject duplicates or
+ * cross-generation identities.</p>
  */
 public final class ObservedRecordCommitQueue {
     // The warnings target compiler-generated members of this public result contract.

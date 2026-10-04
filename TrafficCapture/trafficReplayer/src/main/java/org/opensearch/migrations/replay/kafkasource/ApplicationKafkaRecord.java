@@ -17,22 +17,16 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.NonNull;
 
 /**
- * One Kafka application record as the Kafka source observed it, carried to replay intake.
+ * Carries one Kafka record after it has been stamped with its process-local ownership identity.
  *
- * <p>{@code logAppendTimeMillis} is the broker's {@code LogAppendTime} for this record, and carrying it here
- * is the point of the type. In the pre-rebuild implementation
- * {@code ConsumerRecord.timestamp()} was read in exactly one place — a dump-mode {@code --end-time} filter —
- * and never reached intake at all, which is why broker-time expiration, the backward-skew fatal check, and
- * heartbeat baselines could not exist and expiration ran on a wall clock instead. Any record type crossing
- * this boundary without the broker timestamp reintroduces that defect.</p>
+ * <p>The record combines the generation-qualified offset with broker {@code LogAppendTime}, serialized size,
+ * encoded capture envelope, and optional tracing scope. Keeping broker time alongside the payload lets
+ * intake validate timestamp movement, resolve retry windows, and expire writer state using evidence from
+ * the partition log rather than the replayer's wall clock.</p>
  *
- * <p>The encoded envelope is the protocol value, decoded and exhaustively switched on by intake per
- * {@code kafkaLLD §7.1}: {@code TrafficStream}, {@code WriterPartitionHeartbeat},
- * {@code CaptureCapabilityProbe}, and {@code PAYLOAD_NOT_SET} as a protocol violation. It is deliberately the
- * still-encoded Kafka value rather than a pre-interpreted union, so both protobuf decoding and the payload
- * switch happen once, at intake, where the design places them.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 5.5.</p>
+ * <p>The envelope remains encoded until intake applies the record. Decoding and the exhaustive protocol
+ * payload switch therefore occur at the same serialized state boundary that owns record associations and
+ * protocol-violation handling, rather than being partially interpreted by the Kafka adapter.</p>
  */
 public record ApplicationKafkaRecord(
     @NonNull KafkaRecordId recordId,

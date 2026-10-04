@@ -17,23 +17,23 @@ class CaptureRoutingStateTest {
     private static final Duration EXPIRATION = Duration.ofSeconds(30);
 
     @Test
-    void assignmentIsNotUsableUntilEveryInitialHeartbeatIsAcknowledged() {
+    void routingGenerationIsNotUsableUntilEveryInitialHeartbeatIsAcknowledged() {
         var state = new CaptureRoutingState(ACTIVATION_ID, 3);
-        var assignment = state.prepareAssignment(List.of(0, 2));
+        var generation = state.prepareRoutingGeneration(List.of(0, 2));
 
-        assertEquals(1, assignment.assignmentSequence());
-        assertEquals("activation:1", assignment.writerNodeId());
-        assertEquals(List.of(0, 2), assignment.partitions());
+        assertEquals(1, generation.generationSequence());
+        assertEquals("activation:1", generation.writerNodeId());
+        assertEquals(List.of(0, 2), generation.partitions());
         assertThrows(IllegalStateException.class, () -> state.routeNewConnection("too-early"));
 
-        state.acceptHeartbeatLogAppendTime(assignment.writerPartitions().get(0), 1_000L, EXPIRATION);
+        state.acceptHeartbeatLogAppendTime(generation.writerPartitions().get(0), 1_000L, EXPIRATION);
         assertThrows(
             CorruptedCaptureStateException.class,
-            () -> state.activateAssignment(assignment)
+            () -> state.activateRoutingGeneration(generation)
         );
 
-        state.acceptHeartbeatLogAppendTime(assignment.writerPartitions().get(1), 2_000L, EXPIRATION);
-        state.activateAssignment(assignment);
+        state.acceptHeartbeatLogAppendTime(generation.writerPartitions().get(1), 2_000L, EXPIRATION);
+        state.activateRoutingGeneration(generation);
 
         var route = state.routeNewConnection("accepted");
         assertEquals("activation:1", route.writerNodeId());
@@ -41,16 +41,16 @@ class CaptureRoutingStateTest {
     }
 
     @Test
-    void everyAssignmentGetsANewWriterIdentity() {
+    void everyRoutingGenerationGetsANewWriterIdentity() {
         var state = new CaptureRoutingState(ACTIVATION_ID, 2);
 
-        var first = state.prepareAssignment(List.of(0));
+        var first = state.prepareRoutingGeneration(List.of(0));
         acceptInitialHeartbeats(state, first);
-        state.activateAssignment(first);
+        state.activateRoutingGeneration(first);
 
-        var second = state.prepareAssignment(List.of(1));
+        var second = state.prepareRoutingGeneration(List.of(1));
         acceptInitialHeartbeats(state, second);
-        state.activateAssignment(second);
+        state.activateRoutingGeneration(second);
 
         assertEquals("activation:1", first.writerNodeId());
         assertEquals("activation:2", second.writerNodeId());
@@ -61,13 +61,13 @@ class CaptureRoutingStateTest {
     @Test
     void writerPartitionsMaintainIndependentContinuousHeartbeatBaselines() {
         var state = new CaptureRoutingState(ACTIVATION_ID, 2);
-        var assignment = state.prepareAssignment(List.of(0, 1));
-        var first = assignment.writerPartitions().get(0);
-        var second = assignment.writerPartitions().get(1);
+        var generation = state.prepareRoutingGeneration(List.of(0, 1));
+        var first = generation.writerPartitions().get(0);
+        var second = generation.writerPartitions().get(1);
 
         state.acceptHeartbeatLogAppendTime(first, 1_000L, EXPIRATION);
         state.acceptHeartbeatLogAppendTime(second, 2_000L, EXPIRATION);
-        state.activateAssignment(assignment);
+        state.activateRoutingGeneration(generation);
 
         state.acceptHeartbeatLogAppendTime(first, 30_999L, EXPIRATION);
         state.acceptHeartbeatLogAppendTime(second, 1_500L, EXPIRATION);
@@ -91,8 +91,8 @@ class CaptureRoutingStateTest {
     @Test
     void nonPositiveBrokerTimestampsAreRejected() {
         var state = new CaptureRoutingState(ACTIVATION_ID, 1);
-        var assignment = state.prepareAssignment(List.of(0));
-        var writerPartition = only(assignment.writerPartitions());
+        var generation = state.prepareRoutingGeneration(List.of(0));
+        var writerPartition = only(generation.writerPartitions());
 
         assertThrows(
             IllegalStateException.class,
@@ -119,13 +119,13 @@ class CaptureRoutingStateTest {
     }
 
     @Test
-    void replacementAssignmentChangesOnlyNewConnectionRoutes() {
+    void replacementRoutingGenerationChangesOnlyNewConnectionRoutes() {
         var state = activeState(4, List.of(0, 1), 1_000L);
         var existing = state.routeNewConnection("same-local-id");
 
-        var replacement = state.prepareAssignment(List.of(2, 3));
+        var replacement = state.prepareRoutingGeneration(List.of(2, 3));
         acceptInitialHeartbeats(state, replacement);
-        state.activateAssignment(replacement);
+        state.activateRoutingGeneration(replacement);
         var later = state.routeNewConnection("same-local-id");
 
         assertEquals("activation:1", existing.writerNodeId());
@@ -143,9 +143,9 @@ class CaptureRoutingStateTest {
             () -> state.routeNewConnection("connection")
         );
 
-        var replacement = state.prepareAssignment(List.of(0));
+        var replacement = state.prepareRoutingGeneration(List.of(0));
         acceptInitialHeartbeats(state, replacement);
-        state.activateAssignment(replacement);
+        state.activateRoutingGeneration(replacement);
         var newRoute = state.routeNewConnection("connection");
 
         assertNotEquals(oldRoute.writerNodeId(), newRoute.writerNodeId());
@@ -203,9 +203,9 @@ class CaptureRoutingStateTest {
         var oldRoute = state.routeNewConnection("connection");
         var oldWriterPartition = oldRoute.writerPartition();
 
-        var replacement = state.prepareAssignment(List.of(0));
+        var replacement = state.prepareRoutingGeneration(List.of(0));
         acceptInitialHeartbeats(state, replacement);
-        state.activateAssignment(replacement);
+        state.activateRoutingGeneration(replacement);
 
         assertEquals(
             CaptureRoutingState.WriterStatus.DRAINING,
@@ -240,7 +240,7 @@ class CaptureRoutingStateTest {
         state.removeAfterTerminalAcknowledgement(route);
         state.beginOrderlyRetirement();
 
-        assertEquals(List.of(), state.assignedPartitions());
+        assertEquals(List.of(), state.activeRoutingPartitions());
         assertEquals(
             CaptureRoutingState.WriterStatus.DRAINING,
             state.writerStatus(route.writerNodeId(), route.partition())
@@ -257,22 +257,28 @@ class CaptureRoutingStateTest {
         var state = activeState(1, List.of(0), 1_000L);
         state.beginShutdown();
 
-        assertEquals(List.of(), state.assignedPartitions());
+        assertEquals(List.of(), state.activeRoutingPartitions());
         assertThrows(IllegalStateException.class, () -> state.routeNewConnection("new"));
     }
 
     @Test
-    void invalidConstructionAssignmentsAndDurationsFailLoudly() {
+    void invalidRoutingGenerationsAndDurationsFailLoudly() {
         assertThrows(IllegalArgumentException.class, () -> new CaptureRoutingState("", 1));
         assertThrows(IllegalArgumentException.class, () -> new CaptureRoutingState(ACTIVATION_ID, 0));
 
         var state = new CaptureRoutingState(ACTIVATION_ID, 2);
-        assertThrows(IllegalArgumentException.class, () -> state.prepareAssignment(List.of()));
-        assertThrows(IllegalArgumentException.class, () -> state.prepareAssignment(List.of(0, 0)));
-        assertThrows(IllegalArgumentException.class, () -> state.prepareAssignment(List.of(2)));
+        assertThrows(IllegalArgumentException.class, () -> state.prepareRoutingGeneration(List.of()));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> state.prepareRoutingGeneration(List.of(0, 0))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> state.prepareRoutingGeneration(List.of(2))
+        );
 
-        var assignment = state.prepareAssignment(List.of(0));
-        var writerPartition = only(assignment.writerPartitions());
+        var generation = state.prepareRoutingGeneration(List.of(0));
+        var writerPartition = only(generation.writerPartitions());
         assertThrows(
             IllegalArgumentException.class,
             () -> state.acceptHeartbeatLogAppendTime(writerPartition, 1, Duration.ZERO)
@@ -285,20 +291,20 @@ class CaptureRoutingStateTest {
         long initialLogAppendTime
     ) {
         var state = new CaptureRoutingState(ACTIVATION_ID, partitionCount);
-        var assignment = state.prepareAssignment(partitions);
-        for (var writerPartition : assignment.writerPartitions()) {
+        var generation = state.prepareRoutingGeneration(partitions);
+        for (var writerPartition : generation.writerPartitions()) {
             state.acceptHeartbeatLogAppendTime(writerPartition, initialLogAppendTime, EXPIRATION);
         }
-        state.activateAssignment(assignment);
+        state.activateRoutingGeneration(generation);
         return state;
     }
 
     private static void acceptInitialHeartbeats(
         CaptureRoutingState state,
-        CaptureRoutingState.PendingAssignment assignment
+        CaptureRoutingState.PendingRoutingGeneration generation
     ) {
         long logAppendTime = 1_000L;
-        for (var writerPartition : assignment.writerPartitions()) {
+        for (var writerPartition : generation.writerPartitions()) {
             state.acceptHeartbeatLogAppendTime(writerPartition, logAppendTime++, EXPIRATION);
         }
     }

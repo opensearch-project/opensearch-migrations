@@ -19,27 +19,16 @@ import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 import lombok.NonNull;
 
 /**
- * Inputs submitted to the replay-intake owner. The Kafka thread, Netty event loops, and tuple I/O may submit
- * them; <strong>only</strong> the replay-intake thread removes them and changes replay-intake state.
+ * Defines the immutable event vocabulary consumed by the replay-intake state machine.
  *
- * <p>These are <em>events that replay intake processes, not states.</em> The distinction matters: an input
- * reports that something completed elsewhere, and intake decides what changes as a result. It never carries
- * mutable state, and it never carries authority to change state on the submitter's behalf.</p>
+ * <p>Kafka batches, ownership changes, request milestones, and connection cleanup can originate on
+ * independent threads. They are represented as data and serialized through one queue so none of those
+ * threads mutates intake state directly. The sealed hierarchy keeps the transition switch exhaustive and
+ * prevents arbitrary callbacks from hiding state changes.</p>
  *
- * <p>This family belongs to <strong>one</strong> owner. The pre-rebuild implementation made the same-named
- * interface permit four owners' input families at once — a permit provider, a progress controller, a record
- * tracker, and the request-lifecycle pair — which left the exhaustiveness of a switch over it meaningless,
- * since the cases were not a single owner's vocabulary. Nothing but replay-intake inputs may be added here.</p>
- *
- * <p>Every input carries its {@link PartitionGenerationId} so that duplicate, stale-generation, and
- * already-cleaned-generation deliveries are decidable at the point of handling rather than inferred.</p>
- *
- * <p>The queue does not accept a callback or a {@code Runnable}, which would hide which intake fields it can
- * change and bypass the exhaustive switch. Submissions from one Netty event loop preserve that sender's order;
- * correctness must not depend on any total order <em>between</em> independent event loops, which is why these
- * carry request and connection identities.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 4.1.</p>
+ * <p>Every event carries its {@link PartitionGenerationId}, and finer-grained events also carry their
+ * request or connection identity. Intake can therefore reject duplicates and ignore stale completions from
+ * a draining generation without relying on arrival order between unrelated producers.</p>
  */
 public sealed interface ReplayIntakeInput permits
     ReplayIntakeInput.PartitionGenerationAssigned,

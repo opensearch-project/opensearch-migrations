@@ -8,6 +8,15 @@ import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 
+/**
+ * Projects the proxy's irreversible capture-process state into low-cardinality metrics. Transition
+ * counters record entry into pass-through or termination, while an up/down counter remains positive
+ * for the lifetime of a live fail-open process so monitoring can detect the continuing capture gap.
+ *
+ * <p>The local {@code gapActive} bit makes metric updates match the state machine rather than the
+ * number of notifications received. Process and capture-activation attributes identify the
+ * affected proxy without introducing per-connection cardinality.
+ */
 final class CaptureProcessMetrics {
     static final AttributeKey<String> PROCESS_ID = AttributeKey.stringKey("processId");
     static final AttributeKey<String> CAPTURE_ACTIVATION_ID =

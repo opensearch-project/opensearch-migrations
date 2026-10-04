@@ -20,11 +20,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 
 /**
- * Owns the process-failure boundary for the replay application.
+ * Converts an unrecoverable replay failure into one deterministic process-wide termination sequence.
  *
- * <p>The first unexpected owner failure wins. The watchdog is armed before any failure hook runs so a
- * non-responsive owner, diagnostic sink, or JVM shutdown hook cannot keep the process alive past the
- * documented bound.</p>
+ * <p>Replay work is distributed across independently scheduled owners, so several failures can surface
+ * concurrently after one invariant is broken. This supervisor records only the first fatal signal, stops
+ * new input, emits the available diagnostics, and exits with a code that identifies the failure category.
+ * Later signals are ignored so they cannot replace the evidence for the initiating failure.</p>
+ *
+ * <p>A non-daemon watchdog is armed before any shutdown action runs. If logging, input shutdown, JVM
+ * shutdown hooks, or {@link System#exit(int)} stall, the watchdog prints all thread stacks and invokes
+ * {@link Runtime#halt(int)}. The result is a bounded failure path even when the normal process-exit
+ * machinery is itself unhealthy.</p>
  */
 @Slf4j
 public final class ProcessSupervisor {

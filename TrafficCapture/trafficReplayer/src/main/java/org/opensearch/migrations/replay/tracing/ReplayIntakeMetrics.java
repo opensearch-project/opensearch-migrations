@@ -20,7 +20,18 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
-/** Fixed-cardinality observability for replay intake and source assembly. */
+/**
+ * Maps replay-intake state transitions into fixed-cardinality OpenTelemetry instruments.
+ *
+ * <p>Counters cover input application, source reconstruction, broker-time decisions, demand, protocol
+ * violations, and generation cancellation. Up-down counters expose the live populations that should return
+ * to zero—record trackers and retry-ready request supply—while separate addition and removal counters make
+ * conservation failures diagnosable after the fact.</p>
+ *
+ * <p>Only bounded enum-like dimensions such as input kind, response completeness, and cancellation mode are
+ * attached. Individual records, writers, connections, and requests stay in traces and logs rather than
+ * becoming unbounded metric attributes.</p>
+ */
 public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
 
     private static final String UNIT_RECORDS = "records";

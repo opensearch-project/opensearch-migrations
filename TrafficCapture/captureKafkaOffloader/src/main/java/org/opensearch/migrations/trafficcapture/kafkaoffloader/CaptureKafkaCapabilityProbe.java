@@ -17,7 +17,13 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
 /**
- * Publishes the acknowledged, replay-inert records required before a proxy joins its Kafka group.
+ * Qualifies the Kafka traffic topic before capture begins. Metadata discovery alone cannot prove
+ * that the producer may write or that the broker will supply the append timestamps required by
+ * replay, so this probe publishes a replay-inert record to one partition led by each broker.
+ *
+ * <p>The probe completes only after every record is acknowledged with a positive broker timestamp.
+ * A send failure, missing timestamp, or non-positive timestamp fails the whole qualification,
+ * preventing a partially compatible Kafka cluster from being treated as capture-ready.
  */
 final class CaptureKafkaCapabilityProbe {
     private CaptureKafkaCapabilityProbe() {}

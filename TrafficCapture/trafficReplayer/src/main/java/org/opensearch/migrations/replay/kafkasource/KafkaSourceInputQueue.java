@@ -17,29 +17,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.NonNull;
 
 /**
- * Carries {@link KafkaSourceInput} from other owners to the Kafka thread, which is the only thread that
- * removes and applies them. Defined by {@code kafkaLLD §4.2}.
+ * Carries source-state events safely from concurrent producers to the Kafka consumer thread.
  *
- * <p>The order of the two steps in {@link #submit} is the contract, not an implementation detail: the value
- * is queued <strong>before</strong> any wakeup is considered, so a wakeup can never arrive pointing at work
- * that is not yet visible. {@code kafkaLLD §5.4} states it as "submitting a source input always places the
- * immutable value in the queue first".
+ * <p>Submission first makes the immutable value visible, then signals both coordination mechanisms. A
+ * direct condition signal wakes a revocation callback that is waiting through its grace interval; a
+ * controlled Kafka wakeup may interrupt a long poll when the consumer is in a phase where interruption is
+ * safe. Keeping those mechanisms separate prevents a wakeup from disrupting rebalance or commit work.</p>
  *
- * <p>Submission reports acceptance and never silently discards. Once closed, submission is refused rather
- * than dropped, because an input that vanishes is a record that never completes
- * ({@code kafkaLLD §4.2}).
- *
- * <p>Submission also signals {@link #awaitInput(long)} directly. That is how a revocation callback waiting
- * for its grace deadline learns about commit and lifecycle inputs: {@code kafkaLLD §15.1} requires that
- * "queue submission signals the callback's wait directly; it does not call {@code KafkaConsumer.wakeup()}
- * while callback handling is protected from wakeup". The signal and the wakeup are therefore two separate
- * mechanisms, and only the signal reaches a callback.
- *
- * <p>{@link #awaitInput(long)} takes a <em>duration</em> rather than a deadline, which is the only shape that
- * can be right. {@code kafkaLLD §15.1} requires one monotonic source per deadline, and this class is not that
- * source — the owner is. Accepting an absolute instant would mean comparing the owner's clock against
- * whatever clock the wait itself measures, and two unrelated origins make the wait arbitrary rather than
- * merely mis-sized.
+ * <p>The queue rejects submissions after closure rather than silently losing correctness-critical events.
+ * Draining is bounded to the entries present at the start of the call so a continuous stream of control
+ * messages cannot starve Kafka polling, and timed waiting accepts a duration so the owner retains authority
+ * over the monotonic deadline.</p>
  */
 public final class KafkaSourceInputQueue {
 

@@ -32,11 +32,20 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
 /**
- * Owns the single Kafka producer lane, assignment heartbeats, connection traffic submissions,
- * acknowledgement callbacks, and local writer-partition retirement.
+ * Serializes all capture publication state on one publisher thread. Each writer identity and Kafka
+ * partition has a distinct lane that orders its initial heartbeat, connection traffic, periodic
+ * heartbeats, acknowledgement deadlines, and final retirement without relying on producer
+ * callbacks to arrive on that thread.
+ *
+ * <p>A routing generation becomes eligible for new connections only after every lane's initial
+ * heartbeat is acknowledged with acceptable broker time. Replacing that generation stops new
+ * routing through its lanes but does not stop their publication: superseded lanes continue traffic
+ * and heartbeats while existing connections drain, then retire locally once no accepted send or
+ * connection remains. Any failure that makes acknowledged ordering or heartbeat continuity
+ * uncertain permanently closes the process-wide write gate.
  */
 @Slf4j
-public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCloseable {
+public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher, AutoCloseable {
     static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(30);
 
     private enum PublisherLaneStatus {
@@ -116,11 +125,11 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         }
     }
 
-    private static final class AssignmentInstallation {
+    private static final class RoutingGenerationInitialization {
         private final List<Integer> partitions;
         private final CompletableFuture<String> result;
 
-        private AssignmentInstallation(
+        private RoutingGenerationInitialization(
             List<Integer> partitions,
             CompletableFuture<String> result
         ) {
@@ -152,7 +161,8 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     private final AtomicReference<Thread> publisherThread = new AtomicReference<>();
     private final Map<CaptureRoutingState.WriterPartition, PublisherLane> publisherLanes =
         new HashMap<>();
-    private final ArrayDeque<AssignmentInstallation> assignmentInstallations = new ArrayDeque<>();
+    private final ArrayDeque<RoutingGenerationInitialization> routingGenerationInitializations =
+        new ArrayDeque<>();
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean unstableProcessFailureReported = new AtomicBoolean();
@@ -160,7 +170,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     private final Set<CompletableFuture<RecordMetadata>> inFlightSends =
         Collections.newSetFromMap(new IdentityHashMap<>());
     private CompletableFuture<Void> orderlyRetirement;
-    private boolean assignmentInstallationInProgress;
+    private boolean routingGenerationInitializationInProgress;
 
     public CaptureKafkaPublisher(
         Producer<String, byte[]> producer,
@@ -232,31 +242,39 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     @Override
-    public CompletableFuture<String> installAssignment(@NonNull Collection<Integer> partitions) {
+    public CompletableFuture<String> initializeRoutingGeneration(
+        @NonNull Collection<Integer> partitions
+    ) {
         var result = new CompletableFuture<String>();
         var partitionSnapshot = List.copyOf(partitions);
         executeOnPublisher(() -> {
-            assignmentInstallations.addLast(new AssignmentInstallation(partitionSnapshot, result));
-            startNextAssignmentInstallation();
+            routingGenerationInitializations.addLast(
+                new RoutingGenerationInitialization(partitionSnapshot, result)
+            );
+            startNextRoutingGenerationInitialization();
         }, result);
         return result;
     }
 
-    private void startNextAssignmentInstallation() {
-        if (assignmentInstallationInProgress || assignmentInstallations.isEmpty()) {
+    private void startNextRoutingGenerationInitialization() {
+        if (routingGenerationInitializationInProgress
+            || routingGenerationInitializations.isEmpty()) {
             return;
         }
-        assignmentInstallationInProgress = true;
-        var installation = assignmentInstallations.removeFirst();
-        installAssignmentOnPublisher(installation.partitions(), installation.result());
+        routingGenerationInitializationInProgress = true;
+        var initialization = routingGenerationInitializations.removeFirst();
+        initializeRoutingGenerationOnPublisher(
+            initialization.partitions(),
+            initialization.result()
+        );
     }
 
-    private void installAssignmentOnPublisher(
+    private void initializeRoutingGenerationOnPublisher(
         Collection<Integer> partitions,
         CompletableFuture<String> result
     ) {
-        var pendingAssignment = routingState.prepareAssignment(partitions);
-        var initialHeartbeats = pendingAssignment.writerPartitions()
+        var pendingGeneration = routingState.prepareRoutingGeneration(partitions);
+        var initialHeartbeats = pendingGeneration.writerPartitions()
             .stream()
             .map(writerPartition -> {
                 var lane = new PublisherLane(writerPartition);
@@ -269,35 +287,35 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
             })
             .toArray(CompletableFuture[]::new);
         CompletableFuture.allOf(initialHeartbeats)
-            .whenComplete((ignored, assignmentFailure) ->
+            .whenComplete((ignored, generationFailure) ->
                 executeCompletionOnPublisher(
-                    () -> finishAssignmentInstallation(
-                        pendingAssignment,
+                    () -> finishRoutingGenerationInitialization(
+                        pendingGeneration,
                         result,
-                        assignmentFailure
+                        generationFailure
                     ),
                     result
                 )
             );
     }
 
-    private void finishAssignmentInstallation(
-        CaptureRoutingState.PendingAssignment pendingAssignment,
+    private void finishRoutingGenerationInitialization(
+        CaptureRoutingState.PendingRoutingGeneration pendingGeneration,
         CompletableFuture<String> result,
-        Throwable assignmentFailure
+        Throwable generationFailure
     ) {
-        if (assignmentFailure != null) {
-            var cause = unwrapCompletionFailure(assignmentFailure);
+        if (generationFailure != null) {
+            var cause = unwrapCompletionFailure(generationFailure);
             result.completeExceptionally(cause);
             failForThrowable(cause);
             return;
         }
         try {
-            routingState.activateAssignment(pendingAssignment);
-            result.complete(pendingAssignment.writerNodeId());
+            routingState.activateRoutingGeneration(pendingGeneration);
+            result.complete(pendingGeneration.writerNodeId());
             beginDrainedWriterRetirements();
-            assignmentInstallationInProgress = false;
-            startNextAssignmentInstallation();
+            routingGenerationInitializationInProgress = false;
+            startNextRoutingGenerationInitialization();
         } catch (Throwable t) {
             result.completeExceptionally(t);
             failForThrowable(t);
@@ -835,10 +853,10 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
                     lane.retirement.completeExceptionally(throwable);
                 }
             });
-            assignmentInstallationInProgress = false;
-            AssignmentInstallation installation;
-            while ((installation = assignmentInstallations.pollFirst()) != null) {
-                installation.result().completeExceptionally(throwable);
+            routingGenerationInitializationInProgress = false;
+            RoutingGenerationInitialization initialization;
+            while ((initialization = routingGenerationInitializations.pollFirst()) != null) {
+                initialization.result().completeExceptionally(throwable);
             }
         };
         if (Thread.currentThread() == publisherThread.get()) {

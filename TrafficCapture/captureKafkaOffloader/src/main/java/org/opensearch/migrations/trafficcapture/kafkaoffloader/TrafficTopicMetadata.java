@@ -14,7 +14,14 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.PartitionInfo;
 
 /**
- * Immutable metadata discovered from the Kafka traffic topic.
+ * Reduces Kafka topic metadata to the facts capture startup needs: a validated partition count and
+ * one representative partition for every current leader broker. Probing one partition per leader
+ * exercises every broker that can acknowledge traffic without publishing redundant probes to all
+ * partitions.
+ *
+ * <p>Discovery also verifies that partition numbers are contiguous and every partition currently
+ * has a valid leader. The resulting immutable snapshot is therefore suitable both for sizing
+ * routing state and for deciding whether the topic is sufficiently available to begin capture.
  */
 @EqualsAndHashCode
 @ToString

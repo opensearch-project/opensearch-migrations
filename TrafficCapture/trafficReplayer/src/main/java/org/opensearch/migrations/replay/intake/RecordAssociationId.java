@@ -14,17 +14,16 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import lombok.NonNull;
 
 /**
- * Which replay-intake operation still needs a Kafka record's observation.
+ * Names a replay-intake operation that still depends on observations held by one or more Kafka records.
  *
- * <p>{@code kafkaLLD §8.1} defines the operation identity as one of an incomplete source-request assembly,
- * a {@code ReplayRequestId}, terminal source-connection processing, or another explicitly documented
- * replay-intake operation. This is that union, and a fourth variant arrives when a fourth operation is
- * documented — not before.
+ * <p>Records cannot become committable merely because their bytes have been parsed: an incomplete request
+ * assembly, a reconstituted request awaiting durable processing, or terminal connection handling may still
+ * depend on them. This sealed union gives each such operation a stable bookkeeping key so every contributing
+ * record can retain it until that operation finishes.</p>
  *
- * <p>These are <strong>not</strong> among the eight process-local identities in
- * {@code org.opensearch.migrations.replay.identity}. {@code §2} defines those; this is intake-local
- * bookkeeping that keys them, which is why {@link Request} carries a {@code ReplayRequestId} rather than
- * being one. The dependency runs intake → identity and not the other way.
+ * <p>An assembly association is relabelled to a request association when parsing allocates the final
+ * {@link ReplayRequestId}. That transition occurs without a gap, preventing the completing record from
+ * appearing unreferenced and becoming committable between the two phases.</p>
  */
 public sealed interface RecordAssociationId {
 

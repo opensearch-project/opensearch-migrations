@@ -12,16 +12,15 @@ import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
- * One process-local uninterrupted ownership period for one Kafka topic partition.
+ * Identifies one uninterrupted process-local ownership period for a Kafka topic partition.
  *
- * <p>{@code localSequence} is allocated by this replayer each time Kafka assigns that partition locally.
- * It is <strong>not</strong> Kafka's group generation and is never serialized.</p>
+ * <p>A new local sequence is allocated each time the partition becomes owned. The value is neither Kafka's
+ * consumer-group generation nor protocol data; it exists only to separate work created during different
+ * local ownership periods.</p>
  *
- * <p>This is the identity that makes a reread distinguishable from a first read. When ownership is lost and
- * a later generation rereads the same offsets, those are different {@link KafkaRecordId}s because the
- * generation differs, which is what lets record accounting stay exact across a rebalance.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
+ * <p>That separation is essential when a rebalance causes offsets to be read again. Records, connection
+ * lifetimes, batch requests, cancellation, and cleanup remain attributable to the generation that created
+ * them, so old draining work cannot collide with replacement work for the same partition.</p>
  */
 public record PartitionGenerationId(@NonNull TopicPartition topicPartition, long localSequence) {
     public PartitionGenerationId {

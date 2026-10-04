@@ -9,7 +9,15 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * One-way process-wide response to a failure that compromises required capture.
+ * Coordinates the one-way, process-wide response to failures that compromise required capture.
+ * The proxy begins in authoritative {@code CAPTURE}; a required-capture failure moves it exactly
+ * once to either permanent {@code PASS_THROUGH} or {@code TERMINATING}, while corrupted execution
+ * state always moves it to termination.
+ *
+ * <p>The state transition is synchronized with source forwarding so fail-closed termination cannot
+ * race with another connection beginning to forward a mutation. Transition and termination
+ * listeners are notified from the canonical state change, allowing metrics and process shutdown to
+ * agree on whether a capture gap exists.
  */
 @Slf4j
 public final class CaptureProcessState {

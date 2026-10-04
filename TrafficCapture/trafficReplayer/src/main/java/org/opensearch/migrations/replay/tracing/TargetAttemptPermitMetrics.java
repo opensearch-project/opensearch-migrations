@@ -18,7 +18,17 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
-/** Fixed-cardinality telemetry for the application target-attempt limit. */
+/**
+ * Describes contention and permit conservation at the application-wide target-attempt limit.
+ *
+ * <p>Acquisition counters distinguish requests, queued waiters, cancellations, and failures; permit counters
+ * distinguish acquisition, current active ownership, and release. The hold-duration histogram shows how long
+ * capacity remains occupied, making a saturated limit distinguishable from leaked permits or slow target
+ * attempts.</p>
+ *
+ * <p>The instruments intentionally carry no request or connection identifiers. All dimensions are implicit
+ * in the bounded event types, so concurrency telemetry remains fixed-cardinality under load.</p>
+ */
 public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProvider.Metrics {
     private static final String UNIT_REQUESTS = "requests";
     private static final String UNIT_PERMITS = "permits";

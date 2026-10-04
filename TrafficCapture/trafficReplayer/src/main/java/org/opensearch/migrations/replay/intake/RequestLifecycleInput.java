@@ -14,7 +14,16 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import lombok.NonNull;
 
 /**
- * Immutable request-lifecycle results returned from a target-connection owner to replay intake.
+ * Reports the two request milestones that change source-record retention and intake backpressure.
+ *
+ * <p>{@link ConnectionRequestFinished} means the target-connection pipeline no longer needs this request as
+ * available supply, so intake may admit replacement work. {@link RequestProcessingFinished} is later and
+ * stronger: target handling and durable tuple output are complete, so associations from the request to its
+ * contributing Kafka records may be removed.</p>
+ *
+ * <p>Keeping the milestones distinct prevents throughput accounting from being coupled to commit safety.
+ * Both carry the generation and request identity so delayed completions can be matched narrowly or ignored
+ * after generation cleanup.</p>
  */
 public sealed interface RequestLifecycleInput extends ReplayIntakeInput permits
     RequestLifecycleInput.ConnectionRequestFinished,

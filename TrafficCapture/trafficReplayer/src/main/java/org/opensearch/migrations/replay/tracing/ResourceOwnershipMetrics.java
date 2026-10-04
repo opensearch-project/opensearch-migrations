@@ -9,6 +9,17 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
+/**
+ * Exposes the live reference-counted payload population and ownership invariant failures.
+ *
+ * <p>Up-down counters track owned wrapper handles, Netty buffers, and readable bytes by the small fixed set
+ * of payload types. They rise when Java-level ownership is created and fall only after the underlying release
+ * succeeds, so nonzero residuals identify retained replay memory rather than merely allocated objects.</p>
+ *
+ * <p>Separate counters record duplicate close attempts and failed release invariants. Resource identities are
+ * intentionally absent from attributes, keeping leak detection aggregatable without request-level metric
+ * cardinality.</p>
+ */
 public final class ResourceOwnershipMetrics implements ResourceOwnership.Metrics {
     public static final AttributeKey<String> RESOURCE_TYPE_ATTRIBUTE =
         AttributeKey.stringKey("resourceType");

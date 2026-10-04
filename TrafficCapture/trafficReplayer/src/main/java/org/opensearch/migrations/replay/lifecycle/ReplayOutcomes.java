@@ -6,6 +6,18 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 
 import lombok.NonNull;
 
+/**
+ * Defines the closed set of expected asynchronous outcomes used by replay lifecycle state machines.
+ *
+ * <p>Preparation cancellation, retry decisions, successful target responses, and expected no-response cases
+ * are represented as values rather than exceptions. This lets lifecycle code switch exhaustively over
+ * normal operational results while reserving exceptional completion for broken invariants and unexpected
+ * implementation failures.</p>
+ *
+ * <p>The result records also validate combinations at construction—for example, a skipped transformation
+ * carries no prepared request—so impossible intermediate states cannot be passed between asynchronous
+ * stages and discovered only after ownership has moved.</p>
+ */
 public final class ReplayOutcomes {
     private ReplayOutcomes() {}
 

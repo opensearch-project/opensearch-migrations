@@ -15,14 +15,16 @@ import java.util.concurrent.LinkedBlockingQueue;
 import lombok.NonNull;
 
 /**
- * Thread-safe submission boundary for immutable replay-intake inputs.
+ * Provides the thread-safe FIFO boundary around the single-threaded replay-intake state machine.
  *
- * <p>The queue owns no replay state. Only the replay-intake owner removes inputs.
+ * <p>Producers submit immutable events without gaining access to intake state. Acceptance means the event
+ * is durably ordered for observation by the owner, while the optional handled future distinguishes that
+ * guarantee from the later point at which the transition has actually been applied.</p>
  *
- * <p>{@link #submit} reports whether the input was accepted, and that return value is load-bearing rather
- * than advisory: {@code procCommit §9.2} has {@code onPartitionsRevoked} wait "only until replay intake
- * accepts that force-cancellation input and then return". Acceptance proves intake will observe the
- * notification unless the process fails; it does not mean intake has acted on it.
+ * <p>Control entries use the same FIFO: a processing fence completes after all earlier events, and the
+ * stop marker atomically rejects later submissions while allowing accepted work to drain. Abrupt closure
+ * instead fails pending acknowledgements and discards queued work, making graceful and failure shutdown
+ * semantics explicit.</p>
  */
 public final class ReplayIntakeInputQueue {
 

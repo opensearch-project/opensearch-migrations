@@ -35,12 +35,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Owns Kafka reading, per-partition demand, and commit authority. Runs on the dedicated Kafka thread and
- * holds all of its state there. Defined by {@code kafkaLLD §5}, with the loop in {@code §3}.
+ * Owns the Kafka-side replay state machine: partition generations, demand-controlled reading, and commit
+ * authority.
  *
- * <p>Only this class invokes the Kafka commit API, and it is the only place a commit position is computed —
- * as a contiguous prefix of the records this consumer actually observed. No request, accumulator, retry
- * policy, or target result may commit ({@code kafkaLLD §5.6}).
+ * <p>On its dedicated thread, the owner applies queued source events, independently evaluates each
+ * partition's pause reasons, polls only readable partitions, stamps returned records with the current local
+ * generation, and delivers non-empty batches to intake. Rebalance callbacks create and retire generations;
+ * a retiring generation receives a bounded grace period for completions and commits, while a successor is
+ * held behind cleanup so old and new ownership cannot overlap unsafely.</p>
+ *
+ * <p>Commit positions are derived only from the contiguous prefix of records actually observed and reported
+ * finished. Ordinary operation permits one asynchronous commit at a time and tracks acceptance separately
+ * from callback outcome; revocation uses a deadline-bounded synchronous commit because no later poll may
+ * deliver a callback. Unknown or stale outcomes remain explicit, and a capture-protocol violation leaves its
+ * record as a permanent commit barrier so restart encounters the same poison input.</p>
  */
 @Slf4j
 public final class KafkaSourceOwner {

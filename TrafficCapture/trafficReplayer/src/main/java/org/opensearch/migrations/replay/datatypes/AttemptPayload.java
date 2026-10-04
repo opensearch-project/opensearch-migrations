@@ -5,7 +5,12 @@ import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import lombok.NonNull;
 
 /**
- * Attempt-scoped ownership of request packets.
+ * Owns the retained request buffers consumed by one target attempt.
+ *
+ * <p>A prepared replay request may produce multiple attempts, but each attempt must release its buffers
+ * independently when it succeeds, fails, or is cancelled. This wrapper gives an attempt its own retained
+ * packet list and couples that list to exactly-once ownership accounting, so cleanup of one attempt cannot
+ * invalidate packets still used by another.</p>
  */
 public final class AttemptPayload implements AutoCloseable {
     private final ByteBufList packets;

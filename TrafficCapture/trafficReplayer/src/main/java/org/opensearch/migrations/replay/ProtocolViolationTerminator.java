@@ -21,8 +21,17 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Gives already-admitted target and tuple side effects a fixed drain window after a capture-protocol
- * violation, then terminates with a reason-specific code.
+ * Bounds how long replay may remain alive after detecting malformed or internally inconsistent capture
+ * data.
+ *
+ * <p>A protocol violation prevents the stream from being interpreted safely, so the process must
+ * terminate rather than continue consuming. Work admitted before the violation may already have target
+ * or tuple-output side effects in flight, however. This class starts one fixed grace period in which that
+ * work may settle, then requests reason-specific process termination regardless of what remains.</p>
+ *
+ * <p>The transition is one-shot: the first violation starts the timer and supplies the diagnostic record;
+ * subsequent reports cannot extend the deadline. This prevents a damaged stream from keeping the process
+ * alive indefinitely by repeatedly restarting its drain period.</p>
  */
 @Slf4j
 public final class ProtocolViolationTerminator implements AutoCloseable {

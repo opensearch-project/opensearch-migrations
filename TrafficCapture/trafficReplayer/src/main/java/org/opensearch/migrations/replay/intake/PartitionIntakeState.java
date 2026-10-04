@@ -32,16 +32,19 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import lombok.NonNull;
 
 /**
- * Replay intake's state for one local partition generation — {@code kafkaLLD §6}.
+ * Holds the complete replay-intake state machine for one local Kafka partition-ownership generation.
  *
- * <p>One of these exists per {@link PartitionGenerationId}, created when {@code PartitionGenerationAssigned}
- * arrives and dropped whole when the generation's cleanup completes. That lifetime is why the record
- * trackers and their reverse index live here rather than in a longer-lived component: nothing belonging to a
- * revoked generation may outlive it, and a successor generation of the same partition starts empty.
+ * <p>The state connects several decisions that must remain atomic: which batch may be applied next, which
+ * logical operations still retain each Kafka record, which source connections and requests are alive, how
+ * much retry-ready request supply exists, and whether broker-time evidence has expired a writer. Record
+ * completion is emitted only after a record is closed to new associations and every operation derived from
+ * it has finished, which is what makes advancing the Kafka commit prefix safe.</p>
  *
- * <p>Every map is changed only by the replay-intake thread, which {@link OwnerThreadGuard} enforces on each
- * mutator. A record completing on a Netty loop instead would race the Kafka source's commit prefix.
- *
+ * <p>The generation also owns graceful and forced cancellation bookkeeping. Once ownership is lost, it
+ * stops record admission, distributes cancellation to its connection lifetimes, and remains present only
+ * until those owners acknowledge cleanup. All mutation is confined to the replay-intake thread so a
+ * successor generation can start with independent state while the old generation drains without locks or
+ * cross-generation collisions.</p>
  */
 public final class PartitionIntakeState {
 

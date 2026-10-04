@@ -11,7 +11,17 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
-/** Fixed-cardinality conservation and commit-resolution instruments owned by G4. */
+/**
+ * Exposes whether Kafka records are conserved from observation through commit or explicit abandonment.
+ *
+ * <p>Monotonic counters classify records as read, committed, cancelled, commit-ineligible, or abandoned at
+ * revocation, while an up-down counter shows the current outstanding population. Commit submissions and
+ * resolutions are recorded separately because a rejected operation and an accepted operation with an
+ * uncertain result have different data-safety implications.</p>
+ *
+ * <p>Attributes are limited to fixed enum-derived causes and outcomes. The metrics can therefore be
+ * aggregated across partitions and requests without introducing record, connection, or topic cardinality.</p>
+ */
 public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
     public static final AttributeKey<String> CAUSE_ATTRIBUTE = AttributeKey.stringKey("cause");
     public static final AttributeKey<String> OUTCOME_ATTRIBUTE = AttributeKey.stringKey("outcome");

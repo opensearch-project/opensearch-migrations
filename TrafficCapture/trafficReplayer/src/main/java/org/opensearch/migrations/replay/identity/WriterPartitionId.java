@@ -12,17 +12,16 @@ import lombok.NonNull;
 import org.apache.kafka.common.TopicPartition;
 
 /**
- * One protocol {@code writerNodeId} paired with the Kafka partition containing its records.
+ * Identifies one capture writer's stream within one Kafka partition.
  *
- * <p>This is the key for broker-time state. Heartbeat baselines and expiration evidence are per writer
- * <em>and</em> partition, not per writer alone, because one writer's records reach several partitions and
- * each partition carries its own {@code LogAppendTime} sequence.</p>
+ * <p>Heartbeat baselines and expiration evidence are tracked per writer and partition. One writer can
+ * publish to several partitions, and each partition has an independent broker
+ * {@code LogAppendTime} sequence, so writer identity alone cannot define a safe time baseline.</p>
  *
- * <p>Note that it deliberately carries a {@link TopicPartition} rather than a {@link PartitionGenerationId}:
- * a writer's broker-time baseline is a property of the partition's log, which outlives any single local
- * ownership period, so it survives a revocation and reassignment that changes the generation.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
+ * <p>The key contains a {@link TopicPartition}, not a {@link PartitionGenerationId}, because the baseline
+ * belongs to the durable log stream and survives local ownership changes. A newly acquired generation can
+ * therefore continue evaluating the writer's liveness against broker time without resetting evidence at
+ * every rebalance.</p>
  */
 public record WriterPartitionId(@NonNull String writerNodeId, @NonNull TopicPartition topicPartition) {
     public WriterPartitionId {

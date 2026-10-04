@@ -11,19 +11,15 @@ package org.opensearch.migrations.replay.identity;
 import lombok.NonNull;
 
 /**
- * One reconstituted request within a {@link ConnectionProcessingId}.
+ * Identifies one reconstituted request within a local connection-processing lifetime.
  *
- * <p>This is <strong>the only</strong> request identity used across replay intake, target connection,
- * request replay, and tuple output. There is deliberately no second request identity for any one of those
- * stages: the prior implementation carried several, which made a request's identity depend on which
- * component was asked.</p>
+ * <p>The same value follows the request through assembly, target transmission, response handling, and tuple
+ * output. A single identity lets those independently asynchronous stages correlate ownership and terminal
+ * outcomes without translating among stage-specific request ids.</p>
  *
- * <p>{@code capturedRequestOrdinal} is the request's position within the captured connection, and it starts
- * wherever the capture says it does. A replay that begins from a nonzero Kafka cursor sees a nonzero first
- * ordinal, and that must preserve later request order rather than being renumbered from zero.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerLowLevelDesign.md} section 1 and
- * {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
+ * <p>The captured ordinal preserves the request's original position within its connection. Replay may
+ * begin in the middle of a Kafka stream, so the first observed ordinal need not be zero and must not be
+ * renumbered; preserving it is what keeps pipelined request and response order unambiguous.</p>
  */
 public record ReplayRequestId(@NonNull ConnectionProcessingId connectionProcessingId, long capturedRequestOrdinal) {
     public ReplayRequestId {

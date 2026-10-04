@@ -30,11 +30,17 @@ import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.WakeupException;
 
 /**
- * {@link KafkaSourcePort} over a real {@code KafkaConsumer}.
+ * Adapts a real Kafka consumer to the state-free operations required by the replay source.
  *
- * <p>Holds no source state: generations, demand and commit positions all belong to
- * {@code KafkaSourceOwner}. This only translates, which is what keeps the owner's logic provable without a
- * broker.
+ * <p>Polling is translated into partition-grouped {@link PolledKafkaRecord}s that preserve broker timestamp,
+ * offset, encoded bytes, and serialized size without attaching local generations. Pause, resume, committed
+ * position, and close similarly expose Kafka mechanics while leaving demand and ownership decisions outside
+ * the adapter.</p>
+ *
+ * <p>Commit exceptions are classified by what can safely be inferred: rejection before client acceptance,
+ * acknowledged completion, retriable failure, stale membership, or an outcome that may already have reached
+ * the broker. Preserving those distinctions prevents an uncertain commit from being treated as a definite
+ * failure and retried blindly.</p>
  */
 public final class KafkaConsumerSourcePort implements KafkaSourcePort {
 

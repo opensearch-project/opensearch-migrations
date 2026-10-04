@@ -11,7 +11,14 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Flushes capture-failure diagnostics and then terminates the process exactly once.
+ * Implements the last-resort process boundary for compromised capture or unstable proxy state.
+ * The first failure starts a non-daemon termination thread; later failures are ignored so several
+ * failing connections cannot launch competing shutdown sequences.
+ *
+ * <p>Diagnostic logs are flushed on a separate daemon thread under a strict timeout, after which
+ * the JVM is halted directly. This avoids depending on ordinary shutdown hooks or cooperative
+ * executors that may themselves be deadlocked or corrupted, while still making a bounded attempt
+ * to preserve the evidence explaining the exit.
  */
 @Slf4j
 final class CaptureFailureTerminator implements Consumer<Throwable> {

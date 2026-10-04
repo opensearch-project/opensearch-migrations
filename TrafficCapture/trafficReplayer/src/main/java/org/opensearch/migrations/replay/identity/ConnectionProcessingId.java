@@ -11,22 +11,16 @@ package org.opensearch.migrations.replay.identity;
 import lombok.NonNull;
 
 /**
- * One process-local source-assembly and target-connection lifetime for a {@link CapturedConnectionId}.
+ * Identifies one process-local assembly and target-connection lifetime for captured connection traffic.
  *
- * <p>{@code localSequence} is allocated whenever replay intake begins fresh process-local source assembly
- * for a captured connection.</p>
+ * <p>Broker-time expiration can end local processing while target and tuple work is still settling. A
+ * later record for the same {@link CapturedConnectionId} may then begin a new lifetime, and the old and new
+ * work must not share assembly buffers, target state, request registries, or completion signals. The local
+ * sequence makes those overlapping lifetimes distinct.</p>
  *
- * <p>This identity exists because broker-time expiration can end one process-local lifetime while target
- * and tuple work from that lifetime is still finishing, and a later observation for the same
- * {@code CapturedConnectionId} may start a separate lifetime. The two lifetimes must never share source
- * accumulators, a target channel, a request registry, or completion messages — so they must not share an
- * identity either, which is what this type provides and a bare {@code CapturedConnectionId} cannot.</p>
- *
- * <p>The generation is a component because a lifetime belongs to the ownership period that produced it:
- * cleanup for a revoked generation must be able to name exactly its own lifetimes.</p>
- *
- * <p>Defined by {@code docs/captureAndReplay/replayerLowLevelDesign.md} section 1 and
- * {@code docs/captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md} section 2.</p>
+ * <p>The partition generation is also part of the identity because cleanup must affect only work created
+ * during that ownership period. This lets a revoked generation drain or cancel its own connection
+ * lifetimes without touching replacements created after ownership is reacquired.</p>
  */
 public record ConnectionProcessingId(
     @NonNull PartitionGenerationId generation,
