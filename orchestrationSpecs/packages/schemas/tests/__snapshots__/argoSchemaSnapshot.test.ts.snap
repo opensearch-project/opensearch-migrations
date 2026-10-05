@@ -318,34 +318,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                                 "default": "",
                                                 "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                               },
+                                              "otelTraceExportEnabled": {
+                                                "type": "boolean",
+                                                "default": false,
+                                                "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                              },
                                               "otelTraceCollectorEndpoint": {
-                                                "anyOf": [
-                                                  {
-                                                    "type": "string",
-                                                    "enum": [
-                                                      ""
-                                                    ]
-                                                  },
-                                                  {
-                                                    "type": "string"
-                                                  }
-                                                ],
-                                                "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                                "type": "string",
+                                                "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                              },
+                                              "otelMetricsExportEnabled": {
+                                                "type": "boolean",
+                                                "default": true,
+                                                "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                               },
                                               "otelMetricsCollectorEndpoint": {
-                                                "anyOf": [
-                                                  {
-                                                    "type": "string",
-                                                    "enum": [
-                                                      ""
-                                                    ]
-                                                  },
-                                                  {
-                                                    "type": "string"
-                                                  }
-                                                ],
-                                                "default": "http://otel-collector:4317",
-                                                "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                                "type": "string",
+                                                "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                               },
                                               "indexAllowlist": {
                                                 "type": "array",
@@ -477,34 +466,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         ],
                                         "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
                                       },
+                                      "otelTraceExportEnabled": {
+                                        "type": "boolean",
+                                        "default": false,
+                                        "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                      },
                                       "otelTraceCollectorEndpoint": {
-                                        "anyOf": [
-                                          {
-                                            "type": "string",
-                                            "enum": [
-                                              ""
-                                            ]
-                                          },
-                                          {
-                                            "type": "string"
-                                          }
-                                        ],
-                                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                        "type": "string",
+                                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                      },
+                                      "otelMetricsExportEnabled": {
+                                        "type": "boolean",
+                                        "default": true,
+                                        "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                       },
                                       "otelMetricsCollectorEndpoint": {
-                                        "anyOf": [
-                                          {
-                                            "type": "string",
-                                            "enum": [
-                                              ""
-                                            ]
-                                          },
-                                          {
-                                            "type": "string"
-                                          }
-                                        ],
-                                        "default": "http://otel-collector:4317",
-                                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                        "type": "string",
+                                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                       },
                                       "jvmArgs": {
                                         "type": "string",
@@ -554,34 +532,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             ],
                                             "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
                                           },
+                                          "otelTraceExportEnabled": {
+                                            "type": "boolean",
+                                            "default": false,
+                                            "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                          },
                                           "otelTraceCollectorEndpoint": {
-                                            "anyOf": [
-                                              {
-                                                "type": "string",
-                                                "enum": [
-                                                  ""
-                                                ]
-                                              },
-                                              {
-                                                "type": "string"
-                                              }
-                                            ],
-                                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                            "type": "string",
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                          },
+                                          "otelMetricsExportEnabled": {
+                                            "type": "boolean",
+                                            "default": true,
+                                            "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                           },
                                           "otelMetricsCollectorEndpoint": {
-                                            "anyOf": [
-                                              {
-                                                "type": "string",
-                                                "enum": [
-                                                  ""
-                                                ]
-                                              },
-                                              {
-                                                "type": "string"
-                                              }
-                                            ],
-                                            "default": "http://otel-collector:4317",
-                                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                            "type": "string",
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                           },
                                           "jvmArgs": {
                                             "type": "string",
@@ -900,33 +867,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                     },
                     "otelTraceCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                     },
                     "otelMetricsCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "default": "http://otel-collector:4317",
-                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                     },
                     "setHeader": {
                       "type": "array",
@@ -1641,33 +1587,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "default": ""
                           },
                           "otelTraceCollectorEndpoint": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  ""
-                                ]
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                            "type": "string",
+                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                           },
                           "otelMetricsCollectorEndpoint": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  ""
-                                ]
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "default": "http://otel-collector:4317",
-                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                            "type": "string",
+                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                           },
                           "indexAllowlist": {
                             "type": "array",
@@ -2118,33 +2043,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": 1
                     },
                     "otelTraceCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                     },
                     "otelMetricsCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "default": "http://otel-collector:4317",
-                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                     },
                     "output": {
                       "type": "string",
@@ -2438,33 +2342,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": 85899345920
                     },
                     "otelTraceCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                     },
                     "otelMetricsCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "default": "http://otel-collector:4317",
-                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                     },
                     "serverGeneratedIds": {
                       "type": "string",
@@ -3239,33 +3122,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": 360
                     },
                     "otelTraceCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
                     },
                     "otelMetricsCollectorEndpoint": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            ""
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "default": "http://otel-collector:4317",
-                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                      "type": "string",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                     },
                     "quiescentPeriodMs": {
                       "type": "number",
@@ -3994,34 +3856,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "default": "",
                                       "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                     },
+                                    "otelTraceExportEnabled": {
+                                      "type": "boolean",
+                                      "default": false,
+                                      "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                    },
                                     "otelTraceCollectorEndpoint": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            ""
-                                          ]
-                                        },
-                                        {
-                                          "type": "string"
-                                        }
-                                      ],
-                                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                      "type": "string",
+                                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                    },
+                                    "otelMetricsExportEnabled": {
+                                      "type": "boolean",
+                                      "default": true,
+                                      "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                     },
                                     "otelMetricsCollectorEndpoint": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            ""
-                                          ]
-                                        },
-                                        {
-                                          "type": "string"
-                                        }
-                                      ],
-                                      "default": "http://otel-collector:4317",
-                                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                      "type": "string",
+                                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                     },
                                     "indexAllowlist": {
                                       "type": "array",
@@ -4153,34 +4004,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               ],
                               "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
                             },
+                            "otelTraceExportEnabled": {
+                              "type": "boolean",
+                              "default": false,
+                              "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                            },
                             "otelTraceCollectorEndpoint": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    ""
-                                  ]
-                                },
-                                {
-                                  "type": "string"
-                                }
-                              ],
-                              "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                              "type": "string",
+                              "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                            },
+                            "otelMetricsExportEnabled": {
+                              "type": "boolean",
+                              "default": true,
+                              "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                             },
                             "otelMetricsCollectorEndpoint": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    ""
-                                  ]
-                                },
-                                {
-                                  "type": "string"
-                                }
-                              ],
-                              "default": "http://otel-collector:4317",
-                              "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                              "type": "string",
+                              "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                             },
                             "jvmArgs": {
                               "type": "string",
@@ -4230,34 +4070,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   ],
                                   "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
                                 },
+                                "otelTraceExportEnabled": {
+                                  "type": "boolean",
+                                  "default": false,
+                                  "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                                },
                                 "otelTraceCollectorEndpoint": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        ""
-                                      ]
-                                    },
-                                    {
-                                      "type": "string"
-                                    }
-                                  ],
-                                  "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                  "type": "string",
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                                },
+                                "otelMetricsExportEnabled": {
+                                  "type": "boolean",
+                                  "default": true,
+                                  "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                                 },
                                 "otelMetricsCollectorEndpoint": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        ""
-                                      ]
-                                    },
-                                    {
-                                      "type": "string"
-                                    }
-                                  ],
-                                  "default": "http://otel-collector:4317",
-                                  "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                  "type": "string",
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                                 },
                                 "jvmArgs": {
                                   "type": "string",
@@ -4567,34 +4396,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": 1,
                         "description": "Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."
                       },
+                      "otelTraceExportEnabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                      },
                       "otelTraceCollectorEndpoint": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              ""
-                            ]
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ],
-                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                        "type": "string",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                      },
+                      "otelMetricsExportEnabled": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                       },
                       "otelMetricsCollectorEndpoint": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              ""
-                            ]
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ],
-                        "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                        "type": "string",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                       },
                       "output": {
                         "type": "string",
@@ -5472,34 +5290,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.",
                         "changeRestriction": "gated"
                       },
+                      "otelTraceExportEnabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                      },
                       "otelTraceCollectorEndpoint": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              ""
-                            ]
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ],
-                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                        "type": "string",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                      },
+                      "otelMetricsExportEnabled": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                       },
                       "otelMetricsCollectorEndpoint": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              ""
-                            ]
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ],
-                        "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                        "type": "string",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                       },
                       "serverGeneratedIds": {
                         "type": "string",
@@ -5801,34 +5608,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                   },
+                  "otelTraceExportEnabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                  },
                   "otelTraceCollectorEndpoint": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    "type": "string",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                  },
+                  "otelMetricsExportEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                   },
                   "otelMetricsCollectorEndpoint": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                    "type": "string",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                   },
                   "setHeader": {
                     "type": "array",
@@ -6421,34 +6217,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": 360,
                     "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
                   },
+                  "otelTraceExportEnabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled."
+                  },
                   "otelTraceCollectorEndpoint": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    "type": "string",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
+                  },
+                  "otelMetricsExportEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses 'http://otel-collector:4317'."
                   },
                   "otelMetricsCollectorEndpoint": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                    "type": "string",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
                   },
                   "quiescentPeriodMs": {
                     "type": "number",

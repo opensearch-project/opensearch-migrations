@@ -7,6 +7,7 @@ import {
     KAFKA_CLUSTER_CREATION_CONFIG,
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
+    OTEL_EXPORT_CONTROL_FIELD_MASK,
     REPO_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
     SOLR_COLLECTIONS_OPTION,
@@ -184,7 +185,10 @@ export const COMPLETE_SNAPSHOT_CONFIG =
     }));
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true}).extend({
+    dropRefinements(USER_CREATE_SNAPSHOT_OPTIONS).omit({
+        snapshotPrefix: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
+    }).extend({
         mode: z.enum(["create", "import"]).default("create").optional()
             .describe("Workflow-internal snapshot/backup mode. 'create' (default) produces a new snapshot or " +
                 "backup of the source. 'import' is used only for Solr external-backup prepare: it runs " +
@@ -225,6 +229,7 @@ export const DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG =
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_METADATA_OPTIONS).omit({
         metadataTransforms: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend({
         ...FILE_SOURCE_RESOLVED_FIELDS,
         ...COLLECTION_ROUTING_RESOLVED_FIELDS,
@@ -246,6 +251,7 @@ export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
         documentTransforms: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend({
         ...FILE_SOURCE_RESOLVED_FIELDS,
         ...COLLECTION_ROUTING_RESOLVED_FIELDS,
@@ -280,7 +286,9 @@ const PROXY_RESOLVED_FIELDS = {
 } as const;
 
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.safeExtend(PROXY_RESOLVED_FIELDS)
+    dropRefinements(USER_PROXY_OPTIONS)
+        .omit(OTEL_EXPORT_CONTROL_FIELD_MASK)
+        .extend(PROXY_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
     "loggingConfigurationOverrideConfigMap",
@@ -297,9 +305,9 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
 
 // Resolved-only keys are the fields PROXY_RESOLVED_FIELDS adds over the user
 // schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). The CaptureProxy
-// CRD is projected from USER_PROXY_OPTIONS, so these are the top-level keys the CRD
-// does not define and that must be stripped from the CR. Derived from the shape so
-// the set stays in sync as PROXY_RESOLVED_FIELDS changes.
+// CRD is projected from the user proxy fields after dropping user-only OTEL controls,
+// so these are the additional top-level keys that must be stripped from the CR.
+// Derived from the shape so the set stays in sync as PROXY_RESOLVED_FIELDS changes.
 export const ARGO_PROXY_RESOLVED_ONLY_KEYS =
     Object.keys(PROXY_RESOLVED_FIELDS) as (keyof typeof PROXY_RESOLVED_FIELDS)[];
 
@@ -315,6 +323,7 @@ export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_REPLAYER_OPTIONS).omit({
         requestTransforms: true,
         tupleTransforms: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = [
