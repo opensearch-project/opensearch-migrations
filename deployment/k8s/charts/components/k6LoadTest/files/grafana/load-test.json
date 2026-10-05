@@ -774,7 +774,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(fullRequest_count_total{exported_job=\"capture\"}[1m])",
+          "expr": "sum(rate(fullRequest_count_total{exported_job=\"capture\"}[1m]))",
           "legendFormat": "proxy captured (req/s)",
           "refId": "B"
         }
@@ -826,7 +826,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "activeConnection_count{exported_job=\"capture\"}",
+          "expr": "sum(activeConnection_count{exported_job=\"capture\"})",
           "legendFormat": "proxy active connections",
           "refId": "A"
         },
@@ -887,7 +887,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, rate(gatheringRequestDuration_milliseconds_bucket{exported_job=\"capture\"}[1m]))",
+          "expr": "histogram_quantile(0.50, sum by (le)(rate(gatheringRequestDuration_milliseconds_bucket{exported_job=\"capture\"}[1m])))",
           "legendFormat": "request capture p50",
           "refId": "A"
         },
@@ -896,7 +896,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, rate(gatheringRequestDuration_milliseconds_bucket{exported_job=\"capture\"}[1m]))",
+          "expr": "histogram_quantile(0.95, sum by (le)(rate(gatheringRequestDuration_milliseconds_bucket{exported_job=\"capture\"}[1m])))",
           "legendFormat": "request capture p95",
           "refId": "B"
         },
@@ -905,7 +905,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, rate(gatheringRequestDuration_milliseconds_bucket{exported_job=\"capture\"}[1m]))",
+          "expr": "histogram_quantile(0.99, sum by (le)(rate(gatheringRequestDuration_milliseconds_bucket{exported_job=\"capture\"}[1m])))",
           "legendFormat": "request capture p99",
           "refId": "C"
         },
@@ -914,7 +914,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, rate(gatheringResponseDuration_milliseconds_bucket{exported_job=\"capture\"}[1m]))",
+          "expr": "histogram_quantile(0.50, sum by (le)(rate(gatheringResponseDuration_milliseconds_bucket{exported_job=\"capture\"}[1m])))",
           "legendFormat": "response capture p50",
           "refId": "D"
         },
@@ -923,7 +923,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, rate(gatheringResponseDuration_milliseconds_bucket{exported_job=\"capture\"}[1m]))",
+          "expr": "histogram_quantile(0.95, sum by (le)(rate(gatheringResponseDuration_milliseconds_bucket{exported_job=\"capture\"}[1m])))",
           "legendFormat": "response capture p95",
           "refId": "E"
         },
@@ -932,7 +932,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, rate(gatheringResponseDuration_milliseconds_bucket{exported_job=\"capture\"}[1m]))",
+          "expr": "histogram_quantile(0.99, sum by (le)(rate(gatheringResponseDuration_milliseconds_bucket{exported_job=\"capture\"}[1m])))",
           "legendFormat": "response capture p99",
           "refId": "F"
         }

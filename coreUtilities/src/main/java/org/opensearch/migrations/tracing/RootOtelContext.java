@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Utils;
@@ -18,6 +19,7 @@ import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.sdk.metrics.export.MetricReader;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
@@ -37,9 +39,33 @@ public class RootOtelContext implements IRootOtelContext {
     public static OpenTelemetry initializeOpenTelemetryForCollectors(
         @NonNull OtelCollectorEndpoints collectorEndpoints,
         @NonNull String serviceName,
-        @NonNull String nodeName
+        @NonNull String instanceName
+    ) {
+        var openTelemetrySdk = buildOpenTelemetryForCollectors(
+            collectorEndpoints,
+            serviceName,
+            instanceName,
+            endpoint -> PeriodicMetricReader.builder(
+                OtlpGrpcMetricExporter.builder()
+                    .setEndpoint(endpoint)
+                    // Keep cumulative temporality; the collector converts only the AWSEMF branch to delta.
+                    .build()
+            ).setInterval(Duration.ofMillis(1000)).build()
+        );
+
+        // Add hook to close SDK, which flushes logs
+        Runtime.getRuntime().addShutdownHook(new Thread(openTelemetrySdk::close));
+        return openTelemetrySdk;
+    }
+
+    static OpenTelemetrySdk buildOpenTelemetryForCollectors(
+        @NonNull OtelCollectorEndpoints collectorEndpoints,
+        @NonNull String serviceName,
+        @NonNull String instanceName,
+        @NonNull Function<String, MetricReader> metricReaderFactory
     ) {
         var openTelemetryBuilder = OpenTelemetrySdk.builder();
+        var serviceResource = buildServiceResource(serviceName, instanceName);
 
         var normalizedTraceEndpoint = Optional.ofNullable(collectorEndpoints.getTraceEndpoint())
             .map(endpoint -> normalizeOtlpEndpoint(endpoint, "trace"));
@@ -53,11 +79,7 @@ public class RootOtelContext implements IRootOtelContext {
 
             openTelemetryBuilder = openTelemetryBuilder.setTracerProvider(
                 SdkTracerProvider.builder()
-                    .setResource(Resource.getDefault()
-                        .toBuilder()
-                        .put(ServiceAttributes.SERVICE_NAME, serviceName)
-                        .put(ServiceAttributes.SERVICE_INSTANCE_ID, nodeName)
-                        .build())
+                    .setResource(serviceResource)
                     .addSpanProcessor(spanProcessor)
                     .build()
             );
@@ -66,30 +88,24 @@ public class RootOtelContext implements IRootOtelContext {
         var normalizedMetricsEndpoint = Optional.ofNullable(collectorEndpoints.getMetricsEndpoint())
             .map(endpoint -> normalizeOtlpEndpoint(endpoint, "metrics"));
         if (normalizedMetricsEndpoint.isPresent()) {
-            final var metricReader = PeriodicMetricReader.builder(
-                OtlpGrpcMetricExporter.builder()
-                    .setEndpoint(normalizedMetricsEndpoint.get())
-                    // see https://opentelemetry.io/docs/specs/otel/metrics/sdk_exporters/prometheus/
-                    // "A Prometheus Exporter MUST only support Cumulative Temporality."
-                    // .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
-                    .build()
-            ).setInterval(Duration.ofMillis(1000)).build();
+            final var metricReader = metricReaderFactory.apply(normalizedMetricsEndpoint.get());
 
             openTelemetryBuilder = openTelemetryBuilder.setMeterProvider(
                 SdkMeterProvider.builder()
-                    .setResource(Resource.getDefault()
-                        .toBuilder()
-                        .put(ServiceAttributes.SERVICE_NAME, serviceName)
-                        .build())
+                    .setResource(serviceResource)
                     .registerMetricReader(metricReader).build()
             );
         }
 
-        var openTelemetrySdk = openTelemetryBuilder.build();
+        return openTelemetryBuilder.build();
+    }
 
-        // Add hook to close SDK, which flushes logs
-        Runtime.getRuntime().addShutdownHook(new Thread(openTelemetrySdk::close));
-        return openTelemetrySdk;
+    static Resource buildServiceResource(@NonNull String serviceName, @NonNull String instanceName) {
+        return Resource.getDefault()
+            .toBuilder()
+            .put(ServiceAttributes.SERVICE_NAME, serviceName)
+            .put(ServiceAttributes.SERVICE_INSTANCE_ID, instanceName)
+            .build();
     }
 
     public static OpenTelemetry initializeNoopOpenTelemetry() {

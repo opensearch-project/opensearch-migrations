@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,6 +18,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * TransformerParams classes expose the right values via @Getter.
  */
 class ShimMainTest {
+
+    @Test
+    void otelInstanceNameIncludesTheProcessIdentity() {
+        assertEquals(
+            "shim-8080-pod-a_process-a",
+            ShimMain.buildOtelInstanceName(8080, () -> "pod-a_process-a")
+        );
+        assertNotEquals(
+            ShimMain.buildOtelInstanceName(8080, () -> "pod-a_process-a"),
+            ShimMain.buildOtelInstanceName(8080, () -> "pod-a_process-b")
+        );
+    }
 
     private static ShimMain.Parameters parse(String... args) {
         var params = new ShimMain.Parameters();
