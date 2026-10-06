@@ -7,6 +7,7 @@ evaluationDependsOn ':SearchSnapshotExtractor'
 
 dependencies {
     implementation project(':RfsCommon')
+    implementation project(':awsUtilities')
     implementation project(':RfsHttp')
     implementation project(':RfsPipeline')
     implementation project(':SearchSnapshotExtractor')

@@ -57,7 +57,13 @@ def normalizeRepoUri:
     .
   end;
 
-# S3-side enrichment: awsRegion → aws_region, s3RoleArn → role.
+# Repo fields that only drive pod wiring in the workflow templates (credential Secret and the
+# endpoint/region/addressing ConfigMap become pod env vars); console_link has no use for them.
+def dropPodOnlyRepoFields:
+  del(.repoName, .useLocalStack, .s3CredentialsSecretName, .s3SettingsConfigMapName);
+
+# S3-side enrichment: awsRegion → aws_region, s3RoleArn → role, s3AddressingStyle → addressing_style
+# ("" means "tool default", so it is dropped rather than passed through).
 def normalizeS3Config:
   normalizeRepoUri
   | (if has("awsRegion") then
@@ -70,12 +76,19 @@ def normalizeS3Config:
     else
       .
     end)
-  | del(.repoName, .useLocalStack);
+  | (if (.s3AddressingStyle // "") != "" then
+      .addressing_style = .s3AddressingStyle
+    else
+      .
+    end)
+  | del(.s3AddressingStyle)
+  | dropPodOnlyRepoFields;
 
 # GCS has no extra fields beyond repoPathUri/endpoint at the moment.
 def normalizeGcsConfig:
   normalizeRepoUri
-  | del(.repoName, .useLocalStack, .awsRegion, .s3RoleArn);
+  | dropPodOnlyRepoFields
+  | del(.awsRegion, .s3RoleArn, .s3AddressingStyle);
 
 def normalizeRepoConfig:
   if has("repoConfig") then

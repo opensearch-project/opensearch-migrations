@@ -28,6 +28,12 @@ import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions
 import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {
+    getS3RepoCredentialsVolumeSource,
+    getS3RepoEnvVars,
+    S3_REPO_CREDENTIALS_MOUNT_PATH,
+    S3_REPO_CREDENTIALS_VOLUME_NAME
+} from "./commonUtils/s3RepoEnv";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
 import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
@@ -206,14 +212,29 @@ function makeMetadataPodSpecPatch(
     inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>
 ) {
     const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
+    const s3CredentialsSecretName =
+        expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "s3CredentialsSecretName"], "");
+    const s3CredentialsSecret = getS3RepoCredentialsVolumeSource(s3CredentialsSecretName).secret;
     return {
         volumes: expr.concatArrays(
             expr.templateValue(METADATA_STATIC_VOLUMES),
+            expr.toArray(expr.makeDict({
+                name: expr.literal(S3_REPO_CREDENTIALS_VOLUME_NAME),
+                secret: expr.makeDict({
+                    secretName: s3CredentialsSecret.secretName,
+                    optional: expr.literal(s3CredentialsSecret.optional),
+                }),
+            })),
             expr.dig(metadataConfig, ["fileSourceVolumes"], [])
         ),
         mainContainer: {
             volumeMounts: expr.concatArrays(
                 expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
+                expr.templateValue([{
+                    name: S3_REPO_CREDENTIALS_VOLUME_NAME,
+                    mountPath: S3_REPO_CREDENTIALS_MOUNT_PATH,
+                    readOnly: true
+                }]),
                 expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
             ),
             resources: expr.get(metadataConfig, "resources"),
@@ -240,6 +261,8 @@ function buildMetadataContainer<
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
+        .addEnvVarsFromRecord(getS3RepoEnvVars(
+            expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "s3SettingsConfigMapName"], "")))
         .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
         .addArgs([
             inputs.commandMode,

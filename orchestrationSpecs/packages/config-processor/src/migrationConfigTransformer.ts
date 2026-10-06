@@ -24,7 +24,7 @@ import { z } from 'zod';
 import {promises as dns} from "dns";
 import {createHash} from "crypto";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
-import { crdName } from './crdNaming';
+import { crdName, s3RepoSettingsConfigMapName } from './crdNaming';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 import {FileSourceRegistry} from "./fileSourceUtils";
 
@@ -92,7 +92,8 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
 
 async function rewriteRepoEndpointIfLocalStack(
     snapshotRepo: z.infer<typeof REPO_CONFIG>,
-    repoName: string
+    repoName: string,
+    sourceLabel: string
 ): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
     // The localstack:// rewrite below is an S3 addressing workaround, not a
@@ -108,17 +109,21 @@ async function rewriteRepoEndpointIfLocalStack(
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
     }
-    return { ...snapshotRepo, useLocalStack, repoName };
+    const s3SettingsConfigMapName = snapshotRepo.repoPathUri.startsWith("s3://")
+        ? s3RepoSettingsConfigMapName(sourceLabel, repoName)
+        : "";
+    return { ...snapshotRepo, useLocalStack, repoName, s3SettingsConfigMapName };
 }
 
 async function rewriteRepoRecordEndpointIfLocalStack(
-    snapshotRepos: z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>
+    snapshotRepos: z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>,
+    sourceLabel: string
 ): Promise<z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>>
 {
     const entries = Object.entries(snapshotRepos);
     const rewrittenEntries = await Promise.all(
         entries.map(async ([repoName, repoConfig]) => {
-            const rewritten = await rewriteRepoEndpointIfLocalStack(repoConfig, repoName);
+            const rewritten = await rewriteRepoEndpointIfLocalStack(repoConfig, repoName, sourceLabel);
             return [repoName, rewritten] as const;
         })
     );
@@ -878,7 +883,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ...cluster,
                     snapshotInfo: {
                         ...cluster.snapshotInfo,
-                        repos: await rewriteRepoRecordEndpointIfLocalStack(cluster.snapshotInfo.repos)
+                        repos: await rewriteRepoRecordEndpointIfLocalStack(cluster.snapshotInfo.repos, name)
                     }
                 };
             }
@@ -1615,6 +1620,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         };
     }
 
+    // s3CredentialsSecretName and s3AddressingStyle are deliberately left out: they are pod-start
+    // access settings, not identity. Including them would re-run Completed DataSnapshots (checksum
+    // mismatch -> Pending) and, via workloadIdentityChecksum, start a fresh RFS session.
     static repoIdentity(repoConfig: Record<string, unknown>): Record<string, unknown> {
         return {
             repoName: repoConfig.repoName ?? "",

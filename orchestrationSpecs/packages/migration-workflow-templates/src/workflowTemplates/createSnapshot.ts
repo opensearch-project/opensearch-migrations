@@ -25,6 +25,7 @@ import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions
 import {makeClusterParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getSourceHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {getS3RepoCredentialsVolumeSource, getS3RepoEnvVars, S3_REPO_CREDENTIALS_MOUNT_PATH} from "./commonUtils/s3RepoEnv";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
@@ -111,6 +112,12 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     },
                     mountPath: "/config/credentials",
                     readOnly: true
+                },
+                's3-repo-credentials': {
+                    ...getS3RepoCredentialsVolumeSource(
+                        expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "s3CredentialsSecretName"], "")),
+                    mountPath: S3_REPO_CREDENTIALS_MOUNT_PATH,
+                    readOnly: true
                 }
             })
             .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
@@ -120,6 +127,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     expr.literal(""))
             )
             .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(b.inputs.sourceConfig)))
+            .addEnvVarsFromRecord(getS3RepoEnvVars(
+                expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "s3SettingsConfigMapName"], "")))
             .addEnvVar("JDK_JAVA_OPTIONS",
                 expr.dig(expr.deserializeRecord(b.inputs.createSnapshotConfig), ["jvmArgs"], "")
             )

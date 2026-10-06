@@ -343,6 +343,12 @@ spec:
             - name: shared-logs
               mountPath: /shared-logs-output
     {{- end }}
+    {{- with (.Values.migrationConsole).s3RepoCredentialsSecretName }}
+            # No subPath: kubelet only refreshes whole-volume Secret mounts, which key rotation relies on.
+            - name: s3-repo-credentials
+              mountPath: /config/s3-repo-credentials
+              readOnly: true
+    {{- end }}
       volumes:
         - name: workflow-schema
           emptyDir:
@@ -351,4 +357,10 @@ spec:
         - name: shared-logs
           persistentVolumeClaim:
             claimName: {{ .Values.logs.sharedLogsVolume.name }}
+    {{- end }}
+    {{- with (.Values.migrationConsole).s3RepoCredentialsSecretName }}
+        - name: s3-repo-credentials
+          secret:
+            secretName: {{ . | quote }}
+            optional: true
     {{- end }}

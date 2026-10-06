@@ -267,6 +267,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                                     "default": "",
                                     "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  },
+                                  "s3CredentialsSecretName": {
+                                    "type": "string",
+                                    "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                                    "default": "",
+                                    "description": "Name of a Kubernetes Secret with static S3 credentials under the keys 'accessKey' and 'secretKey'. When set, migration pods that read or write this repository use these keys for S3 only; SigV4 cluster auth keeps the pod's own AWS identity. Leave empty to use the pod's own AWS identity (e.g. EKS Pod Identity) for S3 as well. The Secret name is read when each pod starts and is not part of config change detection: changing it does not update running snapshots or migrations. To rotate credentials, update the keys in the same Secret; running pods pick up the new keys within a few minutes, without a restart. Keep the old keys valid until then. Used for s3:// URIs only; ignored for gs://."
+                                  },
+                                  "s3AddressingStyle": {
+                                    "type": "string",
+                                    "enum": [
+                                      "",
+                                      "path",
+                                      "virtual"
+                                    ],
+                                    "default": "",
+                                    "description": "S3 bucket addressing style exported to migration pods as AWS_S3_ADDRESSING_STYLE. 'path' (bucket in the URL path) is required by most S3-compatible stores; 'virtual' uses bucket.host. Empty keeps each tool's default (path-style whenever 'endpoint' is set). Read when each pod starts and not part of config change detection: changing it does not update running snapshots or migrations, so set it before the first run. Used for s3:// URIs only; ignored for gs://."
                                   }
                                 },
                                 "required": [
@@ -426,6 +442,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                                     "default": "",
                                     "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  },
+                                  "s3CredentialsSecretName": {
+                                    "type": "string",
+                                    "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                                    "default": "",
+                                    "description": "Name of a Kubernetes Secret with static S3 credentials under the keys 'accessKey' and 'secretKey'. When set, migration pods that read or write this repository use these keys for S3 only; SigV4 cluster auth keeps the pod's own AWS identity. Leave empty to use the pod's own AWS identity (e.g. EKS Pod Identity) for S3 as well. The Secret name is read when each pod starts and is not part of config change detection: changing it does not update running snapshots or migrations. To rotate credentials, update the keys in the same Secret; running pods pick up the new keys within a few minutes, without a restart. Keep the old keys valid until then. Used for s3:// URIs only; ignored for gs://."
+                                  },
+                                  "s3AddressingStyle": {
+                                    "type": "string",
+                                    "enum": [
+                                      "",
+                                      "path",
+                                      "virtual"
+                                    ],
+                                    "default": "",
+                                    "description": "S3 bucket addressing style exported to migration pods as AWS_S3_ADDRESSING_STYLE. 'path' (bucket in the URL path) is required by most S3-compatible stores; 'virtual' uses bucket.host. Empty keeps each tool's default (path-style whenever 'endpoint' is set). Read when each pod starts and not part of config change detection: changing it does not update running snapshots or migrations, so set it before the first run. Used for s3:// URIs only; ignored for gs://."
                                   }
                                 },
                                 "required": [
@@ -1661,12 +1693,30 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                             "default": ""
                           },
+                          "s3CredentialsSecretName": {
+                            "type": "string",
+                            "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                            "default": ""
+                          },
+                          "s3AddressingStyle": {
+                            "type": "string",
+                            "enum": [
+                              "",
+                              "path",
+                              "virtual"
+                            ],
+                            "default": ""
+                          },
                           "useLocalStack": {
                             "type": "boolean",
                             "default": false
                           },
                           "repoName": {
                             "type": "string"
+                          },
+                          "s3SettingsConfigMapName": {
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
@@ -2755,12 +2805,30 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                           "default": ""
                         },
+                        "s3CredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                          "default": ""
+                        },
+                        "s3AddressingStyle": {
+                          "type": "string",
+                          "enum": [
+                            "",
+                            "path",
+                            "virtual"
+                          ],
+                          "default": ""
+                        },
                         "useLocalStack": {
                           "type": "boolean",
                           "default": false
                         },
                         "repoName": {
                           "type": "string"
+                        },
+                        "s3SettingsConfigMapName": {
+                          "type": "string",
+                          "default": ""
                         }
                       },
                       "required": [
@@ -3787,6 +3855,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                           "default": "",
                           "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                        },
+                        "s3CredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                          "default": "",
+                          "description": "Name of a Kubernetes Secret with static S3 credentials under the keys 'accessKey' and 'secretKey'. When set, migration pods that read or write this repository use these keys for S3 only; SigV4 cluster auth keeps the pod's own AWS identity. Leave empty to use the pod's own AWS identity (e.g. EKS Pod Identity) for S3 as well. The Secret name is read when each pod starts and is not part of config change detection: changing it does not update running snapshots or migrations. To rotate credentials, update the keys in the same Secret; running pods pick up the new keys within a few minutes, without a restart. Keep the old keys valid until then. Used for s3:// URIs only; ignored for gs://."
+                        },
+                        "s3AddressingStyle": {
+                          "type": "string",
+                          "enum": [
+                            "",
+                            "path",
+                            "virtual"
+                          ],
+                          "default": "",
+                          "description": "S3 bucket addressing style exported to migration pods as AWS_S3_ADDRESSING_STYLE. 'path' (bucket in the URL path) is required by most S3-compatible stores; 'virtual' uses bucket.host. Empty keeps each tool's default (path-style whenever 'endpoint' is set). Read when each pod starts and not part of config change detection: changing it does not update running snapshots or migrations, so set it before the first run. Used for s3:// URIs only; ignored for gs://."
                         }
                       },
                       "required": [
@@ -3946,6 +4030,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                           "default": "",
                           "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                        },
+                        "s3CredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                          "default": "",
+                          "description": "Name of a Kubernetes Secret with static S3 credentials under the keys 'accessKey' and 'secretKey'. When set, migration pods that read or write this repository use these keys for S3 only; SigV4 cluster auth keeps the pod's own AWS identity. Leave empty to use the pod's own AWS identity (e.g. EKS Pod Identity) for S3 as well. The Secret name is read when each pod starts and is not part of config change detection: changing it does not update running snapshots or migrations. To rotate credentials, update the keys in the same Secret; running pods pick up the new keys within a few minutes, without a restart. Keep the old keys valid until then. Used for s3:// URIs only; ignored for gs://."
+                        },
+                        "s3AddressingStyle": {
+                          "type": "string",
+                          "enum": [
+                            "",
+                            "path",
+                            "virtual"
+                          ],
+                          "default": "",
+                          "description": "S3 bucket addressing style exported to migration pods as AWS_S3_ADDRESSING_STYLE. 'path' (bucket in the URL path) is required by most S3-compatible stores; 'virtual' uses bucket.host. Empty keeps each tool's default (path-style whenever 'endpoint' is set). Read when each pod starts and not part of config change detection: changing it does not update running snapshots or migrations, so set it before the first run. Used for s3:// URIs only; ignored for gs://."
                         }
                       },
                       "required": [
