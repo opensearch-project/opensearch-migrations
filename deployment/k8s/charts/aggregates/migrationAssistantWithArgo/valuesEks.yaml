@@ -107,6 +107,16 @@ metrics:
             action: delete
           - key: service.name
             action: delete
+          - key: service.instance.id
+            action: delete
+      resource/remove_telemetry_sdk_attributes:
+        attributes:
+          - key: telemetry.sdk.name
+            action: delete
+          - key: telemetry.sdk.version
+            action: delete
+          - key: telemetry.sdk.language
+            action: delete
     extensions:
       health_check:
         endpoint: :13133
@@ -139,7 +149,11 @@ metrics:
         metrics/app:
           receivers: [otlp]
           processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
-          exporters: [awsemf/app, prometheus]
+          exporters: [awsemf/app]
+        metrics/app-prometheus:
+          receivers: [otlp]
+          processors: [batch, resource/remove_telemetry_sdk_attributes, resource/metrics]
+          exporters: [prometheus]
         metrics/cadvisor:
           receivers: [prometheus]
           processors: [batch]

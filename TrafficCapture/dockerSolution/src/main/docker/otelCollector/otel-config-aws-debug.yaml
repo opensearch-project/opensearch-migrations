@@ -28,6 +28,16 @@ processors:
         action: delete
       - key: service.name
         action: delete
+      - key: service.instance.id
+        action: delete
+  resource/remove_telemetry_sdk_attributes:
+    attributes:
+      - key: telemetry.sdk.name
+        action: delete
+      - key: telemetry.sdk.version
+        action: delete
+      - key: telemetry.sdk.language
+        action: delete
 extensions:
   health_check:
     endpoint: :13133
@@ -49,7 +59,11 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
-      exporters: [debug, awsemf]
+      exporters: [awsemf]
+    metrics/debug:
+      receivers: [otlp]
+      processors: [batch, resource/remove_telemetry_sdk_attributes, resource/metrics]
+      exporters: [debug]
     traces:
       receivers: [otlp]
       processors: [probabilistic_sampler/traces, batch]
