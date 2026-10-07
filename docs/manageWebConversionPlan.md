@@ -533,9 +533,10 @@ The browser loads one revisioned YAML document, projects it through
 rename, remove, comparison, dependency, and navigation work does not call FastAPI.
 
 `ConfigurationDocumentService` owns atomic load and save against
-`WorkflowConfigStore`. Save verifies the expected persisted revision and authoritatively
-validates the exact YAML before writing it. `SavedConfigSubmissionService` reviews,
-preflights, and submits an exact saved revision. `ExternalResourceService` performs
+`WorkflowConfigStore`. Save verifies the expected persisted revision and preserves the
+exact YAML, including incomplete work that is not yet deployable.
+`SavedConfigSubmissionService` authoritatively validates, reviews, preflights, and
+submits an exact saved revision. `ExternalResourceService` performs
 Kubernetes-dependent inventory, validation, and mutation from the YAML context supplied
 with each request; it does not retain an edit session.
 

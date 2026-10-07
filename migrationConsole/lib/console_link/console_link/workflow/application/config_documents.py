@@ -29,18 +29,20 @@ class ConfigurationDocumentConflict(RuntimeError):
 
 
 class ConfigurationDocumentService:
-    """Loads and atomically saves configuration documents without a server draft."""
+    """Loads and atomically saves raw configuration drafts by revision.
+
+    Validation is intentionally deferred to review and submission so users can
+    save incomplete work and repair externally-authored documents later.
+    """
 
     def __init__(
         self,
         *,
         store: WorkflowConfigStore,
-        validate: Callable[[str], None],
         session_name: str = "default",
         on_saved: Optional[Callable[[], None]] = None,
     ):
         self._store = store
-        self._validate = validate
         self._session_name = session_name
         self._on_saved = on_saved
 
@@ -55,7 +57,6 @@ class ConfigurationDocumentService:
         current = self.load()
         if current.persisted_revision != expected_persisted_revision:
             raise ConfigurationDocumentConflict(current)
-        self._validate(raw_yaml)
         try:
             saved = self._store.save_document(
                 WorkflowConfig(raw_yaml=raw_yaml),

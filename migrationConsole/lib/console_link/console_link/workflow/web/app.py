@@ -777,14 +777,6 @@ def create_app(
             )
         except ConfigurationDocumentConflict as error:
             raise _document_conflict(error) from error
-        except ValueError as error:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "configuration_document_invalid",
-                    "message": str(error),
-                },
-            ) from error
         except HTTPException:
             raise
         except Exception as error:

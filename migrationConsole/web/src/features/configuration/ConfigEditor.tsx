@@ -747,37 +747,6 @@ function findParent(nodes: EditNode[], nodeId: string): EditNode | null {
   return null;
 }
 
-function diagnosticTargetNode(
-  nodes: EditNode[],
-  diagnostic: EditDiagnostic,
-): EditNode | null {
-  const diagnosticPath = diagnostic.path ?? [];
-  let target: EditNode | null = null;
-  const visit = (node: EditNode) => {
-    if (
-      node.valueKind !== "command"
-      && node.path.length <= diagnosticPath.length
-      && node.path.every((part, index) => diagnosticPath[index] === part)
-      && (!target || node.path.length > target.path.length)
-    ) {
-      target = node;
-    }
-    nodeChildren(node).forEach(visit);
-  };
-  nodes.forEach(visit);
-  return target;
-}
-
-function firstBlockingDiagnostic(
-  diagnostics: EditDiagnostic[] | undefined,
-): EditDiagnostic | null {
-  return diagnostics?.find((diagnostic) => (
-    ["required", "error", "gated", "blocked"].includes(
-      diagnostic.severity,
-    )
-  )) ?? null;
-}
-
 function yamlRangeForPath(
   rawYaml: string,
   path: string[] | undefined,
@@ -2407,7 +2376,6 @@ export function ConfigEditor({
   } | null>(null);
   const pendingScrollTop = useRef<number | null>(null);
   const pendingCommit = useRef<Promise<boolean> | null>(null);
-  const pendingValidationFocusId = useRef<string | null>(null);
   const rawYamlTextarea = useRef<HTMLTextAreaElement>(null);
   const pendingRowAnchor = useRef<{
     nodeId: string;
@@ -3283,47 +3251,6 @@ export function ConfigEditor({
       panel.scrollTop = top;
     }
   }, [rowAncestors, rows, scope?.id]);
-  useLayoutEffect(() => {
-    const nodeId = pendingValidationFocusId.current;
-    if (!nodeId) return;
-    const row = rowElements.current.get(nodeId);
-    if (!row) return;
-    pendingValidationFocusId.current = null;
-    setSelectedId(nodeId);
-    scrollToRow(nodeId);
-    const control = row.querySelector<HTMLElement>(
-      ".property-value input:not(:disabled), "
-      + ".property-value select:not(:disabled), "
-      + ".property-value textarea:not(:disabled), "
-      + ".property-value button:not(:disabled)",
-    );
-    (control ?? row).focus();
-  }, [rows, scrollToRow]);
-  const focusValidationDiagnostic = (diagnostic: EditDiagnostic): boolean => {
-    const targetNode = diagnosticTargetNode(nodes, diagnostic);
-    if (!targetNode) return false;
-    const ancestorIds = new Set<string>();
-    let ancestor = findParent(nodes, targetNode.id);
-    while (ancestor) {
-      ancestorIds.add(ancestor.id);
-      ancestor = findParent(nodes, ancestor.id);
-    }
-    setExpanded((current) => new Set([...current, ...ancestorIds]));
-    pendingValidationFocusId.current = targetNode.id;
-    if (!findNode(scopedNodes, targetNode.id)) {
-      const surface = editSurfaces
-        .filter((candidate) => (
-          targetNode.id === candidate.targetId
-          || targetNode.id.startsWith(`${candidate.targetId}.`)
-        ))
-        .sort((left, right) =>
-          right.targetId.length - left.targetId.length)[0];
-      onNavigateEditTarget(surface?.targetId ?? targetNode.id);
-    } else {
-      setSelectedId(targetNode.id);
-    }
-    return true;
-  };
   const focusRawDiagnostic = (diagnostic: EditDiagnostic) => {
     const textarea = rawYamlTextarea.current;
     if (!textarea) return;
@@ -3506,36 +3433,16 @@ export function ConfigEditor({
           BROWSER_CONFIG_DRAFT_QUERY_KEY,
         );
       if (!current?.dirty) return;
-      const validationDiagnostic = firstBlockingDiagnostic(
-        current.editState.validation.diagnostics,
-      );
-      if (validationDiagnostic) {
-        const path = validationDiagnostic.path?.join(".");
-        if (!focusValidationDiagnostic(validationDiagnostic)) {
-          const repairDraft = replaceBrowserConfigYaml(
-            current,
-            current.rawDocument,
-          );
-          if (repairDraft.rawYaml !== undefined) {
-            queryClient.setQueryData(
-              BROWSER_CONFIG_DRAFT_QUERY_KEY,
-              repairDraft,
-            );
-            setRawYamlText(repairDraft.rawYaml);
-            setRawYamlDirty(false);
-            setProblem("");
-            return;
-          }
-        }
-        setProblem(
-          "Workflow configuration is not valid; fix "
-          + `${path ? `${path}: ` : ""}${validationDiagnostic.message}`,
-        );
-        return;
-      }
       try {
         const saved = await persistBrowserDraft(current);
-        if (!saved.dirty) setLocallyEditedIds(new Set());
+        if (!saved.dirty) {
+          setLocallyEditedIds(new Set());
+          setNotice(
+            current.editState.validation.valid === false
+              ? "Configuration saved. Resolve validation errors before submitting."
+              : "Configuration saved.",
+          );
+        }
       } catch (error) {
         setProblem(error instanceof Error ? error.message : String(error));
       }
@@ -3909,7 +3816,7 @@ export function ConfigEditor({
               || (!hasLocalEdits && (busy || !draft.dirty))
             }
             onClick={() => void save()}
-            title="Save configuration and continue editing"
+            title="Save this draft and continue editing; validation errors only block submission"
             type="button"
           >
             <Save aria-hidden="true" />

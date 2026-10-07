@@ -1587,34 +1587,6 @@ def test_config_document_conflict_returns_the_current_saved_document(tmp_path):
     }
 
 
-def test_config_document_validation_failure_is_actionable(tmp_path):
-    documents = _Documents()
-
-    def reject(_expected_revision, _raw_yaml):
-        raise ValueError("Configuration validation failed: invalid source")
-
-    documents.save = reject
-    app = create_app(
-        static_dir=_static_bundle(tmp_path),
-        config_documents=documents,
-    )
-
-    with TestClient(app) as client:
-        response = client.put(
-            "/api/v1/config/document",
-            json={
-                "expectedPersistedRevision": "11",
-                "rawYaml": "sourceClusters: [\n",
-            },
-        )
-
-    assert response.status_code == 422
-    assert response.json()["detail"] == {
-        "code": "configuration_document_invalid",
-        "message": "Configuration validation failed: invalid source",
-    }
-
-
 class _Operations:
     def __init__(self):
         self.started = None

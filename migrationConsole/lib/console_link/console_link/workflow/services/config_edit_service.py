@@ -351,11 +351,6 @@ class ConfigEditService:
         edit_state = self._run_edit_state(raw_yaml, validate_external_refs=True)
         self._require_valid_edit_state(edit_state, action="submit")
 
-    def validate_raw_config_for_save(self, raw_yaml: str) -> None:
-        """Validate document syntax and schema without remote environment checks."""
-        edit_state = self._run_edit_state(raw_yaml, validate_external_refs=False)
-        self._require_valid_edit_state(edit_state, action="save")
-
     def diagnose_external_resources(self, raw_yaml: str) -> Dict[str, Any]:
         """Check configured Kubernetes references without changing edit validity."""
         edit_state = self._run_edit_state(raw_yaml, validate_external_refs=False)

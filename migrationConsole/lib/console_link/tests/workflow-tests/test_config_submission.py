@@ -34,6 +34,7 @@ class _EditService:
         self.preflight = None
         self.submitted = None
         self.validated = []
+        self.validation_error = None
 
     def project_raw_yaml(self, raw_yaml):
         return {
@@ -57,6 +58,8 @@ class _EditService:
 
     def validate_config_for_submit(self, raw_yaml):
         self.validated.append(raw_yaml)
+        if self.validation_error is not None:
+            raise self.validation_error
 
     def submit_raw_config(self, raw_yaml, workflow_name):
         self.submitted = (raw_yaml, workflow_name)
@@ -100,6 +103,25 @@ def test_stale_saved_revision_is_rejected_before_validation():
 
     assert error.value.current.persisted_revision == "11"
     assert edits.validated == []
+
+
+def test_submission_rejects_an_invalid_saved_draft():
+    documents = _Documents()
+    documents.current = ConfigurationDocument(
+        raw_yaml="traffic:\n  proxies:\n    capture-proxy: {}\n",
+        persisted_revision="11",
+    )
+    edits = _EditService()
+    edits.validation_error = ValueError(
+        "traffic.proxies.capture-proxy.kafka is required"
+    )
+    service = SavedConfigSubmissionService(documents, edits)
+
+    with pytest.raises(ValueError, match="capture-proxy.kafka"):
+        service.prepare("11")
+
+    assert edits.validated == [documents.current.raw_yaml]
+    assert edits.submitted is None
 
 
 def test_worker_recheck_rejects_configuration_changed_after_acceptance():

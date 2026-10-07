@@ -202,67 +202,6 @@ def test_resolve_console_resources_uses_strict_user_config():
     assert args[2].endswith(".json")
 
 
-def test_save_validation_uses_schema_projection_without_external_checks():
-    service = ConfigEditService(namespace="test", store=FakeStore())
-    service._run_edit_state = MagicMock(return_value={
-        "validation": {"valid": True},
-    })
-
-    service.validate_raw_config_for_save("sourceClusters: {}\n")
-
-    service._run_edit_state.assert_called_once_with(
-        "sourceClusters: {}\n",
-        validate_external_refs=False,
-    )
-
-
-def test_save_validation_error_names_save_instead_of_submit():
-    service = ConfigEditService(namespace="test", store=FakeStore())
-    service._run_edit_state = MagicMock(return_value={
-        "validation": {
-            "valid": False,
-            "diagnostics": [{"message": "Endpoint is required", "path": []}],
-        },
-    })
-
-    with pytest.raises(
-        ValueError,
-    ) as error:
-        service.validate_raw_config_for_save("sourceClusters: {}\n")
-
-    assert "before save" in str(error.value)
-    assert "Endpoint is required" in str(error.value)
-
-
-def test_save_validation_error_preserves_actionable_snapshot_info_path():
-    service = ConfigEditService(namespace="test", store=FakeStore())
-    service._run_edit_state = MagicMock(return_value={
-        "validation": {
-            "valid": False,
-            "diagnostics": [{
-                "severity": "required",
-                "message": "Invalid input: expected record, received undefined",
-                "path": [
-                    "sourceClusters",
-                    "logs-na",
-                    "snapshotInfo",
-                    "snapshots",
-                ],
-            }],
-        },
-    })
-
-    with pytest.raises(ValueError) as error:
-        service.validate_raw_config_for_save("sourceClusters: {}\n")
-
-    message = str(error.value)
-    assert (
-        "sourceClusters.logs-na.snapshotInfo.snapshots: "
-        "Invalid input: expected record, received undefined"
-    ) in message
-    assert "sourceClusters.logs-na.snapshotInfo: Invalid input;" not in message
-
-
 @patch("console_link.workflow.services.config_edit_service.list_resources_full", return_value={"migrationruns": []})
 def test_load_resource_config_snapshots_uses_loose_pending_projection(_list_resources):
     runner = MagicMock()

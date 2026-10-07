@@ -158,7 +158,6 @@ def run_server(
 
         config_documents = ConfigurationDocumentService(
             store=config_store,
-            validate=config_service.validate_raw_config_for_save,
         )
         configuration_service = SavedConfigSubmissionService(
             config_documents,

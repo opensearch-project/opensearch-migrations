@@ -4664,11 +4664,26 @@ test("saves a focused text edit as one resource-level action", async () => {
         secretName: source-creds
 targetClusters: {}
 snapshotMigrationConfigs: []
+traffic:
+  proxies:
+    capture-proxy:
+      source: legacy
+      proxyConfig:
+        listenPort: 9201
 `;
+  const projection = projectConfigYaml(rawYaml);
+  expect(projection.editState.validation.diagnostics).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: ["traffic", "proxies", "capture-proxy", "kafka"],
+        severity: "required",
+      }),
+    ]),
+  );
   const draft: ConfigDraft = {
     ...structuredClone(configDraft),
     rawYaml,
-    editState: projectConfigYaml(rawYaml).editState,
+    editState: projection.editState,
   };
   server.use(
     http.put("*/api/v1/config/document", async ({ request }) => {
@@ -4703,7 +4718,7 @@ snapshotMigrationConfigs: []
   expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
 });
 
-test("save focuses the actionable snapshotInfo collection error", async () => {
+test("save persists a draft with an actionable snapshotInfo error", async () => {
   const rawYaml = `sourceClusters:
   logs-na:
     endpoint: https://logs-na.example.com:9200
@@ -4741,15 +4756,16 @@ snapshotMigrationConfigs: []
   });
   snapshot.nodes[source.id] = source;
   snapshot.nodes["group:Sources:Sources"].childIds = [source.id];
-  let saveCalled = false;
+  let saveRequest: unknown;
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
-    http.put("*/api/v1/config/document", () => {
-      saveCalled = true;
+    http.put("*/api/v1/config/document", async ({ request }) => {
+      saveRequest = await request.json();
+      const body = saveRequest as { rawYaml: string };
       return HttpResponse.json({
         modelVersion: "1",
-        persistedRevision: "unexpected-save",
-        rawYaml,
+        persistedRevision: "saved-with-validation-errors",
+        rawYaml: body.rawYaml,
       });
     }),
   );
@@ -4769,21 +4785,16 @@ snapshotMigrationConfigs: []
     name: "Save configuration",
   }));
 
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "sourceClusters.logs-na.snapshotInfo.snapshots",
-  );
-  expect(screen.getByRole("alert")).toHaveTextContent("expected record");
-  expect(screen.getByRole("alert")).not.toHaveTextContent(
-    "snapshotInfo: Invalid input",
-  );
-  const snapshotsRow = await screen.findByRole("row", {
-    name: /^Snapshots/,
-  });
-  await waitFor(() => {
-    expect(snapshotsRow).toHaveAttribute("aria-selected", "true");
-    expect(snapshotsRow).toHaveFocus();
-  });
-  expect(saveCalled).toBe(false);
+  await waitFor(() => expect(saveRequest).toMatchObject({
+    expectedPersistedRevision: "config-base-1",
+  }));
+  expect((saveRequest as { rawYaml: string }).rawYaml).toBe(rawYaml);
+  expect(screen.queryByText(
+    /Workflow configuration is not valid; fix/,
+  )).toBeNull();
+  expect(screen.getByText(
+    "Configuration saved. Resolve validation errors before submitting.",
+  )).toBeInTheDocument();
 });
 
 

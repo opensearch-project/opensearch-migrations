@@ -66,14 +66,16 @@ in TypeScript. They can be shared directly by the CLI, server, and browser.
   while the user is editing.
 - Preserve revision conflict detection when configuration is modified outside
   the current browser.
-- Repeat authoritative validation during save and submit.
+- Surface local validation continuously and repeat authoritative validation
+  before submission without preventing users from saving incomplete work.
 - Remove the process-local mutable server draft after the browser path is
   proven equivalent.
 
 ## Non-Goals
 
 - Moving Kubernetes credentials or clients into the browser.
-- Treating browser validation as sufficient for persistence or submission.
+- Treating a saved draft as deployable without authoritative submission
+  validation.
 - Storing workflow drafts in local storage.
 - Building a general collaborative editor in the first implementation.
 - Sending Kubernetes Secret values to the browser.
@@ -349,7 +351,8 @@ temporarily preserving the existing server draft API.
 
 - Add the configuration document response.
 - Add save-by-persisted-revision.
-- Revalidate the exact save payload server-side.
+- Persist the exact save payload after the revision check, including incomplete
+  or malformed drafts that must reopen in raw repair mode.
 - Publish saved-configuration invalidation.
 - Add ConfigMap concurrency tests.
 - Keep the server draft behavior available temporarily as a compatibility
@@ -491,7 +494,8 @@ Implementation result:
 - Runtime status continues updating while the user edits.
 - Remote diagnostics never overwrite or block a newer local draft.
 - Saved configuration conflicts are detected and never silently overwritten.
-- Save and submit repeat authoritative validation.
+- Save preserves the exact draft while review and submit repeat authoritative
+  validation and prevent invalid deployment.
 - CLI configuration and submission behavior continue to use the same shared
   TypeScript semantics.
 - Workflow submit remains functional in every stacked PR.
