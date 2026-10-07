@@ -1,0 +1,82 @@
+services:
+  # solr-node1 runs the embedded ZooKeeper (on port 9983) that the other nodes connect to.
+  solr-node1:
+    image: solr:9.10
+    container_name: solr-node1
+    ports:
+      - "8983:8983"
+    networks:
+      - solrcloud
+    environment:
+      # Solr 9 binds Jetty to 127.0.0.1 by default; force all interfaces so the
+      # published port and inter-node SolrCloud traffic work inside the container.
+      - SOLR_JETTY_HOST=0.0.0.0
+      # Allow collection BACKUP/RESTORE to write to the shared /backups mount.
+      - SOLR_OPTS=-Dsolr.allowPaths=/backups
+    volumes:
+      # Shared backup target, identical path on every node (required for SolrCloud
+      # BACKUP) and bind-mounted to the host so backups survive the containers.
+      - ./backups:/backups
+    mem_limit: 8g
+    command: solr start -c -f -m 4g --host solr-node1 -p 8983
+    # Gate the other nodes on this: not just "Solr is up" but "embedded ZooKeeper
+    # is answering", since nodes 2 & 3 connect to solr-node1:9983.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:8983/solr/admin/zookeeper/status' | grep -q '\"status\":\"green\"' || curl -fsS http://localhost:8983/solr/admin/info/system"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  solr-node2:
+    image: solr:9.10
+    container_name: solr-node2
+    ports:
+      - "8984:8984"
+    networks:
+      - solrcloud
+    environment:
+      - SOLR_JETTY_HOST=0.0.0.0
+      - SOLR_OPTS=-Dsolr.allowPaths=/backups
+    volumes:
+      - ./backups:/backups
+    mem_limit: 8g
+    command: solr start -c -f -m 4g --host solr-node2 -p 8984 -z solr-node1:9983
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:8984/solr/admin/zookeeper/status' | grep -q '\"status\":\"green\"' || curl -fsS http://localhost:8984/solr/admin/info/system"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    depends_on:
+      solr-node1:
+        condition: service_healthy
+
+  solr-node3:
+    image: solr:9.10
+    container_name: solr-node3
+    ports:
+      - "8985:8985"
+    networks:
+      - solrcloud
+    environment:
+      - SOLR_JETTY_HOST=0.0.0.0
+      - SOLR_OPTS=-Dsolr.allowPaths=/backups
+    volumes:
+      - ./backups:/backups
+    mem_limit: 8g
+    command: solr start -c -f -m 4g --host solr-node3 -p 8985 -z solr-node1:9983
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:8985/solr/admin/zookeeper/status' | grep -q '\"status\":\"green\"' || curl -fsS http://localhost:8985/solr/admin/info/system"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    depends_on:
+      solr-node1:
+        condition: service_healthy
+
+networks:
+  solrcloud:
+    name: solrcloud
+    driver: bridge
