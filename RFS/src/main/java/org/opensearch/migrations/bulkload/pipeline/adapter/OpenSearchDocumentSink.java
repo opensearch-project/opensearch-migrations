@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.BulkItemOutcomes;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -94,22 +95,30 @@ public class OpenSearchDocumentSink implements DocumentSink {
             .mapToLong(Document::sourceLength)
             .sum();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
+        var outcomes = new BulkItemOutcomes();
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (transformer == null) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
             bulkMono = client.sendBulkRequestRaw(collectionName, batch,
-                requestContext, allowServerGeneratedIds, allowlist);
+                requestContext, allowServerGeneratedIds, allowlist, outcomes);
         } else {
             var bulkOps = batch.stream()
                 .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
                 .collect(Collectors.toList());
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
             bulkMono = client.sendBulkRequest(collectionName, opsToSend,
-                requestContext, allowServerGeneratedIds, allowlist);
+                requestContext, allowServerGeneratedIds, allowlist, outcomes);
         }
 
-        return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch)));
+        // Outcomes are only complete once the bulk Mono succeeds, so read them lazily.
+        return bulkMono.then(Mono.fromCallable(() -> new BatchResult(
+            batch.size(),
+            bytesInBatch,
+            outcomes.getSucceeded(),
+            outcomes.getFailed(),
+            outcomes.getFailedByType()
+        )));
     }
 
     @SuppressWarnings("unchecked")

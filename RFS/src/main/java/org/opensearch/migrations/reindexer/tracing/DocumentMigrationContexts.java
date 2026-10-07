@@ -9,6 +9,8 @@ import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
@@ -122,6 +124,7 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
     }
 
     class DocumentReindexContext extends BaseDocumentMigrationContext implements IDocumentReindexContext {
+        public static final AttributeKey<String> FAILURE_TYPE_ATTR = AttributeKey.stringKey(AttributeNames.FAILURE_TYPE);
 
         protected DocumentReindexContext(RootDocumentMigrationContext rootScope) {
             super(rootScope);
@@ -143,6 +146,8 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
             public final LongCounter docsMigrated;
             public final LongCounter bytesMigrated;
             public final LongCounter pipelineErrors;
+            public final LongCounter docsSucceeded;
+            public final LongCounter docsFailed;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, fromActivityName(activityName));
@@ -150,6 +155,8 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
                 docsMigrated = meter.counterBuilder(MetricNames.DOCS_MIGRATED).setUnit("count").build();
                 bytesMigrated = meter.counterBuilder(MetricNames.BYTES_MIGRATED).setUnit("bytes").build();
                 pipelineErrors = meter.counterBuilder(MetricNames.PIPELINE_ERRORS).setUnit("count").build();
+                docsSucceeded = meter.counterBuilder(MetricNames.DOCS_SUCCEEDED).setUnit("count").build();
+                docsFailed = meter.counterBuilder(MetricNames.DOCS_FAILED).setUnit("count").build();
             }
         }
 
@@ -182,6 +189,17 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         @Override
         public void recordPipelineError() {
             meterIncrementEvent(getMetrics().pipelineErrors);
+        }
+
+        @Override
+        public void recordDocsSucceeded(long count) {
+            meterIncrementEvent(getMetrics().docsSucceeded, count);
+        }
+
+        @Override
+        public void recordDocsFailed(String failureType, long count) {
+            meterIncrementEvent(getMetrics().docsFailed, count,
+                Attributes.builder().put(FAILURE_TYPE_ATTR, failureType));
         }
 
         @Override

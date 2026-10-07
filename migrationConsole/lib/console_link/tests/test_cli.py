@@ -1083,6 +1083,8 @@ def test_get_backfill_status_with_deep_check_as_json(runner, mocker):
         "shard_complete": 0,
         "shard_in_progress": 0,
         "shard_waiting": 0,
+        "docs_succeeded": 1000,
+        "docs_failed": 3,
     }
     mock_build_status = mocker.patch.object(
         ECSRFSBackfill,

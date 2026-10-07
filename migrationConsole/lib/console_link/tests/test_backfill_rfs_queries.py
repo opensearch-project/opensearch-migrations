@@ -81,7 +81,9 @@ class WorkingStateDoc:
                  completed: bool,
                  expired: bool,
                  status: str,
-                 successors: str | None = None
+                 successors: str | None = None,
+                 docs_succeeded: int | None = None,
+                 docs_failed: int | None = None
                  ) -> None:
         self.index = index
         self.shard = shard
@@ -90,17 +92,25 @@ class WorkingStateDoc:
         self.expired = expired
         self.status = status
         self.successors = successors
+        self.docs_succeeded = docs_succeeded
+        self.docs_failed = docs_failed
 
     def get_id(self):
         return f"{self.index}__{self.shard}__{self.starting_doc_id}"
 
     def body(self):
-        return json.dumps({
+        body = {
             "expiration": past_time if self.expired else future_time,
             "completedAt": past_time if self.completed else None,
             "successor_items": self.successors,
             "status": self.status
-        })
+        }
+        # Older RFS versions never write these fields, so only include them when set.
+        if self.docs_succeeded is not None:
+            body["docsSucceeded"] = self.docs_succeeded
+        if self.docs_failed is not None:
+            body["docsFailed"] = self.docs_failed
+        return json.dumps(body)
 
 
 """
@@ -293,6 +303,9 @@ def test_get_detailed_status_obj(env_with_cluster: Environment):
     assert status_obj.shard_in_progress == (IN_PROGRESS_DOC_COUNT * SHARD_COUNT +
                                             IN_PROGRESS_SUCCESSOR_COUNT), f"{status_obj}"
     assert status_obj.shard_waiting == UNCLAIMED_DOC_COUNT * SHARD_COUNT, f"{status_obj}"
+    # These work items predate per-item doc counts, so the sums are 0 rather than an error.
+    assert status_obj.docs_succeeded == 0, f"{status_obj}"
+    assert status_obj.docs_failed == 0, f"{status_obj}"
 
 
 def create_all_completed_working_state(cluster: Cluster):
@@ -324,3 +337,38 @@ def test_get_detailed_status_obj_completed_with_failed_documents(env_with_cluste
 
     without_failures = get_detailed_status_obj(target_cluster, has_failed_documents=False)
     assert without_failures.status == StepStateWithPause.COMPLETED
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+def test_get_detailed_status_obj_sums_doc_counts_of_completed_work_items(env_with_cluster: Environment):
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    docs = [
+        WorkingStateDoc(index="index1", shard=0, starting_doc_id=0, completed=True, expired=False,
+                        status="Completed", docs_succeeded=100, docs_failed=2),
+        # A parent that handed off to a successor counts only its own range.
+        WorkingStateDoc(index="index1", shard=1, starting_doc_id=0, completed=True, expired=False,
+                        status="Completed", successors="index1__1__50", docs_succeeded=50, docs_failed=0),
+        WorkingStateDoc(index="index1", shard=1, starting_doc_id=50, completed=True, expired=False,
+                        status="Completed", docs_succeeded=30, docs_failed=3),
+        # Not completed: must not contribute even if counts are present.
+        WorkingStateDoc(index="index2", shard=0, starting_doc_id=0, completed=False, expired=False,
+                        status="in_progress", docs_succeeded=1000, docs_failed=1000),
+        # Completed by an older worker version: no count fields.
+        WorkingStateDoc(index="index3", shard=0, starting_doc_id=0, completed=True, expired=False,
+                        status="Completed"),
+    ]
+    for doc in docs:
+        target_cluster.call_api(f"/{WORKING_STATE_INDEX}/_doc/{doc.get_id()}", HttpMethod.PUT,
+                                data=doc.body(), headers={"Content-Type": "application/json"})
+    target_cluster.call_api(f"/{WORKING_STATE_INDEX}/_doc/shard_setup", HttpMethod.PUT,
+                            data=json.dumps({"completedAt": current_time, "status": "completed",
+                                             "docsSucceeded": 9999, "docsFailed": 9999}),
+                            headers={"Content-Type": "application/json"})
+    target_cluster.call_api("/_refresh", HttpMethod.POST)
+
+    status_obj = get_detailed_status_obj(target_cluster)
+
+    assert status_obj.docs_succeeded == 180, f"{status_obj}"
+    assert status_obj.docs_failed == 5, f"{status_obj}"

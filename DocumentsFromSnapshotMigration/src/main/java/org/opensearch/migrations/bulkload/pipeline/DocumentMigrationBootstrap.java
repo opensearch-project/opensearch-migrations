@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.pipeline;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -17,6 +18,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSin
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemDocCounts;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -106,6 +108,7 @@ public class DocumentMigrationBootstrap {
                 contextRef.set(ctx);
                 return ctx;
             };
+            var lastCursor = new AtomicReference<WorkItemCursor>();
             try (var context = wrappedContextSupplier.get()) {
                 return workCoordinator.ensurePhaseCompletion(wc -> {
                     try {
@@ -124,14 +127,17 @@ public class DocumentMigrationBootstrap {
 
                     @Override
                     public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                        return runPartitionMigration(workItem, pipelineConfig, context);
+                        return runPartitionMigration(workItem, pipelineConfig, context, lastCursor::set);
                     }
 
                     @Override
                     public CompletionStatus onNoAvailableWorkToBeDone() {
                         return CompletionStatus.NOTHING_DONE;
                     }
-                }, context::createCloseContext);
+                }, context::createCloseContext,
+                    () -> Optional.ofNullable(lastCursor.get())
+                        .map(WorkItemCursor::getDocCounts)
+                        .orElse(WorkItemDocCounts.NONE));
             }
         } finally {
             closeQuietly(source);
@@ -145,6 +151,19 @@ public class DocumentMigrationBootstrap {
         IWorkCoordinator.WorkItemAndDuration workItem,
         PipelineConfig pipelineConfig,
         IDocumentMigrationContexts.IDocumentReindexContext context
+    ) {
+        return runPartitionMigration(workItem, pipelineConfig, context, cursor -> {});
+    }
+
+    /**
+     * @param committedCursorConsumer receives every committed cursor (in addition to {@code cursorConsumer}),
+     *                                so the caller can persist the final doc counts on completion
+     */
+    CompletionStatus runPartitionMigration(
+        IWorkCoordinator.WorkItemAndDuration workItem,
+        PipelineConfig pipelineConfig,
+        IDocumentMigrationContexts.IDocumentReindexContext context,
+        Consumer<WorkItemCursor> committedCursorConsumer
     ) {
         var wi = workItem.getWorkItem();
         log.info("Pipeline acquired work item: {}", wi);
@@ -172,6 +191,8 @@ public class DocumentMigrationBootstrap {
         var batchCount = new AtomicInteger();
         var totalDocsMigrated = new AtomicLong();
         var totalBytesMigrated = new AtomicLong();
+        var totalDocsSucceeded = new AtomicLong();
+        var totalDocsFailed = new AtomicLong();
         var migrationError = new AtomicReference<Throwable>();
         var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
 
@@ -194,7 +215,16 @@ public class DocumentMigrationBootstrap {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                    cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
+                    // Record outcomes only for batches whose cursor is committed: a successor resumes
+                    // from this cursor, so these documents are never re-sent on the normal path.
+                    context.recordDocsSucceeded(cursor.docsSucceeded());
+                    cursor.failedByType().forEach(context::recordDocsFailed);
+                    var docCounts = new WorkItemDocCounts(
+                        totalDocsSucceeded.addAndGet(cursor.docsSucceeded()),
+                        totalDocsFailed.addAndGet(cursor.docsFailed()));
+                    var workItemCursor = new WorkItemCursor(cursor.lastDocProcessed(), docCounts);
+                    committedCursorConsumer.accept(workItemCursor);
+                    cursorConsumer.accept(workItemCursor);
                 },
                 error -> {
                     log.atError()
@@ -218,10 +248,12 @@ public class DocumentMigrationBootstrap {
             latch.await(); // Bridge reactive→sync: block until pipeline subscription completes
             long durationMs = System.currentTimeMillis() - start;
             log.atInfo()
-                .setMessage("Partition migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
+                .setMessage("Partition migration stats: index={}, shard={}, docs={}, succeeded={}, failed={}, bytes={}, batches={}, duration={}ms")
                 .addArgument(wi.getIndexName())
                 .addArgument(wi.getShardNumber())
                 .addArgument(totalDocsMigrated::get)
+                .addArgument(totalDocsSucceeded::get)
+                .addArgument(totalDocsFailed::get)
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)
                 .addArgument(durationMs)
