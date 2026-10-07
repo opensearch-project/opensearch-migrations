@@ -411,6 +411,32 @@ class TestDeduplication:
 
         assert failed_document_stream.count(_config()) == 2
 
+    def test_count_by_failure_type_dedupes_and_sums_to_count(self, mocker):
+        obj = _gz(_ndjson([
+            {"targetIndex": "movies", "documentId": "d1", "failureType": "mapper_parsing_exception",
+             "timestamp": "2026-05-01T00:00:00Z"},
+            {"targetIndex": "movies", "documentId": "d1", "failureType": "mapper_parsing_exception",
+             "timestamp": "2026-05-02T00:00:00Z"},  # re-emitted duplicate
+            {"targetIndex": "movies", "documentId": "d2", "failureType": "mapper_parsing_exception",
+             "timestamp": "2026-05-02T00:00:00Z"},
+            {"targetIndex": "movies", "documentId": "d3", "failureType": "strict_dynamic_mapping_exception",
+             "timestamp": "2026-05-02T00:00:00Z"},
+            {"targetIndex": "movies", "documentId": "d4", "timestamp": "2026-05-02T00:00:00Z"},  # no type
+        ]))
+        s3 = _make_s3_mock([("a.gz", obj)])
+        mocker.patch.object(failed_document_stream, "_s3_client", return_value=s3)
+
+        by_type = failed_document_stream.count_by(_config(), "failureType")
+
+        assert by_type == {"mapper_parsing_exception": 2, "strict_dynamic_mapping_exception": 1, "unknown": 1}
+        # The mock paginator is one-shot, so give count() a fresh client over the same objects.
+        mocker.patch.object(failed_document_stream, "_s3_client", return_value=_make_s3_mock([("a.gz", obj)]))
+        assert sum(by_type.values()) == failed_document_stream.count(_config())
+
+    def test_count_by_rejects_unknown_field(self):
+        with pytest.raises(ValueError):
+            failed_document_stream.count_by(_config(), "documentId")
+
     def test_list_keeps_latest_record_per_document(self, mocker):
         obj = _gz(_ndjson([
             {"targetIndex": "movies", "documentId": "d1", "failureType": "old",

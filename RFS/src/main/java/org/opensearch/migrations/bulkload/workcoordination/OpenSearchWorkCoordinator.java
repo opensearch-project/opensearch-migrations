@@ -717,8 +717,6 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException {
         try (var ctx = contextSupplier.get()) {
-            // Doc counts are optional params so that workers without them (and older workers sharing the
-            // same working-state index) still complete items; scriptVersion doesn't need to change.
             final var docCountParams = docCounts == null ? "" : ",\n"
                 + "      \"" + DOCS_SUCCEEDED_FIELD_NAME + "\": " + docCounts.succeeded() + ",\n"
                 + "      \"" + DOCS_FAILED_FIELD_NAME + "\": " + docCounts.failed();

@@ -705,10 +705,6 @@ public abstract class OpenSearchClient {
      * are written to the failed document stream immediately and removed from {@code pendingDocs} so the
      * retry loop does not keep hammering them.
      *
-     * <p>When {@code outcomes} is non-null, successes and non-retryable failures are recorded there.
-     * Each item is removed from {@code pendingDocs} when it's recorded, so it's counted at most once
-     * across retry attempts.
-     *
      * @return number of documents removed because they succeeded (or were allowlisted)
      */
     private int compactPendingDocs(

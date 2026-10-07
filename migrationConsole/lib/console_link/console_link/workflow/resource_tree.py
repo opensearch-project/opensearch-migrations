@@ -459,6 +459,14 @@ def _format_backfill_status(backfill: Dict[str, Any]):
     shards_waiting = summary.get('shardsWaiting')
     if shards_waiting:
         details.append(f"shards waiting: {shards_waiting}")
+    docs_succeeded = summary.get('docsSucceeded')
+    docs_failed = summary.get('docsFailed')
+    if docs_succeeded is not None or docs_failed is not None:
+        parts.append(f"docs {docs_succeeded or 0:,} succeeded / {docs_failed or 0:,} failed")
+    if docs_succeeded is not None:
+        details.append(f"docs succeeded: {docs_succeeded:,}")
+    if docs_failed is not None:
+        details.append(f"docs failed: {docs_failed:,}")
     eta_ms = summary.get('etaMs')
     if eta_ms:
         secs = int(eta_ms / 1000)

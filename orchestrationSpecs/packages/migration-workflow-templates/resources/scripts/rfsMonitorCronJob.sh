@@ -101,7 +101,9 @@ make_backfill_status_patch() {
                     shardsTotal:($r.shard_total // 0),
                     shardsMigrated:($r.shard_complete // 0),
                     shardsInProgress:($r.shard_in_progress // 0),
-                    shardsWaiting:($r.shard_waiting // 0)
+                    shardsWaiting:($r.shard_waiting // 0),
+                    docsSucceeded:$r.docs_succeeded,
+                    docsFailed:$r.docs_failed
                 }
              }}}'
         return 0
@@ -123,7 +125,9 @@ make_backfill_status_patch() {
                 shardsTotal:0,
                 shardsMigrated:0,
                 shardsInProgress:0,
-                shardsWaiting:0
+                shardsWaiting:0,
+                docsSucceeded:null,
+                docsFailed:null
             }
         }}}'
 }

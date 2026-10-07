@@ -43,11 +43,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/**
- * Verifies that succeeded / failed document counts are recorded per committed batch: as OTel metrics
- * ({@code pipelineDocsSucceeded}, {@code pipelineDocsFailed} by {@code failureType}) and as cumulative
- * {@link WorkItemDocCounts} on the {@link WorkItemCursor} that is persisted on completion.
- */
 class DocumentMigrationBootstrapDocCountsTest {
 
     private static final String INDEX = "movies";
@@ -61,7 +56,6 @@ class DocumentMigrationBootstrapDocCountsTest {
         for (var body : bulkResponses) {
             stubbing = stubbing.thenReturn(Mono.just(new HttpResponse(200, "", null, body)));
         }
-        // Short fixed retries so retry paths run quickly.
         return new OpenSearchClient_OS_2_11(restClient, mock(FailedRequestsLogger.class),
             Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED) {
             @Override

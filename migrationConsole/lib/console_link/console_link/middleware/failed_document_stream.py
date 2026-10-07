@@ -27,8 +27,9 @@ import gzip
 import io
 import json
 import logging
+from collections import Counter
 from dataclasses import dataclass
-from typing import Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 import boto3
 
@@ -272,6 +273,21 @@ def count(cfg: FailedDocumentStreamConfig) -> int:
     just need to know whether the backfill had failures should use ``has_records``.
     """
     return len(dedupe_records(list(_iter_records(cfg))))
+
+
+COUNT_BY_FIELDS = ("failureType", "failureClass", "targetIndex")
+
+
+def count_by(cfg: FailedDocumentStreamConfig, field: str) -> Dict[str, int]:
+    """Distinct failed documents grouped by a record field, e.g. ``failureType``.
+
+    Same de-duplication and O(stream size) cost as ``count``; the values sum to ``count``. Records missing
+    the field are grouped under ``"unknown"``.
+    """
+    if field not in COUNT_BY_FIELDS:
+        raise ValueError(f"Cannot group by {field!r}; choose one of {', '.join(COUNT_BY_FIELDS)}")
+    counts = Counter((r.get(field) or "unknown") for r in dedupe_records(list(_iter_records(cfg))))
+    return dict(counts.most_common())
 
 
 def has_records(cfg: FailedDocumentStreamConfig) -> bool:

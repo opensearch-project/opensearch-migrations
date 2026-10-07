@@ -35,11 +35,6 @@ public class ScopedWorkCoordinator {
         return ensurePhaseCompletion(workItemIdSupplier, visitor, contextSupplier, () -> null);
     }
 
-    /**
-     * Same as {@link #ensurePhaseCompletion(WorkItemGetter, IWorkCoordinator.WorkAcquisitionOutcomeVisitor, Supplier)},
-     * persisting the document outcomes from {@code docCountsSupplier} (read after the visitor finishes; may
-     * return null) on the work item when it is marked complete.
-     */
     public <T> T ensurePhaseCompletion(
         WorkItemGetter workItemIdSupplier,
         IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,

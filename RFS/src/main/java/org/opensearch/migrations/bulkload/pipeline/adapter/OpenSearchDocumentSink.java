@@ -111,7 +111,6 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 requestContext, allowServerGeneratedIds, allowlist, outcomes);
         }
 
-        // Outcomes are only complete once the bulk Mono succeeds, so read them lazily.
         return bulkMono.then(Mono.fromCallable(() -> new BatchResult(
             batch.size(),
             bytesInBatch,

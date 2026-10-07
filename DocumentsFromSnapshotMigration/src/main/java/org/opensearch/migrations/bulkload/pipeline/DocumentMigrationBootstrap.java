@@ -155,10 +155,6 @@ public class DocumentMigrationBootstrap {
         return runPartitionMigration(workItem, pipelineConfig, context, cursor -> {});
     }
 
-    /**
-     * @param committedCursorConsumer receives every committed cursor (in addition to {@code cursorConsumer}),
-     *                                so the caller can persist the final doc counts on completion
-     */
     CompletionStatus runPartitionMigration(
         IWorkCoordinator.WorkItemAndDuration workItem,
         PipelineConfig pipelineConfig,
