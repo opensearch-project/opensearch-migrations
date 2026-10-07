@@ -23,6 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 WORKING_STATE_INDEX = ".migrations_working_state"
+JSON_HEADERS = {"Content-Type": "application/json"}
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
@@ -354,7 +355,7 @@ def _get_max_completed_epoch(cluster, index_name: str) -> Optional[int]:
         resp = cluster.call_api(
             f"/{index_name}/_search",
             data=json.dumps(body),
-            headers={"Content-Type": "application/json"},
+            headers=JSON_HEADERS,
         )
         aggs = resp.json().get("aggregations", {})
         val = aggs.get("max_completed", {}).get("value")
@@ -645,7 +646,7 @@ def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: 
     try:
         logger.debug(f"Creating request: /{index_name}/_search; {query}")
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
         return None
@@ -665,7 +666,7 @@ def parse_doc_counts_response(query: dict, cluster: Cluster,
     """Return (docs_succeeded, docs_failed) from the sum aggregations, or (None, None) on any failure."""
     try:
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
         aggs = response.json().get("aggregations", {})
         return (_sum_agg_value(aggs, DOCS_SUCCEEDED_FIELD), _sum_agg_value(aggs, DOCS_FAILED_FIELD))
     except Exception as e:
@@ -684,7 +685,7 @@ def parse_shard_setup_response(query: dict, cluster: Cluster, index_name: str) -
     """Check if shard_setup document has completedAt field set"""
     try:
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
         body = response.json()
         hits = body.get('hits', {}).get('hits', [])
         if hits:

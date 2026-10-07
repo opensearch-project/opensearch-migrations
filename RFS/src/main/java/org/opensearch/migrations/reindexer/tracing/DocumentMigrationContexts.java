@@ -149,14 +149,16 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
             public final LongCounter docsSucceeded;
             public final LongCounter docsFailed;
 
+            private static final String COUNT_UNIT = "count";
+
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, fromActivityName(activityName));
                 shardDuration = meter.histogramBuilder(MetricNames.SHARD_DURATION).setUnit("ms").build();
-                docsMigrated = meter.counterBuilder(MetricNames.DOCS_MIGRATED).setUnit("count").build();
+                docsMigrated = meter.counterBuilder(MetricNames.DOCS_MIGRATED).setUnit(COUNT_UNIT).build();
                 bytesMigrated = meter.counterBuilder(MetricNames.BYTES_MIGRATED).setUnit("bytes").build();
-                pipelineErrors = meter.counterBuilder(MetricNames.PIPELINE_ERRORS).setUnit("count").build();
-                docsSucceeded = meter.counterBuilder(MetricNames.DOCS_SUCCEEDED).setUnit("count").build();
-                docsFailed = meter.counterBuilder(MetricNames.DOCS_FAILED).setUnit("count").build();
+                pipelineErrors = meter.counterBuilder(MetricNames.PIPELINE_ERRORS).setUnit(COUNT_UNIT).build();
+                docsSucceeded = meter.counterBuilder(MetricNames.DOCS_SUCCEEDED).setUnit(COUNT_UNIT).build();
+                docsFailed = meter.counterBuilder(MetricNames.DOCS_FAILED).setUnit(COUNT_UNIT).build();
             }
         }
 
