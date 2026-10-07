@@ -46,9 +46,11 @@ import {
     type ConfigReferenceEdge,
 } from "./configDependencies";
 import {
+    actionableZodIssues,
     formatInputValidationError,
     InputValidationElement,
     InputValidationError,
+    snapshotInfoCollectionForVersion,
     stripComments,
 } from "./inputValidation";
 import {validateNoExtraConfigKeys} from "./extraKeyValidation";
@@ -1042,67 +1044,6 @@ export function validationSuccess(): EditStateV1["validation"] {
     return {valid: true, errors: []};
 }
 
-function hasValueAtPath(config: unknown, path: PropertyKey[]): boolean {
-    let value = config;
-    for (const part of path) {
-        if (typeof value !== "object" || value === null || !(part in value)) {
-            return false;
-        }
-        value = (value as any)[part];
-    }
-    return value !== undefined;
-}
-
-function actionableZodIssues(
-    issues: z.core.$ZodIssue[],
-    config: unknown,
-): z.core.$ZodIssue[] {
-    return issues.flatMap(issue => {
-        if (issue.code === "invalid_key") {
-            const nested = (issue as any).issues as z.core.$ZodIssue[] | undefined;
-            if (nested?.length) {
-                return actionableZodIssues(
-                    nested.map(child => ({
-                        ...child,
-                        path: [...issue.path, ...child.path],
-                    })),
-                    config,
-                );
-            }
-        }
-        if (issue.code !== "invalid_union") {
-            return [issue];
-        }
-        const branches = ((issue as any).errors ?? []) as z.core.$ZodIssue[][];
-        const candidates = branches.map(branch => actionableZodIssues(
-            branch.map(child => ({
-                ...child,
-                path: [...issue.path, ...child.path],
-            })),
-            config,
-        ));
-        const ranked = candidates
-            .map(branch => ({
-                branch,
-                presentValues: branch.filter(candidate =>
-                    hasValueAtPath(config, candidate.path)).length,
-            }))
-            .sort((left, right) =>
-                right.presentValues - left.presentValues
-                || left.branch.length - right.branch.length);
-        if (ranked[0]?.presentValues) {
-            return ranked[0].branch;
-        }
-        const sharedIssues = (candidates[0] ?? []).filter(candidate =>
-            candidates.every(branch => branch.some(other =>
-                other.code === candidate.code
-                && other.message === candidate.message
-                && JSON.stringify(other.path) === JSON.stringify(candidate.path)
-            )));
-        return sharedIssues.length ? sharedIssues : [issue];
-    });
-}
-
 export function validationFromError(error: unknown, config?: unknown): EditStateV1["validation"] {
     if (error instanceof InputValidationError) {
         return {
@@ -1961,6 +1902,29 @@ function defaultConfigValueForSchema(schema: any): unknown {
     return "";
 }
 
+function initializeSnapshotInfoCollection(
+    config: any,
+    operationPath: string[],
+): void {
+    if (
+        operationPath.length < 2
+        || operationPath[0] !== "sourceClusters"
+    ) {
+        return;
+    }
+    const source = config?.sourceClusters?.[operationPath[1]];
+    if (
+        !isPlainObject(source)
+        || !isPlainObject(source.snapshotInfo)
+        || "snapshots" in source.snapshotInfo
+        || "backups" in source.snapshotInfo
+    ) {
+        return;
+    }
+    const collection = snapshotInfoCollectionForVersion(source.version);
+    source.snapshotInfo[collection] = {};
+}
+
 function addAtPath(config: any, path: string[], value: unknown): void {
     if (path.length === 1 && path[0] === "snapshotMigrationConfigs") {
         if (!Array.isArray(config.snapshotMigrationConfigs)) {
@@ -2086,6 +2050,9 @@ export function applyEditOperation(
     } else {
         const exhaustive: never = operation;
         throw new Error(`Unsupported edit operation: ${JSON.stringify(exhaustive)}`);
+    }
+    if (operation.op === "set" || operation.op === "add") {
+        initializeSnapshotInfoCollection(nextConfig, operation.path);
     }
     return nextConfig;
 }

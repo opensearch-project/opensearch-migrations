@@ -717,6 +717,173 @@ describe("editConfig state", () => {
         });
     });
 
+    it.each([
+        ["ES 7.10.2", "snapshots", "backups"],
+        ["OS 2.19", "snapshots", "backups"],
+        ["SOLR 9.7.0", "backups", "snapshots"],
+    ])(
+        "reports the version-specific item collection for %s (%s)",
+        (version, expectedCollection, irrelevantCollection) => {
+            const state = buildEditStateFromObject({
+                sourceClusters: {
+                    source: {
+                        endpoint: "https://source.example.com:9200",
+                        version,
+                        snapshotInfo: {
+                            repos: {
+                                repo: {
+                                    repoPathUri: "s3://bucket/path",
+                                    awsRegion: "us-east-1",
+                                },
+                            },
+                        },
+                    },
+                },
+                targetClusters: {},
+                snapshotMigrationConfigs: [],
+            });
+
+            expect(state.validation.valid).toBe(false);
+            expect(state.validation.diagnostics).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    severity: "required",
+                    path: [
+                        "sourceClusters",
+                        "source",
+                        "snapshotInfo",
+                        expectedCollection,
+                    ],
+                    message: expect.stringContaining("expected record"),
+                }),
+            ]));
+            expect(state.validation.diagnostics).not.toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    path: [
+                        "sourceClusters",
+                        "source",
+                        "snapshotInfo",
+                        irrelevantCollection,
+                    ],
+                }),
+            ]));
+            expect(state.validation.errors).not.toEqual(expect.arrayContaining([
+                expect.stringMatching(/snapshotInfo: Invalid input$/),
+            ]));
+            expect(findNode(
+                state.nodes,
+                `edit:sourceClusters.source.snapshotInfo.${expectedCollection}`,
+            )).toMatchObject({
+                status: "required",
+                diagnostics: expect.arrayContaining([
+                    expect.objectContaining({
+                        path: [
+                            "sourceClusters",
+                            "source",
+                            "snapshotInfo",
+                            expectedCollection,
+                        ],
+                    }),
+                ]),
+            });
+        },
+    );
+
+    it("retains precise nested repository and snapshot validation paths", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "OS 2.19",
+                    snapshotInfo: {
+                        repos: {
+                            repo: {
+                                repoPathUri: 42,
+                                awsRegion: "us-east-1",
+                            },
+                        },
+                        snapshots: {
+                            snap: {
+                                repoName: 42,
+                                config: {
+                                    externallyManagedSnapshotName: "snapshot-1",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+        });
+
+        expect(state.validation.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: [
+                    "sourceClusters",
+                    "source",
+                    "snapshotInfo",
+                    "repos",
+                    "repo",
+                    "repoPathUri",
+                ],
+                message: expect.stringContaining("expected string"),
+            }),
+            expect.objectContaining({
+                path: [
+                    "sourceClusters",
+                    "source",
+                    "snapshotInfo",
+                    "snapshots",
+                    "snap",
+                    "repoName",
+                ],
+                message: expect.stringContaining("expected string"),
+            }),
+        ]));
+        expect(state.validation.errors).not.toEqual(expect.arrayContaining([
+            expect.stringMatching(/snapshotInfo: Invalid input$/),
+        ]));
+    });
+
+    it.each([
+        ["snapshots", "OS 2.19"],
+        ["backups", "SOLR 9.7.0"],
+    ])(
+        "initializes the %s collection when the UI adds the first snapshot repository for %s",
+        (expectedCollection, version) => {
+            const result = applyEditOperationToObject({
+                sourceClusters: {
+                    source: {
+                        endpoint: "https://source.example.com:9200",
+                        version,
+                    },
+                },
+                targetClusters: {},
+                snapshotMigrationConfigs: [],
+            }, {
+                op: "add",
+                path: [
+                    "sourceClusters",
+                    "source",
+                    "snapshotInfo",
+                    "repos",
+                ],
+                value: {name: "repo"},
+            });
+            const config = parse(result.yaml) as any;
+
+            expect(config.sourceClusters.source.snapshotInfo).toMatchObject({
+                repos: {repo: {}},
+                [expectedCollection]: {},
+            });
+            expect(result.editState.validation.errors).not.toEqual(
+                expect.arrayContaining([
+                    expect.stringMatching(/snapshotInfo: Invalid input$/),
+                ]),
+            );
+        },
+    );
+
     it("returns regex validation metadata and marks invalid scalar values", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {
@@ -2414,8 +2581,20 @@ describe("editConfig state", () => {
         );
         expect(configNode).toMatchObject({
             valueKind: "union",
-            status: "ok",
+            status: "required",
             value: "unset",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    path: [
+                        "sourceClusters",
+                        "source",
+                        "snapshotInfo",
+                        "snapshots",
+                        "s1",
+                        "config",
+                    ],
+                }),
+            ]),
         });
     });
 

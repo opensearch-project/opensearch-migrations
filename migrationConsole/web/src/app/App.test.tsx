@@ -4623,6 +4623,21 @@ test("applies scalar and exact-node rename operations locally", async () => {
 
 test("saves a focused text edit as one resource-level action", async () => {
   let saveRequest: unknown;
+  const rawYaml = `sourceClusters:
+  legacy:
+    endpoint: https://legacy.example.com:9200
+    version: ES 7.10.2
+    authConfig:
+      basic:
+        secretName: source-creds
+targetClusters: {}
+snapshotMigrationConfigs: []
+`;
+  const draft: ConfigDraft = {
+    ...structuredClone(configDraft),
+    rawYaml,
+    editState: projectConfigYaml(rawYaml).editState,
+  };
   server.use(
     http.put("*/api/v1/config/document", async ({ request }) => {
       saveRequest = await request.json();
@@ -4634,7 +4649,7 @@ test("saves a focused text edit as one resource-level action", async () => {
       });
     }),
   );
-  renderApp();
+  renderApp(draft);
   await enterEditMode();
 
   const endpoint = await screen.findByRole("textbox", { name: "Endpoint" });
@@ -4654,6 +4669,89 @@ test("saves a focused text edit as one resource-level action", async () => {
   expect((saveRequest as { rawYaml: string }).rawYaml)
     .toContain("https://saved.example.com:9200");
   expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+});
+
+test("save focuses the actionable snapshotInfo collection error", async () => {
+  const rawYaml = `sourceClusters:
+  logs-na:
+    endpoint: https://logs-na.example.com:9200
+    version: OS 2.19
+    snapshotInfo:
+      repos:
+        default:
+          repoPathUri: s3://snapshot-bucket/logs-na
+          awsRegion: us-east-1
+targetClusters: {}
+snapshotMigrationConfigs: []
+`;
+  const projection = projectConfigYaml(rawYaml);
+  const draft: ConfigDraft = {
+    ...structuredClone(configDraft),
+    dirty: true,
+    draftRevision: "logs-na-repo-only",
+    rawYaml,
+    editState: projection.editState,
+  };
+  const snapshot = runtimeSourceSnapshot();
+  const source = snapshot.nodes["resource:sourceconfigs:legacy"];
+  delete snapshot.nodes[source.id];
+  Object.assign(source, {
+    id: "resource:sourceconfigs:logs-na",
+    revision: "logs-na-source-1",
+    label: "logs-na",
+    description: "sourceconfigs/logs-na",
+    capabilities: [{
+      kind: "edit",
+      editTargetId: "edit:sourceClusters.logs-na",
+      label: "Edit logs-na",
+    }],
+    resourceName: "logs-na",
+  });
+  snapshot.nodes[source.id] = source;
+  snapshot.nodes["group:Sources:Sources"].childIds = [source.id];
+  let saveCalled = false;
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.put("*/api/v1/config/document", () => {
+      saveCalled = true;
+      return HttpResponse.json({
+        modelVersion: "1",
+        persistedRevision: "unexpected-save",
+        rawYaml,
+      });
+    }),
+  );
+  renderApp(draft);
+
+  const resourceTree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  await userEvent.click(within(resourceTree).getByRole("treeitem", {
+    name: /^logs-na/,
+  }));
+  await enterEditMode();
+  await screen.findByRole("table", {
+    name: "Configuration fields",
+  });
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Save configuration",
+  }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "sourceClusters.logs-na.snapshotInfo.snapshots",
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent("expected record");
+  expect(screen.getByRole("alert")).not.toHaveTextContent(
+    "snapshotInfo: Invalid input",
+  );
+  const snapshotsRow = await screen.findByRole("row", {
+    name: /^Snapshots/,
+  });
+  await waitFor(() => {
+    expect(snapshotsRow).toHaveAttribute("aria-selected", "true");
+    expect(snapshotsRow).toHaveFocus();
+  });
+  expect(saveCalled).toBe(false);
 });
 
 

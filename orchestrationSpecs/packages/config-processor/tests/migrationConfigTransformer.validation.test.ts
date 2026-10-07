@@ -127,6 +127,36 @@ describe("MigrationConfigTransformer validation", () => {
     });
 
     it.each([
+        ["OS 2.19", "snapshots", "backups"],
+        ["SOLR 9.7.0", "backups", "snapshots"],
+    ])(
+        "reports the version-specific snapshotInfo collection through CLI validation for %s",
+        (version, expectedCollection, irrelevantCollection) => {
+            const config = cloneBaseConfig() as any;
+            config.sourceClusters.source1.version = version;
+            config.sourceClusters.source1.snapshotInfo = {
+                repos: config.sourceClusters.source1.snapshotInfo.repos,
+            };
+
+            expect(() => transformer.validateInput(config)).toThrow(
+                new RegExp(
+                    `expected record, received undefined at: `
+                    + `sourceClusters\\.source1\\.snapshotInfo\\.${expectedCollection}`,
+                ),
+            );
+            try {
+                transformer.validateInput(config);
+                throw new Error("Expected snapshotInfo validation to fail");
+            } catch (error) {
+                expect(String(error)).not.toContain(
+                    `snapshotInfo.${irrelevantCollection}`,
+                );
+                expect(String(error)).not.toMatch(/snapshotInfo(?:\\b|:).*Invalid input/);
+            }
+        },
+    );
+
+    it.each([
         { globalValue: undefined, innerValue: undefined, expectedValue: false, expectedBeginValue: false, },
         { globalValue: undefined, innerValue: false, expectedValue: false, expectedBeginValue: false, },
         { globalValue: undefined, innerValue: true, expectedValue: true, expectedBeginValue: true, },
