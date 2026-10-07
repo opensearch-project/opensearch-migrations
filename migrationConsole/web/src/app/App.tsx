@@ -1594,13 +1594,7 @@ function ManageApp() {
               </button>
             </section>
           ) : null}
-          {!editContext && displayedState.rootIds.length === 0 ? (
-            <main className="empty-state">
-              <Activity aria-hidden="true" />
-              <h2>No migration resources found</h2>
-            </main>
-          ) : (
-            <main className="manage-layout">
+          <main className="manage-layout">
               <section
                 aria-label="Resource navigation"
                 className={`tree-panel ${treeOpen ? "open" : ""}`}
@@ -1730,6 +1724,11 @@ function ManageApp() {
                     }
                   />
                 </Suspense>
+              ) : displayedState.rootIds.length === 0 ? (
+                <section className="workspace empty-state">
+                  <Activity aria-hidden="true" />
+                  <h2>No migration resources found</h2>
+                </section>
               ) : selectedNode ? (
                 <ResourceWorkspace
                   approvalGates={approvalGates.data?.gates ?? []}
@@ -1783,7 +1782,6 @@ function ManageApp() {
                 }
               />
             </main>
-          )}
         </>
       ) : null}
     </div>

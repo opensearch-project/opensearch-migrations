@@ -848,6 +848,61 @@ test("switches the resource overview between rollout snapshots", async () => {
 });
 
 
+test("keeps navigation available when a resource view has no matches", async () => {
+  const rolloutSnapshot = structuredClone(manageSnapshot);
+  Object.values(rolloutSnapshot.nodes)
+    .filter((node) => node.kind === "resource")
+    .forEach((node) => {
+      node.configPresence = {
+        deployed: false,
+        submitted: true,
+        pending: true,
+      };
+    });
+  server.use(
+    http.get(
+      "*/api/v1/manage/state",
+      () => HttpResponse.json(rolloutSnapshot),
+    ),
+  );
+  renderApp();
+
+  const views = await screen.findByRole("group", {
+    name: "Resource state view",
+  });
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  await userEvent.click(within(views).getByRole("button", {
+    name: "Deployed",
+  }));
+
+  expect(screen.getByRole("region", {
+    name: "Resource navigation",
+  })).toBeInTheDocument();
+  expect(tree).toBeInTheDocument();
+  expect(within(views).getByRole("button", {
+    name: "Saved config",
+  })).toBeInTheDocument();
+  expect(screen.getByRole("button", {
+    name: "Edit configuration",
+  })).toBeInTheDocument();
+  const emptyHeading = screen.getByRole("heading", {
+    name: "No migration resources found",
+  });
+  expect(emptyHeading.closest(".workspace")).not.toBeNull();
+  expect(document.querySelector(".manage-layout")).not.toBeNull();
+
+  await userEvent.click(within(views).getByRole("button", {
+    name: "Saved config",
+  }));
+  expect(screen.queryByRole("heading", {
+    name: "No migration resources found",
+  })).toBeNull();
+  expect(within(tree).getByRole("treeitem", {
+    name: /^capture, Ready$/,
+  })).toBeInTheDocument();
+});
+
+
 test("separates runtime state from configuration state in the resource tree", async () => {
   renderApp();
 
