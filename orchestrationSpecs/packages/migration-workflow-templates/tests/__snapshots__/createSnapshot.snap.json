@@ -111,16 +111,6 @@
               }
             },
             {
-              "name": "AWS_DEFAULT_REGION",
-              "valueFrom": {
-                "configMapKeyRef": {
-                  "name": "{{=((0 == len(sprig.dig('repoConfig', 's3SettingsConfigMapName', '', fromJSON(inputs.parameters.snapshotConfig)))) ? ('empty') : (sprig.dig('repoConfig', 's3SettingsConfigMapName', '', fromJSON(inputs.parameters.snapshotConfig))))}}",
-                  "key": "AWS_DEFAULT_REGION",
-                  "optional": true
-                }
-              }
-            },
-            {
               "name": "AWS_S3_ADDRESSING_STYLE",
               "valueFrom": {
                 "configMapKeyRef": {

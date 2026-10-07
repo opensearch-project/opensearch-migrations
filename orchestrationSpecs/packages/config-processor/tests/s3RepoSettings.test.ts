@@ -3,7 +3,7 @@ import {MigrationConfigTransformer, MigrationInitializer} from "../src";
 
 /**
  * S3 client settings for an s3:// snapshot repo reach migration pods through a per-repo ConfigMap
- * (endpoint, region, addressing style) and an optional credentials Secret. The ConfigMap must only
+ * (endpoint, addressing style) and an optional credentials Secret. The ConfigMap must only
  * carry keys that are set: an env var that is present but empty (e.g. AWS_ENDPOINT_URL_S3="") is read
  * by the AWS SDKs as an invalid endpoint rather than as "unset".
  */
@@ -48,7 +48,7 @@ async function bundleFor(repo: Record<string, unknown>) {
 }
 
 describe("S3 repo settings ConfigMap", () => {
-    it("carries endpoint, region, and addressing style for a custom S3 endpoint", async () => {
+    it("carries endpoint and addressing style, but not region, for a custom S3 endpoint", async () => {
         const bundle = await bundleFor({
             repoPathUri: "s3://solr-np/solr-backup",
             awsRegion: "us-east-1",
@@ -63,7 +63,6 @@ describe("S3 repo settings ConfigMap", () => {
             metadata: {name: "s3-repo-settings-solrsource-default"},
             data: {
                 AWS_ENDPOINT_URL_S3: "https://northamerica-1.object-storage.apple.com",
-                AWS_DEFAULT_REGION: "us-east-1",
                 AWS_S3_ADDRESSING_STYLE: "path",
             },
         }]);
@@ -83,7 +82,7 @@ describe("S3 repo settings ConfigMap", () => {
         });
 
         expect(bundle.s3RepoSettingsConfigMaps.items).toHaveLength(1);
-        expect(bundle.s3RepoSettingsConfigMaps.items[0].data).toEqual({AWS_DEFAULT_REGION: "us-east-2"});
+        expect(bundle.s3RepoSettingsConfigMaps.items[0].data).toEqual({});
         expect(bundle.workflows.snapshots[0].createSnapshotConfig[0].repo.s3CredentialsSecretName).toBe("");
     });
 

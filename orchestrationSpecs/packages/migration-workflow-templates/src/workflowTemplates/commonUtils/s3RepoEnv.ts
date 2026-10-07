@@ -24,7 +24,7 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {emptySecretName} from "./basicCredsGetters";
 
-export const S3_REPO_SETTINGS_KEYS = ["AWS_ENDPOINT_URL_S3", "AWS_DEFAULT_REGION", "AWS_S3_ADDRESSING_STYLE"] as const;
+export const S3_REPO_SETTINGS_KEYS = ["AWS_ENDPOINT_URL_S3", "AWS_S3_ADDRESSING_STYLE"] as const;
 export const S3_REPO_CREDENTIALS_VOLUME_NAME = "s3-repo-credentials";
 export const S3_REPO_CREDENTIALS_MOUNT_PATH = "/config/s3-repo-credentials";
 const S3_REPO_CREDENTIALS_DIR_ENV_VAR = "S3_REPO_CREDENTIALS_DIR";
@@ -40,7 +40,6 @@ export function getS3RepoEnvVars(settingsConfigMapNameOrEmpty: AllowLiteralOrExp
     return {
         [S3_REPO_CREDENTIALS_DIR_ENV_VAR]: expr.literal(S3_REPO_CREDENTIALS_MOUNT_PATH),
         AWS_ENDPOINT_URL_S3: setting("AWS_ENDPOINT_URL_S3"),
-        AWS_DEFAULT_REGION: setting("AWS_DEFAULT_REGION"),
         AWS_S3_ADDRESSING_STYLE: setting("AWS_S3_ADDRESSING_STYLE"),
     } as const;
 }

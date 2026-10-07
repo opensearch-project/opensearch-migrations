@@ -32,8 +32,7 @@ export function crdName(...labels: string[]): string {
 
 /**
  * Name of the ConfigMap the initializer creates for an s3:// snapshot repo. It carries only the
- * S3 client settings the user actually set (AWS_ENDPOINT_URL_S3, AWS_DEFAULT_REGION,
- * AWS_S3_ADDRESSING_STYLE); pods reference each key as an optional configMapKeyRef, so an unset
+ * S3 client settings the user actually set (AWS_ENDPOINT_URL_S3, AWS_S3_ADDRESSING_STYLE); pods reference each key as an optional configMapKeyRef, so an unset
  * setting leaves the env var absent instead of empty.
  */
 export function s3RepoSettingsConfigMapName(sourceLabel: string, repoName: string): string {

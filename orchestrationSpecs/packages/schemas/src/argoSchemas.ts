@@ -155,7 +155,7 @@ export const DENORMALIZED_REPO_CONFIG =
         useLocalStack: z.boolean().default(false),
         repoName: z.string(),
         // Set by the config transformer for s3:// repos: the ConfigMap holding this repo's
-        // AWS_ENDPOINT_URL_S3 / AWS_DEFAULT_REGION / AWS_S3_ADDRESSING_STYLE (only the keys that are set).
+        // AWS_ENDPOINT_URL_S3 / AWS_S3_ADDRESSING_STYLE (only the keys that are set).
         s3SettingsConfigMapName: z.string().default(""),
     }));
 

@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.function.UnaryOperator;
 
 import org.opensearch.migrations.aws.S3RepoCredentials;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
@@ -98,9 +99,14 @@ public class S3Repo implements SourceRepo, AutoCloseable {
     }
 
     private static S3AsyncClient buildS3Client(String s3Region, URI s3Endpoint) {
+        return buildS3Client(s3Region, s3Endpoint, System::getenv);
+    }
+
+    /** @param env environment lookup for the S3 repo credentials and addressing style settings */
+    static S3AsyncClient buildS3Client(String s3Region, URI s3Endpoint, UnaryOperator<String> env) {
         return S3AsyncClient.crtBuilder()
             .region(Region.of(s3Region))
-            .credentialsProvider(S3RepoCredentials.provider())
+            .credentialsProvider(S3RepoCredentials.provider(env))
             .retryConfiguration(r -> r.numRetries(3))
             .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
             .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
@@ -109,7 +115,7 @@ public class S3Repo implements SourceRepo, AutoCloseable {
             // Custom S3-compatible endpoints generally can't resolve virtual-hosted bucket names
             // (bucket.host), so default to path-style whenever an endpoint override is set, unless
             // the repo's AWS_S3_ADDRESSING_STYLE says otherwise. This matches CreateSnapshot.
-            .forcePathStyle(S3AddressingStyle.forcePathStyle(s3Endpoint != null))
+            .forcePathStyle(S3AddressingStyle.forcePathStyle(s3Endpoint != null, env))
             .build();
     }
 

@@ -192,14 +192,20 @@ export const REPO_CONFIG = z.object({
             "The Secret name is read when each pod starts and is not part of config change detection: changing " +
             "it does not update running snapshots or migrations. To rotate credentials, update the keys in the " +
             "same Secret; running pods pick up the new keys within a few minutes, without a restart. Keep the " +
-            "old keys valid until then. Used for s3:// URIs only; ignored for gs://."),
+            "old keys valid until then. Used for s3:// URIs only; ignored for gs://. " +
+            "These keys are only used by the migration tools' own S3 clients. The source cluster writes the " +
+            "snapshot itself and never receives them, so it needs its own credentials for the store (e.g. " +
+            "s3.client.default.access_key/secret_key in the OpenSearch/Elasticsearch keystore)."),
     s3AddressingStyle: z.enum(["", "path", "virtual"]).default("").optional()
         .describe("S3 bucket addressing style exported to migration pods as AWS_S3_ADDRESSING_STYLE. " +
             "'path' (bucket in the URL path) is required by most S3-compatible stores; 'virtual' uses " +
             "bucket.host. Empty keeps each tool's default (path-style whenever 'endpoint' is set). " +
             "Read when each pod starts and not part of config change detection: changing it does not update " +
             "running snapshots or migrations, so set it before the first run. " +
-            "Used for s3:// URIs only; ignored for gs://.")
+            "Used for s3:// URIs only; ignored for gs://. " +
+            "Only the migration tools' own S3 clients use it; it is not passed to the source cluster, which " +
+            "writes the snapshot itself and needs its own path-style setting for the store (e.g. " +
+            "s3.client.default.path_style_access for OpenSearch/Elasticsearch).")
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
     "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +

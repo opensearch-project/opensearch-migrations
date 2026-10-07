@@ -34,7 +34,8 @@ public class S3RepoCredentials {
         return provider(System::getenv);
     }
 
-    static AwsCredentialsProvider provider(UnaryOperator<String> env) {
+    /** Same as {@link #provider()}, reading the environment through {@code env}. */
+    public static AwsCredentialsProvider provider(UnaryOperator<String> env) {
         var dirValue = env.apply(CREDENTIALS_DIR_ENV_VAR);
         if (dirValue == null || dirValue.isBlank()) {
             return DefaultCredentialsProvider.builder().build();

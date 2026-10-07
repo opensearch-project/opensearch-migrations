@@ -314,7 +314,9 @@ export class MigrationInitializer {
     /**
      * One ConfigMap per s3:// snapshot repo with the S3 client env vars the repo sets. Keys whose
      * value is empty are left out: pods read each key through an optional configMapKeyRef, and an
-     * env var that is present but empty (e.g. AWS_ENDPOINT_URL_S3="") breaks the AWS SDKs.
+     * env var that is present but empty (e.g. AWS_ENDPOINT_URL_S3="") breaks the AWS SDKs. The region
+     * is not included: the Java S3 clients take it from --s3-region, and Java SDK v2 doesn't read
+     * AWS_DEFAULT_REGION anyway.
      */
     private generateS3RepoSettingsConfigMaps(workflows: WorkflowConfig) {
         type Repo = SnapshotItemConfig["repo"];
@@ -331,7 +333,6 @@ export class MigrationInitializer {
             }
             const data: Record<string, string> = {};
             if (repo.endpoint) data.AWS_ENDPOINT_URL_S3 = repo.endpoint;
-            if (repo.awsRegion) data.AWS_DEFAULT_REGION = repo.awsRegion;
             if (repo.s3AddressingStyle) data.AWS_S3_ADDRESSING_STYLE = repo.s3AddressingStyle;
             byName.set(repo.s3SettingsConfigMapName, data);
         }
