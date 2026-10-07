@@ -4324,6 +4324,38 @@ test("repairs raw YAML and returns to the structured editor", async () => {
   expect(screen.queryByRole("textbox", { name: "Workflow YAML" })).toBeNull();
 });
 
+test("raw repair identifies and selects an unmapped configuration path", async () => {
+  const rawYaml = [
+    "sourceClusters: {}",
+    "targetClusters: {}",
+    "snapshotMigrationConfigs: []",
+    "kafkaClusterConfiguration:",
+    "  default:",
+    "    autoCreate: {}",
+    "",
+  ].join("\n");
+  const projection = projectConfigYaml(rawYaml);
+  const draft: ConfigDraft = {
+    ...structuredClone(configDraft),
+    rawYaml,
+    editState: projection.editState,
+  };
+  renderApp(draft);
+  await enterEditMode();
+
+  const yaml = await screen.findByRole("textbox", { name: "Workflow YAML" });
+  const diagnostic = screen.getByRole("button", {
+    name: /kafkaClusterConfiguration.*Unrecognized key/,
+  });
+  await userEvent.click(diagnostic);
+
+  expect(yaml).toHaveFocus();
+  expect((yaml as HTMLTextAreaElement).value.slice(
+    (yaml as HTMLTextAreaElement).selectionStart,
+    (yaml as HTMLTextAreaElement).selectionEnd,
+  )).toContain("kafkaClusterConfiguration");
+});
+
 
 test("opens raw repair when runtime and configuration navigation are empty", async () => {
   const emptySnapshot = structuredClone(manageSnapshot);

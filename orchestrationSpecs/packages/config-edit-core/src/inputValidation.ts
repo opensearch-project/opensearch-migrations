@@ -133,6 +133,22 @@ export function actionableZodIssues(
         if (issue.message !== "Invalid input") {
             return [issue];
         }
+        const unionValue = valueAtPath(config, issue.path);
+        if (
+            issue.path.length === 3
+            && issue.path[0] === "traffic"
+            && issue.path[1] === "kafkaClusters"
+            && typeof unionValue === "object"
+            && unionValue !== null
+            && "existing" in unionValue
+            && "autoCreate" in unionValue
+        ) {
+            return [{
+                ...issue,
+                code: "custom",
+                message: "Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate'",
+            } as z.core.$ZodIssue];
+        }
         const branches = ((issue as any).errors ?? []) as z.core.$ZodIssue[][];
         const candidates = branches.map(branch => actionableZodIssues(
             branch.map(child => ({
@@ -153,14 +169,31 @@ export function actionableZodIssues(
             .map(branch => ({
                 branch,
                 presentValues: branch.filter(candidate =>
-                    hasValueAtPath(config, candidate.path)).length,
+                    !/^Unrecognized key\b/.test(candidate.message)
+                    && hasValueAtPath(config, candidate.path)).length,
+                rejectedPresentValues: branch.filter(candidate =>
+                    /^Unrecognized key\b/.test(candidate.message)
+                    && hasValueAtPath(config, candidate.path)).length,
             }))
             .sort((left, right) =>
                 right.presentValues - left.presentValues
+                || left.rejectedPresentValues - right.rejectedPresentValues
                 || left.branch.length - right.branch.length);
         if (
-            ranked[0]?.presentValues
-            && ranked[0].presentValues > (ranked[1]?.presentValues ?? -1)
+            ranked[0]
+            && (
+                ranked[0].presentValues > (ranked[1]?.presentValues ?? -1)
+                || (
+                    ranked[0].presentValues === (ranked[1]?.presentValues ?? -1)
+                    && ranked[0].rejectedPresentValues
+                        < (ranked[1]?.rejectedPresentValues ?? Number.MAX_SAFE_INTEGER)
+                )
+            )
+            && (
+                ranked[0].presentValues > 0
+                || ranked[0].rejectedPresentValues
+                    < (ranked[1]?.rejectedPresentValues ?? Number.MAX_SAFE_INTEGER)
+            )
         ) {
             return ranked[0].branch;
         }

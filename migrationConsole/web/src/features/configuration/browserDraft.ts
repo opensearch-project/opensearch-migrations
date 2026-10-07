@@ -111,7 +111,9 @@ export function applyBrowserEditOperation(
     draftRevision: nextRevision(draft.persistedRevision),
     dirty: result.yaml !== draft.savedRawDocument,
     editState,
-    rawYaml: undefined,
+    rawYaml: result.editState.provenance.mode === "raw"
+      ? result.yaml
+      : undefined,
     notices: [],
     config,
     rawDocument: result.yaml,

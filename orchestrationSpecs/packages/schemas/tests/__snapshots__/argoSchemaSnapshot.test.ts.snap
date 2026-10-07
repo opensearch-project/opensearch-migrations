@@ -8457,6 +8457,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "required": [
                   "existing"
                 ],
+                "additionalProperties": false,
                 "description": "Use an existing Kafka cluster by providing connection details."
               },
               {
@@ -8552,6 +8553,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     }
                   }
                 },
+                "additionalProperties": false,
                 "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
               }
             ],

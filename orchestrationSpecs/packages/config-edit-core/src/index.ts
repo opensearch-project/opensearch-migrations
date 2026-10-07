@@ -45,6 +45,9 @@ export {
     stripComments,
 } from "./inputValidation";
 export {
+    validateNoExtraConfigKeys,
+} from "./extraKeyValidation";
+export {
     DEFAULT_AUTO_CREATE_CONFIG,
     DEFAULT_KAFKA_CLUSTER_NAME,
     KAFKA_VERSION,

@@ -1180,12 +1180,34 @@ function configShapeSupportsStructuredEdit(config: unknown): boolean {
 function validationRequiresRawRepair(
     config: unknown,
     validation: EditStateV1["validation"],
+    nodes: EditNode[],
 ): boolean {
     if (!configShapeSupportsStructuredEdit(config)) {
         return true;
     }
-    return (validation.diagnostics ?? []).some(diagnostic =>
-        diagnostic.message.startsWith("Unrecognized key "));
+    const editablePaths: string[][] = [];
+    const visit = (node: EditNode): void => {
+        if (node.valueKind !== "command") {
+            editablePaths.push(node.path);
+        }
+        (node.children ?? []).forEach(visit);
+    };
+    nodes.forEach(visit);
+    return (validation.diagnostics ?? []).some(diagnostic => {
+        if (
+            diagnostic.severity !== "error"
+            && diagnostic.severity !== "required"
+        ) {
+            return false;
+        }
+        if (/^Unrecognized key\b/.test(diagnostic.message)) {
+            return true;
+        }
+        const diagnosticPath = diagnostic.path ?? [];
+        return !editablePaths.some(path =>
+            path.length <= diagnosticPath.length
+            && path.every((part, index) => part === diagnosticPath[index]));
+    });
 }
 
 export function validationForConfig(
@@ -1241,13 +1263,14 @@ export function buildEditStateFromObjectWithValidation(
     validation: EditStateV1["validation"],
     options: ConfigEditCoreOptions = {},
 ): EditStateV1 {
-    if (validationRequiresRawRepair(config, validation)) {
+    const structuredState = buildEditStateFromObject(config, validation, options);
+    if (validationRequiresRawRepair(config, validation, structuredState.nodes)) {
         return rawRepairState(
             validation,
-            "The saved YAML contains structures that cannot be represented safely by the form editor.",
+            "The saved YAML contains an error that cannot be located safely in the form editor.",
         );
     }
-    return buildEditStateFromObject(config, validation, options);
+    return structuredState;
 }
 
 function editNodesByPath(editState: EditStateV1): Map<string, EditNode> {
@@ -2064,9 +2087,14 @@ export function applyEditOperationToObject(
 ): EditApplyResultV1 {
     const nextConfig = applyEditOperation(config, operation, options);
     const yaml = stringify(nextConfig);
+    const validation = validationForConfig(nextConfig, options);
     return {
         formatVersion: 1,
         yaml,
-        editState: buildEditStateFromObject(nextConfig, undefined, options),
+        editState: buildEditStateFromObjectWithValidation(
+            nextConfig,
+            validation,
+            options,
+        ),
     };
 }

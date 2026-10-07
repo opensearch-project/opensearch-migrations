@@ -82,10 +82,15 @@ export function applyEditOperationToObject(
     operation: EditOperation,
 ): EditApplyResultV1 {
     const nextConfig = applyEditOperation(config, operation);
+    const validation = validationForConfig(nextConfig);
     return {
         formatVersion: 1,
         yaml: stringify(nextConfig),
-        editState: buildEditStateFromObject(nextConfig),
+        editState: buildEditStateFromObjectWithValidation(
+            nextConfig,
+            validation,
+            coreOptions(),
+        ),
     };
 }
 

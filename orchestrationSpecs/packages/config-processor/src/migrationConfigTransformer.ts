@@ -5,7 +5,6 @@ import {
     DENORMALIZED_REPO_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
-    normalizeLegacySnapshotMigrationSlices,
     REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD,
     USER_SNAPSHOT_MIGRATION_SLICE_CONFIG,
@@ -19,9 +18,9 @@ import {
     ARGO_PROXY_OPTIONS,
     TRANSFORM_PIPELINE,
     TRANSFORM_CONTEXT_VALUE,
-    unwrapSchema as unwrapSchemaWithPipes,
     DEPLOYMENT_DEFAULTS_CONFIG,
 } from '@opensearch-migrations/schemas';
+import {validateNoExtraConfigKeys} from "@opensearch-migrations/config-edit-core";
 import {InputValidationElement, InputValidationError, StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
@@ -169,127 +168,6 @@ export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
 
 function makeProxyServiceEndpoint(proxyName: string, listenPort: number, hasTls: boolean): string {
     return `${hasTls ? "https" : "http"}://${proxyName}:${listenPort}`;
-}
-
-function extraKeysError(path: string[], extraKeys: string[]): InputValidationError {
-    return new InputValidationError(extraKeys.map(key =>
-        new InputValidationElement(
-            [...path, key],
-            `Unrecognized key '${key}'`
-        )
-    ));
-}
-
-function kafkaClusterUnionError(path: string[]): InputValidationError {
-    return new InputValidationError([
-        new InputValidationElement(
-            path,
-            "Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate'"
-        ),
-    ]);
-}
-
-function isKafkaClusterConfigPath(path: string[]): boolean {
-    return path.length === 3 && path[0] === "traffic" && path[1] === "kafkaClusters";
-}
-
-function schemaDef(schema: z.ZodTypeAny): any {
-    return (schema as any)._def ?? {};
-}
-
-function schemaType(schema: z.ZodTypeAny): string {
-    return schemaDef(schema).type ?? schema.constructor.name;
-}
-
-function unwrapTransparentSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
-    let current: z.ZodTypeAny = unwrapSchemaWithPipes(schema);
-    while (true) {
-        const currentType = schemaType(current);
-        const def = schemaDef(current);
-        if (currentType === "catch" || currentType === "readonly") {
-            current = typeof (current as any).unwrap === "function"
-                ? (current as any).unwrap()
-                : def.innerType;
-            current = unwrapSchemaWithPipes(current);
-            continue;
-        }
-        if (currentType === "lazy" && typeof def.getter === "function") {
-            current = unwrapSchemaWithPipes(def.getter());
-            continue;
-        }
-        return current;
-    }
-}
-
-function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = []): void {
-    schema = unwrapTransparentSchema(schema);
-    const schemaTypeName = schema.constructor.name;
-    const schemaTypeDef = schemaType(schema);
-    
-    if (schemaTypeName === 'ZodObject' || schemaTypeDef === "object") {
-        if (typeof data !== 'object' || data === null) return;
-        
-        const allowedKeys = Object.keys((schema as z.ZodObject<any>).shape);
-        const actualKeys = Object.keys(data);
-        const extraKeys = actualKeys.filter(key => !allowedKeys.includes(key));
-        
-        if (extraKeys.length > 0) {
-            throw extraKeysError(path, extraKeys);
-        }
-        
-        // Recursively validate nested objects
-        for (const key of allowedKeys) {
-            if (data[key] !== undefined) {
-                validateNoExtraKeys(data[key], (schema as z.ZodObject<any>).shape[key], [...path, key]);
-            }
-        }
-    } else if ((schemaTypeName === 'ZodArray' || schemaTypeDef === "array") && Array.isArray(data)) {
-        data.forEach((item, index) => {
-            validateNoExtraKeys(item, (schema as z.ZodArray<any>).element, [...path, index.toString()]);
-        });
-    } else if ((schemaTypeName === 'ZodUnion' || schemaTypeDef === "union") && data !== null && data !== undefined) {
-        // For unions, we need to manually check which option matches AND validate extra keys
-        let foundValidMatch = false;
-        let extraKeyError: InputValidationError | null = null;
-        let parseError: Error | null = null;
-        if (
-            isKafkaClusterConfigPath(path) &&
-            typeof data === "object" &&
-            "existing" in data &&
-            "autoCreate" in data
-        ) {
-            throw kafkaClusterUnionError(path);
-        }
-        
-        for (const option of (schema as z.ZodUnion<any>).options) {
-            try {
-                // First check if this option would parse the data
-                option.parse(data);
-                // If it parses, this could be the matching option
-                // Now validate it recursively for extra keys
-                validateNoExtraKeys(data, option, path);
-                foundValidMatch = true;
-                break; // Found a valid match, no need to check other options
-            } catch (e) {
-                if (e instanceof InputValidationError) {
-                    extraKeyError = e;
-                } else {
-                    parseError = e as Error;
-                }
-                // Continue to next option
-            }
-        }
-        
-        if (!foundValidMatch) {
-            // Prioritize extra key errors over parse errors
-            throw extraKeyError || parseError || new Error('No valid union option found');
-        }
-    } else if ((schemaTypeName === 'ZodRecord' || schemaTypeDef === "record") && typeof data === 'object' && data !== null) {
-        const valueType = (schema as any).valueType ?? schemaDef(schema).valueType;
-        Object.entries(data).forEach(([key, value]) => {
-            validateNoExtraKeys(value, valueType, [...path, key]);
-        });
-    }
 }
 
 function defaultProxyTlsConfig(proxyName: string) {
@@ -942,10 +820,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         validateInputAgainstUnifiedSchema(validationNormalized);
 
         // Third pass: check for extra keys
-        validateNoExtraKeys(
-            normalizeLegacySnapshotMigrationSlices(data),
-            OVERALL_MIGRATION_CONFIG,
-        );
+        validateNoExtraConfigKeys(data, OVERALL_MIGRATION_CONFIG);
 
         return normalizeUserConfig(parsed);
     }

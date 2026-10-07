@@ -49,6 +49,54 @@ function isKafkaClusterConfigPath(path: string[]): boolean {
     return path.length === 3 && path[0] === "traffic" && path[1] === "kafkaClusters";
 }
 
+function objectShape(schema: z.ZodTypeAny): Record<string, z.ZodTypeAny> | undefined {
+    const unwrapped = unwrapTransparentSchema(schema);
+    const typeName = unwrapped.constructor.name;
+    const typeDefinition = schemaType(unwrapped);
+    if (typeName !== "ZodObject" && typeDefinition !== "object") {
+        return undefined;
+    }
+    return (unwrapped as z.ZodObject<any>).shape as Record<string, z.ZodTypeAny>;
+}
+
+function selectObjectUnionOption(
+    data: Record<string, unknown>,
+    options: readonly z.ZodTypeAny[],
+): z.ZodTypeAny | undefined {
+    const dataKeys = Object.keys(data);
+    const ranked = options.flatMap((option, index) => {
+        const shape = objectShape(option);
+        if (!shape) {
+            return [];
+        }
+        const allowedKeys = new Set(Object.keys(shape));
+        const unrecognizedKeys = dataKeys.filter(key => !allowedKeys.has(key)).length;
+        return [{
+            option,
+            index,
+            unrecognizedKeys,
+            recognizedKeys: dataKeys.length - unrecognizedKeys,
+        }];
+    }).sort((left, right) =>
+        left.unrecognizedKeys - right.unrecognizedKeys
+        || right.recognizedKeys - left.recognizedKeys
+        || left.index - right.index);
+
+    const best = ranked[0];
+    const runnerUp = ranked[1];
+    if (
+        !best
+        || (
+            runnerUp
+            && best.unrecognizedKeys === runnerUp.unrecognizedKeys
+            && best.recognizedKeys === runnerUp.recognizedKeys
+        )
+    ) {
+        return undefined;
+    }
+    return best.option;
+}
+
 function validateNoExtraKeys(data: unknown, inputSchema: z.ZodTypeAny, path: string[] = []): void {
     const schema = unwrapTransparentSchema(inputSchema);
     const typeName = schema.constructor.name;
@@ -84,9 +132,20 @@ function validateNoExtraKeys(data: unknown, inputSchema: z.ZodTypeAny, path: str
         ) {
             throw kafkaClusterUnionError(path);
         }
+        const options = (schema as z.ZodUnion<any>).options as readonly z.ZodTypeAny[];
+        if (typeof data === "object" && !Array.isArray(data)) {
+            const selectedOption = selectObjectUnionOption(
+                data as Record<string, unknown>,
+                options,
+            );
+            if (selectedOption) {
+                validateNoExtraKeys(data, selectedOption, path);
+                return;
+            }
+        }
         let extraKeyError: InputValidationError | undefined;
         let parseError: Error | undefined;
-        for (const option of (schema as z.ZodUnion<any>).options) {
+        for (const option of options) {
             try {
                 option.parse(data);
                 validateNoExtraKeys(data, option, path);

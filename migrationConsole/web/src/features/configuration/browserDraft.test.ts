@@ -223,6 +223,37 @@ traffic:
     expect(reverted.rawDocument).toBe(document.rawYaml);
   });
 
+  it("preserves an edited document when an unmapped error requires raw repair", () => {
+    const legacyDocument: ConfigurationDocument = {
+      modelVersion: "1",
+      persistedRevision: "legacy-1",
+      rawYaml: `
+sourceClusters:
+  source:
+    endpoint: https://source.example.com:9200
+    version: not-a-version
+targetClusters: {}
+snapshotMigrationConfigs: []
+kafkaClusterConfiguration:
+  default:
+    autoCreate: {}
+`,
+    };
+    const draft = createBrowserConfigDraft(legacyDocument);
+    expect(draft.editState.provenance.mode).toBe("structured");
+
+    const repairedField = applyBrowserEditOperation(draft, {
+      op: "set",
+      path: ["sourceClusters", "source", "version"],
+      value: "OS 2.19",
+    });
+
+    expect(repairedField.editState.provenance.mode).toBe("raw");
+    expect(repairedField.rawYaml).toBe(repairedField.rawDocument);
+    expect(repairedField.rawDocument).toContain("version: OS 2.19");
+    expect(repairedField.rawDocument).toContain("kafkaClusterConfiguration:");
+  });
+
   it("retains dirty local work when its saved base changes remotely", () => {
     const draft = applyBrowserEditOperation(
       createBrowserConfigDraft(document),

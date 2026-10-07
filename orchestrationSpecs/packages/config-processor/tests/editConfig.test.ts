@@ -4100,6 +4100,75 @@ describe("editConfig state", () => {
         expect(state.validation.valid).toBe(false);
     });
 
+    it("opens unmapped configuration errors directly in raw repair", async () => {
+        const state = await buildEditStateFromObjectForSubmit({
+            sourceClusters: {},
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+            kafkaClusterConfiguration: {
+                default: {autoCreate: {}},
+            },
+        });
+
+        expect(state.provenance).toMatchObject({
+            lossy: true,
+            mode: "raw",
+        });
+        expect(state.nodes).toEqual([]);
+        expect(state.validation.diagnostics).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    severity: "error",
+                    path: ["kafkaClusterConfiguration"],
+                    message: expect.stringContaining("Unrecognized key"),
+                }),
+            ]),
+        );
+    });
+
+    it("switches an edited draft to raw repair when the remaining error has no editable node", () => {
+        const result = applyEditOperationToObject({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "not-a-version",
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+            kafkaClusterConfiguration: {
+                default: {autoCreate: {}},
+            },
+        }, {
+            op: "set",
+            path: ["sourceClusters", "source", "version"],
+            value: "OS 2.19",
+        });
+
+        expect(result.editState.provenance).toMatchObject({
+            lossy: true,
+            mode: "raw",
+        });
+        expect(result.editState.nodes).toEqual([]);
+        expect(result.editState.validation.diagnostics).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    severity: "error",
+                    path: ["kafkaClusterConfiguration"],
+                    message: expect.stringContaining("Unrecognized key"),
+                }),
+            ]),
+        );
+        expect(parse(result.yaml)).toMatchObject({
+            sourceClusters: {
+                source: {version: "OS 2.19"},
+            },
+            kafkaClusterConfiguration: {
+                default: {autoCreate: {}},
+            },
+        });
+    });
+
     it.each([
         ["top-level null", null],
         ["top-level scalar", "not-a-workflow"],

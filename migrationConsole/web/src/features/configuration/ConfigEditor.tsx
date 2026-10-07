@@ -10,6 +10,13 @@ import {
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  isMap,
+  isScalar,
+  isSeq,
+  parseDocument,
+  type ParsedNode,
+} from "yaml";
+import {
   AlertTriangle,
   ArrowLeft,
   Check,
@@ -769,6 +776,53 @@ function firstBlockingDiagnostic(
       diagnostic.severity,
     )
   )) ?? null;
+}
+
+function yamlRangeForPath(
+  rawYaml: string,
+  path: string[] | undefined,
+): { start: number; end: number } | null {
+  if (!path?.length) return null;
+  const document = parseDocument(rawYaml);
+  let node: ParsedNode | null = document.contents;
+  for (let index = 0; index < path.length; index += 1) {
+    const part = path[index];
+    const last = index === path.length - 1;
+    if (isMap(node)) {
+      const pair = node.items.find((item) => (
+        isScalar(item.key) && String(item.key.value) === part
+      ));
+      if (!pair) return null;
+      if (last) {
+        const keyRange = pair.key?.range;
+        const valueRange = pair.value?.range;
+        const start = keyRange?.[0] ?? valueRange?.[0];
+        const end = valueRange?.[1] ?? keyRange?.[1];
+        return typeof start === "number" && typeof end === "number"
+          ? { start, end }
+          : null;
+      }
+      node = pair.value;
+      continue;
+    }
+    if (isSeq(node)) {
+      const itemIndex = Number(part);
+      if (
+        !Number.isInteger(itemIndex)
+        || !node.items[itemIndex]
+      ) return null;
+      node = node.items[itemIndex];
+      if (last) {
+        const range = node.range;
+        return range
+          ? { start: range[0], end: range[1] }
+          : null;
+      }
+      continue;
+    }
+    return null;
+  }
+  return null;
 }
 
 
@@ -2354,6 +2408,7 @@ export function ConfigEditor({
   const pendingScrollTop = useRef<number | null>(null);
   const pendingCommit = useRef<Promise<boolean> | null>(null);
   const pendingValidationFocusId = useRef<string | null>(null);
+  const rawYamlTextarea = useRef<HTMLTextAreaElement>(null);
   const pendingRowAnchor = useRef<{
     nodeId: string;
     top: number;
@@ -3244,9 +3299,9 @@ export function ConfigEditor({
     );
     (control ?? row).focus();
   }, [rows, scrollToRow]);
-  const focusValidationDiagnostic = (diagnostic: EditDiagnostic) => {
+  const focusValidationDiagnostic = (diagnostic: EditDiagnostic): boolean => {
     const targetNode = diagnosticTargetNode(nodes, diagnostic);
-    if (!targetNode) return;
+    if (!targetNode) return false;
     const ancestorIds = new Set<string>();
     let ancestor = findParent(nodes, targetNode.id);
     while (ancestor) {
@@ -3266,6 +3321,16 @@ export function ConfigEditor({
       onNavigateEditTarget(surface?.targetId ?? targetNode.id);
     } else {
       setSelectedId(targetNode.id);
+    }
+    return true;
+  };
+  const focusRawDiagnostic = (diagnostic: EditDiagnostic) => {
+    const textarea = rawYamlTextarea.current;
+    if (!textarea) return;
+    const range = yamlRangeForPath(rawYamlText, diagnostic.path);
+    textarea.focus();
+    if (range) {
+      textarea.setSelectionRange(range.start, range.end);
     }
   };
   useEffect(() => {
@@ -3446,11 +3511,26 @@ export function ConfigEditor({
       );
       if (validationDiagnostic) {
         const path = validationDiagnostic.path?.join(".");
+        if (!focusValidationDiagnostic(validationDiagnostic)) {
+          const repairDraft = replaceBrowserConfigYaml(
+            current,
+            current.rawDocument,
+          );
+          if (repairDraft.rawYaml !== undefined) {
+            queryClient.setQueryData(
+              BROWSER_CONFIG_DRAFT_QUERY_KEY,
+              repairDraft,
+            );
+            setRawYamlText(repairDraft.rawYaml);
+            setRawYamlDirty(false);
+            setProblem("");
+            return;
+          }
+        }
         setProblem(
           "Workflow configuration is not valid; fix "
           + `${path ? `${path}: ` : ""}${validationDiagnostic.message}`,
         );
-        focusValidationDiagnostic(validationDiagnostic);
         return;
       }
       try {
@@ -4069,16 +4149,29 @@ export function ConfigEditor({
               setRawYamlText(event.target.value);
               setRawYamlDirty(event.target.value !== draft.rawYaml);
             }}
+            ref={rawYamlTextarea}
             spellCheck={false}
             value={rawYamlText}
           />
           <div className="raw-config-diagnostics" role="alert">
             {(draft.editState.validation.diagnostics ?? []).map(
               (diagnostic, index) => (
-                <p key={`${diagnostic.message}:${index}`}>
+                <button
+                  className="raw-config-diagnostic"
+                  key={`${diagnostic.message}:${index}`}
+                  onClick={() => focusRawDiagnostic(diagnostic)}
+                  type="button"
+                >
                   <AlertTriangle aria-hidden="true" />
-                  <span>{diagnostic.message}</span>
-                </p>
+                  <span>
+                    <strong>
+                      {diagnostic.path?.length
+                        ? diagnostic.path.join(".")
+                        : "Workflow YAML"}
+                    </strong>
+                    <span>{diagnostic.message}</span>
+                  </span>
+                </button>
               ),
             )}
           </div>
