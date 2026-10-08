@@ -621,20 +621,52 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             sb.append(" partitions=").append(partitionToOffsetLifecycleTrackerMap.keySet());
             sb.append(" inflight=").append(inflight);
 
-            // Report commit head details from the first partition's tracker
+            // Report commit head details — find the oldest (most stuck) across all partitions
+            Duration worstAge = Duration.ZERO;
+            int totalQueueSize = 0;
+            for (var entry : partitionToOffsetLifecycleTrackerMap.entrySet()) {
+                totalQueueSize += entry.getValue().size();
+            }
+            // Find the single worst head across all partitions
+            int worstPartition = -1;
+            long worstOffset = -1;
+            String worstConn = null;
+            for (var entry : partitionToOffsetLifecycleTrackerMap.entrySet()) {
+                var tracker = entry.getValue();
+                var metaOp = tracker.peekHeadMetadata();
+                if (metaOp.isPresent()) {
+                    var age = Duration.between(metaOp.get().addedAt, clock.instant());
+                    if (age.compareTo(worstAge) > 0) {
+                        worstAge = age;
+                        worstPartition = entry.getKey();
+                        worstOffset = tracker.peekHeadOffset().orElse(-1L);
+                        worstConn = metaOp.get().connectionId;
+                    }
+                }
+            }
+            if (worstPartition >= 0) {
+                sb.append(" commitHead={partition=").append(worstPartition);
+                sb.append(", offset=").append(worstOffset);
+                sb.append(", conn=").append(worstConn);
+                sb.append(", age=").append(Utils.formatDurationInSeconds(worstAge));
+                sb.append("}");
+            }
+            // Also report the tail/highwater from first tracker for continuity
             partitionToOffsetLifecycleTrackerMap.values().stream().findFirst().ifPresent(tracker -> {
-                tracker.peekHeadOffset().ifPresent(headOffset -> {
-                    sb.append(" commitHead={offset=").append(headOffset);
-                    tracker.peekHeadMetadata().ifPresent(meta -> {
-                        sb.append(", conn=").append(meta.connectionId);
-                        var age = Duration.between(meta.addedAt, clock.instant());
-                        sb.append(", age=").append(Utils.formatDurationInSeconds(age));
-                    });
-                    sb.append("}");
-                });
                 sb.append(" commitTail=").append(tracker.getHighWatermark());
-                sb.append(" queueSize=").append(tracker.size());
             });
+            sb.append(" totalQueueSize=").append(totalQueueSize);
+
+            if (worstAge.toSeconds() > 120) {
+                heartbeatLogger.atWarn()
+                    .setMessage("COMMIT HEAD STUCK for {}s on partition {} offset {} conn={} — " +
+                        "this connection is blocking offset advancement for the entire consumer")
+                    .addArgument(worstAge.toSeconds())
+                    .addArgument(worstPartition)
+                    .addArgument(worstOffset)
+                    .addArgument(worstConn)
+                    .log();
+            }
 
             sb.append(" polls=").append(polls);
             sb.append(" emptyPolls=").append(emptyPolls);
