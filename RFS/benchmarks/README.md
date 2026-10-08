@@ -3,6 +3,8 @@
 `VersioningBenchmark` measures the cost of preserving Lucene `_version` using
 real OpenSearch shard files. It is opt-in, with no timing assertions in CI.
 The same benchmark source compiles against main before version preservation.
+See [measured results](RESULTS.md) for the mainline comparison and the native
+transformation and allocation analysis.
 
 ## Prepare inputs
 
