@@ -143,7 +143,10 @@ public class DocumentMigrationPipeline {
                                 partition,
                                 cumulativeOffset[0],
                                 result.docsInBatch(),
-                                result.bytesInBatch()
+                                result.bytesInBatch(),
+                                result.docsSucceeded(),
+                                result.docsFailed(),
+                                result.failedByType()
                             );
                         })
                         .doFinally(s -> activeBatches.decrementAndGet());

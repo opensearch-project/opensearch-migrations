@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -510,6 +511,19 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
+        return sendBulkRequest(indexName, docs, context, allowServerGeneratedIds, allowlist, null);
+    }
+
+    /**
+     * Same as {@link #sendBulkRequest(String, List, IRfsContexts.IRequestContext, boolean, DocumentExceptionAllowlist)},
+     * additionally recording each item's terminal outcome into {@code outcomes} (may be null).
+     */
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
+                                              IRfsContexts.IRequestContext context,
+                                              boolean allowServerGeneratedIds,
+                                              DocumentExceptionAllowlist allowlist,
+                                              BulkItemOutcomes outcomes)
+    {
         final var pendingDocs = new ArrayList<BulkOperationSpec>(docs);
         return executeBulkWithRetry(
             indexName,
@@ -520,9 +534,11 @@ public abstract class OpenSearchClient {
                 return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
             },
             pendingDocs,
+            pendingDocs::size,
             () -> {},
             context,
-            allowlist
+            allowlist,
+            outcomes
         );
     }
 
@@ -534,6 +550,18 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
+        return sendBulkRequestRaw(indexName, docs, context, allowServerGeneratedIds, allowlist, null);
+    }
+
+    /**
+     * Same as {@link #sendBulkRequestRaw(String, List, IRfsContexts.IRequestContext, boolean, DocumentExceptionAllowlist)},
+     * additionally recording each item's terminal outcome into {@code outcomes} (may be null).
+     */
+    public Mono<BulkResponse> sendBulkRequestRaw(String indexName, List<Document> docs,
+                                                  IRfsContexts.IRequestContext context,
+                                                  boolean allowServerGeneratedIds,
+                                                  DocumentExceptionAllowlist allowlist,
+                                                  BulkItemOutcomes outcomes) {
         final var pendingRawDocs = new ArrayList<>(docs);
         final var pendingOps = new ArrayList<BulkOperationSpec>();
 
@@ -559,9 +587,11 @@ public abstract class OpenSearchClient {
                 return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
             },
             pendingOps,
+            () -> pendingOps.isEmpty() ? pendingRawDocs.size() : pendingOps.size(),
             lazyConvert,
             context,
-            allowlist
+            allowlist,
+            outcomes
         );
     }
 
@@ -571,17 +601,22 @@ public abstract class OpenSearchClient {
      * @param indexName         target index
      * @param bodyBuilder       builds the NDJSON body bytes for each attempt
      * @param pendingOps        mutable list of pending operations (compacted on partial success)
+     * @param pendingItemCount  number of items in the request about to be sent (raw docs before lazy conversion)
      * @param preCompactHook    called before compaction to allow lazy initialization of pendingOps
      * @param context           request context for metrics
      * @param allowlist         exception types to treat as success
+     * @param outcomes          receives each item's terminal outcome; may be null
      */
+    @SuppressWarnings("java:S107")
     private Mono<BulkResponse> executeBulkWithRetry(
         String indexName,
         java.util.function.Supplier<byte[]> bodyBuilder,
         ArrayList<BulkOperationSpec> pendingOps,
+        IntSupplier pendingItemCount,
         Runnable preCompactHook,
         IRfsContexts.IRequestContext context,
-        DocumentExceptionAllowlist allowlist
+        DocumentExceptionAllowlist allowlist,
+        BulkItemOutcomes outcomes
     ) {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
 
@@ -592,6 +627,9 @@ public abstract class OpenSearchClient {
                     var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
 
                     if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
+                        if (outcomes != null) {
+                            outcomes.addSucceeded(pendingItemCount.getAsInt());
+                        }
                         return Mono.just(resp);
                     }
                     log.atInfo()
@@ -603,7 +641,7 @@ public abstract class OpenSearchClient {
                     // Allow lazy initialization of pendingOps (e.g., raw→ops conversion)
                     preCompactHook.run();
 
-                    int successCount = compactPendingDocs(indexName, pendingOps, resp, allowlist);
+                    int successCount = compactPendingDocs(indexName, pendingOps, resp, allowlist, outcomes);
 
                     if (pendingOps.isEmpty()) {
                         return Mono.just(resp);
@@ -673,7 +711,8 @@ public abstract class OpenSearchClient {
         String indexName,
         ArrayList<BulkOperationSpec> pendingDocs,
         BulkResponse resp,
-        DocumentExceptionAllowlist allowlist
+        DocumentExceptionAllowlist allowlist,
+        BulkItemOutcomes outcomes
     ) {
         ItemPartition partition = BulkResponseParser.partitionItems(resp.body, allowlist);
         if (partition == null) {
@@ -687,6 +726,9 @@ public abstract class OpenSearchClient {
                 ? pendingDocs.get(failure.getPosition())
                 : null;
             emitFailedDocumentStreamRecord(indexName, op, failure, FailureClass.NON_RETRYABLE);
+            if (outcomes != null) {
+                outcomes.addFailed(failure.getErrorType());
+            }
         }
 
         // Keep only retryable failures in pendingDocs, in original order.
@@ -701,7 +743,11 @@ public abstract class OpenSearchClient {
         int removed = pendingDocs.size() - writeIdx;
         pendingDocs.subList(writeIdx, pendingDocs.size()).clear();
         // removed = successes + non-retryable; return only the success count for the existing log line.
-        return removed - partition.getNonRetryableFailures().size();
+        int successCount = removed - partition.getNonRetryableFailures().size();
+        if (outcomes != null) {
+            outcomes.addSucceeded(successCount);
+        }
+        return successCount;
     }
 
     /**

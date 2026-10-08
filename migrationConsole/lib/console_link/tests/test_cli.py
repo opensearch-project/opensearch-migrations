@@ -1083,6 +1083,8 @@ def test_get_backfill_status_with_deep_check_as_json(runner, mocker):
         "shard_complete": 0,
         "shard_in_progress": 0,
         "shard_waiting": 0,
+        "docs_succeeded": 1000,
+        "docs_failed": 3,
     }
     mock_build_status = mocker.patch.object(
         ECSRFSBackfill,
@@ -1986,6 +1988,42 @@ def test_failed_document_stream_count_prints_count(runner, mocker):
                            catch_exceptions=False)
     assert result.exit_code == 0
     assert "7" in result.output
+
+
+def test_failed_document_stream_count_by_failure_type(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "count_by",
+                        return_value={"mapper_parsing_exception": 3000, "routing_missing_exception": 2000})
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'failed-document-stream', 'count',
+                                 '--by', 'failureType'], catch_exceptions=False)
+    assert result.exit_code == 0
+    lines = result.output.splitlines()
+    assert lines[0].split() == ["mapper_parsing_exception", "3000"]
+    assert lines[1].split() == ["routing_missing_exception", "2000"]
+    assert lines[-1].split() == ["total", "5000"]
+
+
+def test_failed_document_stream_count_by_failure_type_json(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "count_by",
+                        return_value={"mapper_parsing_exception": 3, "unknown": 1})
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), '--json', 'failed-document-stream',
+                                 'count', '--by', 'failureType'], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"by": "failureType",
+                                         "counts": {"mapper_parsing_exception": 3, "unknown": 1}, "total": 4}
+
+
+def test_failed_document_stream_count_json(runner, mocker):
+    mocker.patch.object(cli_module.failed_document_stream_, "load_config",
+                        return_value=_fake_failed_document_stream_cfg())
+    mocker.patch.object(cli_module.failed_document_stream_, "count", return_value=7)
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), '--json', 'failed-document-stream',
+                                 'count'], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"count": 7}
 
 
 def test_failed_document_stream_count_when_not_configured(runner, mocker):

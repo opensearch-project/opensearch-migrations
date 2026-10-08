@@ -627,6 +627,13 @@ def _format_number(value: Any) -> Optional[str]:
     return str(value)
 
 
+def _format_count(value: Any) -> Optional[str]:
+    """Exact integer rendering for document counts (`:g` would turn 1234567 into 1.23457e+06)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return f"{int(value):,}"
+
+
 def _format_snapshot_migration_backfill_status(status: Dict[str, Any]) -> Optional[str]:
     summary = status.get('summary') if isinstance(status.get('summary'), dict) else {}
     phase = status.get('phase') or status.get('status')
@@ -650,6 +657,13 @@ def _format_snapshot_migration_backfill_status(status: Dict[str, Any]) -> Option
     shards_waiting = _format_number(summary.get('shardsWaiting'))
     if shards_waiting is not None:
         details.append(f"waiting {shards_waiting}")
+
+    docs_succeeded = _format_count(summary.get('docsSucceeded'))
+    if docs_succeeded is not None:
+        details.append(f"docs succeeded {docs_succeeded}")
+    docs_failed = _format_count(summary.get('docsFailed'))
+    if docs_failed is not None:
+        details.append(f"docs failed {docs_failed}")
 
     parts = [str(phase)] if phase else []
     if details:

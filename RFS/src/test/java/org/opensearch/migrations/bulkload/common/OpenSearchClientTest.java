@@ -55,6 +55,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntry;
+import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
 import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryRetryableFailure;
 
 @ExtendWith(MockitoExtension.class)
@@ -235,6 +236,123 @@ class OpenSearchClientTest {
         verify(restClient, times(maxAttempts)).postAsyncBytes(any(), any(), any(), any());
         verify(failedRequestLogger).logBulkFailure(any(), any(), any(), any());
         verifyNoMoreInteractions(failedRequestLogger);
+    }
+
+    @Test
+    void testBulkRequest_outcomes_allSucceed() {
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("a"), itemEntry("b")))));
+
+        var outcomes = new BulkItemOutcomes();
+        openSearchClient.sendBulkRequest("idx", List.of(createBulkDoc("a"), createBulkDoc("b")),
+            mock(IRfsContexts.IRequestContext.class), false, DocumentExceptionAllowlist.empty(), outcomes).block();
+
+        assertThat(outcomes.getSucceeded(), equalTo(2L));
+        assertThat(outcomes.getFailed(), equalTo(0L));
+    }
+
+    @Test
+    void testBulkRequest_outcomes_countEachDocOnceAcrossRetries() {
+        var bothFail = bulkItemResponse(true, List.of(itemEntryRetryableFailure("a"), itemEntryRetryableFailure("b")));
+        var oneFails = bulkItemResponse(true, List.of(itemEntry("a"), itemEntryRetryableFailure("b")));
+        var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
+        var lastSucceeds = bulkItemResponse(false, List.of(itemEntry("b")));
+        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(bothFail))
+            .thenReturn(Mono.just(oneFails))
+            .thenReturn(Mono.just(server500))
+            .thenReturn(Mono.just(lastSucceeds));
+        doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+
+        var outcomes = new BulkItemOutcomes();
+        openSearchClient.sendBulkRequest("idx", List.of(createBulkDoc("a"), createBulkDoc("b")),
+            mock(IRfsContexts.IRequestContext.class), false, DocumentExceptionAllowlist.empty(), outcomes).block();
+
+        assertThat(outcomes.getSucceeded(), equalTo(2L));
+        assertThat(outcomes.getFailed(), equalTo(0L));
+    }
+
+    @Test
+    void testBulkRequest_outcomes_nonRetryableCountedAsFailedByType() {
+        // "b" is a version conflict (non-retryable): dropped after the first attempt and counted as failed.
+        var mixed = bulkItemResponse(true, List.of(itemEntry("a"), itemEntryFailure("b"), itemEntryRetryableFailure("c")));
+        var retrySucceeds = bulkItemResponse(false, List.of(itemEntry("c")));
+        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(mixed))
+            .thenReturn(Mono.just(retrySucceeds));
+        doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+
+        var outcomes = new BulkItemOutcomes();
+        openSearchClient.sendBulkRequest("idx", List.of(createBulkDoc("a"), createBulkDoc("b"), createBulkDoc("c")),
+            mock(IRfsContexts.IRequestContext.class), false, DocumentExceptionAllowlist.empty(), outcomes).block();
+
+        assertThat(outcomes.getSucceeded(), equalTo(2L));
+        assertThat(outcomes.getFailed(), equalTo(1L));
+        assertThat(outcomes.getFailedByType(), equalTo(Map.of("version_conflict_engine_exception", 1L)));
+    }
+
+    @Test
+    void testBulkRequest_outcomes_allowlistedErrorCountsAsSucceeded() {
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntry("a"), itemEntryFailure("b")))));
+
+        var outcomes = new BulkItemOutcomes();
+        var allowlist = new DocumentExceptionAllowlist(java.util.Set.of("version_conflict_engine_exception"));
+        openSearchClient.sendBulkRequest("idx", List.of(createBulkDoc("a"), createBulkDoc("b")),
+            mock(IRfsContexts.IRequestContext.class), false, allowlist, outcomes).block();
+
+        assertThat(outcomes.getSucceeded(), equalTo(2L));
+        assertThat(outcomes.getFailed(), equalTo(0L));
+    }
+
+    @Test
+    void testBulkRequest_outcomes_retryExhaustedIsNotCountedAsFailed() {
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntry("a"), itemEntryRetryableFailure("b")))))
+            .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntryRetryableFailure("b")))));
+        doReturn(Retry.fixedDelay(2, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+
+        var outcomes = new BulkItemOutcomes();
+        var responseMono = openSearchClient.sendBulkRequest("idx", List.of(createBulkDoc("a"), createBulkDoc("b")),
+            mock(IRfsContexts.IRequestContext.class), false, DocumentExceptionAllowlist.empty(), outcomes);
+        assertThrows(Exception.class, responseMono::block);
+
+        // The batch errors and is re-driven by a later lease, so "b" isn't terminal yet.
+        assertThat(outcomes.getSucceeded(), equalTo(1L));
+        assertThat(outcomes.getFailed(), equalTo(0L));
+    }
+
+    @Test
+    void testBulkRequestRaw_outcomes_countRawDocsBeforeAndAfterConversion() {
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(true,
+                List.of(itemEntry("a"), itemEntryFailure("b"), itemEntryRetryableFailure("c")))))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("c")))));
+        doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+
+        var docs = List.of(rawDoc("a"), rawDoc("b"), rawDoc("c"));
+        var outcomes = new BulkItemOutcomes();
+        openSearchClient.sendBulkRequestRaw("idx", docs, mock(IRfsContexts.IRequestContext.class), false,
+            DocumentExceptionAllowlist.empty(), outcomes).block();
+
+        assertThat(outcomes.getSucceeded(), equalTo(2L));
+        assertThat(outcomes.getFailedByType(), equalTo(Map.of("version_conflict_engine_exception", 1L)));
+    }
+
+    @Test
+    void testBulkRequestRaw_outcomes_cleanFirstResponse() {
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("a"), itemEntry("b")))));
+
+        var outcomes = new BulkItemOutcomes();
+        openSearchClient.sendBulkRequestRaw("idx", List.of(rawDoc("a"), rawDoc("b")),
+            mock(IRfsContexts.IRequestContext.class), false, DocumentExceptionAllowlist.empty(), outcomes).block();
+
+        assertThat(outcomes.getSucceeded(), equalTo(2L));
+        assertThat(outcomes.getFailed(), equalTo(0L));
+    }
+
+    private static org.opensearch.migrations.bulkload.pipeline.model.Document rawDoc(String id) {
+        return new org.opensearch.migrations.bulkload.pipeline.model.Document(id, "{\"f\":1}".getBytes(),
+            org.opensearch.migrations.bulkload.pipeline.model.Document.Operation.UPSERT, Map.of(), Map.of());
     }
 
     private HttpResponse bulkItemResponse(boolean hasErrors, List<BulkItemResponseEntry> entries) {

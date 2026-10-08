@@ -90,6 +90,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String LEASE_HOLDER_ID_FIELD_NAME = "leaseHolderId";
     public static final String VERSION_CONFLICTS_FIELD_NAME = "version_conflicts";
     public static final String COMPLETED_AT_FIELD_NAME = "completedAt";
+    public static final String DOCS_SUCCEEDED_FIELD_NAME = "docsSucceeded";
+    public static final String DOCS_FAILED_FIELD_NAME = "docsFailed";
     public static final String INDEX_NAME_FIELD_NAME = "indexName";
     public static final String SOURCE_FIELD_NAME = "_source";
     public static final String SUCCESSOR_ITEMS_FIELD_NAME = "successor_items";
@@ -690,8 +692,17 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws InterruptedException {
+        completeWorkItem(workItemId, null, contextSupplier);
+    }
+
+    @Override
+    public void completeWorkItem(
+        String workItemId,
+        WorkItemDocCounts docCounts,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws InterruptedException {
             retryWithExponentialBackoff(
-                () -> completeWorkItemWithoutRetry(workItemId, contextSupplier),
+                () -> completeWorkItemWithoutRetry(workItemId, docCounts, contextSupplier),
                 completionRetryConfig.maxRetries(),
                 completionRetryConfig.initialDelayMs(),
                 completionRetryConfig.maxDelayMs(),
@@ -702,15 +713,20 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     private void completeWorkItemWithoutRetry(
         String workItemId,
+        WorkItemDocCounts docCounts,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException {
         try (var ctx = contextSupplier.get()) {
+            final var docCountParams = docCounts == null ? "" : ",\n"
+                + "      \"" + DOCS_SUCCEEDED_FIELD_NAME + "\": " + docCounts.succeeded() + ",\n"
+                + "      \"" + DOCS_FAILED_FIELD_NAME + "\": " + docCounts.failed();
             final var markWorkAsCompleteBodyTemplate = "{\n"
                 + "  \"script\": {\n"
                 + "    \"lang\": \"painless\",\n"
                 + "    \"params\": { \n"
                 + "      \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n"
-                + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
+                + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\""
+                + docCountParams + "\n"
                 + "    },\n"
                 + "    \"source\": \""
                 + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
@@ -721,6 +737,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 +                        LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);"
                 + "      } else {"
                 + "        ctx._source." + COMPLETED_AT_FIELD_NAME + " = System.currentTimeMillis() / 1000;"
+                + "        if (params." + DOCS_SUCCEEDED_FIELD_NAME + " != null) {"
+                + "          ctx._source." + DOCS_SUCCEEDED_FIELD_NAME + " = params." + DOCS_SUCCEEDED_FIELD_NAME + ";"
+                + "          ctx._source." + DOCS_FAILED_FIELD_NAME + " = params." + DOCS_FAILED_FIELD_NAME + ";"
+                + "        }"
                 + "     }"
                 + "\"\n"
                 + "  }\n"
@@ -1221,6 +1241,20 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             Instant deadline,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
+        createSuccessorWorkItemsAndMarkComplete(workItemId, successorWorkItemIds,
+            successorNextAcquisitionLeaseExponent, deadline, null, contextSupplier);
+    }
+
+    @Override
+    @SuppressWarnings("java:S107")
+    public void createSuccessorWorkItemsAndMarkComplete(
+            String workItemId,
+            List<String> successorWorkItemIds,
+            int successorNextAcquisitionLeaseExponent,
+            Instant deadline,
+            WorkItemDocCounts docCounts,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException, IllegalStateException {
         if (successorWorkItemIds.contains(workItemId)) {
             throw new IllegalArgumentException(String.format("successorWorkItemIds %s can not not contain the parent workItemId: %s", successorWorkItemIds, workItemId));
         }
@@ -1247,7 +1281,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
-                    () -> completeWorkItemWithoutRetry(workItemId, ctx::getCompleteWorkItemContext),
+                    () -> completeWorkItemWithoutRetry(workItemId, docCounts, ctx::getCompleteWorkItemContext),
                     completionRetryConfig.maxRetries(),
                     completionRetryConfig.initialDelayMs(),
                     completionRetryConfig.maxDelayMs(),

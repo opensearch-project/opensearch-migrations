@@ -359,6 +359,64 @@ public class WorkCoordinatorTest {
 
     @ParameterizedTest
     @MethodSource("containerVersions")
+    public void testCompletionPersistsDocCounts(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var parentId = workId("C", 0, 0L);
+        var successorId = workId("C", 0, 100L);
+        var plainId = workId("D", 0, 0L);
+
+        try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+            creator.createUnassignedWorkItem(parentId, testContext::createUnassignedWorkContext);
+        }
+
+        try (var worker = factory.get(httpClientSupplier.get(), 3600, "worker")) {
+            // Parent hands off to a successor: its counts cover only the committed range [0, 100).
+            acquireSpecific(worker, testContext, parentId);
+            worker.createSuccessorWorkItemsAndMarkComplete(parentId, List.of(successorId), 0, null,
+                new WorkItemDocCounts(95, 5), testContext::createSuccessorWorkItemsContext);
+
+            acquireSpecific(worker, testContext, successorId);
+            worker.completeWorkItem(successorId, new WorkItemDocCounts(40, 2), testContext::createCompleteWorkContext);
+
+            // Completion without counts leaves the fields absent.  Items are created one at a time
+            // because acquisition picks randomly among available items.
+            worker.createUnassignedWorkItem(plainId, testContext::createUnassignedWorkContext);
+            acquireSpecific(worker, testContext, plainId);
+            worker.completeWorkItem(plainId, testContext::createCompleteWorkContext);
+            Assertions.assertFalse(worker.workItemsNotYetComplete(testContext::createItemsPendingContext));
+        }
+
+        var parent = getWorkItemSource(parentId);
+        Assertions.assertEquals(95, parent.path(OpenSearchWorkCoordinator.DOCS_SUCCEEDED_FIELD_NAME).asLong());
+        Assertions.assertEquals(5, parent.path(OpenSearchWorkCoordinator.DOCS_FAILED_FIELD_NAME).asLong());
+        var successor = getWorkItemSource(successorId);
+        Assertions.assertEquals(40, successor.path(OpenSearchWorkCoordinator.DOCS_SUCCEEDED_FIELD_NAME).asLong());
+        Assertions.assertEquals(2, successor.path(OpenSearchWorkCoordinator.DOCS_FAILED_FIELD_NAME).asLong());
+        var plain = getWorkItemSource(plainId);
+        Assertions.assertTrue(plain.path(OpenSearchWorkCoordinator.DOCS_SUCCEEDED_FIELD_NAME).isMissingNode());
+        Assertions.assertTrue(plain.path(OpenSearchWorkCoordinator.DOCS_FAILED_FIELD_NAME).isMissingNode());
+    }
+
+    private static void acquireSpecific(IWorkCoordinator worker, WorkCoordinationTestContext testContext,
+                                        String workItemId) throws Exception {
+        var outcome = worker.acquireNextWorkItem(Duration.ofSeconds(600), testContext::createAcquireNextItemContext);
+        var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+        Assertions.assertEquals(workItemId, acquired.getWorkItem().toString());
+    }
+
+    @SneakyThrows
+    private JsonNode getWorkItemSource(String workItemId) {
+        var body = "{\"query\": {\"ids\": {\"values\": [\"" + workItemId + "\"]}}}";
+        var response = httpClientSupplier.get().makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD, OpenSearchWorkCoordinator.INDEX_BASENAME + "/_search", null, body);
+        var hits = new ObjectMapper().readTree(response.getPayloadBytes()).path("hits").path("hits");
+        Assertions.assertEquals(1, hits.size(), "expected exactly one doc for " + workItemId);
+        return hits.get(0).path("_source");
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
     public void testAddSuccessorWorkItems(SearchClusterContainer.ContainerVersion version) throws Exception {
         setupOpenSearchContainer(version);
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
