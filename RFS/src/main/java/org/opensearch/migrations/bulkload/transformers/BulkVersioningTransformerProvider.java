@@ -11,13 +11,12 @@ import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMet
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
-import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.IJsonTransformerProvider;
 
 /** Changes bulk versioning policy without parsing document bodies unless a version field is selected. */
 public class BulkVersioningTransformerProvider implements IJsonTransformerProvider {
     @Override
-    public IJsonTransformer createTransformer(Object jsonConfig) {
+    public BulkOperationTransformer createTransformer(Object jsonConfig) {
         if (jsonConfig != null && !(jsonConfig instanceof Map<?, ?>)) {
             throw new IllegalArgumentException("Versioning configuration must be an object");
         }
@@ -37,7 +36,7 @@ public class BulkVersioningTransformerProvider implements IJsonTransformerProvid
         return new VersioningTransformer(versionType, versionType == VersionType.INTERNAL || path == null ? null : List.copyOf(path));
     }
 
-    private static final class VersioningTransformer extends BulkOperationTransformer {
+    private static final class VersioningTransformer implements BulkOperationTransformer {
         private final VersionType versionType;
         private final List<?> versionPath;
 
@@ -55,6 +54,7 @@ public class BulkVersioningTransformerProvider implements IJsonTransformerProvid
                         case DeleteOperationMeta delete -> delete.getVersioning();
                     };
                     if (versioning != null) {
+                        // Internal writes let the target assign the version; explicit snapshot versions are rejected.
                         versioning.setVersion(null);
                         versioning.setVersionType(null);
                     }

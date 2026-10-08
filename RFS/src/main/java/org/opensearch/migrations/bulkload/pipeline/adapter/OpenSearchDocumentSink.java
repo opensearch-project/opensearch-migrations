@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +18,6 @@ import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.JsonCompositeTransformer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -57,7 +55,8 @@ public class OpenSearchDocumentSink implements DocumentSink {
     ) {
         this.client = client;
         this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
-        this.nativeTransformers = nativeStages(this.transformer);
+        this.nativeTransformers = this.transformer == null ? List.of()
+            : this.transformer.getNativeStages(BulkOperationTransformer.class).orElse(null);
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
         this.requestContextSupplier = requestContextSupplier;
@@ -124,31 +123,6 @@ public class OpenSearchDocumentSink implements DocumentSink {
         }
 
         return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch)));
-    }
-
-    /** Resolve capabilities once, preserving the existing JSON path for mixed or opaque wrappers. */
-    private static List<BulkOperationTransformer> nativeStages(IJsonTransformer stage) {
-        if (stage == null) {
-            return List.of();
-        }
-        if (stage instanceof BulkOperationTransformer nativeTransformer) {
-            return List.of(nativeTransformer);
-        }
-        // A subclass may override transformJson with additional behavior. Treat
-        // it as an opaque JSON stage rather than bypassing that override.
-        if (stage.getClass() == JsonCompositeTransformer.class) {
-            var composite = (JsonCompositeTransformer) stage;
-            var stages = new ArrayList<BulkOperationTransformer>();
-            for (var child : composite.getTransformers()) {
-                var childStages = nativeStages(child);
-                if (childStages == null) {
-                    return null;
-                }
-                stages.addAll(childStages);
-            }
-            return List.copyOf(stages);
-        }
-        return null;
     }
 
     @SuppressWarnings("unchecked")

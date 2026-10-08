@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
@@ -143,12 +144,9 @@ class NativeBulkTransformationTest {
 
     @Test
     void nativeBodyEditMaterializesOnlyTheChangedBodyAndRetainsOriginal() throws Exception {
-        var transformer = new BulkOperationTransformer() {
-            @Override
-            public List<BulkOperationSpec> transformOperations(List<BulkOperationSpec> operations) {
-                operations.get(0).getDocument().put("title", "changed");
-                return operations;
-            }
+        BulkOperationTransformer transformer = operations -> {
+            operations.get(0).getDocument().put("title", "changed");
+            return operations;
         };
         var operation = send(transformer, document(SOURCE));
         assertNull(operation.getRawDocument());
@@ -158,6 +156,47 @@ class NativeBulkTransformationTest {
         // Failure reporting uses Jackson's ordinary operation serializer.
         assertEquals("changed", MAPPER.valueToTree(operation).path("document").path("title").asText());
         assertFalse(MAPPER.valueToTree(operation).has("raw_document"));
+    }
+
+    @Test
+    void nativeCapabilitiesSupportMetadataAndFilteringThroughWrappers() throws Exception {
+        BulkOperationTransformer reroute = operations -> {
+            for (var operation : operations) {
+                if (operation instanceof IndexOp index) {
+                    index.getOperation().setIndex("archive");
+                    index.getOperation().setRouting("archived-tenant");
+                }
+            }
+            return operations;
+        };
+        BulkOperationTransformer filter = operations -> operations.stream()
+            .filter(operation -> operation instanceof IndexOp index
+                && "archive".equals(index.getOperation().getIndex())
+                && "d1".equals(index.getOperation().getId()))
+            .toList();
+        var chain = new JsonCompositeTransformer(reroute, new JsonCompositeTransformer(filter));
+        IJsonTransformer wrapper = new IJsonTransformer() {
+            @Override
+            public Object transformJson(Object input) {
+                return chain.transformJson(input);
+            }
+
+            @Override
+            public <T> Optional<List<T>> getNativeStages(Class<T> nativeType) {
+                return chain.getNativeStages(nativeType);
+            }
+        };
+        var retained = document(SOURCE);
+        var dropped = new Document("drop", retained.source(), Document.Operation.UPSERT, Map.of(), Map.of());
+        var result = sendBatch(wrapper, List.of(dropped, retained));
+        assertEquals(1, result.size());
+        assertSame(retained.source(), result.get(0).getRawDocument());
+        var lines = BulkNdjson.toBulkNdjson(result, MAPPER).split("\n");
+        var action = MAPPER.readTree(lines[0]).path("index");
+        assertEquals("d1", action.path("_id").asText());
+        assertEquals("archive", action.path("_index").asText());
+        assertEquals("archived-tenant", action.path("routing").asText());
+        assertEquals(SOURCE, lines[1]);
     }
 
     @SuppressWarnings("unchecked")
@@ -190,7 +229,7 @@ class NativeBulkTransformationTest {
     @ParameterizedTest
     @ValueSource(strings = {"-1", "\"92233720368547758070\"", "1.5", "null"})
     void invalidApplicationVersionCannotFallBackToSnapshot(String value) {
-        var transformer = (BulkOperationTransformer) new BulkVersioningTransformerProvider().createTransformer(
+        var transformer = new BulkVersioningTransformerProvider().createTransformer(
             Map.of("versionField", "version"));
         var operation = BulkOperationConverter.fromRawDocument(document("{\"version\":" + value + "}"), "products");
         assertThrows(IllegalArgumentException.class, () -> transformer.transformOperations(List.of(operation)));
@@ -205,7 +244,7 @@ class NativeBulkTransformationTest {
         assertNull(metadata.getVersioning());
         metadata.setVersioning(VersionControlMetadata.builder()
             .version(7L).ifSeqNo(5L).ifPrimaryTerm(3L).build());
-        var transformer = (BulkOperationTransformer) new BulkVersioningTransformerProvider()
+        var transformer = new BulkVersioningTransformerProvider()
             .createTransformer(Map.of("versionType", "internal"));
         transformer.transformOperations(List.of(operation));
         assertNull(metadata.getVersioning().getVersion());
@@ -228,15 +267,19 @@ class NativeBulkTransformationTest {
             source.getBytes(StandardCharsets.UTF_8), "tenant", DocumentChangeType.INDEX, version));
     }
 
-    @SuppressWarnings("unchecked")
     private static BulkOperationSpec send(IJsonTransformer transformer, Document document) {
+        return sendBatch(transformer, List.of(document)).get(0);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<BulkOperationSpec> sendBatch(IJsonTransformer transformer, List<Document> documents) {
         var client = mock(OpenSearchClient.class);
         when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any()))
             .thenReturn(Mono.just(new OpenSearchClient.BulkResponse(200, "", null, "{}")));
         var sink = new OpenSearchDocumentSink(client, () -> transformer, false, DocumentExceptionAllowlist.empty(), null);
-        sink.writeBatch("products", List.of(document)).block();
+        sink.writeBatch("products", documents).block();
         ArgumentCaptor<List<BulkOperationSpec>> captured = ArgumentCaptor.forClass(List.class);
         verify(client).sendBulkRequest(anyString(), captured.capture(), any(), anyBoolean(), any());
-        return captured.getValue().get(0);
+        return captured.getValue();
     }
 }

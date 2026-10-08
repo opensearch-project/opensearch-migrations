@@ -246,16 +246,19 @@ target-managed internal versions instead:
 ```
 
 New target documents then start at version 1. Existing documents increment
-their current version; opting out does not reset existing counters.
+their current version; opting out does not reset existing counters. The modifier
+removes both `version` and `version_type`: OpenSearch rejects an explicit snapshot
+version with internal versioning, including when `version_type` is omitted.
+Explicit `if_seq_no` and `if_primary_term` checks are preserved.
 
 Use `"external"` for strict greater-than versioning. Unknown version types are
 rejected. The modifier is not applied by default because the native RFS write
 path already preserves snapshot versions using `external`.
 
-Changing only `versionType` preserves the selected action version, including a
-value selected by an earlier transformation. If absent, it falls back to the
-original snapshot version, allowing internal mode to be followed by an external
-mode. Metadata changes do not parse document bodies. A chain composed entirely
+In either external mode, changing `versionType` preserves the selected action
+version, including a value selected by an earlier transformation. If absent, it
+falls back to the original snapshot version, allowing internal mode to be followed
+by an external mode. Metadata changes do not parse document bodies. A chain composed entirely
 of native `BulkOperationTransformer` implementations retains the source bytes through
 metadata changes, serialization, and retries. Adding a JavaScript or other JSON
 transformer uses the existing JSON path, in the configured order.

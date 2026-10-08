@@ -23,7 +23,6 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneAdapter;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
-import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.bulkload.transformers.BulkVersioningTransformerProvider;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
@@ -292,7 +291,7 @@ class OpenSearchClientTest {
                     : BulkOperationConverter.fromDocument(doc, "products"))
                 .toList();
             if (path.equals("native")) {
-                var transformer = (BulkOperationTransformer) new BulkVersioningTransformerProvider()
+                var transformer = new BulkVersioningTransformerProvider()
                     .createTransformer(Map.of("versionType", "external_gte"));
                 operations = transformer.transformOperations(operations);
             }

@@ -18,24 +18,46 @@ It is recommended to refer to the respective README of the tool you want to use 
 
 ## Native bulk transformations
 
-Java document providers can return a
+Java document providers can implement the functional interface
 [`BulkOperationTransformer`](src/main/java/org/opensearch/migrations/bulkload/transformers/BulkOperationTransformer.java)
-from the existing `IJsonTransformerProvider` service interface. Its
-`transformOperations` method receives typed bulk metadata and unparsed document
-bodies. Register the provider with the existing Java service loader and select it
-with `--doc-transformer-config`; the sink recognizes native stages automatically.
-A single configured transformer is returned directly by the loader. With multiple
-stages, the sink inspects the standard composite to determine whether all are native.
+and return it through the existing `IJsonTransformerProvider` service interface.
+Its `transformOperations` method receives typed bulk metadata and unparsed document
+bodies. Versioning, metadata edits, filtering, and body changes use the same contract.
+For example, an index-write transformation can be a lambda:
+
+```java
+BulkOperationTransformer renameIndex = operations -> {
+    for (var operation : operations) {
+        if (operation instanceof IndexOp index) {
+            index.getOperation().setIndex("archive");
+        }
+    }
+    return operations;
+};
+```
+
+Register the provider with the existing Java service loader and select it with
+`--doc-transformer-config`. The loader returns a single configured transformer
+directly. RFS requests `getNativeStages(BulkOperationTransformer.class)` once when
+constructing the sink; the shared transformer interfaces handle composition.
+This capability query also supports other typed transformation contracts without
+depending on RFS or versioning.
 
 Metadata changes can edit `IndexOp` or `DeleteOp` directly without creating body
 Maps. Calling `operation.getDocument()` materializes a mutable Map and switches
 that operation to normal JSON serialization. To replace a body with already
 encoded JSON, use `setRawDocument(byte[])`; treat the original byte arrays as
 immutable. The original source is retained separately for failed-document records.
+To filter, reorder, or add operations, return a new list; operations themselves
+can be edited in place.
 
 All stages must be native to retain the raw path. Mixed Java/JavaScript chains
-use the existing JSON representation and preserve configuration order. The
-built-in `BulkVersioningTransformerProvider` supports `internal`, `external`,
+use the existing JSON representation and preserve configuration order.
+`BulkOperationJsonAdapter` contains the JSON conversion; native execution bypasses
+it. Custom wrappers can expose a native contract through `getNativeStages` only
+when that contract preserves their full behavior.
+
+The built-in `BulkVersioningTransformerProvider` supports `internal`, `external`,
 and `external_gte`; see the
 [startup examples](../DocumentsFromSnapshotMigration/README.md#native-java-versioning).
 

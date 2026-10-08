@@ -182,6 +182,21 @@ public class OpenSearchDocumentSinkEndToEndTest {
                         false, DocumentExceptionAllowlist.empty(), null);
                     String index = "versions_" + policy;
                     sink.createCollection(new CollectionMetadata(index, 1, Map.of())).block();
+                    if (internal) {
+                        // Removing only version_type still leaves an explicit internal version, which is invalid.
+                        for (var metadata : List.of(
+                            Map.of("_index", index, "_id", "v1", "version", 7),
+                            Map.of("_index", index, "_id", "v1", "version", 7, "version_type", "internal")
+                        )) {
+                            var response = restClient.post("_bulk", MAPPER.writeValueAsString(Map.of("index", metadata))
+                                + "\n{\"title\":\"explicit internal version\"}\n", context.createUnboundRequestContext());
+                            assertEquals(400, response.statusCode, response.body);
+                            var error = MAPPER.readTree(response.body).path("error");
+                            assertEquals("action_request_validation_exception", error.path("type").asText());
+                            assertTrue(error.path("reason").asText().contains("internal versioning"),
+                                response.body);
+                        }
+                    }
                     sink.writeBatch(index, List.of(snapshotVersion(7, "original"))).block();
                     assertSnapshotWrite(restClient, context, index, internal ? 1 : 7, "original");
 
