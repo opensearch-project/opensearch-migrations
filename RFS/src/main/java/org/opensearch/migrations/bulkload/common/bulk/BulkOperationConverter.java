@@ -40,9 +40,13 @@ public class BulkOperationConverter {
     private static BulkOperationSpec fromDocument(Document doc, String indexName, boolean retainRawSource) {
         Map<String, Object> document;
         try {
-            document = doc.source() != null
-                ? (retainRawSource ? null : OBJECT_MAPPER.readValue(doc.source(), new TypeReference<>() {}))
-                : Map.of();
+            if (doc.source() == null) {
+                document = Map.of();
+            } else if (retainRawSource) {
+                document = null;
+            } else {
+                document = OBJECT_MAPPER.readValue(doc.source(), new TypeReference<>() {});
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
