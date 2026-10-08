@@ -14,7 +14,7 @@ import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.IJsonTransformerProvider;
 
-/** Configurable native equivalent of the bundled externalVersioning.js transformation. */
+/** Changes bulk versioning policy without parsing document bodies unless a version field is selected. */
 public class BulkVersioningTransformerProvider implements IJsonTransformerProvider {
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {

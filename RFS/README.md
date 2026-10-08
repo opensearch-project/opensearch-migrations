@@ -41,10 +41,6 @@ and `external_gte`; see the
 
 This library supports benchmarks via [Java Microbenchmark Harness or JMH](https://github.com/openjdk/jmh).  These are best to be used with A/B testing that does not involve any external systems, such as string parsers.  Run the command with `./gradlew RFS:jmh` after it has completed results will be available in {project.dir}/build/reports/jmh in addition to the human readable logs.
 
-For version extraction, bulk serialization, and native/JavaScript transformation
-comparisons over real OpenSearch shard files, use the
-[versioning benchmark](benchmarks/README.md).
-
 ### Adding a benchmark
 
 It is recommended to put benchmarks into the test code, so they are validated for correctness when not run in the benchmark suite. The following shows example annotations that are used.

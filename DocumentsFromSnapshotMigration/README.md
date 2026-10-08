@@ -196,7 +196,7 @@ source ID are available, RFS includes that `version` and `version_type: "externa
 in the bulk action by default. A document at version 7 in the snapshot is indexed
 at version 7 on the target. No extraction flag or transformation is needed; the
 default path still sends the original source bytes without parsing the body into
-JavaScript.
+a Map.
 
 External versioning accepts only a version greater than the target's current
 version. Equal-version retries and attempts to replace newer target versions
@@ -220,7 +220,7 @@ requires index operations; transformations producing create-only operations
 must remove the explicit version. The bundled data-stream backing-index
 transformation does this when it selects `op_type: "create"`.
 
-The optional built-in Java and JavaScript modifiers support all three policies:
+The optional built-in Java modifier supports all three policies:
 
 | `versionType` | Behavior |
 |---|---|
@@ -228,119 +228,63 @@ The optional built-in Java and JavaScript modifiers support all three policies:
 | `external` (default) | Retain the selected write version or use a configured source field; only higher versions overwrite. |
 | `external_gte` | Retain the selected write version or use a configured source field; equal or higher versions overwrite. |
 
-Unknown version types are rejected. The modifier is not applied by default;
-the native RFS write path already preserves snapshot versions using `external`.
-Changing only `versionType` preserves `operation.version`, including a value
-selected by an earlier transformation. If that value is absent, the modifier
-falls back to `source_metadata._version`, allowing internal mode to be followed
-by an external mode.
-
 #### Native Java versioning
 
-Use the bundled Java provider to change the version policy without converting
-document bodies to Maps. It is available in the standard image and accepts an
-inline startup argument:
+`BulkVersioningTransformerProvider` is bundled in the standard image. For
+equal-version replay, pass this inline startup argument:
 
 ```shell
 --doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external_gte"}}]'
 ```
 
-Use `"internal"` to remove explicit versioning, or `"external"` for strict
-greater-than versioning. A chain composed entirely of native
-`BulkOperationTransformer` implementations retains the source bytes through
+This permits replacing different target content at the same version; older
+versions still fail unless conflicts are explicitly allowlisted. To use
+target-managed internal versions instead:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"internal"}}]'
+```
+
+New target documents then start at version 1. Existing documents increment
+their current version; opting out does not reset existing counters.
+
+Use `"external"` for strict greater-than versioning. Unknown version types are
+rejected. The modifier is not applied by default because the native RFS write
+path already preserves snapshot versions using `external`.
+
+Changing only `versionType` preserves the selected action version, including a
+value selected by an earlier transformation. If absent, it falls back to the
+original snapshot version, allowing internal mode to be followed by an external
+mode. Metadata changes do not parse document bodies. A chain composed entirely
+of native `BulkOperationTransformer` implementations retains the source bytes through
 metadata changes, serialization, and retries. Adding a JavaScript or other JSON
 transformer uses the existing JSON path, in the configured order.
 
-The Java provider also accepts `versionField`, either a field name or a list of
-nested field names. Selecting an application field parses the body; using the
-snapshot version does not. Java preserves integer values through `Long.MAX_VALUE`
-without JavaScript's numeric precision limit. Floating-point application values
-are rejected.
-
-The bundled [externalVersioning.js](../transformation/standardJavascriptTransforms/src/externalVersioning.js)
-remains available through `JsonJSTransformerProvider`, with its options inside
-`bindingsObject`. The examples below show that configuration.
-
-#### Opting out with internal versioning
-
-Set `versionType` to `internal` to remove `version` and `version_type` from the
-action, retaining the ID, routing, body, and source metadata. This mode does not
-require a snapshot version or look up an application version field.
-
-Save this configuration as `internal-versioning.json`:
-
-```json
-[
-  {
-    "JsonJSTransformerProvider": {
-      "initializationResourcePath": "js/externalVersioning.js",
-      "bindingsObject": {
-        "versionType": "internal"
-      }
-    }
-  }
-]
-```
-
-Apply it with:
-
-```shell
---doc-transformer-config-file /path/to/internal-versioning.json
-```
-
-New target documents then start at version 1. Writes to existing target documents
-increment their current version; opting out does not reset existing counters.
-
-#### Allowing equal-version rewrites
-
-To overwrite documents whose target version equals the snapshot version, use
-the same modifier with `versionType` set to `external_gte`:
-
-```json
-[
-  {
-    "JsonJSTransformerProvider": {
-      "initializationResourcePath": "js/externalVersioning.js",
-      "bindingsObject": {
-        "versionType": "external_gte"
-      }
-    }
-  }
-]
-```
-
-This allows rerunning a transformation at the same version, including replacing
-different target content at that version. Older versions still cannot overwrite
-newer ones; those conflicts remain failures unless explicitly allowlisted.
-A custom JavaScript transformation can make the same policy change
-for an index operation simply by assigning:
-
-```javascript
-document.operation.version_type = "external_gte";
-```
-
-#### Application version fields and JavaScript precision
+#### Application version fields
 
 In either external mode, the modifier can replace the selected write version with a
-field from `_source`. Add `"versionField": "ext_version"` to its
-`bindingsObject`. A string names a literal field, including any dots in its name.
-For a nested field, use an array such as
-`"versionField": ["metadata", "revision"]`. Missing or invalid values fail the
-transformation. The source body is preserved. `versionField` is ignored in
+field from `_source`:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external_gte","versionField":"ext_version"}}]'
+```
+
+A string names a literal field, including any dots in its name. For a nested
+field, use an array such as `"versionField": ["metadata", "revision"]`.
+Selecting an application field parses the body but preserves its contents.
+Missing or invalid values fail the transformation. `versionField` is ignored in
 internal mode.
 
-RFS exposes the original version as `source_metadata._version` and the default
-write version as `operation.version`. Both are decimal strings in transformation
-input, preserving all 64 bits. Custom transformations can keep, replace, or
-remove the action's version; the original source metadata remains available.
-The serializer omits `source_metadata` from bulk requests and converts the
-action version to a Java `Long`, writing a JSON integer on the wire.
+Versions must be integers or decimal strings from 0 through
+`9223372036854775807` (`Long.MAX_VALUE`). The Java provider preserves the full
+range, including integer values above JavaScript's precision limit.
+Floating-point values and out-of-range strings such as `"92233720368547758070"`
+are rejected. Bulk requests always write the version as a JSON integer.
 
-Versions must be non-negative integers up to `9223372036854775807`. Quoted values
-have the same limit: `"92233720368547758070"` is rejected. JavaScript numbers
-supplied through `versionField` are accepted through `9007199254740991`
-(`2^53 - 1`); store larger application versions as decimal strings. Preserve
-these strings inside JavaScript instead of converting them to `Number`.
+Custom JSON transformations receive `operation.version` and the original
+`source_metadata._version` as decimal strings to preserve 64-bit precision.
+Keep these strings intact when using JavaScript; conversion to `Number` can
+lose precision. Source metadata is never emitted in bulk requests.
 
 At `Long.MAX_VALUE`, there is no higher valid version and an internal increment
 can overflow. For such documents, consider opting out when populating a new
@@ -350,6 +294,15 @@ Version preservation does not order independent source and target write
 histories. An old snapshot document at version 100 can overwrite a newly
 ingested target document at version 1. Plan backfill and live-ingestion ordering
 accordingly.
+
+The native provider has a JUnit end-to-end test under the normal `test` task.
+With Docker available, it creates a real OpenSearch snapshot and migrates it twice
+using `external_gte`, verifying exact versions and no failed-document records.
+The test is skipped when Docker is unavailable:
+
+```shell
+./gradlew :DocumentsFromSnapshotMigration:test --tests '*ExternalVersioningMigrationTest.nativeJavaTransformationReplaysSnapshot'
+```
 
 ### Supported Exception Types
 

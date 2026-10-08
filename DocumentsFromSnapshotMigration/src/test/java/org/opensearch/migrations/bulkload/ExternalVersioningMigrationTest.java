@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import reactor.core.publisher.Mono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,7 +39,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-@Tag("isolatedTest")
+@Testcontainers(disabledWithoutDocker = true)
 class ExternalVersioningMigrationTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String INDEX = "versioned_documents";
@@ -53,6 +54,7 @@ class ExternalVersioningMigrationTest {
         return SupportedClusters.supportedSources(true).stream();
     }
 
+    @Tag("isolatedTest")
     @ParameterizedTest(name = "preserves Lucene versions from {0}")
     @MethodSource("sourceVersions")
     void preservesSnapshotVersions(ContainerVersion sourceVersion) throws Exception {

@@ -25,6 +25,7 @@ import org.opensearch.migrations.transform.TransformationLoader;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
@@ -46,6 +47,31 @@ import static org.mockito.Mockito.when;
 class NativeBulkTransformationTest {
     private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final String SOURCE = "{ \"title\" : \"source\" }";
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {0, 9007199254740993L, Long.MAX_VALUE})
+    void rawAndConvertedWritesPreserveAvailableVersions(Long version) throws Exception {
+        var document = document(SOURCE, version);
+        var raw = new String(BulkNdjson.toRawNdjsonBytes(List.of(document), "products", false, MAPPER),
+            StandardCharsets.UTF_8);
+        var converted = BulkNdjson.toBulkNdjson(List.of(BulkOperationConverter.fromDocument(document, "products")), MAPPER);
+        for (String ndjson : List.of(raw, converted)) {
+            var action = MAPPER.readTree(ndjson.split("\n")[0]).path("index");
+            if (version == null) {
+                assertFalse(action.has("version"));
+                assertFalse(action.has("version_type"));
+            } else {
+                assertEquals(version.longValue(), action.path("version").longValue());
+                assertTrue(action.path("version").isIntegralNumber());
+                assertEquals("external", action.path("version_type").asText());
+            }
+            assertEquals("d1", action.path("_id").asText());
+            assertEquals("tenant", action.path("routing").asText());
+            assertFalse(action.has("source_metadata"));
+        }
+        assertEquals(SOURCE, raw.split("\n")[1]);
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"internal", "external", "external_gte"})
@@ -96,6 +122,9 @@ class NativeBulkTransformationTest {
         String javascriptStage = """
             {"JsonJSTransformerProvider":{"initializationScript":
               "context => documents => documents.map(doc => { \
+                if (doc.operation.version !== '9223372036854775807') { \
+                  throw new Error('The snapshot version must reach JavaScript as an exact decimal string'); \
+                } \
                 doc.document.seen = doc.operation.version_type; \
                 doc.operation.version = '9007199254740993'; return doc; })"}}
             """;
@@ -105,6 +134,7 @@ class NativeBulkTransformationTest {
             assertNull(operation.getRawDocument(), "Mixed chains retain the existing JSON transformation path");
             assertEquals(nativeFirst ? "external_gte" : "external", operation.getDocument().get("seen"));
             assertEquals(9007199254740993L, operation.getOperation().getVersioning().getVersion());
+            assertEquals(Long.toString(Long.MAX_VALUE), operation.getSourceMetadata().get(Document.SOURCE_META_VERSION));
             assertEquals(Map.of("title", "source"), operation.getOriginalSource());
         }
     }
@@ -188,8 +218,12 @@ class NativeBulkTransformationTest {
     }
 
     private static Document document(String source) {
+        return document(source, Long.MAX_VALUE);
+    }
+
+    private static Document document(String source, Long version) {
         return new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "d1", null,
-            source.getBytes(StandardCharsets.UTF_8), "tenant", DocumentChangeType.INDEX, Long.MAX_VALUE));
+            source.getBytes(StandardCharsets.UTF_8), "tenant", DocumentChangeType.INDEX, version));
     }
 
     @SuppressWarnings("unchecked")

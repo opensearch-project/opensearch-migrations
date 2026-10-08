@@ -110,21 +110,3 @@ jmh {
     humanOutputFile = project.file("${project.buildDir}/reports/jmh/human.txt")
     resultsFile = project.file("${project.buildDir}/reports/jmh/results.txt")
 }
-
-// JMH compiles its generated harness without the project's annotation-processor path.
-// Keep Error Prone on production and handwritten test code, but not this generated source.
-tasks.named('jmhCompileGeneratedClasses', JavaCompile) {
-    options.errorprone.enabled = false
-}
-
-// Use the normal runtime classpath, preserving Lucene and transformer service resources.
-tasks.register('versioningBenchmark', JavaExec) {
-    group = 'verification'
-    description = 'Runs opt-in JMH benchmarks over prepared OpenSearch shard files'
-    dependsOn tasks.named('jmhCompileGeneratedClasses')
-    classpath = sourceSets.test.runtimeClasspath + configurations.jmh +
-        files(tasks.named('jmhCompileGeneratedClasses').flatMap { it.destinationDirectory },
-            layout.buildDirectory.dir('jmh-generated-resources'))
-    mainClass = 'org.openjdk.jmh.Main'
-    args 'VersioningBenchmark'
-}
