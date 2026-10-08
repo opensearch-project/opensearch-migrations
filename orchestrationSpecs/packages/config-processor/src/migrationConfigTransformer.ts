@@ -90,32 +90,45 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
     return `${protocol}${s3Ip}${port}`;
 }
 
-async function rewriteRepoEndpointIfLocalStack(
+/**
+ * Static S3 keys the chart creates under LocalStack (templates/resources/s3/defaultBucketCredentials.yaml),
+ * in the accessKey/secretKey format that s3CredentialsSecretName expects.
+ */
+const LOCALSTACK_S3_CREDENTIALS_SECRET_NAME = "migrations-default-s3-creds";
+
+async function denormalizeRepoConfig(
     snapshotRepo: z.infer<typeof REPO_CONFIG>,
     repoName: string,
     sourceLabel: string
 ): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
-    // The localstack:// rewrite below is an S3 addressing workaround, not a
-    // generic emulator feature: resolving the host to an IP forces the AWS SDK
-    // out of virtual-host-style addressing. See MetadataMigration/DEVELOPER_GUIDE.md.
+    // localstack:// is shorthand for an S3-compatible store with LocalStack's settings: it expands
+    // to the same s3AddressingStyle / s3CredentialsSecretName fields any non-AWS store uses, so
+    // LocalStack runs exercise the same pod wiring. Explicitly set fields win.
     //
-    // Path-style emulators need none of this. fake-gcs-server is reached through
-    // a plain http:// endpoint (see the gcs/ chart templates), and GcsRepo.create
-    // infers "emulator" from a non-empty endpoint and installs NoCredentials.
-    // So the check below is a no-op for gs:// URIs and useLocalStack stays false,
-    // not because GCS lacks an emulator, but because it does not need the rewrite.
+    // The endpoint is still rewritten to an IP. The migration tools no longer need that (they
+    // default to path-style whenever an endpoint is set), but the endpoint is also sent to the
+    // source cluster when CreateSnapshot registers the repository, and an IP host is what makes
+    // the cluster's S3 client use path-style there. See MetadataMigration/DEVELOPER_GUIDE.md.
+    //
+    // gs:// needs none of this. fake-gcs-server is reached through a plain http:// endpoint (see
+    // the gcs/ chart templates), and GcsRepo.create infers "emulator" from a non-empty endpoint and
+    // installs NoCredentials.
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
+        snapshotRepo.s3AddressingStyle ||= "path";
+        snapshotRepo.s3CredentialsSecretName ||= LOCALSTACK_S3_CREDENTIALS_SECRET_NAME;
     }
     const s3SettingsConfigMapName = snapshotRepo.repoPathUri.startsWith("s3://")
         ? s3RepoSettingsConfigMapName(sourceLabel, repoName)
         : "";
+    // useLocalStack no longer drives any pod wiring; it is kept because it is part of the repo's
+    // identity (repoIdentity, repoUseLocalStack on the CRDs).
     return { ...snapshotRepo, useLocalStack, repoName, s3SettingsConfigMapName };
 }
 
-async function rewriteRepoRecordEndpointIfLocalStack(
+async function denormalizeRepoRecord(
     snapshotRepos: z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>,
     sourceLabel: string
 ): Promise<z.infer<typeof SOURCE_CLUSTER_REPOS_RECORD>>
@@ -123,7 +136,7 @@ async function rewriteRepoRecordEndpointIfLocalStack(
     const entries = Object.entries(snapshotRepos);
     const rewrittenEntries = await Promise.all(
         entries.map(async ([repoName, repoConfig]) => {
-            const rewritten = await rewriteRepoEndpointIfLocalStack(repoConfig, repoName, sourceLabel);
+            const rewritten = await denormalizeRepoConfig(repoConfig, repoName, sourceLabel);
             return [repoName, rewritten] as const;
         })
     );
@@ -883,7 +896,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ...cluster,
                     snapshotInfo: {
                         ...cluster.snapshotInfo,
-                        repos: await rewriteRepoRecordEndpointIfLocalStack(cluster.snapshotInfo.repos, name)
+                        repos: await denormalizeRepoRecord(cluster.snapshotInfo.repos, name)
                     }
                 };
             }

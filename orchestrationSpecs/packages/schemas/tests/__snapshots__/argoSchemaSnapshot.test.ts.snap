@@ -260,7 +260,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                     "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. localstack(s):// is shorthand for LocalStack's S3 settings: the host is resolved to an IP address during config transformation, and s3AddressingStyle and s3CredentialsSecretName default to 'path' and the chart's LocalStack credentials Secret unless set. Used for S3-compatible stores (LocalStack, MinIO, ...) or GCS (fake-gcs-server) testing."
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
@@ -435,7 +435,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                     "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. localstack(s):// is shorthand for LocalStack's S3 settings: the host is resolved to an IP address during config transformation, and s3AddressingStyle and s3CredentialsSecretName default to 'path' and the chart's LocalStack credentials Secret unless set. Used for S3-compatible stores (LocalStack, MinIO, ...) or GCS (fake-gcs-server) testing."
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
@@ -3848,7 +3848,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. localstack(s):// is shorthand for LocalStack's S3 settings: the host is resolved to an IP address during config transformation, and s3AddressingStyle and s3CredentialsSecretName default to 'path' and the chart's LocalStack credentials Secret unless set. Used for S3-compatible stores (LocalStack, MinIO, ...) or GCS (fake-gcs-server) testing."
                         },
                         "s3RoleArn": {
                           "type": "string",
@@ -4023,7 +4023,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. localstack(s):// is shorthand for LocalStack's S3 settings: the host is resolved to an IP address during config transformation, and s3AddressingStyle and s3CredentialsSecretName default to 'path' and the chart's LocalStack credentials Secret unless set. Used for S3-compatible stores (LocalStack, MinIO, ...) or GCS (fake-gcs-server) testing."
                         },
                         "s3RoleArn": {
                           "type": "string",

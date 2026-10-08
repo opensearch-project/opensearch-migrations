@@ -105,14 +105,6 @@ export const CreateSnapshot = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/root/createSnapshot/bin/CreateSnapshot"])
             .addVolumesFromRecord({
-                'test-creds': {
-                    configMap: {
-                        name: expr.literal("localstack-test-creds"),
-                        optional: true
-                    },
-                    mountPath: "/config/credentials",
-                    readOnly: true
-                },
                 's3-repo-credentials': {
                     ...getS3RepoCredentialsVolumeSource(
                         expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "s3CredentialsSecretName"], "")),
@@ -120,12 +112,6 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     readOnly: true
                 }
             })
-            .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
-                expr.ternary(
-                    expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
-                    expr.literal("/config/credentials/configuration"),
-                    expr.literal(""))
-            )
             .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(b.inputs.sourceConfig)))
             .addEnvVarsFromRecord(getS3RepoEnvVars(
                 expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "s3SettingsConfigMapName"], "")))

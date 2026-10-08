@@ -178,8 +178,10 @@ export const REPO_CONFIG = z.object({
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
-            "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
-            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
+            "localstack(s):// is shorthand for LocalStack's S3 settings: the host is resolved to an IP address during " +
+            "config transformation, and s3AddressingStyle and s3CredentialsSecretName default to 'path' and the " +
+            "chart's LocalStack credentials Secret unless set. " +
+            "Used for S3-compatible stores (LocalStack, MinIO, ...) or GCS (fake-gcs-server) testing."),
     s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
             "Used for s3:// URIs only; ignored for gs://. " +

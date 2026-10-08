@@ -73,10 +73,6 @@
         "container": {
           "env": [
             {
-              "name": "AWS_SHARED_CREDENTIALS_FILE",
-              "value": "{{=((sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))) ? ('/config/credentials/configuration') : (''))}}"
-            },
-            {
               "name": "SOURCE_USERNAME",
               "valueFrom": {
                 "secretKeyRef": {
@@ -146,11 +142,6 @@
           ],
           "volumeMounts": [
             {
-              "name": "test-creds",
-              "mountPath": "/config/credentials",
-              "readOnly": true
-            },
-            {
               "name": "s3-repo-credentials",
               "mountPath": "/config/s3-repo-credentials",
               "readOnly": true
@@ -169,13 +160,6 @@
           }
         },
         "volumes": [
-          {
-            "name": "test-creds",
-            "configMap": {
-              "name": "localstack-test-creds",
-              "optional": true
-            }
-          },
           {
             "name": "s3-repo-credentials",
             "secret": {

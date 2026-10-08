@@ -35,7 +35,6 @@ import {makeRepoParamDict} from "./metadataMigration";
 import {
     setupFileSourcesForContainer,
     setupLog4jConfigForContainer,
-    setupTestCredsForContainer,
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -137,7 +136,6 @@ const startHistoricalBackfillInputs = {
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
     fileSourceVolumes: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>(),
     fileSourceVolumeMounts: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>(),
-    useLocalStack: defineRequiredParam<boolean>({description: "Only used for local testing"}),
     resources: defineRequiredParam<ResourceRequirementsType>(),
     crdName: defineRequiredParam<string>(),
     crdUid: defineRequiredParam<string>(),
@@ -161,7 +159,6 @@ function getRfsDeploymentManifest
     s3CredentialsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
     s3SettingsConfigMapNameOrEmpty: AllowLiteralOrExpression<string>,
 
-    useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
     fileSourceVolumes: BaseExpression<any[]>,
@@ -226,14 +223,11 @@ function getRfsDeploymentManifest
     const finalContainerDefinition = setupFileSourcesForContainer(
         args.fileSourceVolumes,
         args.fileSourceVolumeMounts,
-        setupTestCredsForContainer(
-            args.useLocalstackAwsCreds,
-            setupLog4jConfigForContainer(
-                useCustomLogging,
-                args.loggingConfigMap,
-                {container: baseContainerDefinition, volumes: [s3RepoCredentials.volume]},
-                args.jvmArgs
-            )
+        setupLog4jConfigForContainer(
+            useCustomLogging,
+            args.loggingConfigMap,
+            {container: baseContainerDefinition, volumes: [s3RepoCredentials.volume]},
+            args.jvmArgs
         )
     );
     const deploymentName = getRfsDeploymentName(args.sessionName);
@@ -468,7 +462,6 @@ function makeRfsDeploymentDefinition(
             jvmArgs: inputs.jvmArgs,
             fileSourceVolumes: expr.deserializeRecord(inputs.fileSourceVolumes),
             fileSourceVolumeMounts: expr.deserializeRecord(inputs.fileSourceVolumeMounts),
-            useLocalstackAwsCreds: expr.deserializeRecord(inputs.useLocalStack),
             sessionName: inputs.sessionName,
             targetBasicCredsSecretNameOrEmpty: inputs.targetBasicCredsSecretNameOrEmpty,
             coordinatorBasicCredsSecretNameOrEmpty: inputs.coordinatorBasicCredsSecretNameOrEmpty,
@@ -578,7 +571,6 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["jvmArgs"], ""),
                     fileSourceVolumes: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumes"], [])),
                     fileSourceVolumeMounts: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumeMounts"], [])),
-                    useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.sourceVersion,
                             b.inputs.targetConfig,

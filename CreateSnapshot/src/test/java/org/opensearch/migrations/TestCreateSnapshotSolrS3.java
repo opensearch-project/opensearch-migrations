@@ -950,6 +950,24 @@ public class TestCreateSnapshotSolrS3 {
             "buildS3Client", String.class, String.class);
         build.setAccessible(true);
 
+        // The SDK also reports endpoints configured outside the builder (AWS_ENDPOINT_URL[_S3], or an
+        // endpoint_url in the active profile's services section) as an override. Ignore those so the
+        // assertions only see what buildS3Client set.
+        var previousIgnore = System.setProperty(IGNORE_CONFIGURED_ENDPOINT_URLS_PROPERTY, "true");
+        try {
+            assertBuildS3ClientEndpointOverride(build);
+        } finally {
+            if (previousIgnore == null) {
+                System.clearProperty(IGNORE_CONFIGURED_ENDPOINT_URLS_PROPERTY);
+            } else {
+                System.setProperty(IGNORE_CONFIGURED_ENDPOINT_URLS_PROPERTY, previousIgnore);
+            }
+        }
+    }
+
+    private static final String IGNORE_CONFIGURED_ENDPOINT_URLS_PROPERTY = "aws.ignoreConfiguredEndpointUrls";
+
+    private static void assertBuildS3ClientEndpointOverride(Method build) throws Exception {
         // null endpoint -> no override
         try (S3Client c = (S3Client) build.invoke(null, "us-east-1", null)) {
             Assertions.assertFalse(c.serviceClientConfiguration().endpointOverride().isPresent(),

@@ -78,7 +78,11 @@ For example, if LocalStack is running on port 4566:
 > URLs (`http(s)://<bucket>.<host>/...`), which LocalStack does not serve. An IP literal forces
 > path-style addressing (`http(s)://<host>/<bucket>/...`), which it does.
 
-For Kubernetes deployments, the orchestration layer supports a `localstack://` protocol prefix that automatically resolves the hostname to an IP address. See the [Deploying to Kubernetes](https://github.com/opensearch-project/opensearch-migrations/wiki/Deploying-to-Kubernetes) wiki for details.
+For Kubernetes deployments, the orchestration layer supports a `localstack://` protocol prefix. It is shorthand for
+an S3-compatible store with LocalStack's settings: the hostname is resolved to an IP address, and the repo's
+`s3AddressingStyle` and `s3CredentialsSecretName` default to `path` and the chart's LocalStack credentials Secret
+(the same fields used for any non-AWS S3 store). The IP rewrite is kept for the source cluster, which receives the
+endpoint when the repository is registered. See the [Deploying to Kubernetes](https://github.com/opensearch-project/opensearch-migrations/wiki/Deploying-to-Kubernetes) wiki for details.
 
 Because it exists for S3 addressing, this prefix is S3-specific. Object stores whose clients
 address buckets through the URL path do not need it: the GCS chart templates point at

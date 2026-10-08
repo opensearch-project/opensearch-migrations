@@ -94,3 +94,52 @@ describe("S3 repo settings ConfigMap", () => {
         }))).rejects.toThrow();
     });
 });
+
+describe("localstack:// endpoint shorthand", () => {
+    // localstack:// expands to the same fields as any S3-compatible store, so LocalStack runs use the
+    // per-repo credentials Secret and addressing setting rather than a separate test-credentials path.
+    it("defaults path-style addressing and the chart's LocalStack credentials Secret", async () => {
+        const bundle = await bundleFor({
+            repoPathUri: "s3://bucket/solr-path",
+            awsRegion: "us-east-1",
+            endpoint: "localstack://127.0.0.1:4566",
+        });
+
+        expect(bundle.s3RepoSettingsConfigMaps.items[0].data).toEqual({
+            AWS_ENDPOINT_URL_S3: "http://127.0.0.1:4566",
+            AWS_S3_ADDRESSING_STYLE: "path",
+        });
+        const repo = bundle.workflows.snapshotMigrations[0].snapshotConfig.repoConfig;
+        expect(repo.endpoint).toBe("http://127.0.0.1:4566");
+        expect(repo.s3CredentialsSecretName).toBe("migrations-default-s3-creds");
+        expect(repo.useLocalStack).toBe(true);
+    });
+
+    it("keeps explicitly set addressing style and credentials Secret", async () => {
+        const bundle = await bundleFor({
+            repoPathUri: "s3://bucket/solr-path",
+            awsRegion: "us-east-1",
+            endpoint: "localstacks://127.0.0.1:4566",
+            s3AddressingStyle: "virtual",
+            s3CredentialsSecretName: "my-localstack-creds",
+        });
+
+        const repo = bundle.workflows.snapshotMigrations[0].snapshotConfig.repoConfig;
+        expect(repo.endpoint).toBe("https://127.0.0.1:4566");
+        expect(repo.s3AddressingStyle).toBe("virtual");
+        expect(repo.s3CredentialsSecretName).toBe("my-localstack-creds");
+    });
+
+    it("leaves non-LocalStack endpoints without default credentials", async () => {
+        const bundle = await bundleFor({
+            repoPathUri: "s3://bucket/solr-path",
+            awsRegion: "us-east-1",
+            endpoint: "http://127.0.0.1:9000",
+        });
+
+        const repo = bundle.workflows.snapshotMigrations[0].snapshotConfig.repoConfig;
+        expect(repo.s3CredentialsSecretName).toBe("");
+        expect(repo.useLocalStack).toBe(false);
+        expect(bundle.s3RepoSettingsConfigMaps.items[0].data).toEqual({AWS_ENDPOINT_URL_S3: "http://127.0.0.1:9000"});
+    });
+});

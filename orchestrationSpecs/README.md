@@ -243,6 +243,10 @@ and write failed documents. They are configured separately:
 | `s3CredentialsSecretName` | used (mounted Secret, S3 only) | **not sent** |
 | `s3AddressingStyle` | used (`AWS_S3_ADDRESSING_STYLE`) | **not sent** |
 
+A `localstack://` (or `localstacks://`) endpoint is shorthand for these fields with LocalStack's values:
+`s3AddressingStyle` defaults to `path` and `s3CredentialsSecretName` to the chart's LocalStack keys
+(`migrations-default-s3-creds`), and the host is resolved to an IP so the source cluster also uses path-style.
+
 So for an S3-compatible store that needs static keys or path-style addressing, configure the source
 cluster's own S3 client as well, for example `s3.client.default.access_key` / `secret_key` in the
 OpenSearch/Elasticsearch keystore and `s3.client.default.path_style_access: true` (plus
