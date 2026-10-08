@@ -32,6 +32,7 @@ import reactor.core.publisher.Mono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -78,6 +79,7 @@ class NativeBulkTransformationTest {
     void configuredPoliciesKeepSourceBytesUnparsed(String policy) throws Exception {
         var document = document(SOURCE);
         try (var transformer = configured(policy)) {
+            assertInstanceOf(BulkOperationTransformer.class, transformer);
             var operation = send(transformer, document);
             assertSame(document.source(), operation.getRawDocument());
             assertSame(document.source(), operation.getOriginalSourceBytes());

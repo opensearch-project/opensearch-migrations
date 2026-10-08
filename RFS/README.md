@@ -24,6 +24,8 @@ from the existing `IJsonTransformerProvider` service interface. Its
 `transformOperations` method receives typed bulk metadata and unparsed document
 bodies. Register the provider with the existing Java service loader and select it
 with `--doc-transformer-config`; the sink recognizes native stages automatically.
+A single configured transformer is returned directly by the loader. With multiple
+stages, the sink inspects the standard composite to determine whether all are native.
 
 Metadata changes can edit `IndexOp` or `DeleteOp` directly without creating body
 Maps. Calling `operation.getDocument()` materializes a mutable Map and switches
