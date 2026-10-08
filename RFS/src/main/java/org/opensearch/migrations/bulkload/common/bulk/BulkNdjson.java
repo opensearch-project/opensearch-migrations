@@ -17,7 +17,6 @@ import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.SneakyThrows;
@@ -41,8 +40,7 @@ public final class BulkNdjson {
     @SneakyThrows
     public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
         // action line: {"<op>": {...meta...}}
-        Map<String, Object> meta = mapper.convertValue(op.getOperation(), new TypeReference<>() {});
-        Map<String, Object> actionLine = Map.of(op.getOperationType().name().toLowerCase(), meta);
+        Map<String, Object> actionLine = Map.of(op.getOperationType().name().toLowerCase(), op.getOperation());
 
         out.write(mapper.writeValueAsBytes(actionLine));
 
@@ -60,8 +58,9 @@ public final class BulkNdjson {
     @SneakyThrows
     public static void writeRawOperation(String operationType, BaseOperationMeta meta,
                                          byte[] rawSource, OutputStream out, ObjectMapper mapper) {
-        Map<String, Object> metaMap = mapper.convertValue(meta, new TypeReference<>() {});
-        Map<String, Object> actionLine = Map.of(operationType, metaMap);
+        // Jackson already serializes the metadata's unwrapped fields. Avoid a
+        // metadata -> Map -> JSON round trip on every document, including raw writes.
+        Map<String, Object> actionLine = Map.of(operationType, meta);
         out.write(mapper.writeValueAsBytes(actionLine));
 
         if (rawSource != null && rawSource.length > 0) {
