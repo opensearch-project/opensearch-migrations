@@ -533,6 +533,28 @@ class RfsMigrateDocumentsHelpersTest {
             () -> RfsMigrateDocuments.getSuccessorWorkItemIds(null, new WorkItemCursor(0L)));
     }
 
+    // ---- isSameS3Endpoint -----------------------------------------------
+
+    @Test
+    void isSameS3Endpoint_treatsNullAndBlankAsDefaultEndpoint() {
+        assertThat(RfsMigrateDocuments.isSameS3Endpoint(null, null), is(true));
+        assertThat(RfsMigrateDocuments.isSameS3Endpoint(null, ""), is(true));
+        assertThat(RfsMigrateDocuments.isSameS3Endpoint("  ", null), is(true));
+    }
+
+    @Test
+    void isSameS3Endpoint_ignoresCaseWhitespaceAndTrailingSlashes() {
+        assertThat(RfsMigrateDocuments.isSameS3Endpoint(
+            "http://MinIO:9000//", " http://minio:9000 "), is(true));
+    }
+
+    @Test
+    void isSameS3Endpoint_differentEndpointsDoNotMatch() {
+        assertThat(RfsMigrateDocuments.isSameS3Endpoint("http://minio:9000", null), is(false));
+        assertThat(RfsMigrateDocuments.isSameS3Endpoint(null, "http://minio:9000"), is(false));
+        assertThat(RfsMigrateDocuments.isSameS3Endpoint("http://minio:9000", "http://minio:9001"), is(false));
+    }
+
     // ---- NoWorkLeftException ---------------------------------------------
 
     @Test

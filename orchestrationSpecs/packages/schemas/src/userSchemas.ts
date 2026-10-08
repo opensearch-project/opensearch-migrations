@@ -164,6 +164,8 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 }
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
+// K8S_NAMING_PATTERN (declared below) that also accepts "" for "not set".
+const OPTIONAL_K8S_NAMING_PATTERN = /^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$/;
 
 // Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
 // S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
@@ -176,12 +178,36 @@ export const REPO_CONFIG = z.object({
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
-            "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
-            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
+            "localstack(s):// is shorthand for LocalStack's S3 settings: the host is resolved to an IP address during " +
+            "config transformation, and s3AddressingStyle and s3CredentialsSecretName default to 'path' and the " +
+            "chart's LocalStack credentials Secret unless set. " +
+            "Used for S3-compatible stores (LocalStack, MinIO, ...) or GCS (fake-gcs-server) testing."),
     s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
             "Used for s3:// URIs only; ignored for gs://. " +
-            "Leave empty if the cluster's own IAM role already has S3 access.")
+            "Leave empty if the cluster's own IAM role already has S3 access."),
+    s3CredentialsSecretName: z.string().regex(OPTIONAL_K8S_NAMING_PATTERN).default("").optional()
+        .describe("Name of a Kubernetes Secret with static S3 credentials under the keys 'accessKey' and 'secretKey'. " +
+            "When set, migration pods that read or write this repository use these keys for S3 only; SigV4 " +
+            "cluster auth keeps the pod's own AWS identity. Leave empty to use the pod's own AWS identity " +
+            "(e.g. EKS Pod Identity) for S3 as well. " +
+            "The Secret name is read when each pod starts and is not part of config change detection: changing " +
+            "it does not update running snapshots or migrations. To rotate credentials, update the keys in the " +
+            "same Secret; running pods pick up the new keys within a few minutes, without a restart. Keep the " +
+            "old keys valid until then. Used for s3:// URIs only; ignored for gs://. " +
+            "These keys are only used by the migration tools' own S3 clients. The source cluster writes the " +
+            "snapshot itself and never receives them, so it needs its own credentials for the store (e.g. " +
+            "s3.client.default.access_key/secret_key in the OpenSearch/Elasticsearch keystore)."),
+    s3AddressingStyle: z.enum(["", "path", "virtual"]).default("").optional()
+        .describe("S3 bucket addressing style exported to migration pods as AWS_S3_ADDRESSING_STYLE. " +
+            "'path' (bucket in the URL path) is required by most S3-compatible stores; 'virtual' uses " +
+            "bucket.host. Empty keeps each tool's default (path-style whenever 'endpoint' is set). " +
+            "Read when each pod starts and not part of config change detection: changing it does not update " +
+            "running snapshots or migrations, so set it before the first run. " +
+            "Used for s3:// URIs only; ignored for gs://. " +
+            "Only the migration tools' own S3 clients use it; it is not passed to the source cluster, which " +
+            "writes the snapshot itself and needs its own path-style setting for the store (e.g. " +
+            "s3.client.default.path_style_access for OpenSearch/Elasticsearch).")
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
     "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +

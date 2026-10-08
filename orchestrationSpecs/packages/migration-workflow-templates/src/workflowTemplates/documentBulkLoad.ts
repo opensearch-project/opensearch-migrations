@@ -35,13 +35,13 @@ import {makeRepoParamDict} from "./metadataMigration";
 import {
     setupFileSourcesForContainer,
     setupLog4jConfigForContainer,
-    setupTestCredsForContainer,
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
+import {getS3RepoCredentialsVolumeK8s, getS3RepoEnvVarsK8s} from "./commonUtils/s3RepoEnv";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
@@ -129,12 +129,13 @@ const startHistoricalBackfillInputs = {
     rfsJsonConfig: defineRequiredParam<string>(),
     targetBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
     coordinatorBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
+    s3CredentialsSecretNameOrEmpty: defineRequiredParam<string>(),
+    s3SettingsConfigMapNameOrEmpty: defineRequiredParam<string>(),
     ...SCALABLE_WORKLOAD_INPUTS,
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
     fileSourceVolumes: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>(),
     fileSourceVolumeMounts: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>(),
-    useLocalStack: defineRequiredParam<boolean>({description: "Only used for local testing"}),
     resources: defineRequiredParam<ResourceRequirementsType>(),
     crdName: defineRequiredParam<string>(),
     crdUid: defineRequiredParam<string>(),
@@ -155,8 +156,9 @@ function getRfsDeploymentManifest
     podReplicas: BaseExpression<number>,
     targetBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
     coordinatorBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
+    s3CredentialsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
+    s3SettingsConfigMapNameOrEmpty: AllowLiteralOrExpression<string>,
 
-    useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
     fileSourceVolumes: BaseExpression<any[]>,
@@ -183,6 +185,7 @@ function getRfsDeploymentManifest
         blockOwnerDeletion: true
     }];
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
+    const s3RepoCredentials = getS3RepoCredentialsVolumeK8s(args.s3CredentialsSecretNameOrEmpty);
     const baseContainerDefinition = {
         name: CONTAINER_NAMES.BULK_LOADER,
         image: makeStringTypeProxy(args.rfsImageName),
@@ -191,6 +194,7 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
+            ...getS3RepoEnvVarsK8s(args.s3SettingsConfigMapNameOrEmpty),
             // Terminal RFS document failures go to a durable S3 failed document stream
             // (see RFS/.../reindexer/faileddocumentstream). The previous OFF override turned off the
             // pod-local FailedRequests log because no durable replacement existed; we can now keep the
@@ -212,20 +216,18 @@ function getRfsDeploymentManifest
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
         ],
-        resources: makeDirectTypeProxy(args.resources)
+        resources: makeDirectTypeProxy(args.resources),
+        volumeMounts: [s3RepoCredentials.volumeMount]
     };
 
     const finalContainerDefinition = setupFileSourcesForContainer(
         args.fileSourceVolumes,
         args.fileSourceVolumeMounts,
-        setupTestCredsForContainer(
-            args.useLocalstackAwsCreds,
-            setupLog4jConfigForContainer(
-                useCustomLogging,
-                args.loggingConfigMap,
-                {container: baseContainerDefinition, volumes: []},
-                args.jvmArgs
-            )
+        setupLog4jConfigForContainer(
+            useCustomLogging,
+            args.loggingConfigMap,
+            {container: baseContainerDefinition, volumes: [s3RepoCredentials.volume]},
+            args.jvmArgs
         )
     );
     const deploymentName = getRfsDeploymentName(args.sessionName);
@@ -460,10 +462,11 @@ function makeRfsDeploymentDefinition(
             jvmArgs: inputs.jvmArgs,
             fileSourceVolumes: expr.deserializeRecord(inputs.fileSourceVolumes),
             fileSourceVolumeMounts: expr.deserializeRecord(inputs.fileSourceVolumeMounts),
-            useLocalstackAwsCreds: expr.deserializeRecord(inputs.useLocalStack),
             sessionName: inputs.sessionName,
             targetBasicCredsSecretNameOrEmpty: inputs.targetBasicCredsSecretNameOrEmpty,
             coordinatorBasicCredsSecretNameOrEmpty: inputs.coordinatorBasicCredsSecretNameOrEmpty,
+            s3CredentialsSecretNameOrEmpty: inputs.s3CredentialsSecretNameOrEmpty,
+            s3SettingsConfigMapNameOrEmpty: inputs.s3SettingsConfigMapNameOrEmpty,
             rfsImageName: inputs.imageReindexFromSnapshotLocation,
             rfsImagePullPolicy: inputs.imageReindexFromSnapshotPullPolicy,
             workflowName: expr.getWorkflowValue("name"),
@@ -562,11 +565,12 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                     minPodReplicas: scaling.minPodReplicas,
                     targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
+                    s3CredentialsSecretNameOrEmpty: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "s3CredentialsSecretName"], ""),
+                    s3SettingsConfigMapNameOrEmpty: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "s3SettingsConfigMapName"], ""),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["jvmArgs"], ""),
                     fileSourceVolumes: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumes"], [])),
                     fileSourceVolumeMounts: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumeMounts"], [])),
-                    useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.sourceVersion,
                             b.inputs.targetConfig,

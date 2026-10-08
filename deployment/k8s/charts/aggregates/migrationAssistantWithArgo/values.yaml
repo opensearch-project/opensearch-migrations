@@ -192,6 +192,15 @@ logs:
     storageClass: ""
   format: application # application or docker-json
 
+migrationConsole:
+  # Secret with static S3 snapshot-repo keys under 'accessKey' and 'secretKey' (same format as a repo's
+  # s3CredentialsSecretName). When set, it is mounted at /config/s3-repo-credentials and the snapshot and
+  # metadata tools run from the console use it for S3 only; SigV4 cluster auth keeps the pod's identity.
+  # Updating the keys in the Secret takes effect without restarting the console. The source cluster writes
+  # snapshots itself and never receives these keys; configure its own S3 credentials, endpoint and
+  # path-style setting for the store separately.
+  s3RepoCredentialsSecretName: ""
+
 
 installer:
   # Child chart installs wait by default. Per-chart waitForInstallation values

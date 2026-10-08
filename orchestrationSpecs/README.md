@@ -230,6 +230,29 @@ targetClusters:
 ...
 ```
 
+#### S3 snapshot repository settings: migration tools vs. the source cluster
+
+For `s3://` repositories two different parties talk to the store: the source cluster, which writes the
+snapshot, and the migration tools (CreateSnapshot, metadata migration, document backfill), which read it
+and write failed documents. They are configured separately:
+
+| `snapshotRepo` field | Migration tools' S3 clients | Source cluster |
+|---|---|---|
+| `awsRegion`, `s3RoleArn` | used | sent when CreateSnapshot registers the repository |
+| `endpoint` | used | sent as the repository `endpoint` setting |
+| `s3CredentialsSecretName` | used (mounted Secret, S3 only) | **not sent** |
+| `s3AddressingStyle` | used (`AWS_S3_ADDRESSING_STYLE`) | **not sent** |
+
+A `localstack://` (or `localstacks://`) endpoint is shorthand for these fields with LocalStack's values:
+`s3AddressingStyle` defaults to `path` and `s3CredentialsSecretName` to the chart's LocalStack keys
+(`migrations-default-s3-creds`), and the host is resolved to an IP so the source cluster also uses path-style.
+
+So for an S3-compatible store that needs static keys or path-style addressing, configure the source
+cluster's own S3 client as well, for example `s3.client.default.access_key` / `secret_key` in the
+OpenSearch/Elasticsearch keystore and `s3.client.default.path_style_access: true` (plus
+`s3.client.default.endpoint` if the cluster does not accept the repository-level endpoint). For Solr,
+configure the store, its credentials and addressing in Solr's S3 backup repository.
+
 ### Kafka Settings
 
 `kafkaClusterConfiguration.<cluster>.autoCreate` is intended to behave like the

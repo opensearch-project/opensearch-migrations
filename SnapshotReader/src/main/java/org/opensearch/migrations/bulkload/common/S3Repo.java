@@ -7,12 +7,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.function.UnaryOperator;
 
+import org.opensearch.migrations.aws.S3RepoCredentials;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
@@ -94,17 +95,28 @@ public class S3Repo implements SourceRepo, AutoCloseable {
     }
 
     public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region, URI s3Endpoint, SnapshotFileFinder finder) {
-        S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
+        return new S3Repo(s3LocalDir, s3Uri, s3Region, buildS3Client(s3Region, s3Endpoint), finder);
+    }
+
+    private static S3AsyncClient buildS3Client(String s3Region, URI s3Endpoint) {
+        return buildS3Client(s3Region, s3Endpoint, System::getenv);
+    }
+
+    /** @param env environment lookup for the S3 repo credentials and addressing style settings */
+    static S3AsyncClient buildS3Client(String s3Region, URI s3Endpoint, UnaryOperator<String> env) {
+        return S3AsyncClient.crtBuilder()
             .region(Region.of(s3Region))
-            .credentialsProvider(DefaultCredentialsProvider.builder().build())
+            .credentialsProvider(S3RepoCredentials.provider(env))
             .retryConfiguration(r -> r.numRetries(3))
             .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
             .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
             .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
             .endpointOverride(s3Endpoint)
+            // Custom S3-compatible endpoints generally can't resolve virtual-hosted bucket names
+            // (bucket.host), so default to path-style whenever an endpoint override is set, unless
+            // the repo's AWS_S3_ADDRESSING_STYLE says otherwise. This matches CreateSnapshot.
+            .forcePathStyle(S3AddressingStyle.forcePathStyle(s3Endpoint != null, env))
             .build();
-
-        return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client, finder);
     }
 
     protected S3Repo(Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client, SnapshotFileFinder fileFinder) {
@@ -411,17 +423,7 @@ public class S3Repo implements SourceRepo, AutoCloseable {
      * that only need {@link #downloadAllFiles()}.
      */
     public static S3Repo createRaw(Path s3LocalDir, S3Uri s3Uri, String s3Region, URI s3Endpoint) {
-        S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
-            .region(Region.of(s3Region))
-            .credentialsProvider(DefaultCredentialsProvider.builder().build())
-            .retryConfiguration(r -> r.numRetries(3))
-            .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
-            .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
-            .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
-            .endpointOverride(s3Endpoint)
-            .build();
-
-        return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client, null);
+        return new S3Repo(s3LocalDir, s3Uri, s3Region, buildS3Client(s3Region, s3Endpoint), null);
     }
 
 }

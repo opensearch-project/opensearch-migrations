@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from console_link.models.cluster import Cluster
+from console_link.models.snapshot import GcsSnapshot, S3Snapshot
 
 JQ_SCRIPT = Path(__file__).resolve().parents[3] / "workflowConfigToServicesConfig.jq"
 
@@ -90,3 +91,48 @@ def test_context_path_is_normalized_by_the_cluster():
     services = translate(solr_workflow_config(solrContextPath="tenant-a/solr/"))
 
     assert Cluster(config=services["source_cluster"]).solr_context_path == "/tenant-a/solr"
+
+
+def with_repo_fields(**repo_fields) -> dict:
+    config = solr_workflow_config()
+    config["snapshot"]["repoConfig"].update(repo_fields)
+    return config
+
+
+def test_translated_s3_repo_with_custom_s3_fields_builds_a_snapshot():
+    """The regression that broke the snapshot-done monitor: the denormalized repoConfig carries
+    pod-wiring fields that console_link's strict snapshot schema rejected as unknown, so every
+    `console snapshot status` call failed and the DataSnapshot never left Pending."""
+    services = translate(with_repo_fields(
+        endpoint="http://minio:9000",
+        s3AddressingStyle="path",
+        s3CredentialsSecretName="minio-creds",
+        s3SettingsConfigMapName="s3-repo-settings-solr-source-s3",
+        useLocalStack=False,
+    ))
+
+    assert services["snapshot"]["s3"] == {
+        "repo_uri": "s3://my-bucket/solr",
+        "aws_region": "us-east-1",
+        "endpoint": "http://minio:9000",
+        "addressing_style": "path",
+    }
+    snapshot = S3Snapshot(services["snapshot"], Cluster(config=services["source_cluster"]))
+    assert snapshot.s3_addressing_style == "path"
+    assert snapshot.s3_endpoint == "http://minio:9000"
+
+
+def test_empty_s3_fields_are_dropped():
+    services = translate(with_repo_fields(s3AddressingStyle="", s3CredentialsSecretName="",
+                                          s3SettingsConfigMapName=""))
+
+    assert services["snapshot"]["s3"] == {"repo_uri": "s3://my-bucket/solr", "aws_region": "us-east-1"}
+    assert S3Snapshot(services["snapshot"], None).s3_addressing_style is None
+
+
+def test_s3_only_fields_are_dropped_for_gcs_repos():
+    services = translate(with_repo_fields(repoPathUri="gs://my-bucket/solr", s3AddressingStyle="path",
+                                          s3CredentialsSecretName="creds", s3SettingsConfigMapName="settings"))
+
+    assert services["snapshot"]["gcs"] == {"repo_uri": "gs://my-bucket/solr"}
+    GcsSnapshot(services["snapshot"], None)

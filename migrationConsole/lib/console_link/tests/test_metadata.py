@@ -270,6 +270,76 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
     )
 
 
+def test_metadata_with_s3_config_exports_addressing_style(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/s3",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1",
+                "addressing_style": "path",
+            },
+        },
+    }
+    metadata = Metadata(config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH),
+                        create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    assert mock.call_args.kwargs["env"]["AWS_S3_ADDRESSING_STYLE"] == "path"
+
+
+def test_metadata_with_external_s3_snapshot_exports_its_addressing_style(mocker):
+    snapshot = S3Snapshot({"snapshot_name": "reindex_from_snapshot",
+                           "s3": {"repo_uri": "s3://my-bucket", "aws_region": "us-east-1",
+                                  "endpoint": "http://minio:9000", "addressing_style": "virtual"}},
+                          create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+    metadata = Metadata({"from_snapshot": None}, create_valid_cluster(auth_type=AuthMethod.NO_AUTH),
+                        create_valid_cluster(version=MOCK_SOURCE_VERSION), snapshot)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    assert mock.call_args.kwargs["env"]["AWS_S3_ADDRESSING_STYLE"] == "virtual"
+
+
+def test_metadata_with_s3_snapshot_passes_mounted_credentials_dir(mocker, monkeypatch, tmp_path):
+    monkeypatch.delenv("S3_REPO_CREDENTIALS_DIR", raising=False)
+    monkeypatch.setattr("console_link.models.snapshot.S3_REPO_CREDENTIALS_MOUNT_PATH", str(tmp_path))
+    config = {"from_snapshot": {"snapshot_name": "reindex_from_snapshot", "local_dir": "/tmp/s3",
+                                "s3": {"repo_uri": "s3://my-bucket", "aws_region": "us-east-1"}}}
+    metadata = Metadata(config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH),
+                        create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    assert mock.call_args.kwargs["env"]["S3_REPO_CREDENTIALS_DIR"] == str(tmp_path)
+
+
+def test_metadata_with_fs_snapshot_ignores_mounted_credentials_dir(mocker, monkeypatch, tmp_path):
+    monkeypatch.delenv("S3_REPO_CREDENTIALS_DIR", raising=False)
+    monkeypatch.setattr("console_link.models.snapshot.S3_REPO_CREDENTIALS_MOUNT_PATH", str(tmp_path))
+    config = {"from_snapshot": {"snapshot_name": "reindex_from_snapshot", "fs": {"repo_path": "path/to/repo"}}}
+    metadata = Metadata(config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH),
+                        create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    assert "env" not in mock.call_args.kwargs
+
+
 def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
     config = {
         "from_snapshot": {

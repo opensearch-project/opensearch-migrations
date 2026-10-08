@@ -22,34 +22,24 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+import {Volume} from "@opensearch-migrations/k8s-types";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {
+    getS3RepoCredentialsVolumeSource,
+    getS3RepoEnvVars,
+    S3_REPO_CREDENTIALS_MOUNT_PATH,
+    S3_REPO_CREDENTIALS_VOLUME_NAME
+} from "./commonUtils/s3RepoEnv";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
 import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 const METADATA_OUTPUT_PATH = "/tmp/outputs/metadata-output.log";
-const METADATA_TEST_CREDS_VOLUME_NAME = "test-creds";
-const METADATA_STATIC_VOLUMES = [
-    {
-        name: METADATA_TEST_CREDS_VOLUME_NAME,
-        configMap: {
-            name: "localstack-test-creds",
-            optional: true
-        }
-    }
-] as const;
-const METADATA_STATIC_VOLUME_MOUNTS = [
-    {
-        name: METADATA_TEST_CREDS_VOLUME_NAME,
-        mountPath: "/config/credentials",
-        readOnly: true
-    }
-] as const;
 
 function makeMetadataOutputS3Key(
     crdName: BaseExpression<string>,
@@ -206,14 +196,27 @@ function makeMetadataPodSpecPatch(
     inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>
 ) {
     const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
+    const s3CredentialsSecretName =
+        expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "s3CredentialsSecretName"], "");
+    const s3CredentialsSecret = getS3RepoCredentialsVolumeSource(s3CredentialsSecretName).secret;
     return {
-        volumes: expr.concatArrays(
-            expr.templateValue(METADATA_STATIC_VOLUMES),
+        volumes: expr.concatArrays<Volume[]>(
+            expr.toArray(expr.makeDict({
+                name: expr.literal(S3_REPO_CREDENTIALS_VOLUME_NAME),
+                secret: expr.makeDict({
+                    secretName: s3CredentialsSecret.secretName,
+                    optional: expr.literal(s3CredentialsSecret.optional),
+                }),
+            })),
             expr.dig(metadataConfig, ["fileSourceVolumes"], [])
         ),
         mainContainer: {
             volumeMounts: expr.concatArrays(
-                expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
+                expr.templateValue([{
+                    name: S3_REPO_CREDENTIALS_VOLUME_NAME,
+                    mountPath: S3_REPO_CREDENTIALS_MOUNT_PATH,
+                    readOnly: true
+                }]),
                 expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
             ),
             resources: expr.get(metadataConfig, "resources"),
@@ -230,16 +233,12 @@ function buildMetadataContainer<
     return builder
         .addImageInfo(inputs.imageMigrationConsoleLocation, inputs.imageMigrationConsolePullPolicy)
         .addPodSpecPatch(({inputs}) => makeMetadataPodSpecPatch(inputs))
-        .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
-            expr.ternary(
-                expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
-                expr.literal("/config/credentials/configuration"),
-                expr.literal(""))
-        )
         .addEnvVar("JDK_JAVA_OPTIONS",
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
+        .addEnvVarsFromRecord(getS3RepoEnvVars(
+            expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "s3SettingsConfigMapName"], "")))
         .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
         .addArgs([
             inputs.commandMode,

@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     implementation project(':coreUtilities')
+    implementation project(':awsUtilities')
     implementation project(":RFS")
     implementation project(":SolrReader")
 

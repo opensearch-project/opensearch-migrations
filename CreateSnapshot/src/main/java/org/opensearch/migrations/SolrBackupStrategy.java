@@ -14,7 +14,9 @@ import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.aws.S3RepoCredentials;
 import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.S3AddressingStyle;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.solr.SolrContextPath;
@@ -1041,13 +1043,18 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     }
 
     private static S3Client buildS3Client(String region, String endpoint) {
-        var builder = S3Client.builder().region(Region.of(region));
-        if (endpoint != null && !endpoint.isEmpty()) {
+        var builder = S3Client.builder()
+            .region(Region.of(region))
+            .credentialsProvider(S3RepoCredentials.provider());
+        var hasEndpoint = endpoint != null && !endpoint.isEmpty();
+        if (hasEndpoint) {
             var endpointUri = endpoint.contains("://") ? endpoint : "http://" + endpoint;
             builder.endpointOverride(URI.create(endpointUri));
-            builder.forcePathStyle(true);
-            log.info("Using custom S3 endpoint: {} (path-style)", endpointUri);
+            log.info("Using custom S3 endpoint: {}", endpointUri);
         }
+        var pathStyle = S3AddressingStyle.forcePathStyle(hasEndpoint);
+        builder.forcePathStyle(pathStyle);
+        log.info("S3 addressing style: {}", pathStyle ? "path" : "virtual");
         return builder.build();
     }
 

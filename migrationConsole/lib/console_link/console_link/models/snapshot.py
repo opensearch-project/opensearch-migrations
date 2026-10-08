@@ -1,5 +1,6 @@
 from enum import Enum
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from cerberus import Validator
@@ -22,6 +23,29 @@ SOLR_NO_DELETE_MSG = "Solr backups are managed as files; no delete API available
 SOLR_LIST_COLLECTIONS_PATH = "/admin/collections?action=LIST&wt=json"
 SOLR_NO_SNAPSHOT_REPO_MSG = "Solr does not use snapshot repositories."
 CREATE_SNAPSHOT_COMMAND = "/root/createSnapshot/bin/CreateSnapshot"
+# The Java tools read the addressing style from this env var (see RfsCommon's S3AddressingStyle);
+# "" leaves each tool's default in place (path-style whenever a custom endpoint is set).
+S3_ADDRESSING_STYLE_ENV_VAR = "AWS_S3_ADDRESSING_STYLE"
+S3_ADDRESSING_STYLES = ['', 'path', 'virtual']
+# Static S3 repo keys (accessKey/secretKey files) are read only by the Java S3 clients, from the directory
+# this env var names (see awsUtilities' S3RepoCredentials). Same mount path as the workflow's migration pods.
+S3_REPO_CREDENTIALS_DIR_ENV_VAR = "S3_REPO_CREDENTIALS_DIR"
+S3_REPO_CREDENTIALS_MOUNT_PATH = "/config/s3-repo-credentials"
+
+
+def s3_repo_env(addressing_style: Optional[str]) -> Optional[Dict[str, str]]:
+    """Env vars for Java tools that touch an S3 snapshot repository, or None to inherit the console's env.
+
+    S3_REPO_CREDENTIALS_DIR is added only when the credentials directory is mounted into the console and the
+    console doesn't already set it (in which case the subprocess inherits it). The keys are deliberately not
+    exported as AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, which would also be used for SigV4 cluster auth.
+    """
+    env = {}
+    if addressing_style:
+        env[S3_ADDRESSING_STYLE_ENV_VAR] = addressing_style
+    if S3_REPO_CREDENTIALS_DIR_ENV_VAR not in os.environ and os.path.isdir(S3_REPO_CREDENTIALS_MOUNT_PATH):
+        env[S3_REPO_CREDENTIALS_DIR_ENV_VAR] = S3_REPO_CREDENTIALS_MOUNT_PATH
+    return env or None
 
 
 def solr_list_collections_api(context_path: str = DEFAULT_SOLR_CONTEXT_PATH) -> str:
@@ -67,7 +91,9 @@ SNAPSHOT_SCHEMA = {
                     'repo_uri': {'type': 'string', 'required': True},
                     'aws_region': {'type': 'string', 'required': True},
                     'role': {'type': 'string', 'required': False},
-                    'endpoint': {'type': 'string', 'required': False}
+                    'endpoint': {'type': 'string', 'required': False},
+                    'addressing_style': {'type': 'string', 'required': False,
+                                         'allowed': S3_ADDRESSING_STYLES}
                 }
             },
             'gcs': {
@@ -227,6 +253,7 @@ class S3Snapshot(Snapshot):
         self.s3_role_arn = config['s3'].get('role')
         self.s3_region = config['s3']['aws_region']
         self.s3_endpoint = config['s3'].get('endpoint')
+        self.s3_addressing_style = config['s3'].get('addressing_style') or None
 
     def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
@@ -259,7 +286,8 @@ class S3Snapshot(Snapshot):
             for arg in extra_args:
                 command_args[arg] = FlagOnlyArgument
 
-        command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
+        command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"],
+                                       env=s3_repo_env(self.s3_addressing_style))
         try:
             command_runner.run()
             logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")

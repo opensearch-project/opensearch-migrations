@@ -66,8 +66,11 @@ class CommandRunner:
     """
     def __init__(self, command_root: str, command_args: Dict[str, Any], sensitive_fields: Optional[List[str]] = None,
                  run_as_detatched: bool = False, log_file: Optional[str] = None,
-                 timeout: Optional[float] = None):
+                 timeout: Optional[float] = None, env: Optional[Dict[str, str]] = None):
         self.command_args = command_args
+        # Extra environment variables layered over the console's own. Passed to subprocess only when
+        # set, so the default call shape (which tests assert on) is unchanged.
+        self.env_kwargs: Dict[str, Any] = {"env": {**os.environ, **env}} if env else {}
         self.command = [command_root]
         for key, value in command_args.items():
             self.command.append(key)
@@ -127,6 +130,7 @@ class CommandRunner:
             "stderr": subprocess.PIPE,
             "text": True,
             "check": True,
+            **self.env_kwargs,
         }
         if self.timeout is not None:
             run_kwargs["timeout"] = self.timeout
@@ -161,6 +165,7 @@ class CommandRunner:
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
+                **self.env_kwargs,
             )
             # Idle-timeout: SIGKILL the child after self.timeout seconds of no
             # output. Re-armed on every line so a command making visible progress
@@ -211,7 +216,8 @@ class CommandRunner:
         try:
             with open(log_file, "w") as f:
                 # Start the process in detached mode
-                process = subprocess.Popen(self.command, stdout=f, stderr=subprocess.STDOUT, preexec_fn=os.setpgrp)
+                process = subprocess.Popen(self.command, stdout=f, stderr=subprocess.STDOUT, preexec_fn=os.setpgrp,
+                                           **self.env_kwargs)
                 logger.info(f"Process started with PID {process.pid}")
                 logger.info(f"Process logs available at {log_file}")
                 return CommandResult(success=True, value=f"Process started with PID {process.pid}\n"
