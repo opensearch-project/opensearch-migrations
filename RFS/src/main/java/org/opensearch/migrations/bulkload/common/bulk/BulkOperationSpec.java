@@ -1,7 +1,10 @@
 package org.opensearch.migrations.bulkload.common.bulk;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Map;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.bulk.enums.SchemaVersion;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
@@ -11,6 +14,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
@@ -37,6 +41,7 @@ import lombok.experimental.SuperBuilder;
     @JsonSubTypes.Type(value = DeleteOp.class, name = DeleteOp.OP_TYPE_VALUE)
 })
 public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
+    private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     protected static final String OPERATION_TYPE_KEY = "operation_type";
     protected static final String INCLUDE_DOCUMENT_KEY = "include_document";
 
@@ -44,6 +49,18 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
     private SchemaVersion schema = SchemaVersion.RFS_OPENSEARCH_BULK_V1;
     private Map<String, Object> document;
     private String documentPath;
+
+    /**
+     * Unparsed body for native transformations. Metadata-only changes retain these
+     * bytes through serialization and retries. Accessing {@link #getDocument()}
+     * materializes a mutable Map and switches subsequent writes to that Map.
+     * Treat the bytes as immutable; replace them with {@link #setRawDocument(byte[])}
+     * to preserve the original source for failure reporting.
+     */
+    @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    private transient byte[] rawDocument;
 
     /**
      * Source metadata exposed to document transformations, such as the snapshot's
@@ -65,6 +82,51 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
     @EqualsAndHashCode.Exclude
     @ToString.Exclude
     private transient Map<String, Object> originalSource;
+
+    /** Retain the source for failure reporting without parsing it on successful writes. */
+    @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    private transient byte[] originalSourceBytes;
+
+    public Map<String, Object> getDocument() {
+        if (rawDocument != null) {
+            document = parseSource(rawDocument);
+            rawDocument = null;
+        }
+        return document;
+    }
+
+    public void setDocument(Map<String, Object> document) {
+        this.document = document;
+        this.rawDocument = null;
+    }
+
+    public void setRawDocument(byte[] rawDocument) {
+        this.rawDocument = rawDocument;
+        this.document = null;
+    }
+
+    public Map<String, Object> getOriginalSource() {
+        if (originalSourceBytes != null) {
+            originalSource = parseSource(originalSourceBytes);
+            originalSourceBytes = null;
+        }
+        return originalSource;
+    }
+
+    public void setOriginalSource(Map<String, Object> originalSource) {
+        this.originalSource = originalSource;
+        this.originalSourceBytes = null;
+    }
+
+    private static Map<String, Object> parseSource(byte[] source) {
+        try {
+            return OBJECT_MAPPER.readValue(source, new TypeReference<>() {});
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
 
     @JsonProperty(INCLUDE_DOCUMENT_KEY)
     public abstract boolean isIncludeDocument();

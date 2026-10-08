@@ -29,10 +29,19 @@ public class BulkOperationConverter {
      * Convert a {@link Document} to a {@link BulkOperationSpec} for the given index.
      */
     public static BulkOperationSpec fromDocument(Document doc, String indexName) {
+        return fromDocument(doc, indexName, false);
+    }
+
+    /** Build typed metadata for a native transformation, retaining the unparsed source. */
+    public static BulkOperationSpec fromRawDocument(Document doc, String indexName) {
+        return fromDocument(doc, indexName, true);
+    }
+
+    private static BulkOperationSpec fromDocument(Document doc, String indexName, boolean retainRawSource) {
         Map<String, Object> document;
         try {
             document = doc.source() != null
-                ? OBJECT_MAPPER.readValue(doc.source(), new TypeReference<>() {})
+                ? (retainRawSource ? null : OBJECT_MAPPER.readValue(doc.source(), new TypeReference<>() {}))
                 : Map.of();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -50,14 +59,18 @@ public class BulkOperationConverter {
                     .routing(routing)
                     .build())
                 .document(document)
+                .rawDocument(retainRawSource ? doc.source() : null)
                 .originalSource(document)
+                .originalSourceBytes(retainRawSource ? doc.source() : null)
                 .sourceMetadata(doc.sourceMetadata())
                 .build();
         }
         return IndexOp.builder()
             .operation(indexMetadata(doc, indexName, false))
             .document(document)
+            .rawDocument(retainRawSource ? doc.source() : null)
             .originalSource(document)
+            .originalSourceBytes(retainRawSource ? doc.source() : null)
             .sourceMetadata(doc.sourceMetadata())
             .build();
     }

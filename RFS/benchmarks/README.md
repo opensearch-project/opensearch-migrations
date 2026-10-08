@@ -44,18 +44,21 @@ MIGRATIONS_ROOT_LOG_LEVEL=ERROR ./gradlew :RFS:versioningBenchmark \
   -rf json -rff /tmp/versioning-native.json"
 ```
 
-Run `VersioningBenchmark.pipeline` with `-p mode=native,java_gte,external_gte`
+Run `VersioningBenchmark.pipeline` with `-p mode=native,native_gte,java_gte,external_gte`
 to measure the production concurrent reader, batching, sink, optional GraalJS
 transformation, and bulk serialization. This replaces only the HTTP exchange
 with an in-process successful response. `java_gte` supplies a direct Java
 `IJsonTransformer` with snapshot-version validation and metadata rewriting.
 It is a benchmark comparator, not a registered provider or the full configurable
 application-field modifier. `external_gte` uses the bundled JavaScript provider.
+`native_gte` uses the bundled `BulkVersioningTransformerProvider`, which edits
+typed metadata and retains the source bytes.
 The optional `identity` mode measures a pass-through JavaScript transformation.
 
-Both Java and JavaScript take the sink's existing transformation path, including
-body conversion to Maps. Selecting Java removes the scripting runtime; preserving
-raw source bytes through a transformer would require a separate pipeline hook.
+`java_gte` and JavaScript take the sink's JSON transformation path, including
+body conversion to Maps. Selecting Java removes the scripting runtime.
+`native_gte` additionally avoids these conversions through the native bulk
+transformation contract. All three modes select `external_gte`.
 
 `readDocument` and `nativeBatch` report microseconds and allocation **per
 document**. `pipeline` reports them **per complete fixture**: divide by the

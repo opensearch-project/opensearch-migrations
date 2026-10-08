@@ -16,9 +16,34 @@ Several entrypoints are provided to handle different aspects of an overall clust
 
 It is recommended to refer to the respective README of the tool you want to use for more details about how to use them.
 
+## Native bulk transformations
+
+Java document providers can return a
+[`BulkOperationTransformer`](src/main/java/org/opensearch/migrations/bulkload/transformers/BulkOperationTransformer.java)
+from the existing `IJsonTransformerProvider` service interface. Its
+`transformOperations` method receives typed bulk metadata and unparsed document
+bodies. Register the provider with the existing Java service loader and select it
+with `--doc-transformer-config`; the sink recognizes native stages automatically.
+
+Metadata changes can edit `IndexOp` or `DeleteOp` directly without creating body
+Maps. Calling `operation.getDocument()` materializes a mutable Map and switches
+that operation to normal JSON serialization. To replace a body with already
+encoded JSON, use `setRawDocument(byte[])`; treat the original byte arrays as
+immutable. The original source is retained separately for failed-document records.
+
+All stages must be native to retain the raw path. Mixed Java/JavaScript chains
+use the existing JSON representation and preserve configuration order. The
+built-in `BulkVersioningTransformerProvider` supports `internal`, `external`,
+and `external_gte`; see the
+[startup examples](../DocumentsFromSnapshotMigration/README.md#native-java-versioning).
+
 ## Benchmarking
 
 This library supports benchmarks via [Java Microbenchmark Harness or JMH](https://github.com/openjdk/jmh).  These are best to be used with A/B testing that does not involve any external systems, such as string parsers.  Run the command with `./gradlew RFS:jmh` after it has completed results will be available in {project.dir}/build/reports/jmh in addition to the human readable logs.
+
+For version extraction, bulk serialization, and native/JavaScript transformation
+comparisons over real OpenSearch shard files, use the
+[versioning benchmark](benchmarks/README.md).
 
 ### Adding a benchmark
 
@@ -148,4 +173,3 @@ curl -u "elastic-admin:elastic-password" -X GET "http://localhost:9200/"
 ## How to run an ES 7.10 Source Cluster w/ an attached debugger
 
 The process is the same as for 6.8; see [that guide](#how-to-run-an-es-68-source-cluster-w-an-attached-debugger).
-

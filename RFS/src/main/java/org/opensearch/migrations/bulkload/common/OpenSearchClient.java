@@ -493,9 +493,11 @@ public abstract class OpenSearchClient {
             
             return IndexOp.builder()
                 .operation(newMetadata)
-                .document(original.getDocument())
+                .document(original.getRawDocument() == null ? original.getDocument() : null)
+                .rawDocument(original.getRawDocument())
                 .includeDocument(original.isIncludeDocument())
-                .originalSource(original.getOriginalSource())
+                .originalSource(original.getOriginalSourceBytes() == null ? original.getOriginalSource() : null)
+                .originalSourceBytes(original.getOriginalSourceBytes())
                 .sourceMetadata(original.getSourceMetadata())
                 .build();
         }

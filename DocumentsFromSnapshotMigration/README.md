@@ -220,8 +220,7 @@ requires index operations; transformations producing create-only operations
 must remove the explicit version. The bundled data-stream backing-index
 transformation does this when it selects `op_type: "create"`.
 
-The optional bundled [externalVersioning.js](../transformation/standardJavascriptTransforms/src/externalVersioning.js)
-modifier supports all three policies through `bindingsObject.versionType`:
+The optional built-in Java and JavaScript modifiers support all three policies:
 
 | `versionType` | Behavior |
 |---|---|
@@ -235,6 +234,32 @@ Changing only `versionType` preserves `operation.version`, including a value
 selected by an earlier transformation. If that value is absent, the modifier
 falls back to `source_metadata._version`, allowing internal mode to be followed
 by an external mode.
+
+#### Native Java versioning
+
+Use the bundled Java provider to change the version policy without converting
+document bodies to Maps. It is available in the standard image and accepts an
+inline startup argument:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external_gte"}}]'
+```
+
+Use `"internal"` to remove explicit versioning, or `"external"` for strict
+greater-than versioning. A chain composed entirely of native
+`BulkOperationTransformer` implementations retains the source bytes through
+metadata changes, serialization, and retries. Adding a JavaScript or other JSON
+transformer uses the existing JSON path, in the configured order.
+
+The Java provider also accepts `versionField`, either a field name or a list of
+nested field names. Selecting an application field parses the body; using the
+snapshot version does not. Java preserves integer values through `Long.MAX_VALUE`
+without JavaScript's numeric precision limit. Floating-point application values
+are rejected.
+
+The bundled [externalVersioning.js](../transformation/standardJavascriptTransforms/src/externalVersioning.js)
+remains available through `JsonJSTransformerProvider`, with its options inside
+`bindingsObject`. The examples below show that configuration.
 
 #### Opting out with internal versioning
 

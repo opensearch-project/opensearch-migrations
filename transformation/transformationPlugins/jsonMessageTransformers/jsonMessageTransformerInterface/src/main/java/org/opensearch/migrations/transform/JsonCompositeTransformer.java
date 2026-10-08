@@ -4,10 +4,15 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class JsonCompositeTransformer implements IJsonTransformer {
-    List<IJsonTransformer> jsonTransformerList;
+    private final List<IJsonTransformer> jsonTransformerList;
 
     public JsonCompositeTransformer(IJsonTransformer... jsonTransformers) {
         this.jsonTransformerList = List.of(jsonTransformers);
+    }
+
+    /** Immutable stages in execution order, for consumers that support native transformation contracts. */
+    public List<IJsonTransformer> getTransformers() {
+        return jsonTransformerList;
     }
 
     @Override

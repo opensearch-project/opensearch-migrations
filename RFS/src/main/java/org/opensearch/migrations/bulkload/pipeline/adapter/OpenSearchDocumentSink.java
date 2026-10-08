@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +17,9 @@ import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.JsonCompositeTransformer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +43,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     private final OpenSearchClient client;
     private final IJsonTransformer transformer;
+    private final List<BulkOperationTransformer> nativeTransformers;
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
@@ -53,6 +57,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
     ) {
         this.client = client;
         this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
+        this.nativeTransformers = nativeStages(this.transformer);
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
         this.requestContextSupplier = requestContextSupplier;
@@ -96,9 +101,18 @@ public class OpenSearchDocumentSink implements DocumentSink {
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
-        if (transformer == null) {
+        if (nativeTransformers != null && nativeTransformers.isEmpty()) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
             bulkMono = client.sendBulkRequestRaw(collectionName, batch,
+                requestContext, allowServerGeneratedIds, allowlist);
+        } else if (nativeTransformers != null) {
+            var operations = batch.stream()
+                .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
+                .collect(Collectors.toList());
+            for (var nativeTransformer : nativeTransformers) {
+                operations = nativeTransformer.transformOperations(operations);
+            }
+            bulkMono = client.sendBulkRequest(collectionName, operations,
                 requestContext, allowServerGeneratedIds, allowlist);
         } else {
             var bulkOps = batch.stream()
@@ -110,6 +124,31 @@ public class OpenSearchDocumentSink implements DocumentSink {
         }
 
         return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch)));
+    }
+
+    /** Resolve capabilities once, preserving the existing JSON path for mixed or opaque wrappers. */
+    private static List<BulkOperationTransformer> nativeStages(IJsonTransformer stage) {
+        if (stage == null) {
+            return List.of();
+        }
+        if (stage instanceof BulkOperationTransformer nativeTransformer) {
+            return List.of(nativeTransformer);
+        }
+        // A subclass may override transformJson with additional behavior. Treat
+        // it as an opaque JSON stage rather than bypassing that override.
+        if (stage.getClass() == JsonCompositeTransformer.class) {
+            var composite = (JsonCompositeTransformer) stage;
+            var stages = new ArrayList<BulkOperationTransformer>();
+            for (var child : composite.getTransformers()) {
+                var childStages = nativeStages(child);
+                if (childStages == null) {
+                    return null;
+                }
+                stages.addAll(childStages);
+            }
+            return List.copyOf(stages);
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

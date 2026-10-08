@@ -23,6 +23,8 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneAdapter;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
+import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
+import org.opensearch.migrations.bulkload.transformers.BulkVersioningTransformerProvider;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
@@ -275,19 +277,26 @@ class OpenSearchClientTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
-    void retriesKeepVersionsConsistentWithIdPolicy(boolean raw, boolean generateIds) throws Exception {
+    @CsvSource({"raw,false", "raw,true", "map,false", "map,true", "native,false", "native,true"})
+    void retriesKeepVersionsConsistentWithIdPolicy(String path, boolean generateIds) throws Exception {
         doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntry("done"), itemEntryRetryableFailure("retry")))))
             .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("retry")))));
         var documents = List.of(snapshotDocument("done", 7L), snapshotDocument("retry", Long.MAX_VALUE));
-        if (raw) {
+        if (path.equals("raw")) {
             openSearchClient.sendBulkRequestRaw("products", documents, null, generateIds, DocumentExceptionAllowlist.empty()).block();
         } else {
-            openSearchClient.sendBulkRequest("products",
-                documents.stream().map(doc -> BulkOperationConverter.fromDocument(doc, "products")).toList(),
-                null, generateIds, DocumentExceptionAllowlist.empty()).block();
+            var operations = documents.stream()
+                .map(doc -> path.equals("native") ? BulkOperationConverter.fromRawDocument(doc, "products")
+                    : BulkOperationConverter.fromDocument(doc, "products"))
+                .toList();
+            if (path.equals("native")) {
+                var transformer = (BulkOperationTransformer) new BulkVersioningTransformerProvider()
+                    .createTransformer(Map.of("versionType", "external_gte"));
+                operations = transformer.transformOperations(operations);
+            }
+            openSearchClient.sendBulkRequest("products", operations, null, generateIds, DocumentExceptionAllowlist.empty()).block();
         }
         var requests = ArgumentCaptor.forClass(byte[].class);
         verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
@@ -305,7 +314,11 @@ class OpenSearchClientTest {
                 } else {
                     assertEquals(action.path("_id").asText().equals("retry") ? Long.MAX_VALUE : 7L,
                         action.path("version").longValue());
-                    assertEquals("external", action.path("version_type").asText());
+                    assertEquals(path.equals("native") ? "external_gte" : "external", action.path("version_type").asText());
+                }
+                if (path.equals("native")) {
+                    assertEquals("{ \"value\" : 9007199254740993 }", lines[i + 1],
+                        "Native metadata transformations and ID stripping must retain raw bodies through retries");
                 }
             }
         }
@@ -314,7 +327,8 @@ class OpenSearchClientTest {
 
     private static Document snapshotDocument(String id, Long version) {
         return new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, id, null,
-            "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX, version));
+            "{ \"value\" : 9007199254740993 }".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            null, DocumentChangeType.INDEX, version));
     }
 
     private HttpResponse bulkItemResponse(boolean hasErrors, List<BulkItemResponseEntry> entries) {

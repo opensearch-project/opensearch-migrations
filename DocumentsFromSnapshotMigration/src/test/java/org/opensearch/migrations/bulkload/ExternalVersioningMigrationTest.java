@@ -13,21 +13,30 @@ import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.testfixtures.SupportedClusters;
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import reactor.core.publisher.Mono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @Tag("isolatedTest")
 class ExternalVersioningMigrationTest {
@@ -47,6 +56,19 @@ class ExternalVersioningMigrationTest {
     @ParameterizedTest(name = "preserves Lucene versions from {0}")
     @MethodSource("sourceVersions")
     void preservesSnapshotVersions(ContainerVersion sourceVersion) throws Exception {
+        verifySnapshotMigration(sourceVersion, null, 1);
+    }
+
+    @Test
+    void nativeJavaTransformationReplaysSnapshot() throws Exception {
+        try (var transformer = new TransformationLoader().getTransformerFactoryLoader("""
+            [{"BulkVersioningTransformerProvider":{"versionType":"external_gte"}}]
+            """)) {
+            verifySnapshotMigration(SearchClusterContainer.OS_LATEST, transformer, 2);
+        }
+    }
+
+    private void verifySnapshotMigration(ContainerVersion sourceVersion, IJsonTransformer transformer, int passes) throws Exception {
         Path snapshotDirectory = directory.resolve("snapshot");
         Map<String, JsonNode> sourceDocuments = createSnapshot(sourceVersion, snapshotDirectory);
         var extractor = SnapshotExtractor.forLocalSnapshot(snapshotDirectory, sourceVersion.getVersion());
@@ -55,13 +77,20 @@ class ExternalVersioningMigrationTest {
             target.start();
             var connection = ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext();
             var client = new OpenSearchClientFactory(connection).determineVersionAndCreate();
-            try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT, directory.resolve("lucene")).build()) {
-                var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
-                var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE, 1, 1);
-                var cursors = pipeline.migrateAll().collectList().block();
-                assertNotNull(cursors);
-                assertEquals(VERSIONS.size(), cursors.stream().mapToLong(cursor -> cursor.docsInBatch()).sum());
+            var failures = mock(FailedDocumentStreamSink.class);
+            when(failures.write(any())).thenReturn(Mono.empty());
+            client.setFailedDocumentStreamContext(failures, "native-versioning", "worker");
+            for (int pass = 0; pass < passes; pass++) {
+                try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT, directory.resolve("lucene-" + pass)).build()) {
+                    var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
+                        false, DocumentExceptionAllowlist.empty(), null);
+                    var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE, 1, 1);
+                    var cursors = pipeline.migrateAll().collectList().block();
+                    assertNotNull(cursors);
+                    assertEquals(VERSIONS.size(), cursors.stream().mapToLong(cursor -> cursor.docsInBatch()).sum());
+                }
             }
+            verifyNoInteractions(failures);
             var operations = new ClusterOperations(target);
             for (var entry : sourceDocuments.entrySet()) {
                 JsonNode migrated = getDocument(operations, entry.getKey());

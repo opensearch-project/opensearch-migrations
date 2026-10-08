@@ -39,6 +39,7 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -173,10 +174,16 @@ public class OpenSearchDocumentSinkEndToEndTest {
             when(failedDocuments.write(any())).thenReturn(Mono.empty());
             client.setFailedDocumentStreamContext(failedDocuments, "version-test", "worker");
 
-            for (String mode : List.of("native", "internal", "external", "external_gte")) {
-                boolean internal = mode.equals("internal");
-                boolean strict = mode.equals("native") || mode.equals("external");
-                try (var transformer = mode.equals("native") ? null : versioningTransformer(Map.of("versionType", mode))) {
+            for (String mode : List.of("native", "internal", "external", "external_gte",
+                "java_internal", "java_external", "java_external_gte")) {
+                String policy = mode.startsWith("java_") ? mode.substring("java_".length()) : mode;
+                boolean internal = policy.equals("internal");
+                boolean strict = policy.equals("native") || policy.equals("external");
+                try (var transformer = mode.equals("native") ? null
+                    : mode.startsWith("java_")
+                        ? new TransformationLoader().getTransformerFactoryLoader(
+                            "[{\"BulkVersioningTransformerProvider\":{\"versionType\":\"" + policy + "\"}}]")
+                        : versioningTransformer(Map.of("versionType", policy))) {
                     var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
                         false, DocumentExceptionAllowlist.empty(), null);
                     String index = "versions_" + mode;
@@ -229,13 +236,16 @@ public class OpenSearchDocumentSinkEndToEndTest {
             }
 
             var failures = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
-            verify(failedDocuments, times(5)).write(failures.capture());
-            assertEquals(List.of("versions_native", "versions_native", "versions_external", "versions_external", "versions_external_gte"),
+            verify(failedDocuments, times(8)).write(failures.capture());
+            assertEquals(List.of("versions_native", "versions_native", "versions_external", "versions_external", "versions_external_gte",
+                "versions_java_external", "versions_java_external", "versions_java_external_gte"),
                 failures.getAllValues().stream().map(FailedDocumentStreamRecord::getTargetIndex).toList());
             for (var failure : failures.getAllValues()) {
                 assertEquals("version_conflict_engine_exception", failure.getFailureType());
                 assertEquals(FailureClass.NON_RETRYABLE, failure.getFailureClass());
                 assertEquals(409, failure.getResponseItem().path("index").path("status").asInt());
+                assertTrue(failure.getRequestItem().path("document").has("title"),
+                    "Failed document records must include the source even when the request used raw bytes");
             }
         }
     }

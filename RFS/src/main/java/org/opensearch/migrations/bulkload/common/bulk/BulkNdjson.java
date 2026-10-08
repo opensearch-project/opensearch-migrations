@@ -30,6 +30,8 @@ public final class BulkNdjson {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final JsonFactory JSON_FACTORY = new JsonFactory();
     private static final byte[] NEWLINE_BYTES = "\n".getBytes(StandardCharsets.UTF_8);
+    private static final int ESTIMATED_ACTION_BYTES = 256;
+    private static final int MAX_INITIAL_BUFFER_BYTES = 16 * 1024 * 1024;
 
     /**
      * Write a single operation to an output stream in NDJSON format.
@@ -39,8 +41,13 @@ public final class BulkNdjson {
      */
     @SneakyThrows
     public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
+        if (op.getRawDocument() != null) {
+            writeRawOperation(op.getOperationType().getValue(), op.getOperation(),
+                op.isIncludeDocument() ? op.getRawDocument() : null, out, mapper);
+            return;
+        }
         // action line: {"<op>": {...meta...}}
-        Map<String, Object> actionLine = Map.of(op.getOperationType().name().toLowerCase(), op.getOperation());
+        Map<String, Object> actionLine = Map.of(op.getOperationType().getValue(), op.getOperation());
 
         out.write(mapper.writeValueAsBytes(actionLine));
 
@@ -99,7 +106,8 @@ public final class BulkNdjson {
         List<? extends Document> docs,
         String indexName, boolean stripIds, ObjectMapper mapper
     ) {
-        try (var baos = new ByteArrayOutputStream()) {
+        long sourceBytes = docs.stream().mapToLong(Document::sourceLength).sum();
+        try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, docs.size()))) {
             for (var doc : docs) {
                 String opType = doc.operation() == Document.Operation.DELETE ? "delete" : "index";
                 String docId = stripIds ? null : doc.id();
@@ -135,12 +143,22 @@ public final class BulkNdjson {
      * Avoids the byte[]→Map→byte[] round-trip for document bodies.
      */
     public static byte[] toBulkNdjsonBytes(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
-        try (var baos = new ByteArrayOutputStream()) {
+        long sourceBytes = ops.stream()
+            .mapToLong(op -> op.isIncludeDocument() && op.getRawDocument() != null ? op.getRawDocument().length : 0)
+            .sum();
+        try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, ops.size()))) {
             writeAll(ops, baos, mapper);
             return baos.toByteArray();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static int initialBufferSize(long sourceBytes, int operationCount) {
+        // Source lengths are already known on the raw path. Reserve room for them
+        // and typical action lines to avoid repeatedly copying multi-megabyte bodies
+        // as the buffer grows. This is an allocation estimate, not a request-size limit.
+        return (int) Math.min(MAX_INITIAL_BUFFER_BYTES, sourceBytes + (long) ESTIMATED_ACTION_BYTES * operationCount);
     }
 
     /**

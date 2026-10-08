@@ -138,7 +138,7 @@ public class VersioningBenchmark {
 
     @State(Scope.Thread)
     public static class Output {
-        @Param({"native", "identity", "external_gte", "java_gte"})
+        @Param({"native", "identity", "external_gte", "java_gte", "native_gte"})
         public String mode;
 
         private IJsonTransformer transformer;
@@ -159,6 +159,9 @@ public class VersioningBenchmark {
                           "initializationResourcePath": "js/externalVersioning.js",
                           "bindingsObject": {"versionType": "external_gte"}
                         }}]
+                        """;
+                case "native_gte" -> """
+                        [{"BulkVersioningTransformerProvider": {"versionType": "external_gte"}}]
                         """;
                 default -> throw new IllegalArgumentException("Unknown benchmark mode: " + mode);
             };
