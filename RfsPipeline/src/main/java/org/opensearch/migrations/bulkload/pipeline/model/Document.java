@@ -30,6 +30,8 @@ public record Document(
     /** Well-known hint keys for ES-compatible sinks. */
     public static final String HINT_TYPE = "_type";
     public static final String HINT_ROUTING = "routing";
+    /** Source document version, as a decimal string; when present the sink writes it with version_type=external_gte. */
+    public static final String HINT_VERSION = "version";
 
     /** Well-known sourceMetadata keys for Lucene-based sources. */
     public static final String SOURCE_META_LUCENE_DOC_NUMBER = "luceneDocNumber";

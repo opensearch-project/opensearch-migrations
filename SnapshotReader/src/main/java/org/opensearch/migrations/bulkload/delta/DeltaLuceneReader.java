@@ -162,7 +162,7 @@ public class DeltaLuceneReader {
                     startDocId,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.INDEX,
-                    null, false)
+                    null, false, false)
             ).subscribeOn(Schedulers.boundedElastic());
 
         var deletionsStream = Flux.fromIterable(removes)
@@ -171,7 +171,7 @@ public class DeltaLuceneReader {
                     startDocId,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.DELETE,
-                    null, false)
+                    null, false, false)
             ).subscribeOn(Schedulers.boundedElastic());
 
         return new DeltaResult(additionsStream, deletionsStream);

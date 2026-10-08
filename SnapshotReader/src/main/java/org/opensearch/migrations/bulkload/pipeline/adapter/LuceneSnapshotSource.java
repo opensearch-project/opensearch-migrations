@@ -56,6 +56,9 @@ public class LuceneSnapshotSource implements DocumentSource {
     // When true, treat _recovery_source as _source if present
     private final boolean useRecoverySource;
 
+    // When true, documents carry their snapshot _version so the sink can write with version_type=external_gte
+    private final boolean preserveDocVersion;
+
     private final LuceneAdapter luceneAdapter;
 
 
@@ -69,6 +72,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         this.deltaContextFactory = builder.deltaContextFactory;
         this.sourcelessMappingContextProvider = builder.sourcelessMappingContextProvider;
         this.useRecoverySource = builder.useRecoverySource;
+        this.preserveDocVersion = builder.preserveDocVersion;
         this.luceneAdapter = new LuceneAdapter(builder.emitDocType);
     }
 
@@ -86,6 +90,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         private Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
         private Function<String, FieldMappingContext> sourcelessMappingContextProvider;
         private boolean useRecoverySource;
+        private boolean preserveDocVersion;
         private boolean emitDocType;
 
         private Builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
@@ -119,6 +124,11 @@ public class LuceneSnapshotSource implements DocumentSource {
 
         public Builder useRecoverySource(boolean useRecoverySource) {
             this.useRecoverySource = useRecoverySource;
+            return this;
+        }
+
+        public Builder preserveDocVersion(boolean preserveDocVersion) {
+            this.preserveDocVersion = preserveDocVersion;
             return this;
         }
 
@@ -224,7 +234,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource)
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource, preserveDocVersion)
             .map(luceneAdapter::fromLucene);
     }
 

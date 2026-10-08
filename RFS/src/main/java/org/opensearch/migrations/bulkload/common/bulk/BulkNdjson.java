@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
@@ -106,9 +107,11 @@ public final class BulkNdjson {
                 String opType = doc.operation() == Document.Operation.DELETE ? "delete" : "index";
                 String docId = stripIds ? null : doc.id();
                 String routing = doc.hints().get(Document.HINT_ROUTING);
+                // Versioning is meaningless without a client-supplied id, so it is dropped alongside the id
+                var versioning = stripIds ? null : VersionControlMetadata.fromHints(doc.hints());
                 var meta = doc.operation() == Document.Operation.DELETE
                     ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(routing).build()
-                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(routing).build();
+                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(routing).versioning(versioning).build();
                 writeRawOperation(opType, meta, doc.source(), baos, mapper);
                 baos.write(NEWLINE_BYTES);
             }

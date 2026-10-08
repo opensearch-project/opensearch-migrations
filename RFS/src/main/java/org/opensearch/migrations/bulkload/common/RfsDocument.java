@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.bulk.*;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -51,6 +52,7 @@ public class RfsDocument {
                 .index(indexName)
                 .type(doc.type)
                 .routing(doc.routing)
+                .versioning(doc.version == null ? null : VersionControlMetadata.preserving(doc.version))
                 .build();
             IndexOp indexOp = IndexOp.builder()
                 .operation(meta)
