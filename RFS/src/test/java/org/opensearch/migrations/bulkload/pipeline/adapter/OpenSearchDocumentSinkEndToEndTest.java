@@ -59,11 +59,6 @@ public class OpenSearchDocumentSinkEndToEndTest {
         return SupportedClusters.targets().stream().map(Arguments::of);
     }
 
-    private static Stream<Arguments> versioningTargets() {
-        return Stream.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V2_19_4,
-            SearchClusterContainer.OS_V3_7_0).map(Arguments::of);
-    }
-
     @ParameterizedTest(name = "createCollection on {0}")
     @MethodSource("targetVersions")
     void createsIndexOnRealCluster(ContainerVersion targetVersion) {
@@ -167,7 +162,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
     }
 
     @ParameterizedTest(name = "versioning policies on {0}")
-    @MethodSource("versioningTargets")
+    @MethodSource("targetVersions")
     void versioningPoliciesSupportReplayAndNormalIngestion(ContainerVersion targetVersion) throws Exception {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
             cluster.start();

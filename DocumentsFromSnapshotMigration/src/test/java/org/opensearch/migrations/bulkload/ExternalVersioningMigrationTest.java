@@ -15,6 +15,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer.ContainerVersion;
+import org.opensearch.migrations.testfixtures.SupportedClusters;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -40,18 +41,7 @@ class ExternalVersioningMigrationTest {
     Path directory;
 
     static Stream<ContainerVersion> sourceVersions() {
-        return Stream.of(
-            SearchClusterContainer.ES_V1_7_6,
-            SearchClusterContainer.ES_V2_4_6,
-            SearchClusterContainer.ES_V5_6_16,
-            SearchClusterContainer.ES_V6_8_23,
-            SearchClusterContainer.ES_V7_10_2,
-            SearchClusterContainer.ES_V8_19,
-            SearchClusterContainer.ES_V9_1,
-            SearchClusterContainer.OS_V1_3_20,
-            SearchClusterContainer.OS_V2_19_4,
-            SearchClusterContainer.OS_V3_7_0
-        );
+        return SupportedClusters.supportedSources(true).stream();
     }
 
     @ParameterizedTest(name = "preserves Lucene versions from {0}")
