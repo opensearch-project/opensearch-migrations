@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -57,6 +58,7 @@ public class BulkOperationConverter {
                 .index(indexName)
                 .type(type)
                 .routing(routing)
+                .versioning(VersionControlMetadata.fromHints(doc.hints()))
                 .build())
             .document(document)
             .originalSource(document)

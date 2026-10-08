@@ -144,6 +144,53 @@ public class OpenSearchDocumentSinkEndToEndTest {
         }
     }
 
+    @ParameterizedTest(name = "writeBatch preserves source _version on {0}")
+    @MethodSource("targetVersions")
+    void writesDocumentsWithPreservedVersion(ContainerVersion targetVersion) {
+        try (var cluster = new SearchClusterContainer(targetVersion)) {
+            cluster.start();
+            var client = createClient(cluster);
+            var allowConflicts = new DocumentExceptionAllowlist(java.util.Set.of("version_conflict_engine_exception"));
+            var sink = new OpenSearchDocumentSink(client, null, false, allowConflicts, null);
+
+            sink.createCollection(new CollectionMetadata("sink_versions", 1, Map.of())).block();
+
+            var restClient = createRestClient(cluster);
+            var context = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            // First write lands with the source version rather than 1
+            sink.writeBatch("sink_versions", List.of(versionedDoc("{\"n\":1}", 7))).block();
+            assertEquals(7L, fetchVersion(restClient, context, "sink_versions", "v1"));
+
+            // Re-sending the same version (retry / work-item re-run) is idempotent under external_gte
+            sink.writeBatch("sink_versions", List.of(versionedDoc("{\"n\":2}", 7))).block();
+            assertEquals(7L, fetchVersion(restClient, context, "sink_versions", "v1"));
+
+            // A stale version is a conflict; with the allowlist it is skipped and the newer doc is kept
+            sink.writeBatch("sink_versions", List.of(versionedDoc("{\"n\":3}", 5))).block();
+            assertEquals(7L, fetchVersion(restClient, context, "sink_versions", "v1"));
+
+            // A newer version wins
+            sink.writeBatch("sink_versions", List.of(versionedDoc("{\"n\":4}", 9))).block();
+            assertEquals(9L, fetchVersion(restClient, context, "sink_versions", "v1"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static Document versionedDoc(String source, long version) {
+        return new Document("v1", source.getBytes(), Document.Operation.UPSERT,
+            Map.of(Document.HINT_VERSION, Long.toString(version)), Map.of());
+    }
+
+    private static long fetchVersion(RestClient restClient, DocumentMigrationTestContext context,
+                                     String index, String id) throws Exception {
+        restClient.get("_refresh", context.createUnboundRequestContext());
+        var resp = restClient.get(index + "/_doc/" + id, context.createUnboundRequestContext());
+        assertThat("Doc " + id + " should exist", resp.statusCode, equalTo(200));
+        return MAPPER.readTree(resp.body).path("_version").asLong();
+    }
+
     @ParameterizedTest(name = "createIndex via metadata sink on {0}")
     @MethodSource("targetVersions")
     void metadataSinkCreatesIndex(ContainerVersion targetVersion) {

@@ -258,6 +258,16 @@ public class RfsMigrateDocuments {
         public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
 
         @Parameter(required = false,
+            names = { "--preserve-doc-version", "--preserveDocVersion" },
+            description = "Optional. Write each document with the _version it has in the snapshot, using " +
+                "version_type=external_gte. Documents the target has already advanced past fail with " +
+                "version_conflict_engine_exception; pair with " +
+                "--allowed-doc-exception-types version_conflict_engine_exception to skip them. " +
+                "Incompatible with server-generated IDs.",
+            arity = 0)
+        public boolean preserveDocVersion = false;
+
+        @Parameter(required = false,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
             description = ("Version of the source cluster. Required when --source-type is SNAPSHOT."))
@@ -628,6 +638,11 @@ public class RfsMigrateDocuments {
             }
         };
 
+        if (arguments.preserveDocVersion && useServerGeneratedIds) {
+            throw new ParameterException("--preserve-doc-version cannot be combined with server-generated IDs; " +
+                "a document version is meaningless without a client-supplied _id.");
+        }
+
         var docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
         if (docTransformerConfig != null) {
             log.atInfo().setMessage("Doc Transformations config string: {}")
@@ -826,6 +841,7 @@ public class RfsMigrateDocuments {
             var sourceBuilder = LuceneSnapshotSource.builder(extractor, arguments.snapshotName, luceneDirPath)
                 .maxShardSizeBytes(arguments.maxShardSizeBytes)
                 .useRecoverySource(arguments.experimental.useRecoverySource)
+                .preserveDocVersion(arguments.preserveDocVersion)
                 .emitDocType(emitDocType);
             if (arguments.experimental.previousSnapshotName != null && arguments.experimental.experimentalDeltaMode != null) {
                 sourceBuilder.delta(arguments.experimental.previousSnapshotName,

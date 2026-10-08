@@ -163,6 +163,15 @@ public class SnapshotExtractor {
 
     public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
                                                      FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return readDocuments(shard, workDir, startDocIdx, mappingContext, useRecoverySource, false);
+    }
+
+    /**
+     * @param preserveVersion when true, each document carries its {@code _version} from the snapshot
+     */
+    public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
+                                                     FieldMappingContext mappingContext, boolean useRecoverySource,
+                                                     boolean preserveVersion) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -179,7 +188,7 @@ public class SnapshotExtractor {
         // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource);
+        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource, preserveVersion);
     }
 
     /**

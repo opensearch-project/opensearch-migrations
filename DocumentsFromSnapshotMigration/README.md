@@ -92,6 +92,7 @@ To see the default shard size, use the `--help` CLI option:
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
 | --documents-size-per-bulk-request | Optional. The maximum aggregate document size to be used in bulk requests in bytes. Default: 10 MiB                                                      |
 | --allowed-doc-exception-types     | Optional. Comma-separated list of document-level exception types to treat as successful operations. Enables idempotent migrations by allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success. Default: none |
+| --preserve-doc-version            | Optional. Write each document with the `_version` it has in the snapshot using `version_type=external_gte`, instead of letting the target start every document at version 1. Pair with `--allowed-doc-exception-types version_conflict_engine_exception` so documents the target has already advanced past are skipped rather than failing the worker. Incompatible with server-generated IDs. Default: false |
 
 ## Advanced Arguments
 

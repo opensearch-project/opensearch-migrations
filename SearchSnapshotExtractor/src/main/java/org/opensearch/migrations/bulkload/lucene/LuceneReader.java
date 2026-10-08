@@ -30,6 +30,9 @@ public class LuceneReader {
     /** Per-segment read concurrency for the bounded-elastic flatMap. */
     private static final int SEGMENT_READ_CONCURRENCY = 100;
 
+    /** Name of the doc-values field holding the Elasticsearch/OpenSearch document version. */
+    static final String VERSION_FIELD = "_version";
+
     private LuceneReader() {}
 
     /**
@@ -49,9 +52,17 @@ public class LuceneReader {
     }
 
     public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext, useRecoverySource, false);
+    }
+
+    /**
+     * @param preserveVersion when true, read each document's {@code _version} doc value so the target can be
+     *                        written with the source's version (see {@link LuceneDocumentChange#getVersion()})
+     */
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource, boolean preserveVersion) {
         return Flux.using(
             () -> indexReader.getReader(segmentsFileName),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource),
+            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource, preserveVersion),
             reader -> {
                 try {
                     reader.close();
@@ -69,6 +80,10 @@ public class LuceneReader {
        to keep the source feeding batches fast enough.
      */
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return readDocsByLeavesFromStartingPosition(reader, startDocId, mappingContext, useRecoverySource, false);
+    }
+
+    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext, boolean useRecoverySource, boolean preserveVersion) {
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
             .addArgument(() -> reader.leaves().size())
@@ -80,7 +95,8 @@ public class LuceneReader {
                     reader.getIndexDirectoryPath(),
                     DocumentChangeType.INDEX,
                     mappingContext,
-                    useRecoverySource)
+                    useRecoverySource,
+                    preserveVersion)
             )
             .subscribeOn(LUCENE_IO_SCHEDULER);
     }
@@ -135,6 +151,13 @@ public class LuceneReader {
     public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 Path indexDirectoryPath, DocumentChangeType operation,
                                                 FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return readDocsFromSegment(readerAndBase, docStartingId, indexDirectoryPath, operation, mappingContext, useRecoverySource, false);
+    }
+
+    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
+                                                Path indexDirectoryPath, DocumentChangeType operation,
+                                                FieldMappingContext mappingContext, boolean useRecoverySource,
+                                                boolean preserveVersion) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -173,7 +196,7 @@ public class LuceneReader {
         return Flux.fromStream(idxStream.boxed())
             .flatMapSequential(docIdx -> Mono.defer(() -> {
                     try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource);
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource, preserveVersion);
                         return Mono.justOrEmpty(document);
                     } catch (Exception e) {
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
@@ -221,6 +244,14 @@ public class LuceneReader {
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
             final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
             FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource) {
+        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath,
+            operation, mappingContext, termIndex, useRecoverySource, false);
+    }
+
+    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
+            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource,
+            boolean preserveVersion) {
         LuceneDocument document;
         try {
             document = reader.document(luceneDocId);
@@ -304,8 +335,33 @@ public class LuceneReader {
             return null; // Skip these
         }
 
+        Long version = preserveVersion ? readVersion(reader, luceneDocId, openSearchDocId, getSegmentReaderDebugInfo) : null;
+
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
+        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation, version);
+    }
+
+    /**
+     * Reads the {@code _version} doc value Elasticsearch/OpenSearch stores on every document. It is a doc value,
+     * not a stored field, so it is not visible through {@link LuceneLeafReader#document(int)}.
+     * Returns null (and logs) when the segment has no {@code _version} doc values.
+     */
+    static Long readVersion(LuceneLeafReader reader, int luceneDocId, String openSearchDocId,
+                            Supplier<String> getSegmentReaderDebugInfo) {
+        try {
+            var value = reader.getNumericValue(luceneDocId, VERSION_FIELD);
+            if (value instanceof Number n) {
+                return n.longValue();
+            }
+            log.atWarn().setMessage("Document {} in segment {} has no {} doc value; it will be indexed without a version")
+                .addArgument(openSearchDocId)
+                .addArgument(getSegmentReaderDebugInfo)
+                .addArgument(VERSION_FIELD)
+                .log();
+            return null;
+        } catch (IOException e) {
+            throw Lombok.sneakyThrow(e);
+        }
     }
 
     /**

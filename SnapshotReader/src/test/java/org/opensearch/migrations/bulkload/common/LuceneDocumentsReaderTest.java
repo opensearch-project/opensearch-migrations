@@ -150,6 +150,40 @@ public class LuceneDocumentsReaderTest {
         }).expectComplete().verify();
     }
 
+    @ParameterizedTest
+    @MethodSource("provideSnapshots")
+    public void ReadDocuments_PreserveVersion_ReadsVersionDocValues(TestResources.Snapshot snapshot, Version version) {
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
+        final var repo = new FileSystemRepo(snapshot.dir, fileFinder);
+        var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
+        var repoAccessor = new SourceRepoAccessor(repo);
+
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
+        Set<ShardFileInfo> filesToUnpack = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
+        filesToUnpack.addAll(shardMetadata.getFiles());
+        Path luceneDir = new SnapshotShardUnpacker.Factory(repoAccessor, tempDirectory)
+            .create(filesToUnpack, "test_updates_deletes", shardMetadata.getIndexId(), 0)
+            .unpack();
+        var reader = new LuceneIndexReader.Factory(sourceResourceProvider).getReader(luceneDir);
+
+        // Default read leaves the version unset so the hot path pays nothing for it
+        var withoutVersion = LuceneReader.streamDocumentChanges(reader, shardMetadata.getSegmentFileName())
+            .collectList().block();
+        assertNotNull(withoutVersion);
+        Assertions.assertTrue(withoutVersion.stream().allMatch(d -> d.getVersion() == null));
+
+        var withVersion = LuceneReader.streamDocumentChanges(reader, shardMetadata.getSegmentFileName(), 0, null, false, true)
+            .collectList().block();
+        assertNotNull(withVersion);
+        var versionById = withVersion.stream().collect(Collectors.toMap(d -> d.id, d -> d.getVersion()));
+
+        assertEquals(Set.of("complexdoc", "updateddoc", "unchangeddoc"), versionById.keySet());
+        versionById.forEach((id, v) -> assertNotNull(v, "_version doc value missing for " + id));
+        assertEquals(1L, versionById.get("unchangeddoc"), "a never-updated doc has version 1");
+        Assertions.assertTrue(versionById.get("updateddoc") >= 2L, "an updated doc has version >= 2");
+        Assertions.assertTrue(versionById.get("complexdoc") >= 2L, "a doc with update history has version >= 2");
+    }
+
     @Test
     public void ReadDocuments_ES5_Origin_AsExpected() {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_6_8_MERGED;
