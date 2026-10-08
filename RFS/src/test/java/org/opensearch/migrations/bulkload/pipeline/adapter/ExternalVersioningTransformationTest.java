@@ -44,9 +44,6 @@ class ExternalVersioningTransformationTest {
     private static final String SNAPSHOT_CONFIG = """
         [{"JsonJSTransformerProvider": {"initializationResourcePath": "js/externalVersioning.js"}}]
         """;
-    private static final String INTERNAL_CONFIG = """
-        [{"JsonJSTransformerProvider": {"initializationResourcePath": "js/internalVersioning.js"}}]
-        """;
     private static final String CUSTOM_CONFIG = """
         [{"JsonJSTransformerProvider": {"initializationScript":
           "context => documents => documents.map(document => {\
@@ -176,14 +173,15 @@ class ExternalVersioningTransformationTest {
         assertEquals("external", action.path("version_type").asText());
     }
 
-    @Test
-    void bundledInternalVersioningRemovesOnlyWriteVersions() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"internal", "external", "external_gte"})
+    void bundledConfigurationSelectsVersioningPolicy(String versionType) throws Exception {
         when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any()))
             .thenReturn(Mono.just(new OpenSearchClient.BulkResponse(200, "", null, "{}")));
         var document = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "d1", null,
             "{\"version\":\"application value\"}".getBytes(StandardCharsets.UTF_8),
             "tenant-1", DocumentChangeType.INDEX, Long.MAX_VALUE));
-        try (var transformer = loadTransformer(INTERNAL_CONFIG)) {
+        try (var transformer = loadTransformer(versioningConfig(versionType))) {
             var sink = new OpenSearchDocumentSink(client, () -> transformer, false,
                 DocumentExceptionAllowlist.empty(), null);
             sink.writeBatch("products", List.of(document)).block();
@@ -196,8 +194,14 @@ class ExternalVersioningTransformationTest {
         var action = mapper.readTree(lines[0]).path("index");
         assertEquals("d1", action.path("_id").asText());
         assertEquals("tenant-1", action.path("routing").asText());
-        assertFalse(action.has("version"));
-        assertFalse(action.has("version_type"));
+        if (versionType.equals("internal")) {
+            assertFalse(action.has("version"));
+            assertFalse(action.has("version_type"));
+        } else {
+            assertEquals(Long.MAX_VALUE, action.path("version").longValue());
+            assertTrue(action.path("version").isIntegralNumber());
+            assertEquals(versionType, action.path("version_type").asText());
+        }
         assertFalse(action.has("source_metadata"));
         assertEquals(mapper.readTree(document.source()), mapper.readTree(lines[1]));
     }
@@ -243,7 +247,7 @@ class ExternalVersioningTransformationTest {
             assertEquals(Long.MAX_VALUE, action.path("version").longValue());
             assertEquals("external", action.path("version_type").asText());
         }
-        try (var transformer = loadTransformer(INTERNAL_CONFIG)) {
+        try (var transformer = loadTransformer(versioningConfig("internal"))) {
             var transformed = RfsDocument.transform(transformer, List.of(original));
             var action = mapper.readTree(BulkNdjson.toBulkNdjson(List.of(transformed.get(0).document), mapper).split("\n")[0])
                 .path("index");
@@ -267,6 +271,17 @@ class ExternalVersioningTransformationTest {
 
     private static IJsonTransformer loadTransformer() throws Exception {
         return loadTransformer(CONFIG);
+    }
+
+    private static String versioningConfig(String versionType) {
+        return """
+            [{
+              "JsonJSTransformerProvider": {
+                "initializationResourcePath": "js/externalVersioning.js",
+                "bindingsObject": {"versionType": "%s"}
+              }
+            }]
+            """.formatted(versionType);
     }
 
     private static IJsonTransformer loadTransformer(String config) throws Exception {

@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
@@ -14,7 +15,9 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer.ContainerVersion;
@@ -28,6 +31,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -38,6 +42,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -53,6 +59,11 @@ public class OpenSearchDocumentSinkEndToEndTest {
 
     private static Stream<Arguments> targetVersions() {
         return SupportedClusters.targets().stream().map(Arguments::of);
+    }
+
+    private static Stream<Arguments> versioningTargets() {
+        return SupportedClusters.targets().stream().flatMap(version ->
+            Stream.of(Arguments.of(version, false), Arguments.of(version, true)));
     }
 
     @ParameterizedTest(name = "createCollection on {0}")
@@ -157,9 +168,9 @@ public class OpenSearchDocumentSinkEndToEndTest {
         }
     }
 
-    @ParameterizedTest(name = "bundled external versioning transformation on {0}")
-    @MethodSource("targetVersions")
-    void writesDocumentsWithExternalVersioningTransform(ContainerVersion targetVersion) throws Exception {
+    @ParameterizedTest(name = "all three modes with a source field on {0}, allowVersionConflicts={1}")
+    @MethodSource("versioningTargets")
+    void writesDocumentsWithExternalVersioningTransform(ContainerVersion targetVersion, boolean allowVersionConflicts) throws Exception {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
             cluster.start();
             var client = createClient(cluster);
@@ -168,8 +179,11 @@ public class OpenSearchDocumentSinkEndToEndTest {
             var failedDocuments = mock(FailedDocumentStreamSink.class);
             when(failedDocuments.write(any())).thenReturn(Mono.empty());
             client.setFailedDocumentStreamContext(failedDocuments, "source-field-test", "worker");
+            var allowlist = allowVersionConflicts
+                ? new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"))
+                : DocumentExceptionAllowlist.empty();
 
-            for (String versionType : List.of("external", "external_gte")) {
+            for (String versionType : List.of("internal", "external", "external_gte")) {
                 String config = """
                     [{
                       "JsonJSTransformerProvider": {
@@ -180,33 +194,35 @@ public class OpenSearchDocumentSinkEndToEndTest {
                     """.formatted(versionType);
                 try (var transformer = new TransformationLoader()
                         .getTransformerFactoryFromServiceLoader(config).findFirst().orElseThrow()) {
-                    var sink = new OpenSearchDocumentSink(client, () -> transformer, false, DocumentExceptionAllowlist.empty(), null);
+                    var sink = new OpenSearchDocumentSink(client, () -> transformer, false, allowlist, null);
                     String index = "sink_versions_" + versionType;
                     sink.createCollection(new CollectionMetadata(index, 1, Map.of())).block();
 
                     sink.writeBatch(index, List.of(versionedSource(7, "original"))).block();
-                    assertStoredVersion(restClient, context, index, 7, "original");
+                    assertStoredVersion(restClient, context, index, versionType.equals("internal") ? 1 : 7, 7, "original");
 
-                    // Equal versions conflict under external and overwrite under external_gte.
+                    // Internal mode increments; external modes compare the supplied value.
                     sink.writeBatch(index, List.of(versionedSource(7, "equal"))).block();
                     String equalVersionTitle = versionType.equals("external") ? "original" : "equal";
-                    assertStoredVersion(restClient, context, index, 7, equalVersionTitle);
+                    assertStoredVersion(restClient, context, index, versionType.equals("internal") ? 2 : 7, 7, equalVersionTitle);
 
-                    // An older version must never replace newer target content.
+                    // Only internal mode permits overwriting with a lower application version.
                     sink.writeBatch(index, List.of(versionedSource(5, "stale"))).block();
-                    assertStoredVersion(restClient, context, index, 7, equalVersionTitle);
+                    assertStoredVersion(restClient, context, index, versionType.equals("internal") ? 3 : 7,
+                        versionType.equals("internal") ? 5 : 7, versionType.equals("internal") ? "stale" : equalVersionTitle);
 
                     sink.writeBatch(index, List.of(versionedSource(9, "newer"))).block();
-                    assertStoredVersion(restClient, context, index, 9, "newer");
+                    assertStoredVersion(restClient, context, index, versionType.equals("internal") ? 4 : 9, 9, "newer");
                 }
             }
-            verifyNoInteractions(failedDocuments);
+            assertVersionConflicts(failedDocuments, allowVersionConflicts ? List.of()
+                : List.of("sink_versions_external", "sink_versions_external", "sink_versions_external_gte"));
         }
     }
 
-    @ParameterizedTest(name = "default snapshot versions and overrides on {0}")
-    @MethodSource("targetVersions")
-    void writesDocumentsWithDefaultAndOverriddenSnapshotVersioning(ContainerVersion targetVersion) throws Exception {
+    @ParameterizedTest(name = "default snapshot versions and all three modes on {0}, allowVersionConflicts={1}")
+    @MethodSource("versioningTargets")
+    void writesDocumentsWithDefaultAndOverriddenSnapshotVersioning(ContainerVersion targetVersion, boolean allowVersionConflicts) throws Exception {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
             cluster.start();
             var client = createClient(cluster);
@@ -215,24 +231,30 @@ public class OpenSearchDocumentSinkEndToEndTest {
             var failedDocuments = mock(FailedDocumentStreamSink.class);
             when(failedDocuments.write(any())).thenReturn(Mono.empty());
             client.setFailedDocumentStreamContext(failedDocuments, "snapshot-version-test", "worker");
+            var allowlist = allowVersionConflicts
+                ? new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"))
+                : DocumentExceptionAllowlist.empty();
 
-            for (String versionType : List.of("external", "external_gte", "internal")) {
-                String config = versionType.equals("internal")
-                    ? "[{\"JsonJSTransformerProvider\":{\"initializationResourcePath\":\"js/internalVersioning.js\"}}]"
-                    : "[{\"JsonJSTransformerProvider\":{\"initializationScript\":"
-                        + "\"context => documents => documents.map(document => {"
-                        + "document.operation.version_type = 'external_gte'; return document; })\"}}]";
-                try (var transformer = versionType.equals("external") ? null : new TransformationLoader()
+            for (String versionType : List.of("default", "internal", "external", "external_gte")) {
+                String config = """
+                    [{
+                      "JsonJSTransformerProvider": {
+                        "initializationResourcePath": "js/externalVersioning.js",
+                        "bindingsObject": {"versionType": "%s"}
+                      }
+                    }]
+                    """.formatted(versionType);
+                try (var transformer = versionType.equals("default") ? null : new TransformationLoader()
                         .getTransformerFactoryFromServiceLoader(config).findFirst().orElseThrow()) {
                     var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
-                        false, DocumentExceptionAllowlist.empty(), null);
+                        false, allowlist, null);
                     String index = "snapshot_versions_" + versionType;
                     sink.createCollection(new CollectionMetadata(index, 1, Map.of())).block();
 
                     sink.writeBatch(index, List.of(snapshotVersion(7, "original"))).block();
                     assertSnapshotWrite(restClient, context, index, versionType.equals("internal") ? 1 : 7, "original");
                     sink.writeBatch(index, List.of(snapshotVersion(7, "equal"))).block();
-                    String equalTitle = versionType.equals("external") ? "original" : "equal";
+                    String equalTitle = versionType.equals("external") || versionType.equals("default") ? "original" : "equal";
                     assertSnapshotWrite(restClient, context, index, versionType.equals("internal") ? 2 : 7, equalTitle);
                     sink.writeBatch(index, List.of(snapshotVersion(5, "stale"))).block();
                     assertSnapshotWrite(restClient, context, index, versionType.equals("internal") ? 3 : 7,
@@ -273,7 +295,26 @@ public class OpenSearchDocumentSinkEndToEndTest {
                     assertEquals(1L, hits.get(0).path("_version").longValue());
                 }
             }
+            assertVersionConflicts(failedDocuments, allowVersionConflicts ? List.of()
+                : List.of("snapshot_versions_default", "snapshot_versions_default",
+                    "snapshot_versions_external", "snapshot_versions_external", "snapshot_versions_external_gte"));
+        }
+    }
+
+    private static void assertVersionConflicts(FailedDocumentStreamSink failedDocuments, List<String> expectedIndices) {
+        if (expectedIndices.isEmpty()) {
             verifyNoInteractions(failedDocuments);
+            return;
+        }
+        var failures = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocuments, times(expectedIndices.size())).write(failures.capture());
+        assertEquals(expectedIndices,
+            failures.getAllValues().stream().map(FailedDocumentStreamRecord::getTargetIndex).toList());
+        for (var failure : failures.getAllValues()) {
+            assertEquals("v1", failure.getDocumentId());
+            assertEquals("version_conflict_engine_exception", failure.getFailureType());
+            assertEquals(FailureClass.NON_RETRYABLE, failure.getFailureClass());
+            assertEquals(409, failure.getResponseItem().path("index").path("status").asInt());
         }
     }
 
@@ -356,12 +397,13 @@ public class OpenSearchDocumentSinkEndToEndTest {
     }
 
     private static void assertStoredVersion(RestClient client, DocumentMigrationTestContext context,
-                                           String index, long expectedVersion, String expectedTitle) throws Exception {
+                                           String index, long expectedVersion, long expectedSourceVersion,
+                                           String expectedTitle) throws Exception {
         var response = client.get(index + "/_doc/v1", context.createUnboundRequestContext());
         assertEquals(200, response.statusCode);
         JsonNode document = MAPPER.readTree(response.body);
         assertEquals(expectedVersion, document.path("_version").asLong());
-        assertEquals(expectedVersion, document.path("_source").path("@version_number").asLong());
+        assertEquals(expectedSourceVersion, document.path("_source").path("@version_number").asLong());
         assertEquals(expectedTitle, document.path("_source").path("title").asText());
     }
 

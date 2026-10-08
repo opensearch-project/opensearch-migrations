@@ -70,12 +70,13 @@ public class BulkOperationConverter {
         String id = stripIds ? null : doc.id();
         String version = doc.hints().get(Document.HINT_VERSION);
         String versionType = doc.hints().get(Document.HINT_VERSION_TYPE);
-        var versioning = id != null && !id.isEmpty() && version != null
-            ? VersionControlMetadata.builder()
+        VersionControlMetadata versioning = null;
+        if (id != null && !id.isEmpty() && version != null) {
+            versioning = VersionControlMetadata.builder()
                 .version(Long.parseLong(version))
                 .versionType(versionType == null ? null : VersionType.from(versionType))
-                .build()
-            : null;
+                .build();
+        }
         return IndexOperationMeta.builder()
             .id(id)
             .index(indexName)

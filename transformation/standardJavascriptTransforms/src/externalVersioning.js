@@ -1,15 +1,17 @@
 /**
- * Overrides external versioning on RFS index operations using the snapshot's
- * _version, or an explicitly configured field in _source. Snapshot versions are
- * already preserved by default; use this to select external_gte or a source field.
+ * Configures versioning on RFS bulk operations. Internal mode removes explicit
+ * versioning; external modes use the snapshot's _version or a field in _source.
+ * Snapshot versions are already preserved by default without this transformation.
  *
  * bindingsObject:
- *   versionField: optional field name, or array of field names for a nested path
- *   versionType: "external" (default) or "external_gte"
+ *   versionType: "internal", "external" (default), or "external_gte"
+ *   versionField: optional field name, or array of field names for a nested path;
+ *                 used only by external modes
  *
  * By default, reads the decimal string at source_metadata._version.
- * Keep source IDs (--server-generated-ids NEVER). RFS automatically skips
- * external-version conflicts when the target already has an equal or newer version.
+ * External modes require source IDs (--server-generated-ids NEVER). Conflicts
+ * follow normal failure handling. Use --allowed-doc-exception-types
+ * version_conflict_engine_exception to explicitly treat them as success.
  */
 
 function getField(object, key) {
@@ -27,7 +29,7 @@ function setField(object, key, value) {
 function deleteField(object, key) {
     if (object instanceof Map) {
         object.delete(key);
-    } else {
+    } else if (object != null) {
         delete object[key];
     }
 }
@@ -38,7 +40,7 @@ function validateVersion(version) {
     }
     // Keep decimal strings as strings: converting them to Number would round
     // versions above 2^53 - 1 before Jackson reads the bulk metadata as a Long.
-    if (typeof version === "string" && /^(0|[1-9][0-9]*)$/.test(version)
+    if (typeof version === "string" && /^(0|[1-9]\d*)$/.test(version)
             && BigInt(version) <= 9223372036854775807n) {
         return;
     }
@@ -47,23 +49,34 @@ function validateVersion(version) {
 }
 
 function main(context) {
+    const versionType = getField(context, "versionType") ?? "external";
+    if (!["internal", "external", "external_gte"].includes(versionType)) {
+        throw new Error('versionType must be "internal", "external", or "external_gte".');
+    }
     const versionField = getField(context, "versionField");
     const path = typeof versionField === "string" ? [versionField] : versionField;
-    if (path != null && (!Array.isArray(path) || path.length === 0
+    if (versionType !== "internal" && path != null && (!Array.isArray(path) || path.length === 0
             || !path.every(key => typeof key === "string" && key.length > 0))) {
         throw new Error("versionField must be a non-empty field name or an array of field names in _source.");
     }
-    const versionType = getField(context, "versionType") ?? "external";
-    if (versionType !== "external" && versionType !== "external_gte") {
-        throw new Error('versionType must be "external" or "external_gte".');
-    }
 
     const transformOperation = (item) => {
+        const operationType = getField(item, "operation_type");
         if (getField(item, "schema") !== "rfs-opensearch-bulk-v1"
-                || getField(item, "operation_type") !== "index") {
+                || (operationType !== "index" && operationType !== "delete")) {
             return item;
         }
         const operation = getField(item, "operation");
+        if (versionType === "internal") {
+            deleteField(operation, "version");
+            deleteField(operation, "version_type");
+            return item;
+        }
+        // A delta snapshot contains the prior document's version, not its
+        // deletion version. External modes must not assign it to a delete.
+        if (operationType === "delete") {
+            return item;
+        }
         const id = getField(operation, "_id");
         if (typeof id !== "string" || id.length === 0) {
             throw new Error("External versioning requires a source _id. Use --server-generated-ids NEVER.");

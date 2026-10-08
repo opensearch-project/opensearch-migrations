@@ -20,6 +20,7 @@ import lombok.AllArgsConstructor;
 @AllArgsConstructor
 public class RfsDocument {
     protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+    private static final LuceneAdapter LUCENE_ADAPTER = new LuceneAdapter(true);
     // Originally set to the lucene index doc number, this number helps keeps track of progress over a work item
     public final int progressCheckpointNum;
 
@@ -27,7 +28,7 @@ public class RfsDocument {
     public final BulkOperationSpec document;
 
     public static RfsDocument fromLuceneDocument(LuceneDocumentChange doc, String indexName) {
-        var document = new LuceneAdapter(true).fromLucene(doc);
+        var document = LUCENE_ADAPTER.fromLucene(doc);
         return new RfsDocument(doc.luceneDocNumber, BulkOperationConverter.fromDocument(document, indexName));
     }
 

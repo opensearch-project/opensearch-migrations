@@ -187,7 +187,7 @@ If a transformation causes exceptions on the target, either from existing docs o
   --allowed-doc-exception-types version_conflict_engine_exception"
 ```
 
-This will prevent the migration from retrying indefinitely when encountering documents that already exist on the target cluster. The migration will treat these conflicts as successful operations and proceed with the remaining documents.
+The migration will treat these conflicts as successful operations instead of recording them as non-retryable document failures.
 
 ### Document versioning
 
@@ -199,11 +199,12 @@ default path still sends the original source bytes without parsing the body into
 JavaScript.
 
 External versioning accepts only a version greater than the target's current
-version. RFS automatically skips version conflicts on externally versioned index
-operations, including equal-version retries and attempts to replace newer target
-versions. These skips do not require an exception allowlist and do not produce
-failed-document records. Other errors, including internal version conflicts,
-retain their normal error handling.
+version. Equal-version retries and attempts to replace newer target versions
+produce `version_conflict_engine_exception`. These follow the normal non-retryable
+document failure path, including failed-document records when configured.
+To explicitly treat conflicts as successful operations, use
+`--allowed-doc-exception-types version_conflict_engine_exception`. No versioning
+mode automatically suppresses these failures.
 
 `version_type` is a per-request concurrency policy, not persistent document
 metadata. The snapshot's `_version` cannot reveal whether source writes used
@@ -218,12 +219,23 @@ the previous document's version, not the deletion's version. External versioning
 requires index operations; transformations producing create-only operations
 must remove the explicit version.
 
+The optional bundled [externalVersioning.js](../transformation/standardJavascriptTransforms/src/externalVersioning.js)
+modifier supports all three policies through `bindingsObject.versionType`:
+
+| `versionType` | Behavior |
+|---|---|
+| `internal` | Remove `version` and `version_type`; the target assigns or increments its own version. |
+| `external` (default) | Use the snapshot or configured source-field version; only higher versions overwrite. |
+| `external_gte` | Use the snapshot or configured source-field version; equal or higher versions overwrite. |
+
+Unknown version types are rejected. The modifier is not applied by default;
+the native RFS write path already preserves snapshot versions using `external`.
+
 #### Opting out with internal versioning
 
-The bundled [internalVersioning.js](../transformation/standardJavascriptTransforms/src/internalVersioning.js)
-transformation removes `version` and `version_type` from the action, retaining
-the ID, routing, body, and source metadata. It is available but is not applied
-by default.
+Set `versionType` to `internal` to remove `version` and `version_type` from the
+action, retaining the ID, routing, body, and source metadata. This mode does not
+require a snapshot version or look up an application version field.
 
 Save this configuration as `internal-versioning.json`:
 
@@ -231,7 +243,10 @@ Save this configuration as `internal-versioning.json`:
 [
   {
     "JsonJSTransformerProvider": {
-      "initializationResourcePath": "js/internalVersioning.js"
+      "initializationResourcePath": "js/externalVersioning.js",
+      "bindingsObject": {
+        "versionType": "internal"
+      }
     }
   }
 ]
@@ -249,8 +264,7 @@ increment their current version; opting out does not reset existing counters.
 #### Allowing equal-version rewrites
 
 To overwrite documents whose target version equals the snapshot version, use
-the bundled [externalVersioning.js](../transformation/standardJavascriptTransforms/src/externalVersioning.js)
-transformation with `versionType` set to `external_gte`:
+the same modifier with `versionType` set to `external_gte`:
 
 ```json
 [
@@ -267,7 +281,8 @@ transformation with `versionType` set to `external_gte`:
 
 This allows rerunning a transformation at the same version, including replacing
 different target content at that version. Older versions still cannot overwrite
-newer ones. A custom JavaScript transformation can make the same policy change
+newer ones; those conflicts remain failures unless explicitly allowlisted.
+A custom JavaScript transformation can make the same policy change
 for an index operation simply by assigning:
 
 ```javascript
@@ -276,12 +291,13 @@ document.operation.version_type = "external_gte";
 
 #### Application version fields and JavaScript precision
 
-The external-versioning transformation can also replace the snapshot version
-with a field from `_source`. Add `"versionField": "ext_version"` to its
+In either external mode, the modifier can replace the snapshot version with a
+field from `_source`. Add `"versionField": "ext_version"` to its
 `bindingsObject`. A string names a literal field, including any dots in its name.
 For a nested field, use an array such as
 `"versionField": ["metadata", "revision"]`. Missing or invalid values fail the
-transformation. The source body is preserved.
+transformation. The source body is preserved. `versionField` is ignored in
+internal mode.
 
 RFS exposes the original version as `source_metadata._version` and the default
 write version as `operation.version`. Both are decimal strings in transformation

@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.UnboundVersionMatchers;
@@ -14,7 +15,9 @@ import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -25,6 +28,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -42,17 +48,8 @@ class ExternalVersioningMigrationTest {
     private static final String INDEX = "versioned_documents";
     private static final String SNAPSHOT = "versioned_snapshot";
     private static final List<String> IDS = List.of("updated", "external", "large", "maximum");
-    private static final String INTERNAL_TRANSFORM = """
-        [{"JsonJSTransformerProvider": {"initializationResourcePath": "js/internalVersioning.js"}}]
-        """;
-    private static final String EXTERNAL_GTE_TRANSFORM = """
-        [{
-          "JsonJSTransformerProvider": {
-            "initializationResourcePath": "js/externalVersioning.js",
-            "bindingsObject": {"versionType": "external_gte"}
-          }
-        }]
-        """;
+    private static final DocumentExceptionAllowlist ALLOW_VERSION_CONFLICTS =
+        new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"));
     private static final String SOURCE_FIELD_TRANSFORM = """
         [{
           "JsonJSTransformerProvider": {
@@ -80,7 +77,7 @@ class ExternalVersioningMigrationTest {
         );
     }
 
-    @ParameterizedTest(name = "default preservation and internal/external_gte overrides from {0}")
+    @ParameterizedTest(name = "default preservation and all three bundled versioning modes from {0}")
     @MethodSource("sourceVersions")
     void preservesSnapshotVersionsAndSupportsSourceFields(ContainerVersion sourceVersion) throws Exception {
         Path snapshotDirectory = directory.resolve("snapshot");
@@ -95,8 +92,10 @@ class ExternalVersioningMigrationTest {
             migrate(extractor, target, "default", null);
             assertSnapshotVersions(operations, sourceDocuments);
 
-            // Replay is idempotent without an exception allowlist.
-            migrate(extractor, target, "retry", null);
+            // Strict external replays report conflicts unless explicitly allowlisted.
+            migrate(extractor, target, "retry", null, DocumentExceptionAllowlist.empty(), IDS);
+            assertSnapshotVersions(operations, sourceDocuments);
+            migrate(extractor, target, "retry-allowed", null, ALLOW_VERSION_CONFLICTS, List.of());
             assertSnapshotVersions(operations, sourceDocuments);
 
             // Ordinary ingestion can continue after backfill. An older snapshot
@@ -105,7 +104,17 @@ class ExternalVersioningMigrationTest {
                 "{\"ext_version\":8,\"title\":\"newer target content\"}");
             assertEquals(200, advanced.getKey());
             assertEquals(8L, MAPPER.readTree(advanced.getValue()).path("_version").longValue());
-            migrate(extractor, target, "stale", null);
+            migrate(extractor, target, "stale", null, DocumentExceptionAllowlist.empty(), IDS);
+            assertEquals(8L, getDocument(operations, "external").path("_version").longValue());
+            assertEquals("newer target content",
+                getDocument(operations, "external").path("_source").path("title").asText());
+
+            // external_gte accepts equal versions, but a newer target remains a
+            // document failure unless the existing exception allowlist suppresses it.
+            migrate(extractor, target, "gte-stale", versioningConfig("external_gte"),
+                DocumentExceptionAllowlist.empty(), List.of("external"));
+            migrate(extractor, target, "gte-stale-allowed", versioningConfig("external_gte"),
+                ALLOW_VERSION_CONFLICTS, List.of());
             assertEquals(8L, getDocument(operations, "external").path("_version").longValue());
             assertEquals("newer target content",
                 getDocument(operations, "external").path("_source").path("title").asText());
@@ -116,14 +125,19 @@ class ExternalVersioningMigrationTest {
             migrate(extractor, target, "custom-inspect", customTransformerConfig(null));
             assertSnapshotVersions(operations, sourceDocuments);
 
+            // The shared modifier accepts explicit external mode as well as the native default.
+            assertEquals(200, operations.delete("/" + INDEX).getKey());
+            migrate(extractor, target, "bundled-external", versioningConfig("external"));
+            assertSnapshotVersions(operations, sourceDocuments);
+
             // Both a one-field custom override and the bundled external_gte
             // configuration can overwrite equal versions while retaining the number.
             int override = 0;
-            for (String config : List.of(customTransformerConfig("external_gte"), EXTERNAL_GTE_TRANSFORM)) {
+            for (String config : List.of(customTransformerConfig("external_gte"), versioningConfig("external_gte"))) {
                 var equalVersionWrite = operations.put("/" + INDEX + "/_doc/external?version=7&version_type=external_gte",
                     "{\"ext_version\":7,\"title\":\"equal-version target content\"}");
                 assertEquals(200, equalVersionWrite.getKey());
-                migrate(extractor, target, "strict-equal-" + override, null);
+                migrate(extractor, target, "strict-equal-" + override, null, DocumentExceptionAllowlist.empty(), IDS);
                 assertEquals("equal-version target content",
                     getDocument(operations, "external").path("_source").path("title").asText());
                 migrate(extractor, target, "gte-" + override++, config);
@@ -135,9 +149,9 @@ class ExternalVersioningMigrationTest {
             assertInternalVersions(operations, sourceDocuments, 1);
 
             assertEquals(200, operations.delete("/" + INDEX).getKey());
-            migrate(extractor, target, "bundled-internal", INTERNAL_TRANSFORM);
+            migrate(extractor, target, "bundled-internal", versioningConfig("internal"));
             assertInternalVersions(operations, sourceDocuments, 1);
-            migrate(extractor, target, "bundled-internal-retry", INTERNAL_TRANSFORM);
+            migrate(extractor, target, "bundled-internal-retry", versioningConfig("internal"));
             assertInternalVersions(operations, sourceDocuments, 2);
 
             assertEquals(200, operations.delete("/" + INDEX).getKey());
@@ -149,6 +163,17 @@ class ExternalVersioningMigrationTest {
                 assertEquals(originalSource, document.path("_source"));
             }
         }
+    }
+
+    private static String versioningConfig(String versionType) {
+        return """
+            [{
+              "JsonJSTransformerProvider": {
+                "initializationResourcePath": "js/externalVersioning.js",
+                "bindingsObject": {"versionType": "%s"}
+              }
+            }]
+            """.formatted(versionType);
     }
 
     private static String customTransformerConfig(String versionType) throws Exception {
@@ -219,6 +244,11 @@ class ExternalVersioningMigrationTest {
 
     private void migrate(SnapshotExtractor extractor, SearchClusterContainer target, String workDirectory,
                          String config) throws Exception {
+        migrate(extractor, target, workDirectory, config, DocumentExceptionAllowlist.empty(), List.of());
+    }
+
+    private void migrate(SnapshotExtractor extractor, SearchClusterContainer target, String workDirectory,
+                         String config, DocumentExceptionAllowlist allowlist, List<String> expectedConflicts) throws Exception {
         var connection = ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext();
         var client = new OpenSearchClientFactory(connection).determineVersionAndCreate();
         var failedDocuments = mock(FailedDocumentStreamSink.class);
@@ -228,12 +258,24 @@ class ExternalVersioningMigrationTest {
              var transformer = config == null ? null
                  : new TransformationLoader().getTransformerFactoryFromServiceLoader(config).findFirst().orElseThrow()) {
             var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer, false,
-                DocumentExceptionAllowlist.empty(), null);
+                allowlist, null);
             var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE, 1, 1);
             var cursors = pipeline.migrateAll().collectList().block();
             assertNotNull(cursors);
             assertEquals(4L, cursors.stream().mapToLong(cursor -> cursor.docsInBatch()).sum());
-            verifyNoInteractions(failedDocuments);
+            if (expectedConflicts.isEmpty()) {
+                verifyNoInteractions(failedDocuments);
+            } else {
+                var failures = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+                verify(failedDocuments, times(expectedConflicts.size())).write(failures.capture());
+                assertEquals(expectedConflicts.stream().sorted().toList(),
+                    failures.getAllValues().stream().map(FailedDocumentStreamRecord::getDocumentId).sorted().toList());
+                for (var failure : failures.getAllValues()) {
+                    assertEquals("version_conflict_engine_exception", failure.getFailureType());
+                    assertEquals(FailureClass.NON_RETRYABLE, failure.getFailureClass());
+                    assertEquals(409, failure.getResponseItem().path("index").path("status").asInt());
+                }
+            }
         }
     }
 

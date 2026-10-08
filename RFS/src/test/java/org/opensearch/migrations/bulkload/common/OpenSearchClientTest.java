@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
@@ -25,6 +26,7 @@ import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
@@ -36,6 +38,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -247,14 +250,17 @@ class OpenSearchClientTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void externalConflictsAreSkippedButOtherFailuresRemainVisible(boolean raw) throws Exception {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void versionConflictsAreFailuresUnlessExplicitlyAllowlisted(boolean raw, boolean allowVersionConflicts) throws Exception {
         var failedDocuments = mock(FailedDocumentStreamSink.class);
         when(failedDocuments.write(any())).thenReturn(Mono.empty());
         openSearchClient.setFailedDocumentStreamContext(failedDocuments, "version-test", "worker");
         doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
         var documents = List.of(
             snapshotDocument("external", 7L),
+            new Document("external-gte", "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                Document.Operation.UPSERT,
+                Map.of(Document.HINT_VERSION, "7", Document.HINT_VERSION_TYPE, "external_gte"), Map.of()),
             snapshotDocument("internal", null),
             snapshotDocument("bad-mapping", 7L),
             snapshotDocument("retry", Long.MAX_VALUE)
@@ -263,6 +269,7 @@ class OpenSearchClientTest {
             .thenReturn(Mono.just(new HttpResponse(200, "", null, """
                 {"errors":true,"items":[
                   {"index":{"_id":"external","status":409,"error":{"type":"version_conflict_engine_exception"}}},
+                  {"index":{"_id":"external-gte","status":409,"error":{"type":"version_conflict_engine_exception"}}},
                   {"index":{"_id":"internal","status":409,"error":{"type":"version_conflict_engine_exception"}}},
                   {"index":{"_id":"bad-mapping","status":400,"error":{"type":"mapper_parsing_exception"}}},
                   {"index":{"_id":"retry","status":429,"error":{"type":"es_rejected_execution_exception"}}}
@@ -271,18 +278,28 @@ class OpenSearchClientTest {
             .thenReturn(Mono.just(new HttpResponse(200, "", null,
                 "{\"errors\":false,\"items\":[{\"index\":{\"_id\":\"retry\",\"status\":201,\"result\":\"created\"}}]}")));
 
+        var allowlist = allowVersionConflicts
+            ? new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"))
+            : DocumentExceptionAllowlist.empty();
         if (raw) {
-            openSearchClient.sendBulkRequestRaw("products", documents, null, false, DocumentExceptionAllowlist.empty()).block();
+            openSearchClient.sendBulkRequestRaw("products", documents, null, false, allowlist).block();
         } else {
             openSearchClient.sendBulkRequest("products",
                 documents.stream().map(doc -> BulkOperationConverter.fromDocument(doc, "products")).toList(),
-                null, false, DocumentExceptionAllowlist.empty()).block();
+                null, false, allowlist).block();
         }
 
         var failures = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
-        verify(failedDocuments, times(2)).write(failures.capture());
-        assertEquals(List.of("internal", "bad-mapping"),
+        var expectedFailures = allowVersionConflicts
+            ? List.of("bad-mapping") : List.of("external", "external-gte", "internal", "bad-mapping");
+        verify(failedDocuments, times(expectedFailures.size())).write(failures.capture());
+        assertEquals(expectedFailures,
             failures.getAllValues().stream().map(FailedDocumentStreamRecord::getDocumentId).toList());
+        for (var failure : failures.getAllValues()) {
+            assertEquals(FailureClass.NON_RETRYABLE, failure.getFailureClass());
+            assertEquals(failure.getDocumentId().equals("bad-mapping")
+                ? "mapper_parsing_exception" : "version_conflict_engine_exception", failure.getFailureType());
+        }
         var requests = ArgumentCaptor.forClass(byte[].class);
         verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
         var retriedLines = new String(requests.getAllValues().get(1), java.nio.charset.StandardCharsets.UTF_8).split("\n");

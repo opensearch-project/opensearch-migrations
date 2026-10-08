@@ -10,7 +10,7 @@ function indexOperation(version = 7) {
 }
 
 describe("External versioning", () => {
-    test.each([undefined, null, {}])("defaults to the snapshot's internal version: %s", config => {
+    test.each([undefined, null, {}])("defaults to the snapshot's stored version: %s", config => {
         const item = indexOperation(42);
         item.source_metadata = { _version: "9007199254740993", luceneDocNumber: 5 };
         main(config)(item);
@@ -177,8 +177,145 @@ describe("External versioning", () => {
         }
     );
 
-    test.each(["internal", "force", "", 7])("rejects unsupported version type: %s", versionType => {
+    test.each(["external gte", "force", "", 7])("rejects unsupported version type: %s", versionType => {
         expect(() => main({ versionField: "@version_number", versionType }))
-            .toThrow('versionType must be "external" or "external_gte"');
+            .toThrow('versionType must be "internal", "external", or "external_gte"');
+    });
+});
+
+function snapshotOperation() {
+    return {
+        schema: "rfs-opensearch-bulk-v1",
+        operation_type: "index",
+        operation: {
+            _index: "products", _id: "product-1", routing: "tenant-1",
+            version: "9223372036854775807", version_type: "external"
+        },
+        document: { ext_version: 42, version: "application value" },
+        source_metadata: { _version: "9223372036854775807", luceneDocNumber: 5 }
+    };
+}
+
+describe("Versioning configuration", () => {
+    test.each(["internal", "external", "external_gte"])(
+        "selects %s using the same modifier", versionType => {
+            const item = snapshotOperation();
+            const original = structuredClone(item);
+            expect(main({ versionType })(item)).toBe(item);
+
+            if (versionType === "internal") {
+                expect(item.operation).not.toHaveProperty("version");
+                expect(item.operation).not.toHaveProperty("version_type");
+            } else {
+                expect(item.operation.version).toBe(original.operation.version);
+                expect(item.operation.version_type).toBe(versionType);
+            }
+            expect(item.operation._id).toBe(original.operation._id);
+            expect(item.document).toEqual(original.document);
+            expect(item.source_metadata).toEqual(original.source_metadata);
+        }
+    );
+});
+
+describe("Internal versioning", () => {
+    const internal = main({ versionType: "internal" });
+
+    test.each(["external", "external_gte", "internal"])(
+        "removes explicit %s versioning without changing the ID, body, or source metadata", versionType => {
+            const item = snapshotOperation();
+            item.operation.version_type = versionType;
+            const original = structuredClone(item);
+
+            expect(internal(item)).toBe(item);
+            expect(item.operation).toEqual({
+                _index: "products", _id: "product-1", routing: "tenant-1"
+            });
+            expect(item.document).toEqual(original.document);
+            expect(item.source_metadata).toEqual(original.source_metadata);
+        }
+    );
+
+    test("does not require a source ID, snapshot version, or application version field", () => {
+        const item = snapshotOperation();
+        delete item.operation._id;
+        delete item.source_metadata;
+        item.operation.op_type = "create";
+        item.operation.version = "invalid external version";
+        main({ versionType: "internal", versionField: "missing" })(item);
+        expect(item.operation).not.toHaveProperty("version");
+        expect(item.operation).not.toHaveProperty("version_type");
+        expect(item.operation.op_type).toBe("create");
+    });
+
+    test("does not validate a versionField that internal mode does not use", () => {
+        const item = snapshotOperation();
+        expect(() => main({ versionType: "internal", versionField: [] })(item)).not.toThrow();
+        expect(item.operation).not.toHaveProperty("version");
+    });
+
+    test("preserves explicit sequence-number concurrency checks", () => {
+        const item = snapshotOperation();
+        Object.assign(item.operation, { if_seq_no: 5, if_primary_term: 3 });
+        internal(item);
+        expect(item.operation.if_seq_no).toBe(5);
+        expect(item.operation.if_primary_term).toBe(3);
+    });
+
+    test("handles a batch containing index and delete operations", () => {
+        const index = snapshotOperation();
+        const deletion = {
+            schema: "rfs-opensearch-bulk-v1",
+            operation_type: "delete",
+            operation: { _index: "products", _id: "removed", version: "7", version_type: "external" }
+        };
+        const result = internal([index, deletion]);
+        expect(result).toEqual([index, deletion]);
+        for (const item of result) {
+            expect(item.operation).not.toHaveProperty("version");
+            expect(item.operation).not.toHaveProperty("version_type");
+        }
+        expect(deletion.operation._id).toBe("removed");
+    });
+
+    test("supports Maps from the transformation runtime", () => {
+        const operation = new Map([
+            ["_id", "product-1"], ["version", "7"], ["version_type", "external"]
+        ]);
+        const item = new Map([
+            ["schema", "rfs-opensearch-bulk-v1"], ["operation_type", "index"], ["operation", operation]
+        ]);
+        expect(main(new Map([["versionType", "internal"]]))(item)).toBe(item);
+        expect(operation.get("_id")).toBe("product-1");
+        expect(operation.has("version")).toBe(false);
+        expect(operation.has("version_type")).toBe(false);
+    });
+
+    test("retains the snapshot version so the same modifier can opt back in", () => {
+        const item = snapshotOperation();
+        internal(item);
+        main({ versionType: "external_gte" })(item);
+        expect(item.operation.version).toBe("9223372036854775807");
+        expect(item.operation.version_type).toBe("external_gte");
+    });
+
+    test("is idempotent for operations already using default internal versioning", () => {
+        const item = snapshotOperation();
+        delete item.operation.version;
+        delete item.operation.version_type;
+        const original = structuredClone(item);
+        internal(item);
+        internal(item);
+        expect(item).toEqual(original);
+    });
+
+    test.each([null, undefined, {}, { schema: "other" }, {
+        schema: "other", operation_type: "index", operation: { version: 5, version_type: "external" }
+    }])("passes unrelated input through: %s", input => {
+        const original = structuredClone(input);
+        expect(internal(input)).toEqual(original);
+    });
+
+    test("accepts an empty batch", () => {
+        expect(internal([])).toEqual([]);
     });
 });
