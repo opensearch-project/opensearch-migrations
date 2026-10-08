@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -43,6 +44,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
+    private final CollectionRoutedTarget collectionRoutedTarget;
 
     public OpenSearchDocumentSink(
         OpenSearchClient client,
@@ -51,6 +53,22 @@ public class OpenSearchDocumentSink implements DocumentSink {
         DocumentExceptionAllowlist allowlist,
         Supplier<IRfsContexts.IRequestContext> requestContextSupplier
     ) {
+        this(client, transformerSupplier, allowServerGeneratedIds, allowlist, requestContextSupplier, null);
+    }
+
+    /**
+     * @param collectionRoutedTarget routes each source index to a serverless collection and decides
+     *                               server-generated IDs per collection; null for other targets
+     */
+    public OpenSearchDocumentSink(
+        OpenSearchClient client,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean allowServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        Supplier<IRfsContexts.IRequestContext> requestContextSupplier,
+        CollectionRoutedTarget collectionRoutedTarget
+    ) {
+        this.collectionRoutedTarget = collectionRoutedTarget;
         this.client = client;
         this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
         this.allowServerGeneratedIds = allowServerGeneratedIds;
@@ -94,19 +112,26 @@ public class OpenSearchDocumentSink implements DocumentSink {
             .mapToLong(Document::sourceLength)
             .sum();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
+        // collectionName is the source index; routing by it holds even when a transformer renames _index
+        var serverlessCollection = collectionRoutedTarget != null
+            ? collectionRoutedTarget.collectionFor(collectionName)
+            : null;
+        var stripIds = serverlessCollection != null
+            ? collectionRoutedTarget.allowServerGeneratedIds(serverlessCollection)
+            : allowServerGeneratedIds;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (transformer == null) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
             bulkMono = client.sendBulkRequestRaw(collectionName, batch,
-                requestContext, allowServerGeneratedIds, allowlist);
+                requestContext, stripIds, allowlist, serverlessCollection);
         } else {
             var bulkOps = batch.stream()
                 .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
                 .collect(Collectors.toList());
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
             bulkMono = client.sendBulkRequest(collectionName, opsToSend,
-                requestContext, allowServerGeneratedIds, allowlist);
+                requestContext, stripIds, allowlist, serverlessCollection);
         }
 
         return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch)));

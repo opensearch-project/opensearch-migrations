@@ -207,8 +207,17 @@ public abstract class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
+        return createLegacyTemplate(templateName, settings, context, null);
+    }
+
+    public Optional<ObjectNode> createLegacyTemplate(
+        String templateName,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context,
+        String serverlessCollection
+    ) {
         String targetPath = "_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings, context);
+        return createObjectIdempotent(targetPath, settings, context, serverlessCollection);
     }
 
     /*
@@ -220,8 +229,17 @@ public abstract class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
+        return createComponentTemplate(templateName, settings, context, null);
+    }
+
+    public Optional<ObjectNode> createComponentTemplate(
+        String templateName,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context,
+        String serverlessCollection
+    ) {
         String targetPath = "_component_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings, context);
+        return createObjectIdempotent(targetPath, settings, context, serverlessCollection);
     }
 
     /*
@@ -233,31 +251,60 @@ public abstract class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
+        return createIndexTemplate(templateName, settings, context, null);
+    }
+
+    public Optional<ObjectNode> createIndexTemplate(
+        String templateName,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context,
+        String serverlessCollection
+    ) {
         String targetPath = "_index_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings, context);
+        return createObjectIdempotent(targetPath, settings, context, serverlessCollection);
     }
 
     /** Returns true if this template already exists */
     public boolean hasLegacyTemplate(String templateName) {
+        return hasLegacyTemplate(templateName, null);
+    }
+
+    /** Returns true if this template already exists */
+    public boolean hasLegacyTemplate(String templateName, String serverlessCollection) {
         var targetPath = "_template/" + templateName;
-        return hasObjectCheck(targetPath, null);
+        return hasObjectCheck(targetPath, null, serverlessCollection);
     }
 
     /** Returns true if this template already exists */
     public boolean hasComponentTemplate(String templateName) {
+        return hasComponentTemplate(templateName, null);
+    }
+
+    /** Returns true if this template already exists */
+    public boolean hasComponentTemplate(String templateName, String serverlessCollection) {
         var targetPath = "_component_template/" + templateName;
-        return hasObjectCheck(targetPath, null);
+        return hasObjectCheck(targetPath, null, serverlessCollection);
     }
 
     /** Returns true if this template already exists */
     public boolean hasIndexTemplate(String templateName) {
+        return hasIndexTemplate(templateName, null);
+    }
+
+    /** Returns true if this template already exists */
+    public boolean hasIndexTemplate(String templateName, String serverlessCollection) {
         var targetPath = "_index_template/" + templateName;
-        return hasObjectCheck(targetPath, null);
+        return hasObjectCheck(targetPath, null, serverlessCollection);
     }
 
     /** Returns true if this index already exists */
     public boolean hasIndex(String indexName) {
-        return hasObjectCheck(indexName, null);
+        return hasIndex(indexName, null);
+    }
+
+    /** Returns true if this index already exists */
+    public boolean hasIndex(String indexName, String serverlessCollection) {
+        return hasObjectCheck(indexName, null, serverlessCollection);
     }
 
     protected abstract String getCreateIndexPath(String indexName);
@@ -271,21 +318,35 @@ public abstract class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
+        return createIndex(indexName, settings, context, null);
+    }
+
+    /**
+     * Create an index if it does not already exist.  serverlessCollection selects the OpenSearch
+     * Serverless collection on a per-account endpoint and is null for every other target.
+     */
+    public Optional<ObjectNode> createIndex(
+        String indexName,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context,
+        String serverlessCollection
+    ) {
         var targetPath = getCreateIndexPath(indexName);
-        return createObjectIdempotent(targetPath, settings, context);
+        return createObjectIdempotent(targetPath, settings, context, serverlessCollection);
     }
 
     private Optional<ObjectNode> createObjectIdempotent(
         String objectPath,
         ObjectNode settings,
-        IRfsContexts.ICheckedIdempotentPutRequestContext context
+        IRfsContexts.ICheckedIdempotentPutRequestContext context,
+        String serverlessCollection
     ) {
         log.info("Starting createObjectIdempotent for path={} with settings={}", objectPath, settings);
-        var objectDoesNotExist = !hasObjectCheck(objectPath, context);
+        var objectDoesNotExist = !hasObjectCheck(objectPath, context, serverlessCollection);
         if (objectDoesNotExist) {
             long startTime = System.currentTimeMillis();
             var putRequestContext = context == null ? null : context.createCheckRequestContext();
-            var putResponse = client.putAsync(objectPath, settings.toString(), putRequestContext).flatMap(resp -> {
+            var putResponse = putAsync(objectPath, settings.toString(), serverlessCollection, putRequestContext).flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else if (resp.statusCode == HttpURLConnection.HTTP_BAD_REQUEST) {
@@ -313,6 +374,19 @@ public abstract class OpenSearchClient {
         return Optional.empty();
     }
 
+    private Mono<HttpResponse> getAsync(String path, String serverlessCollection, IRfsContexts.IRequestContext context) {
+        return serverlessCollection == null
+            ? client.getAsync(path, context)
+            : client.getAsync(path, ServerlessCollectionRouting.headersFor(serverlessCollection), context);
+    }
+
+    private Mono<HttpResponse> putAsync(String path, String body, String serverlessCollection,
+                                        IRfsContexts.IRequestContext context) {
+        return serverlessCollection == null
+            ? client.putAsync(path, body, context)
+            : client.putAsync(path, body, ServerlessCollectionRouting.headersFor(serverlessCollection), context);
+    }
+
     private static String getString(HttpResponse resp) {
         return "Response Code: "
             + resp.statusCode
@@ -324,14 +398,15 @@ public abstract class OpenSearchClient {
 
     private boolean hasObjectCheck(
         String objectPath,
-        IRfsContexts.ICheckedIdempotentPutRequestContext context
+        IRfsContexts.ICheckedIdempotentPutRequestContext context,
+        String serverlessCollection
     ) {
         log.info("Starting hasObjectCheck for path={}", objectPath);
         long startTime = System.currentTimeMillis();
         var requestContext = Optional.ofNullable(context)
             .map(IRfsContexts.ICheckedIdempotentPutRequestContext::createCheckRequestContext)
             .orElse(null);
-        var getResponse = client.getAsync(objectPath, requestContext)
+        var getResponse = getAsync(objectPath, serverlessCollection, requestContext)
             .flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND ||
                     resp.statusCode == HttpURLConnection.HTTP_OK)
@@ -510,9 +585,19 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
+        return sendBulkRequest(indexName, docs, context, allowServerGeneratedIds, allowlist, null);
+    }
+
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
+                                              IRfsContexts.IRequestContext context,
+                                              boolean allowServerGeneratedIds,
+                                              DocumentExceptionAllowlist allowlist,
+                                              String serverlessCollection)
+    {
         final var pendingDocs = new ArrayList<BulkOperationSpec>(docs);
         return executeBulkWithRetry(
             indexName,
+            serverlessCollection,
             () -> {
                 List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
                     ? pendingDocs.stream().map(this::stripDocumentId).collect(Collectors.toList())
@@ -534,6 +619,14 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
+        return sendBulkRequestRaw(indexName, docs, context, allowServerGeneratedIds, allowlist, null);
+    }
+
+    public Mono<BulkResponse> sendBulkRequestRaw(String indexName, List<Document> docs,
+                                                  IRfsContexts.IRequestContext context,
+                                                  boolean allowServerGeneratedIds,
+                                                  DocumentExceptionAllowlist allowlist,
+                                                  String serverlessCollection) {
         final var pendingRawDocs = new ArrayList<>(docs);
         final var pendingOps = new ArrayList<BulkOperationSpec>();
 
@@ -549,6 +642,7 @@ public abstract class OpenSearchClient {
 
         return executeBulkWithRetry(
             indexName,
+            serverlessCollection,
             () -> {
                 if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
                     return buildRawNdjsonBytes(pendingRawDocs, indexName, allowServerGeneratedIds);
@@ -569,6 +663,7 @@ public abstract class OpenSearchClient {
      * Shared bulk request execution with retry, error handling, and compaction.
      *
      * @param indexName         target index
+     * @param serverlessCollection collection header for per-account serverless endpoints, or null
      * @param bodyBuilder       builds the NDJSON body bytes for each attempt
      * @param pendingOps        mutable list of pending operations (compacted on partial success)
      * @param preCompactHook    called before compaction to allow lazy initialization of pendingOps
@@ -577,6 +672,7 @@ public abstract class OpenSearchClient {
      */
     private Mono<BulkResponse> executeBulkWithRetry(
         String indexName,
+        String serverlessCollection,
         java.util.function.Supplier<byte[]> bodyBuilder,
         ArrayList<BulkOperationSpec> pendingOps,
         Runnable preCompactHook,
@@ -587,7 +683,7 @@ public abstract class OpenSearchClient {
 
         return Mono.defer(() -> {
             var bodyBytes = bodyBuilder.get();
-            return postBulkRequest(indexName, bodyBytes, context)
+            return postBulkRequest(indexName, serverlessCollection, bodyBytes, context)
                 .flatMap(response -> {
                     var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
 
@@ -639,9 +735,12 @@ public abstract class OpenSearchClient {
         });
     }
 
-    private Mono<HttpResponse> postBulkRequest(String indexName, byte[] bodyBytes,
+    private Mono<HttpResponse> postBulkRequest(String indexName, String serverlessCollection, byte[] bodyBytes,
                                                        IRfsContexts.IRequestContext context) {
         var additionalHeaders = new HashMap<String, List<String>>();
+        if (serverlessCollection != null) {
+            additionalHeaders.putAll(ServerlessCollectionRouting.headersFor(serverlessCollection));
+        }
         if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
             RestClient.addGzipRequestHeaders(additionalHeaders);
             RestClient.addGzipResponseHeaders(additionalHeaders);

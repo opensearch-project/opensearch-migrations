@@ -17,6 +17,7 @@ from integ_test.test_cases.ma_argo_test_base import (
 # leading-underscore'd.
 from integ_test.test_cases import cdc_aoss_tests as _aoss_tests
 from integ_test.test_cases import aoss_collection_tests as _aoss_collection_tests
+from integ_test.test_cases import aoss_collection_routing_tests as _aoss_routing_tests
 from integ_test.test_cases import mountable_transform_tests as _mt_tests
 from integ_test.test_cases import cdc_simple_bulk_e2e_tests as _bulk_tests
 
@@ -58,6 +59,7 @@ def test_aoss_target_accepts_aoss_native_test():
     # AOSS-native tests have empty allow_source_target_combinations and must
     # construct successfully.
     _aoss_collection_tests.Test0021AossCollectionMigrations(user_args=_aoss_user_args())
+    _aoss_routing_tests.Test0024AossCollectionRouting(user_args=_aoss_user_args())
     _aoss_tests.Test0034CdcOnlyAossTarget(user_args=_aoss_user_args())
     _aoss_tests.Test0041CdcFullE2eAossTarget(user_args=_aoss_user_args())
 

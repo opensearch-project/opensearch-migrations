@@ -14,6 +14,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.IHttpMessage;
 
 import lombok.SneakyThrows;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -87,6 +88,30 @@ public class SigV4SigningTransformationTest {
         // Verify header map returned is unmodifiable (check both keys and values)
         assertThrows(UnsupportedOperationException.class, () -> signedHeaders.put("Test", List.of("Value")));
         assertThrows(UnsupportedOperationException.class, () -> signedHeaders.get("Authorization").add("Test"));
+    }
+
+    @Test
+    public void testAmzRequestHeadersAreSigned() {
+        var signer = new SigV4Signer(
+            new MockCredentialsProvider(),
+            "aoss",
+            "us-east-1",
+            "https",
+            () -> Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
+        );
+        var headers = new HashMap<String, List<String>>();
+        headers.put("Host", List.of("123456789012.aoss.us-east-1.on.aws"));
+        headers.put("X-Amz-Aoss-Collection-Name", List.of("tenant-a"));
+        headers.put("X-Amz-Date", List.of("20990101T000000Z"));
+        headers.put("User-Agent", List.of("RfsWorker-1.0"));
+
+        var signedHeaders = signer.finalizeSignature(modifiableHttpMessage("GET", "/", "HTTP/1.1", headers));
+
+        var authHeader = signedHeaders.get("Authorization").get(0);
+        assertTrue(authHeader.contains("SignedHeaders=host;x-amz-aoss-collection-name;x-amz-date,"),
+            "Unexpected signed headers in " + authHeader);
+        assertEquals(List.of("19700101T000000Z"), signedHeaders.get("X-Amz-Date"));
+        assertFalse(signedHeaders.containsKey("x-amz-aoss-collection-name"));
     }
 
     @SneakyThrows

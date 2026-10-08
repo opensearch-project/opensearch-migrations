@@ -1316,6 +1316,10 @@ export const CLUSTER_CONFIG = z.object({
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(new RegExp(HTTP_ENDPOINT_PATTERN))
         .describe("HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."),
+    collectionRouted: z.boolean().optional()
+        .describe("Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), " +
+            "which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration " +
+            "to this target must define staticCollectionRouting or regexCollectionRouting."),
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
@@ -1687,6 +1691,24 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
         .describe("Resolved name of the snapshot to use for migration.")
 }).describe("A fully resolved snapshot configuration with a concrete snapshot name.");
 
+export const STATIC_COLLECTION_ROUTING = z.array(z.object({
+    sourceIndex: z.string().regex(/\S/, "must not be blank")
+        .describe("Exact source index name."),
+    collection: z.string().regex(/\S/, "must not be blank")
+        .describe("OpenSearch Serverless collection name, used as is."),
+}).describe("Routes one source index to one OpenSearch Serverless collection."))
+    .describe("Exact source index to collection mappings for a collection-routed target. A static match wins over every regex entry. " +
+        "Each sourceIndex may appear only once.");
+
+export const REGEX_COLLECTION_ROUTING = z.array(z.object({
+    sourceIndex: z.string().regex(/\S/, "must not be blank")
+        .describe("Java regular expression that must match the whole source index name (e.g. '(.+)-\\d{4}')."),
+    collection: z.string().regex(/\S/, "must not be blank")
+        .describe("Collection name replacement pattern, which may reference the regex's capture groups by number or name (e.g. '$1' or '${tenant}')."),
+}).describe("Routes source indices that match a regex to an OpenSearch Serverless collection."))
+    .describe("Ordered regex mappings for a collection-routed target, used when no static entry matches. The first regex that matches " +
+        "the whole index name wins. Patterns and group references are validated when the migration starts.");
+
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional()
         .describe("Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."),
@@ -1694,6 +1716,13 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
         .describe("Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."),
     documentBackfillConfig: USER_RFS_OPTIONS.optional()
         .describe("Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."),
+    staticCollectionRouting: STATIC_COLLECTION_ROUTING.optional()
+        .describe("Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry " +
+            "when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill " +
+            "so an index's metadata and documents reach the same collection, and templates go to every collection a migrated index routes to."),
+    regexCollectionRouting: REGEX_COLLECTION_ROUTING.optional()
+        .describe("Ordered regex source index to OpenSearch Serverless collection mappings, used when no static entry matches. " +
+            "Same rules as staticCollectionRouting."),
 }).describe("Configuration for a single migration pass from a snapshot. At least one of metadataMigrationConfig or documentBackfillConfig must be provided.").refine(data =>
         data.metadataMigrationConfig !== undefined ||
         data.documentBackfillConfig !== undefined,
@@ -1739,6 +1768,62 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG)
     .describe("Map of source cluster names to their configurations. Keys are used as labels throughout the migration workflow.");
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG)
     .describe("Map of target cluster names to their configurations. Keys are used as labels and must be referenced by snapshotMigrationConfigs and traffic replayers.");
+
+function validateCollectionRouting(
+    targetCluster: z.infer<typeof TARGET_CLUSTER_CONFIG> | undefined,
+    mc: z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>,
+    i: number,
+    ctx: z.RefinementCtx
+) {
+    if (!targetCluster) {
+        return;
+    }
+    const routed = targetCluster.collectionRouted === true;
+    if (routed) {
+        const sigv4 = HTTP_AUTH_SIGV4.safeParse(targetCluster.authConfig);
+        if (!sigv4.success || sigv4.data.sigv4.service !== "aoss") {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Target '${mc.toTarget}' is collectionRouted, which requires sigv4 authConfig with service 'aoss'.`,
+                path: ['targetClusters', mc.toTarget, 'authConfig']
+            });
+        }
+    }
+    for (const [snapName, migrations] of Object.entries(mc.perSnapshotConfig)) {
+        migrations.forEach((migration, j) => {
+            const entryPath = ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, j];
+            const staticRoutes = migration.staticCollectionRouting;
+            const regexRoutes = migration.regexCollectionRouting;
+            const hasRoutingField = staticRoutes !== undefined || regexRoutes !== undefined;
+            const routeCount = (staticRoutes?.length ?? 0) + (regexRoutes?.length ?? 0);
+            if (routed && routeCount === 0) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Target '${mc.toTarget}' is collectionRouted, so perSnapshotConfig['${snapName}'][${j}] needs at least one ` +
+                        `staticCollectionRouting or regexCollectionRouting entry.`,
+                    path: [...entryPath, 'staticCollectionRouting']
+                });
+            } else if (!routed && hasRoutingField) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `perSnapshotConfig['${snapName}'][${j}] sets collection routing, but target '${mc.toTarget}' is not collectionRouted.`,
+                    path: [...entryPath, staticRoutes !== undefined ? 'staticCollectionRouting' : 'regexCollectionRouting']
+                });
+            }
+            const seen = new Set<string>();
+            (staticRoutes ?? []).forEach((route, k) => {
+                if (seen.has(route.sourceIndex)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `staticCollectionRouting lists source index '${route.sourceIndex}' more than once.`,
+                        path: [...entryPath, 'staticCollectionRouting', k, 'sourceIndex']
+                    });
+                }
+                seen.add(route.sourceIndex);
+            });
+        });
+    }
+}
 
 export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
@@ -1789,6 +1874,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     path: ['snapshotMigrationConfigs', i, 'toTarget']
                 });
             }
+
+            validateCollectionRouting(data.targetClusters[mc.toTarget], mc, i, ctx);
 
             if (mc.perSnapshotConfig) {
                 const sourceCluster = data.sourceClusters[mc.fromSource];
@@ -1855,6 +1942,15 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                             path: ['traffic', 'replayers', replayerName, 'dependsOnSnapshotMigrations', j, 'source']
                         });
                     }
+                }
+
+                if (data.targetClusters[rc.toTarget]?.collectionRouted) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Replayer '${replayerName}' targets '${rc.toTarget}', which is collectionRouted. ` +
+                            `Traffic replay does not support collection-routed targets yet.`,
+                        path: ['traffic', 'replayers', replayerName, 'toTarget']
+                    });
                 }
 
                 // When the target has sigv4 or basic auth, the workflow auto-derives the replayer's auth

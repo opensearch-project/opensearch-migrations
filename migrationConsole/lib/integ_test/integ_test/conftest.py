@@ -10,6 +10,7 @@
 #              variables, so they only run in the BYOS pipeline — not the local k8s jobs.
 #   0020       GCS snapshot migration tests
 #   0021       Combined AOSS collection test (search, time-series, vector)
+#   0024       AOSS per-account endpoint routing to NextGen collections (0022-0023 are retired)
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
 #   0050-0059  Observability tests (metrics/tracing backends)
@@ -41,6 +42,7 @@ from .test_cases.cdc_simple_bulk_e2e_tests import *
 from .test_cases.mountable_transform_tests import *
 from .test_cases.cdc_aoss_tests import *
 from .test_cases.aoss_collection_tests import *
+from .test_cases.aoss_collection_routing_tests import *
 from .test_cases.solr_tests import *
 from .test_cases.observability_tests import *
 from .test_cases.byoc_captured_traffic_tests import *

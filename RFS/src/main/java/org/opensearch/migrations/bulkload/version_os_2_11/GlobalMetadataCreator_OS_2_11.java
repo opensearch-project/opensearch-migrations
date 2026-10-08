@@ -1,11 +1,12 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
@@ -36,62 +37,96 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         GlobalMetadata root,
         MigrationMode mode,
         IClusterMetadataContext context) {
+        return create(root, mode, context, List.of());
+    }
+
+    @Override
+    public GlobalMetadataCreatorResults create(
+        GlobalMetadata root,
+        MigrationMode mode,
+        IClusterMetadataContext context,
+        List<String> serverlessCollections) {
         log.info("Setting Global Metadata");
 
+        // Templates aren't tied to an index, so a collection-routed target gets them in every collection
+        List<String> collections = serverlessCollections.isEmpty()
+            ? Collections.singletonList(null)
+            : serverlessCollections;
         var results = GlobalMetadataCreatorResults.builder();
-        results.legacyTemplates(createLegacyTemplates(root, mode, context));
-        results.componentTemplates(createComponentTemplates(root, mode, context));
-        results.indexTemplates(createIndexTemplates(root, mode, context));
+        results.legacyTemplates(createLegacyTemplates(root, mode, context, collections));
+        results.componentTemplates(createComponentTemplates(root, mode, context, collections));
+        results.indexTemplates(createIndexTemplates(root, mode, context, collections));
         return results.build();
     }
 
     public List<CreationResult> createLegacyTemplates(GlobalMetadata metadata, MigrationMode mode, IClusterMetadataContext context) {
+        return createLegacyTemplates(metadata, mode, context, Collections.singletonList(null));
+    }
+
+    private List<CreationResult> createLegacyTemplates(GlobalMetadata metadata, MigrationMode mode,
+                                                       IClusterMetadataContext context, List<String> collections) {
         return createTemplates(
             metadata.getTemplates(),
             legacyTemplateAllowlist,
             TemplateTypes.LEGACY_INDEX_TEMPLATE,
             mode,
-            context
+            context,
+            collections
         );
     }
 
     public List<CreationResult> createComponentTemplates(GlobalMetadata metadata, MigrationMode mode, IClusterMetadataContext context) {
+        return createComponentTemplates(metadata, mode, context, Collections.singletonList(null));
+    }
+
+    private List<CreationResult> createComponentTemplates(GlobalMetadata metadata, MigrationMode mode,
+                                                          IClusterMetadataContext context, List<String> collections) {
         return createTemplates(
             metadata.getComponentTemplates(),
             componentTemplateAllowlist,
             TemplateTypes.COMPONENT_TEMPLATE,
             mode,
-            context
+            context,
+            collections
         );
     }
 
     public List<CreationResult> createIndexTemplates(GlobalMetadata metadata, MigrationMode mode, IClusterMetadataContext context) {
+        return createIndexTemplates(metadata, mode, context, Collections.singletonList(null));
+    }
+
+    private List<CreationResult> createIndexTemplates(GlobalMetadata metadata, MigrationMode mode,
+                                                      IClusterMetadataContext context, List<String> collections) {
         return createTemplates(
             metadata.getIndexTemplates(),
             indexTemplateAllowlist,
             TemplateTypes.INDEX_TEMPLATE,
             mode,
-            context
+            context,
+            collections
         );
     }
 
     @AllArgsConstructor
     enum TemplateTypes {
         INDEX_TEMPLATE(
-            (targetClient, name, body, context) -> targetClient.createIndexTemplate(name, body, context.createMigrateTemplateContext()),
-            (targetClient, name) -> targetClient.hasIndexTemplate(name),
+            (targetClient, name, body, context, collection) ->
+                targetClient.createIndexTemplate(name, body, context.createMigrateTemplateContext(), collection),
+            OpenSearchClient::hasIndexTemplate,
             FilterScheme.FilterContext.INDEX_TEMPLATE
         ),
 
         LEGACY_INDEX_TEMPLATE(
-            (targetClient, name, body, context) -> targetClient.createLegacyTemplate(name, body, context.createMigrateLegacyTemplateContext()),
-            (targetClient, name) -> targetClient.hasLegacyTemplate(name),
+            (targetClient, name, body, context, collection) ->
+                targetClient.createLegacyTemplate(name, body, context.createMigrateLegacyTemplateContext(), collection),
+            OpenSearchClient::hasLegacyTemplate,
             FilterScheme.FilterContext.LEGACY_INDEX_TEMPLATE
         ),
 
         COMPONENT_TEMPLATE(
-            (targetClient, name, body, context) -> targetClient.createComponentTemplate(name, body, context.createComponentTemplateContext()),
-            (targetClient, name) -> targetClient.hasComponentTemplate(name),
+            (targetClient, name, body, context, collection) ->
+                targetClient.createComponentTemplate(name, body, context.createComponentTemplateContext(), collection),
+            OpenSearchClient::hasComponentTemplate,
             FilterScheme.FilterContext.COMPONENT_TEMPLATE
         );
         final TemplateCreator creator;
@@ -101,12 +136,13 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
 
     @FunctionalInterface
     interface TemplateCreator {
-        Optional<ObjectNode> createTemplate(OpenSearchClient client, String name, ObjectNode body, IClusterMetadataContext context);
+        Optional<ObjectNode> createTemplate(OpenSearchClient client, String name, ObjectNode body,
+                                            IClusterMetadataContext context, String serverlessCollection);
     }
 
     @FunctionalInterface
     interface TemplateExistsCheck {
-        boolean templateAlreadyExists(OpenSearchClient client, String name);
+        boolean templateAlreadyExists(OpenSearchClient client, String name, String serverlessCollection);
     }
 
 
@@ -115,7 +151,8 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         List<String> templateAllowlist,
         TemplateTypes templateType,
         MigrationMode mode,
-        IClusterMetadataContext context
+        IClusterMetadataContext context,
+        List<String> collections
     ) {
 
         log.info("Setting {} ...", templateType);
@@ -127,7 +164,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
 
         var templatesToCreate = getAllTemplates(templates);
 
-        return processTemplateCreation(templatesToCreate, templateType, templateAllowlist, mode, context);
+        return processTemplateCreation(templatesToCreate, templateType, templateAllowlist, mode, context, collections);
     }
 
     Map<String, ObjectNode> getAllTemplates(ObjectNode templates) {
@@ -146,42 +183,57 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             TemplateTypes templateType,
             List<String> templateAllowList,
             MigrationMode mode,
-            IClusterMetadataContext context
+            IClusterMetadataContext context,
+            List<String> collections
         ) {
         var skipCreation = FilterScheme.filterByAllowList(templateAllowList, templateType.filterContext).negate();
 
-        return templatesToCreate.entrySet().stream().map(kvp -> {
-            var templateName = kvp.getKey();
-            var templateBody = kvp.getValue();
-
+        var results = new ArrayList<CreationResult>();
+        templatesToCreate.forEach((templateName, templateBody) -> {
             String[] problemSettings = { "settings.mapping.single_type", "settings.mapper.dynamic" };
             for (var field : problemSettings) {
                 ObjectNodeUtils.removeFieldsByPath(templateBody, field);
             }
 
-            var creationResult = CreationResult.builder().name(templateName);
-
             if (skipCreation.test(templateName)) {
                 log.atInfo().setMessage("Template {} was skipped due to allowlist filter {}").addArgument(templateName).addArgument(templateAllowList).log();
-                return creationResult.failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER).build();
+                results.add(CreationResult.builder().name(templateName).failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER).build());
+                return;
             }
 
-            log.info("Creating {}: {}", templateType, templateName);
-            try {
-                if (mode == MigrationMode.SIMULATE) {
-                    if (templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName)) {
-                        creationResult.failureType(CreationFailureType.METADATA_ALREADY_EXISTS);
-                        log.warn("Template {} already exists on the target, it will not be created during a migration", templateName);
-                    }
-                } else if (mode == MigrationMode.PERFORM) {
-                    createTemplateWithRetry(templateType, templateName, templateBody, context, creationResult);
-                }
-            } catch (Exception e) {
-                creationResult.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
-                creationResult.exception(e);
+            for (var collection : collections) {
+                results.add(createTemplateInCollection(templateType, templateName, templateBody, mode, context, collection));
             }
-            return creationResult.build();
-        }).collect(Collectors.toList());
+        });
+        return results;
+    }
+
+    private CreationResult createTemplateInCollection(
+        TemplateTypes templateType,
+        String templateName,
+        ObjectNode templateBody,
+        MigrationMode mode,
+        IClusterMetadataContext context,
+        String collection
+    ) {
+        var displayName = collection == null ? templateName : templateName + " (collection " + collection + ")";
+        var creationResult = CreationResult.builder().name(displayName);
+
+        log.info("Creating {}: {}", templateType, displayName);
+        try {
+            if (mode == MigrationMode.SIMULATE) {
+                if (templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName, collection)) {
+                    creationResult.failureType(CreationFailureType.METADATA_ALREADY_EXISTS);
+                    log.warn("Template {} already exists on the target, it will not be created during a migration", displayName);
+                }
+            } else if (mode == MigrationMode.PERFORM) {
+                createTemplateWithRetry(templateType, templateName, templateBody, context, creationResult, collection);
+            }
+        } catch (Exception e) {
+            creationResult.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
+            creationResult.exception(e);
+        }
+        return creationResult.build();
     }
 
     private void createTemplateWithRetry(
@@ -189,11 +241,12 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         String templateName,
         ObjectNode templateBody,
         IClusterMetadataContext context,
-        CreationResult.CreationResultBuilder creationResult
+        CreationResult.CreationResultBuilder creationResult,
+        String collection
     ) {
         while (true) {
             try {
-                var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context);
+                var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context, collection);
                 if (createdTemplate.isEmpty()) {
                     creationResult.failureType(CreationFailureType.METADATA_ALREADY_EXISTS);
                     log.warn("Template {} already exists on the target, unable to create", templateName);

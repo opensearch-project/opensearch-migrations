@@ -3,8 +3,16 @@ package org.opensearch.migrations;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionType;
+import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
@@ -12,6 +20,7 @@ import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentSt
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 
 import com.beust.jcommander.ParameterException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 
@@ -24,11 +33,15 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -310,6 +323,106 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void validateArgs_acceptsFileRepoUriOnly() {
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(validEsArgs()));
+    }
+
+    @Test
+    void validateArgs_collectionRoutingRequiresRoutedTargetAndViceVersa() {
+        var routedWithoutTable = validEsArgs();
+        routedWithoutTable.targetArgs.collectionRouted = true;
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(routedWithoutTable));
+
+        var tableWithoutRoutedTarget = validEsArgs();
+        tableWithoutRoutedTarget.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(tableWithoutRoutedTarget));
+
+        var invalidTable = validEsArgs();
+        invalidTable.targetArgs.collectionRouted = true;
+        invalidTable.collectionRouting = "[]";
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(invalidTable));
+
+        var routed = validEsArgs();
+        routed.targetArgs.collectionRouted = true;
+        routed.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(routed));
+    }
+
+    @Test
+    void inlineJson_collectionRoutingArgsParseAsTheWorkflowSendsThem() throws Exception {
+        // The workflow sends the routing table as a JSON string and the target flag as a boolean
+        var routing = "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}";
+        var json = new ObjectMapper().writeValueAsString(Map.of(
+            "targetHost", "https://123456789012.aoss.us-east-1.on.aws",
+            "targetAwsRegion", "us-east-1",
+            "targetAwsServiceSigningName", "aoss",
+            "targetCollectionRouted", true,
+            "collectionRouting", routing));
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", json});
+
+        assertThat(args.collectionRouting, equalTo(routing));
+        assertTrue(args.targetArgs.toConnectionContext().isCollectionRouted());
+        var parsed = ServerlessCollectionRouting.forTarget(args.collectionRouting, args.targetArgs.collectionRouted);
+        assertThat(parsed.orElseThrow().resolve("tenant-a-2024"), equalTo(Optional.of("tenant-a")));
+    }
+
+    @Test
+    void buildCollectionRoutedTarget_onlyForRoutedTargets() {
+        var factory = mock(OpenSearchClientFactory.class);
+        when(factory.detectServerlessCollectionType("tenant-a")).thenReturn(ServerlessCollectionType.VECTOR);
+
+        assertThat(RfsMigrateDocuments.buildCollectionRoutedTarget(validEsArgs(), factory), nullValue());
+
+        var args = validEsArgs();
+        args.targetArgs.collectionRouted = true;
+        args.collectionRouting = "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}";
+        var target = RfsMigrateDocuments.buildCollectionRoutedTarget(args, factory);
+
+        assertThat(target.collectionFor("tenant-a-2024"), equalTo("tenant-a"));
+        assertTrue(target.allowServerGeneratedIds("tenant-a"));
+    }
+
+    @Test
+    void resolveUseServerGeneratedIds_skipsGlobalProbeForRoutedTargets() {
+        var factory = mock(OpenSearchClientFactory.class);
+        when(factory.detectServerlessCollectionType()).thenReturn(ServerlessCollectionType.TIMESERIES);
+        var routedTarget = mock(CollectionRoutedTarget.class);
+
+        assertFalse(RfsMigrateDocuments.resolveUseServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.AUTO, factory, routedTarget));
+        verify(factory, times(0)).detectServerlessCollectionType();
+        assertTrue(RfsMigrateDocuments.resolveUseServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.AUTO, factory, null));
+        assertTrue(RfsMigrateDocuments.resolveUseServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.ALWAYS, factory, routedTarget));
+        assertFalse(RfsMigrateDocuments.resolveUseServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.NEVER, factory, null));
+    }
+
+    @Test
+    void validateCollectionRouting_checksOnlyAllowlistedIndices() {
+        var source = mock(DocumentSource.class);
+        when(source.listCollections()).thenReturn(List.of("tenant-a-2024", "unrouted", ".system"));
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}").orElseThrow();
+        var target = new CollectionRoutedTarget(routing, collection -> false);
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(null, source, List.of()));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of("tenant-a-2024")));
+        var e = assertThrows(IllegalArgumentException.class,
+            () -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of()));
+        assertThat(e.getMessage(), equalTo("No collection routing entry matches source indices [unrouted]"));
+    }
+
+    @Test
+    void requiresServerGeneratedIds_probesOnlyInAutoMode() {
+        var factory = mock(OpenSearchClientFactory.class);
+        when(factory.detectServerlessCollectionType("ts"))
+            .thenReturn(ServerlessCollectionType.TIMESERIES);
+        when(factory.detectServerlessCollectionType("search"))
+            .thenReturn(ServerlessCollectionType.SEARCH);
+
+        assertTrue(RfsMigrateDocuments.requiresServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.AUTO, factory, "ts"));
+        assertFalse(RfsMigrateDocuments.requiresServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.AUTO, factory, "search"));
+        assertTrue(RfsMigrateDocuments.requiresServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.ALWAYS, factory, "search"));
+        assertFalse(RfsMigrateDocuments.requiresServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.NEVER, factory, "ts"));
+        verify(factory, times(2)).detectServerlessCollectionType(anyString());
     }
 
     @Test

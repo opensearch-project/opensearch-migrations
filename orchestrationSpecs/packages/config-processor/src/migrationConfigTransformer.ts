@@ -413,9 +413,27 @@ function lowerFileBackedContextValues(
     return {files, literalValues};
 }
 
+type CollectionRouting = Pick<z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>,
+    "staticCollectionRouting" | "regexCollectionRouting">;
+
+/** Both lists travel to the Java tools together as one JSON object, matching their --collection-routing argument. */
+function collectionRoutingFields(routing: CollectionRouting | undefined): {collectionRouting?: string} {
+    const {staticCollectionRouting, regexCollectionRouting} = routing ?? {};
+    if (staticCollectionRouting === undefined && regexCollectionRouting === undefined) {
+        return {};
+    }
+    return {
+        collectionRouting: JSON.stringify({
+            ...(staticCollectionRouting === undefined ? {} : {staticCollectionRouting}),
+            ...(regexCollectionRouting === undefined ? {} : {regexCollectionRouting}),
+        })
+    };
+}
+
 function prepareMetadataConfig(
     config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"],
-    skipApprovals: boolean
+    skipApprovals: boolean,
+    collectionRouting?: CollectionRouting
 ) {
     if (config === undefined) {
         return undefined;
@@ -430,6 +448,7 @@ function prepareMetadataConfig(
         skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
         skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
+        ...collectionRoutingFields(collectionRouting),
         ...(generatedConfig === undefined ? {} : {transformerConfig: generatedConfig}),
     });
 }
@@ -489,7 +508,8 @@ function prepareDocumentBackfillConfig(
     config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
     repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
     deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>,
-    skipApprovals: boolean
+    skipApprovals: boolean,
+    collectionRouting?: CollectionRouting
 ) {
     if (config === undefined) {
         return undefined;
@@ -503,6 +523,7 @@ function prepareDocumentBackfillConfig(
         ...resolveFailedDocumentStreamS3(rest, repoConfig, deploymentDefaults),
         skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
+        ...collectionRoutingFields(collectionRouting),
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
     });
 }
@@ -1360,13 +1381,15 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     });
                     const metadataMigrationConfig = prepareMetadataConfig(
                         applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist),
-                        skipApprovals
+                        skipApprovals,
+                        migration
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
                         applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist),
                         repoConfig,
                         this.deploymentDefaults,
-                        skipApprovals
+                        skipApprovals,
+                        migration
                     );
                     results.push({
                         label: snapshotName,
