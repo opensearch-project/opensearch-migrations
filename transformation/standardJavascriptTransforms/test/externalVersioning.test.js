@@ -20,11 +20,36 @@ describe("External versioning", () => {
     });
 
     test("does not substitute a source field for a missing snapshot version", () => {
-        expect(() => main()(indexOperation())).toThrow("Missing snapshot _version");
+        expect(() => main()(indexOperation())).toThrow("Missing action version or snapshot _version");
     });
 
-    test("an explicit source field overrides the snapshot version", () => {
+    test.each(["external", "external_gte"])("preserves a previously selected action version under %s", versionType => {
+        const item = indexOperation();
+        item.operation.version = "9007199254740993";
+        item.source_metadata = { _version: "7" };
+        main({ versionType })(item);
+        expect(item.operation.version).toBe("9007199254740993");
+        expect(item.operation.version_type).toBe(versionType);
+        expect(item.source_metadata._version).toBe("7");
+    });
+
+    test.each(["external", "external_gte"])("can use an action version without snapshot metadata under %s", versionType => {
+        const item = indexOperation();
+        item.operation.version = "9223372036854775807";
+        main({ versionType })(item);
+        expect(item.operation.version).toBe("9223372036854775807");
+    });
+
+    test("does not hide an invalid action version by falling back to the snapshot", () => {
+        const item = indexOperation();
+        item.operation.version = "invalid";
+        item.source_metadata = { _version: "7" };
+        expect(() => main()(item)).toThrow("External version must be");
+    });
+
+    test("an explicit source field overrides the action and snapshot versions", () => {
         const item = indexOperation(42);
+        item.operation.version = "99";
         item.source_metadata = { _version: "7" };
         main({ versionField: "@version_number" })(item);
         expect(item.operation.version).toBe(42);
@@ -133,6 +158,8 @@ describe("External versioning", () => {
 
     test.each([undefined, null])("rejects a missing version: %s", version => {
         const item = indexOperation();
+        item.operation.version = "7";
+        item.source_metadata = { _version: "7" };
         item.document["@version_number"] = version;
         expect(() => main({ versionField: "@version_number" })(item))
             .toThrow('Missing external version at _source path ["@version_number"] for document product-1');

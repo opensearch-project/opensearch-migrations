@@ -69,12 +69,11 @@ public class BulkOperationConverter {
     public static IndexOperationMeta indexMetadata(Document doc, String indexName, boolean stripIds) {
         String id = stripIds ? null : doc.id();
         String version = doc.hints().get(Document.HINT_VERSION);
-        String versionType = doc.hints().get(Document.HINT_VERSION_TYPE);
         VersionControlMetadata versioning = null;
         if (id != null && !id.isEmpty() && version != null) {
             versioning = VersionControlMetadata.builder()
                 .version(Long.parseLong(version))
-                .versionType(versionType == null ? null : VersionType.from(versionType))
+                .versionType(VersionType.EXTERNAL)
                 .build();
         }
         return IndexOperationMeta.builder()

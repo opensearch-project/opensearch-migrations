@@ -315,8 +315,7 @@ public class LuceneReader {
 
     private static Long readVersion(LuceneLeafReader reader, int luceneDocId) {
         try {
-            var value = reader.getNumericValue(luceneDocId, "_version");
-            return value instanceof Number number ? number.longValue() : null;
+            return (Long) reader.getNumericValue(luceneDocId, "_version");
         } catch (IOException e) {
             throw Lombok.sneakyThrow(e);
         }

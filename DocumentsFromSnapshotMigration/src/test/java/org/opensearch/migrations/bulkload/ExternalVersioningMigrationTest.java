@@ -256,7 +256,7 @@ class ExternalVersioningMigrationTest {
         client.setFailedDocumentStreamContext(failedDocuments, "version-test", workDirectory);
         try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT, directory.resolve(workDirectory)).build();
              var transformer = config == null ? null
-                 : new TransformationLoader().getTransformerFactoryFromServiceLoader(config).findFirst().orElseThrow()) {
+                 : new TransformationLoader().getTransformerFactoryLoader(config)) {
             var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer, false,
                 allowlist, null);
             var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE, 1, 1);

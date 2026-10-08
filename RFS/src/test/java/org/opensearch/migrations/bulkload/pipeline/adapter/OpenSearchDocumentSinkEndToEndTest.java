@@ -193,7 +193,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                     }]
                     """.formatted(versionType);
                 try (var transformer = new TransformationLoader()
-                        .getTransformerFactoryFromServiceLoader(config).findFirst().orElseThrow()) {
+                        .getTransformerFactoryLoader(config)) {
                     var sink = new OpenSearchDocumentSink(client, () -> transformer, false, allowlist, null);
                     String index = "sink_versions_" + versionType;
                     sink.createCollection(new CollectionMetadata(index, 1, Map.of())).block();
@@ -245,7 +245,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                     }]
                     """.formatted(versionType);
                 try (var transformer = versionType.equals("default") ? null : new TransformationLoader()
-                        .getTransformerFactoryFromServiceLoader(config).findFirst().orElseThrow()) {
+                        .getTransformerFactoryLoader(config)) {
                     var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
                         false, allowlist, null);
                     String index = "snapshot_versions_" + versionType;
@@ -280,7 +280,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                     [{"JsonJSTransformerProvider":{"initializationScript":"context => documents => documents"}}]
                     """;
                 try (var transformer = transformed ? new TransformationLoader()
-                        .getTransformerFactoryFromServiceLoader(config).findFirst().orElseThrow() : null) {
+                        .getTransformerFactoryLoader(config) : null) {
                     var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
                         true, DocumentExceptionAllowlist.empty(), null);
                     String index = "generated_ids_" + transformed;
@@ -341,7 +341,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
             var client = createRestClient(cluster);
             var context = DocumentMigrationTestContext.factory().noOtelTracking();
             int documentNumber = 0;
-            for (String version : List.of("7", "\"7\"", "9007199254740993",
+            for (String version : List.of("0", "\"0\"", "7", "\"7\"", "9007199254740993",
                     "\"9007199254740993\"", "9223372036854775807", "\"9223372036854775807\"")) {
                 String id = "d" + documentNumber++;
                 String bulk = "{\"index\":{\"_index\":\"wire_versions\",\"_id\":\"" + id
@@ -359,7 +359,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
             // Quoting a version must not bypass the signed 64-bit limit. Include
             // Long.MAX_VALUE with an extra zero, as well as the first overflowing value.
             String maxValueWithExtraZero = Long.toString(Long.MAX_VALUE) + "0";
-            for (String version : List.of("9223372036854775808", "\"9223372036854775808\"",
+            for (String version : List.of("-1", "\"-1\"", "9223372036854775808", "\"9223372036854775808\"",
                     maxValueWithExtraZero, "\"" + maxValueWithExtraZero + "\"")) {
                 String id = "overflow" + documentNumber++;
                 String bulk = "{\"index\":{\"_index\":\"wire_versions\",\"_id\":\"" + id

@@ -475,10 +475,13 @@ public abstract class OpenSearchClient {
             var versioning = metadata.getVersioning();
             // Explicit versions require an ID. Keep unrelated concurrency checks
             // intact so invalid custom combinations are still rejected by the target.
-            var unversioned = versioning == null ? null : VersionControlMetadata.builder()
-                .ifSeqNo(versioning.getIfSeqNo())
-                .ifPrimaryTerm(versioning.getIfPrimaryTerm())
-                .build();
+            var unversioned = versioning != null
+                && (versioning.getIfSeqNo() != null || versioning.getIfPrimaryTerm() != null)
+                    ? VersionControlMetadata.builder()
+                        .ifSeqNo(versioning.getIfSeqNo())
+                        .ifPrimaryTerm(versioning.getIfPrimaryTerm())
+                        .build()
+                    : null;
             var newMetadata = IndexOperationMeta.builder()
                 .index(metadata.getIndex())
                 .type(metadata.getType())

@@ -206,6 +206,58 @@ class ExternalVersioningTransformationTest {
         assertEquals(mapper.readTree(document.source()), mapper.readTree(lines[1]));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"internal", "external", "external_gte"})
+    void changingPolicyPreservesAnEarlierTransformationsVersion(String versionType) throws Exception {
+        String config = """
+            [
+              {"JsonJSTransformerProvider": {"initializationScript":
+                "context => documents => documents.map(document => {\
+                  document.operation.version = '9007199254740993'; return document; })"
+              }},
+              {"JsonJSTransformerProvider": {
+                "initializationResourcePath": "js/externalVersioning.js",
+                "bindingsObject": {"versionType": "%s"}
+              }}
+            ]
+            """.formatted(versionType);
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any()))
+            .thenReturn(Mono.just(new OpenSearchClient.BulkResponse(200, "", null, "{}")));
+        var document = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "d1", null,
+            "{}".getBytes(StandardCharsets.UTF_8), null, DocumentChangeType.INDEX, 7L));
+        try (var transformer = loadTransformer(config)) {
+            var sink = new OpenSearchDocumentSink(client, () -> transformer, false,
+                DocumentExceptionAllowlist.empty(), null);
+            sink.writeBatch("products", List.of(document)).block();
+        }
+        verify(client).sendBulkRequest(anyString(), sentOperations.capture(), any(), anyBoolean(), any());
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var operation = sentOperations.getValue().get(0);
+        assertEquals("7", operation.getSourceMetadata().get(Document.SOURCE_META_VERSION));
+        var action = mapper.readTree(BulkNdjson.toBulkNdjson(List.of(operation), mapper).split("\n")[0]).path("index");
+        if (versionType.equals("internal")) {
+            assertFalse(action.has("version"));
+            assertFalse(action.has("version_type"));
+        } else {
+            assertEquals(9007199254740993L, action.path("version").longValue());
+            assertEquals(versionType, action.path("version_type").asText());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "-1", "1.5", "9007199254740993", "\"9223372036854775808\""})
+    void invalidApplicationVersionCannotFallBackToTheSnapshot(String sourceVersion) throws Exception {
+        var document = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "d1", null,
+            ("{\"metadata\":{\"revision\":" + sourceVersion + "}}").getBytes(StandardCharsets.UTF_8),
+            null, DocumentChangeType.INDEX, 7L));
+        try (var transformer = loadTransformer()) {
+            var sink = new OpenSearchDocumentSink(client, () -> transformer, false,
+                DocumentExceptionAllowlist.empty(), null);
+            assertThrows(RuntimeException.class, () -> sink.writeBatch("products", List.of(document)).block());
+        }
+        verifyNoInteractions(client);
+    }
+
     @Test
     void missingVersionsEmptyIdsAndDeletesDoNotAcquireExternalVersioning() throws Exception {
         var adapter = new LuceneAdapter();
@@ -285,6 +337,6 @@ class ExternalVersioningTransformationTest {
     }
 
     private static IJsonTransformer loadTransformer(String config) throws Exception {
-        return new TransformationLoader().getTransformerFactoryFromServiceLoader(config).findFirst().orElseThrow();
+        return new TransformationLoader().getTransformerFactoryLoader(config);
     }
 }

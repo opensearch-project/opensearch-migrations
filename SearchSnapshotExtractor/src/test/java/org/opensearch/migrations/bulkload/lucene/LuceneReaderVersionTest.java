@@ -62,6 +62,12 @@ class LuceneReaderVersionTest {
     }
 
     @Test
+    void invalidDocValueCannotBeTruncatedOrTreatedAsAMissingVersion() throws IOException {
+        when(reader.getNumericValue(0, "_version")).thenReturn(7.5);
+        assertThrows(ClassCastException.class, () -> read(DocumentChangeType.INDEX));
+    }
+
+    @Test
     void deltaDeletionDoesNotUseThePreviousSnapshotsDocumentVersion() throws IOException {
         assertNull(read(DocumentChangeType.DELETE).version);
         verify(reader, never()).getNumericValue(anyInt(), anyString());

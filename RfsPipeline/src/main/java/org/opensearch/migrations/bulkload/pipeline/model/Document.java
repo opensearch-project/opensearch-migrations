@@ -31,7 +31,6 @@ public record Document(
     public static final String HINT_TYPE = "_type";
     public static final String HINT_ROUTING = "routing";
     public static final String HINT_VERSION = "version";
-    public static final String HINT_VERSION_TYPE = "version_type";
 
     /** Well-known sourceMetadata keys for Lucene-based sources. */
     public static final String SOURCE_META_LUCENE_DOC_NUMBER = "luceneDocNumber";

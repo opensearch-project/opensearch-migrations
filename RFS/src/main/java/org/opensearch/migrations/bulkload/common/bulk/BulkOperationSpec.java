@@ -11,7 +11,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
@@ -83,7 +82,7 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> toTransformerMap(ObjectMapper mapper) {
-        Map<String, Object> result = mapper.convertValue(this, new TypeReference<>() {});
+        Map<String, Object> result = mapper.convertValue(this, Map.class);
         var operation = (Map<String, Object>) result.get("operation");
         if (operation != null && operation.get("version") != null) {
             operation.put("version", operation.get("version").toString());

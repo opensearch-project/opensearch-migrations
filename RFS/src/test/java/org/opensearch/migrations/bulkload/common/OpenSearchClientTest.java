@@ -12,6 +12,8 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
+import org.opensearch.migrations.bulkload.common.bulk.enums.VersionType;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -258,9 +260,6 @@ class OpenSearchClientTest {
         doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
         var documents = List.of(
             snapshotDocument("external", 7L),
-            new Document("external-gte", "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                Document.Operation.UPSERT,
-                Map.of(Document.HINT_VERSION, "7", Document.HINT_VERSION_TYPE, "external_gte"), Map.of()),
             snapshotDocument("internal", null),
             snapshotDocument("bad-mapping", 7L),
             snapshotDocument("retry", Long.MAX_VALUE)
@@ -269,7 +268,6 @@ class OpenSearchClientTest {
             .thenReturn(Mono.just(new HttpResponse(200, "", null, """
                 {"errors":true,"items":[
                   {"index":{"_id":"external","status":409,"error":{"type":"version_conflict_engine_exception"}}},
-                  {"index":{"_id":"external-gte","status":409,"error":{"type":"version_conflict_engine_exception"}}},
                   {"index":{"_id":"internal","status":409,"error":{"type":"version_conflict_engine_exception"}}},
                   {"index":{"_id":"bad-mapping","status":400,"error":{"type":"mapper_parsing_exception"}}},
                   {"index":{"_id":"retry","status":429,"error":{"type":"es_rejected_execution_exception"}}}
@@ -291,7 +289,7 @@ class OpenSearchClientTest {
 
         var failures = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
         var expectedFailures = allowVersionConflicts
-            ? List.of("bad-mapping") : List.of("external", "external-gte", "internal", "bad-mapping");
+            ? List.of("bad-mapping") : List.of("external", "internal", "bad-mapping");
         verify(failedDocuments, times(expectedFailures.size())).write(failures.capture());
         assertEquals(expectedFailures,
             failures.getAllValues().stream().map(FailedDocumentStreamRecord::getDocumentId).toList());
@@ -309,6 +307,34 @@ class OpenSearchClientTest {
         assertEquals(Long.MAX_VALUE, retriedAction.path("version").longValue());
         assertEquals("external", retriedAction.path("version_type").asText());
         verifyNoInteractions(failedRequestLogger);
+    }
+
+    @Test
+    void generatingIdsDoesNotSilentlyRemoveExplicitConcurrencyChecks() throws Exception {
+        var operation = IndexOp.builder()
+            .operation(IndexOperationMeta.builder()
+                .id("source-id").index("products")
+                .versioning(VersionControlMetadata.builder()
+                    .version(7L).versionType(VersionType.EXTERNAL)
+                    .ifSeqNo(5L).ifPrimaryTerm(3L).build())
+                .build())
+            .document(Map.of("field", "value"))
+            .build();
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("generated-id")))));
+
+        openSearchClient.sendBulkRequest("products", List.of(operation), null, true,
+            DocumentExceptionAllowlist.empty()).block();
+
+        var request = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient).postAsyncBytes(any(), request.capture(), any(), any());
+        var action = OBJECT_MAPPER.readTree(new String(request.getValue(), java.nio.charset.StandardCharsets.UTF_8)
+            .split("\n")[0]).path("index");
+        assertFalse(action.has("_id"));
+        assertFalse(action.has("version"));
+        assertFalse(action.has("version_type"));
+        assertEquals(5L, action.path("if_seq_no").longValue());
+        assertEquals(3L, action.path("if_primary_term").longValue());
     }
 
     @ParameterizedTest

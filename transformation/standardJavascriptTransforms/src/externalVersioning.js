@@ -1,6 +1,6 @@
 /**
  * Configures versioning on RFS bulk operations. Internal mode removes explicit
- * versioning; external modes use the snapshot's _version or a field in _source.
+ * versioning; external modes retain the action version or use a field in _source.
  * Snapshot versions are already preserved by default without this transformation.
  *
  * bindingsObject:
@@ -8,7 +8,8 @@
  *   versionField: optional field name, or array of field names for a nested path;
  *                 used only by external modes
  *
- * By default, reads the decimal string at source_metadata._version.
+ * By default, retains operation.version, falling back to source_metadata._version
+ * if a previous transformation removed the action version.
  * External modes require source IDs (--server-generated-ids NEVER). Conflicts
  * follow normal failure handling. Use --allowed-doc-exception-types
  * version_conflict_engine_exception to explicitly treat them as success.
@@ -40,12 +41,19 @@ function validateVersion(version) {
     }
     // Keep decimal strings as strings: converting them to Number would round
     // versions above 2^53 - 1 before Jackson reads the bulk metadata as a Long.
-    if (typeof version === "string" && /^(0|[1-9]\d*)$/.test(version)
+    if (typeof version === "string" && version.length <= 19 && /^(0|[1-9]\d*)$/.test(version)
             && BigInt(version) <= 9223372036854775807n) {
         return;
     }
     throw new Error("External version must be a non-negative safe integer or a decimal string "
         + "between 0 and 9223372036854775807. Use a string for versions above 2^53 - 1.");
+}
+
+function resolveVersion(item, operation, path) {
+    if (path != null) {
+        return path.reduce((value, key) => getField(value, key), getField(item, "document"));
+    }
+    return getField(operation, "version") ?? getField(getField(item, "source_metadata"), "_version");
 }
 
 function main(context) {
@@ -85,11 +93,10 @@ function main(context) {
             throw new Error("External versioning requires index operations; op_type=create is not supported.");
         }
 
-        const version = path == null
-            ? getField(getField(item, "source_metadata"), "_version")
-            : path.reduce((value, key) => getField(value, key), getField(item, "document"));
+        const version = resolveVersion(item, operation, path);
         if (version === undefined || version === null) {
-            const location = path == null ? "snapshot _version" : "external version at _source path " + JSON.stringify(path);
+            const location = path == null ? "action version or snapshot _version"
+                : "external version at _source path " + JSON.stringify(path);
             throw new Error("Missing " + location
                 + " for document " + id + ".");
         }

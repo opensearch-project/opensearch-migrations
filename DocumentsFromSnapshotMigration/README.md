@@ -217,7 +217,8 @@ server-generated IDs, it omits both the source ID and the explicit version.
 Delete operations do not inherit snapshot versions: a delta snapshot contains
 the previous document's version, not the deletion's version. External versioning
 requires index operations; transformations producing create-only operations
-must remove the explicit version.
+must remove the explicit version. The bundled data-stream backing-index
+transformation does this when it selects `op_type: "create"`.
 
 The optional bundled [externalVersioning.js](../transformation/standardJavascriptTransforms/src/externalVersioning.js)
 modifier supports all three policies through `bindingsObject.versionType`:
@@ -225,11 +226,15 @@ modifier supports all three policies through `bindingsObject.versionType`:
 | `versionType` | Behavior |
 |---|---|
 | `internal` | Remove `version` and `version_type`; the target assigns or increments its own version. |
-| `external` (default) | Use the snapshot or configured source-field version; only higher versions overwrite. |
-| `external_gte` | Use the snapshot or configured source-field version; equal or higher versions overwrite. |
+| `external` (default) | Retain the selected write version or use a configured source field; only higher versions overwrite. |
+| `external_gte` | Retain the selected write version or use a configured source field; equal or higher versions overwrite. |
 
 Unknown version types are rejected. The modifier is not applied by default;
 the native RFS write path already preserves snapshot versions using `external`.
+Changing only `versionType` preserves `operation.version`, including a value
+selected by an earlier transformation. If that value is absent, the modifier
+falls back to `source_metadata._version`, allowing internal mode to be followed
+by an external mode.
 
 #### Opting out with internal versioning
 
@@ -291,7 +296,7 @@ document.operation.version_type = "external_gte";
 
 #### Application version fields and JavaScript precision
 
-In either external mode, the modifier can replace the snapshot version with a
+In either external mode, the modifier can replace the selected write version with a
 field from `_source`. Add `"versionField": "ext_version"` to its
 `bindingsObject`. A string names a literal field, including any dots in its name.
 For a nested field, use an array such as
