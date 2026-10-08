@@ -13,7 +13,6 @@ import java.util.Objects;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
-import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 import com.fasterxml.jackson.core.JsonFactory;
@@ -108,7 +107,7 @@ public final class BulkNdjson {
                 String routing = doc.hints().get(Document.HINT_ROUTING);
                 var meta = doc.operation() == Document.Operation.DELETE
                     ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(routing).build()
-                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(routing).build();
+                    : BulkOperationConverter.indexMetadata(doc, indexName, stripIds);
                 writeRawOperation(opType, meta, doc.source(), baos, mapper);
                 baos.write(NEWLINE_BYTES);
             }

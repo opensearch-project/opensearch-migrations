@@ -3,7 +3,9 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 import java.util.List;
 import java.util.Map;
 
+import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -39,7 +41,9 @@ class OpenSearchDocumentSinkTest {
     void writeBatch_noTransformer_usesRawPath() {
         when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
-        var docs = List.of(doc("d1", "{\"a\":1}"), doc("d2", "{\"b\":2}"));
+        var versioned = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "d1", null,
+            "{\"a\":1}".getBytes(), null, DocumentChangeType.INDEX, 7L));
+        var docs = List.of(versioned, doc("d2", "{\"b\":2}"));
 
         var result = sink.writeBatch("idx", docs).block();
 

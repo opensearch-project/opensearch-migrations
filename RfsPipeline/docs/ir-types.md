@@ -6,7 +6,7 @@ The pipeline defines a source-agnostic intermediate representation (IR). All typ
 
 All types in this package are source-agnostic — no ES, Lucene, or OpenSearch concepts.
 
-- **`Document`** — A single document flowing through the pipeline. Supports UPSERT and DELETE operations. Carries opaque `hints` for sink-specific routing and `sourceMetadata` for diagnostics.
+- **`Document`** — A single document flowing through the pipeline. Supports UPSERT and DELETE operations. Carries opaque `hints` for sink-specific routing and write policies, and `sourceMetadata` for diagnostics and transformations. Lucene sources set the `version` and `version_type: external` hints for indexed documents with a version and source ID. They also include the original `_version` in source metadata. The OpenSearch sink exposes this metadata as `source_metadata`, outside the bulk action and document body. Both `source_metadata._version` and `operation.version` are decimal strings in transformation input to preserve 64-bit precision; bulk requests serialize the action version as an integer. The internal-versioning transformation can remove the action's version without losing the original source metadata.
 - **`Partition`** — Interface for any source partitioning scheme (e.g., ES shards, S3 prefixes).
 - **`CollectionMetadata`** — Metadata for creating a target collection. Carries opaque `sourceConfig` for source-specific settings.
 - **`ProgressCursor`** — Resumability tracking per partition.

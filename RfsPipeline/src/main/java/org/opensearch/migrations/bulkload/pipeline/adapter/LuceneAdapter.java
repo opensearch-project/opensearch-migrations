@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.util.HashMap;
-import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
@@ -13,8 +12,9 @@ import org.opensearch.migrations.bulkload.pipeline.model.Document;
  * <p>This adapter is the bridge between the existing codebase and the clean pipeline.
  * It lives in the adapter package — the pipeline core never imports Lucene types directly.
  *
- * <p>Populates {@link Document#hints()} with ES-specific fields ({@code _type}, {@code routing})
- * and {@link Document#sourceMetadata()} with diagnostic info ({@code luceneDocNumber}).
+ * <p>Populates {@link Document#hints()} with ES-specific fields ({@code _type}, {@code routing},
+ * {@code version}, and {@code version_type})
+ * and {@link Document#sourceMetadata()} with {@code luceneDocNumber} and the snapshot's {@code _version}.
  */
 public final class LuceneAdapter {
 
@@ -41,13 +41,23 @@ public final class LuceneAdapter {
         if (luceneDoc.getRouting() != null) {
             hints.put(Document.HINT_ROUTING, luceneDoc.getRouting());
         }
+        var sourceMetadata = new HashMap<String, Object>();
+        sourceMetadata.put(Document.SOURCE_META_LUCENE_DOC_NUMBER, luceneDoc.getLuceneDocNumber());
+        if (luceneDoc.getVersion() != null) {
+            sourceMetadata.put(Document.SOURCE_META_VERSION, luceneDoc.getVersion().toString());
+            if (luceneDoc.getOperation() == DocumentChangeType.INDEX
+                && luceneDoc.getId() != null && !luceneDoc.getId().isEmpty()) {
+                hints.put(Document.HINT_VERSION, luceneDoc.getVersion().toString());
+                hints.put(Document.HINT_VERSION_TYPE, "external");
+            }
+        }
 
         return new Document(
             luceneDoc.getId(),
             luceneDoc.getSource(),
             mapOperation(luceneDoc.getOperation()),
             hints,
-            Map.of(Document.SOURCE_META_LUCENE_DOC_NUMBER, luceneDoc.getLuceneDocNumber())
+            sourceMetadata
         );
     }
 

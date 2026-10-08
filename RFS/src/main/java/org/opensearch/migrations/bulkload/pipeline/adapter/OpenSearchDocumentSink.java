@@ -129,7 +129,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
             }
         }
         var asMaps = ops.stream()
-            .map(op -> OBJECT_MAPPER.convertValue(op, Map.class))
+            .map(op -> op.toTransformerMap(OBJECT_MAPPER))
             .toList();
         var transformed = transformer.transformJson(asMaps);
         if (transformed instanceof List) {

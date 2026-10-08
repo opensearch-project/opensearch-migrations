@@ -22,6 +22,8 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.enums.VersionType;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -471,12 +473,19 @@ public abstract class OpenSearchClient {
     private BulkOperationSpec stripDocumentId(BulkOperationSpec original) {
         if (original instanceof IndexOp indexOp) {
             var metadata = indexOp.getOperation();
+            var versioning = metadata.getVersioning();
+            // Explicit versions require an ID. Keep unrelated concurrency checks
+            // intact so invalid custom combinations are still rejected by the target.
+            var unversioned = versioning == null ? null : VersionControlMetadata.builder()
+                .ifSeqNo(versioning.getIfSeqNo())
+                .ifPrimaryTerm(versioning.getIfPrimaryTerm())
+                .build();
             var newMetadata = IndexOperationMeta.builder()
                 .index(metadata.getIndex())
                 .type(metadata.getType())
                 .routing(metadata.getRouting())
                 .write(metadata.getWrite())
-                .versioning(metadata.getVersioning())
+                .versioning(unversioned)
                 .opType(metadata.getOpType())
                 .build();
             
@@ -485,6 +494,7 @@ public abstract class OpenSearchClient {
                 .document(original.getDocument())
                 .includeDocument(original.isIncludeDocument())
                 .originalSource(original.getOriginalSource())
+                .sourceMetadata(original.getSourceMetadata())
                 .build();
         }
         return original;
@@ -667,7 +677,8 @@ public abstract class OpenSearchClient {
      * are written to the failed document stream immediately and removed from {@code pendingDocs} so the
      * retry loop does not keep hammering them.
      *
-     * @return number of documents removed because they succeeded (or were allowlisted)
+     * @return number of documents removed because they succeeded, were allowlisted,
+     *         or the target already held an equal or newer external version
      */
     private int compactPendingDocs(
         String indexName,
@@ -681,11 +692,19 @@ public abstract class OpenSearchClient {
             return 0;
         }
 
-        // Snapshot the ops we're about to drop so we can emit failed document stream records before mutating.
+        // External version conflicts mean the target already has an equal or newer
+        // version. They are expected when replaying a snapshot work item.
+        int nonRetryableFailures = 0;
         for (ItemFailure failure : partition.getNonRetryableFailures()) {
             BulkOperationSpec op = failure.getPosition() < pendingDocs.size()
                 ? pendingDocs.get(failure.getPosition())
                 : null;
+            if (isExternalVersionConflict(op, failure)) {
+                log.debug("Skipping document '{}' on index '{}': the target already has an equal or newer version",
+                    failure.getDocumentId(), indexName);
+                continue;
+            }
+            nonRetryableFailures++;
             emitFailedDocumentStreamRecord(indexName, op, failure, FailureClass.NON_RETRYABLE);
         }
 
@@ -701,7 +720,24 @@ public abstract class OpenSearchClient {
         int removed = pendingDocs.size() - writeIdx;
         pendingDocs.subList(writeIdx, pendingDocs.size()).clear();
         // removed = successes + non-retryable; return only the success count for the existing log line.
-        return removed - partition.getNonRetryableFailures().size();
+        return removed - nonRetryableFailures;
+    }
+
+    private static boolean isExternalVersionConflict(BulkOperationSpec op, ItemFailure failure) {
+        if (!"version_conflict_engine_exception".equals(failure.getErrorType())
+            || !(op instanceof IndexOp indexOp)) {
+            return false;
+        }
+        var metadata = indexOp.getOperation();
+        if (metadata == null) {
+            return false;
+        }
+        var versioning = metadata.getVersioning();
+        return metadata.getId() != null && metadata.getId().equals(failure.getDocumentId())
+            && versioning != null && versioning.getVersion() != null && versioning.getVersion() >= 0
+            && versioning.getIfSeqNo() == null && versioning.getIfPrimaryTerm() == null
+            && (versioning.getVersionType() == VersionType.EXTERNAL
+                || versioning.getVersionType() == VersionType.EXTERNAL_GTE);
     }
 
     /**

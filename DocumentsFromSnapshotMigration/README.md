@@ -189,6 +189,122 @@ If a transformation causes exceptions on the target, either from existing docs o
 
 This will prevent the migration from retrying indefinitely when encountering documents that already exist on the target cluster. The migration will treat these conflicts as successful operations and proceed with the remaining documents.
 
+### Document versioning
+
+RFS always reads the Lucene `_version` for indexed documents. When a version and
+source ID are available, RFS includes that `version` and `version_type: "external"`
+in the bulk action by default. A document at version 7 in the snapshot is indexed
+at version 7 on the target. No extraction flag or transformation is needed; the
+default path still sends the original source bytes without parsing the body into
+JavaScript.
+
+External versioning accepts only a version greater than the target's current
+version. RFS automatically skips version conflicts on externally versioned index
+operations, including equal-version retries and attempts to replace newer target
+versions. These skips do not require an exception allowlist and do not produce
+failed-document records. Other errors, including internal version conflicts,
+retain their normal error handling.
+
+`version_type` is a per-request concurrency policy, not persistent document
+metadata. The snapshot's `_version` cannot reveal whether source writes used
+`internal`, `external`, or `external_gte`. RFS preserves the number regardless of
+how it was assigned. Ordinary ingestion after backfill continues to increment
+the target version: a normal write after version 7 becomes version 8.
+
+Documents without a snapshot version use internal versioning. When RFS uses
+server-generated IDs, it omits both the source ID and the explicit version.
+Delete operations do not inherit snapshot versions: a delta snapshot contains
+the previous document's version, not the deletion's version. External versioning
+requires index operations; transformations producing create-only operations
+must remove the explicit version.
+
+#### Opting out with internal versioning
+
+The bundled [internalVersioning.js](../transformation/standardJavascriptTransforms/src/internalVersioning.js)
+transformation removes `version` and `version_type` from the action, retaining
+the ID, routing, body, and source metadata. It is available but is not applied
+by default.
+
+Save this configuration as `internal-versioning.json`:
+
+```json
+[
+  {
+    "JsonJSTransformerProvider": {
+      "initializationResourcePath": "js/internalVersioning.js"
+    }
+  }
+]
+```
+
+Apply it with:
+
+```shell
+--doc-transformer-config-file /path/to/internal-versioning.json
+```
+
+New target documents then start at version 1. Writes to existing target documents
+increment their current version; opting out does not reset existing counters.
+
+#### Allowing equal-version rewrites
+
+To overwrite documents whose target version equals the snapshot version, use
+the bundled [externalVersioning.js](../transformation/standardJavascriptTransforms/src/externalVersioning.js)
+transformation with `versionType` set to `external_gte`:
+
+```json
+[
+  {
+    "JsonJSTransformerProvider": {
+      "initializationResourcePath": "js/externalVersioning.js",
+      "bindingsObject": {
+        "versionType": "external_gte"
+      }
+    }
+  }
+]
+```
+
+This allows rerunning a transformation at the same version, including replacing
+different target content at that version. Older versions still cannot overwrite
+newer ones. A custom JavaScript transformation can make the same policy change
+for an index operation simply by assigning:
+
+```javascript
+document.operation.version_type = "external_gte";
+```
+
+#### Application version fields and JavaScript precision
+
+The external-versioning transformation can also replace the snapshot version
+with a field from `_source`. Add `"versionField": "ext_version"` to its
+`bindingsObject`. A string names a literal field, including any dots in its name.
+For a nested field, use an array such as
+`"versionField": ["metadata", "revision"]`. Missing or invalid values fail the
+transformation. The source body is preserved.
+
+RFS exposes the original version as `source_metadata._version` and the default
+write version as `operation.version`. Both are decimal strings in transformation
+input, preserving all 64 bits. Custom transformations can keep, replace, or
+remove the action's version; the original source metadata remains available.
+The serializer omits `source_metadata` from bulk requests and converts the
+action version to a Java `Long`, writing a JSON integer on the wire.
+
+Versions must be non-negative integers up to `9223372036854775807`. Quoted values
+have the same limit: `"92233720368547758070"` is rejected. JavaScript numbers
+supplied through `versionField` are accepted through `9007199254740991`
+(`2^53 - 1`); store larger application versions as decimal strings. Preserve
+these strings inside JavaScript instead of converting them to `Number`.
+
+At `Long.MAX_VALUE`, there is no higher valid version and an internal increment
+can overflow. For such documents, consider opting out when populating a new
+target if subsequent ingestion needs internal increments.
+
+Version preservation does not order independent source and target write
+histories. An old snapshot document at version 100 can overwrite a newly
+ingested target document at version 1. Plan backfill and live-ingestion ordering
+accordingly.
+
 ### Supported Exception Types
 
 Common exception types that can be allowlisted:

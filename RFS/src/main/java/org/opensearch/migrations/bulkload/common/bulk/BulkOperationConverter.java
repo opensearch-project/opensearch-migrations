@@ -5,6 +5,8 @@ import java.io.UncheckedIOException;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.bulk.enums.VersionType;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -49,17 +51,37 @@ public class BulkOperationConverter {
                     .build())
                 .document(document)
                 .originalSource(document)
+                .sourceMetadata(doc.sourceMetadata())
                 .build();
         }
         return IndexOp.builder()
-            .operation(IndexOperationMeta.builder()
-                .id(doc.id())
-                .index(indexName)
-                .type(type)
-                .routing(routing)
-                .build())
+            .operation(indexMetadata(doc, indexName, false))
             .document(document)
             .originalSource(document)
+            .sourceMetadata(doc.sourceMetadata())
+            .build();
+    }
+
+    /**
+     * Build index action metadata without parsing the document body. Shared by
+     * the raw bulk path and the transformation path so both preserve versions.
+     */
+    public static IndexOperationMeta indexMetadata(Document doc, String indexName, boolean stripIds) {
+        String id = stripIds ? null : doc.id();
+        String version = doc.hints().get(Document.HINT_VERSION);
+        String versionType = doc.hints().get(Document.HINT_VERSION_TYPE);
+        var versioning = id != null && !id.isEmpty() && version != null
+            ? VersionControlMetadata.builder()
+                .version(Long.parseLong(version))
+                .versionType(versionType == null ? null : VersionType.from(versionType))
+                .build()
+            : null;
+        return IndexOperationMeta.builder()
+            .id(id)
+            .index(indexName)
+            .type(doc.hints().get(Document.HINT_TYPE))
+            .routing(doc.hints().get(Document.HINT_ROUTING))
+            .versioning(versioning)
             .build();
     }
 }

@@ -11,6 +11,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import lombok.Builder;
@@ -45,6 +47,16 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
     private String documentPath;
 
     /**
+     * Source metadata exposed to document transformations, such as the snapshot's
+     * {@code _version}. This is separate from the operation metadata that controls
+     * target writes, so transformations can remove or override the operation's
+     * version without losing the original snapshot version.
+     * {@link BulkNdjson} only serializes the operation and document body.
+     */
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private Map<String, Object> sourceMetadata;
+
+    /**
      * Original (pre-transformation) source document, captured at conversion time so failed document stream
      * records can carry the source-index document rather than the transformed one. This
      * is never serialized to the bulk request wire format or exposed to the transformer;
@@ -62,4 +74,20 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
     public abstract OperationType getOperationType();
 
     public abstract BaseOperationMeta getOperation();
+
+    /**
+     * Expose action versions as decimal strings to preserve long precision through
+     * JavaScript, including scripts that copy or serialize the operation metadata.
+     * The bulk wire format still serializes {@code VersionControlMetadata.version}
+     * as a JSON integer.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> toTransformerMap(ObjectMapper mapper) {
+        Map<String, Object> result = mapper.convertValue(this, new TypeReference<>() {});
+        var operation = (Map<String, Object>) result.get("operation");
+        if (operation != null && operation.get("version") != null) {
+            operation.put("version", operation.get("version").toString());
+        }
+        return result;
+    }
 }

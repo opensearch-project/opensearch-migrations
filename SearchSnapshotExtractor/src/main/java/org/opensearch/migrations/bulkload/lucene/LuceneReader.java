@@ -304,8 +304,22 @@ public class LuceneReader {
             return null; // Skip these
         }
 
+        // _version is a numeric doc value, not a stored field returned by document().
+        // Read it outside the catch above so an I/O failure fails the work item
+        // instead of silently dropping the document.
+        Long version = operation == DocumentChangeType.INDEX ? readVersion(reader, luceneDocId) : null;
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
+        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes,
+            routing, operation, version);
+    }
+
+    private static Long readVersion(LuceneLeafReader reader, int luceneDocId) {
+        try {
+            var value = reader.getNumericValue(luceneDocId, "_version");
+            return value instanceof Number number ? number.longValue() : null;
+        } catch (IOException e) {
+            throw Lombok.sneakyThrow(e);
+        }
     }
 
     /**
