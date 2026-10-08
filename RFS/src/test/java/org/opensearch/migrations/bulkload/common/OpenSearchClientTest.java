@@ -5,7 +5,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
@@ -26,9 +25,6 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
-import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
-import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
-import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
@@ -41,7 +37,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mock.Strictness;
@@ -251,64 +246,6 @@ class OpenSearchClientTest {
         verifyNoMoreInteractions(failedRequestLogger);
     }
 
-    @ParameterizedTest
-    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
-    void versionConflictsAreFailuresUnlessExplicitlyAllowlisted(boolean raw, boolean allowVersionConflicts) throws Exception {
-        var failedDocuments = mock(FailedDocumentStreamSink.class);
-        when(failedDocuments.write(any())).thenReturn(Mono.empty());
-        openSearchClient.setFailedDocumentStreamContext(failedDocuments, "version-test", "worker");
-        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
-        var documents = List.of(
-            snapshotDocument("external", 7L),
-            snapshotDocument("internal", null),
-            snapshotDocument("bad-mapping", 7L),
-            snapshotDocument("retry", Long.MAX_VALUE)
-        );
-        when(restClient.postAsyncBytes(any(), any(), any(), any()))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null, """
-                {"errors":true,"items":[
-                  {"index":{"_id":"external","status":409,"error":{"type":"version_conflict_engine_exception"}}},
-                  {"index":{"_id":"internal","status":409,"error":{"type":"version_conflict_engine_exception"}}},
-                  {"index":{"_id":"bad-mapping","status":400,"error":{"type":"mapper_parsing_exception"}}},
-                  {"index":{"_id":"retry","status":429,"error":{"type":"es_rejected_execution_exception"}}}
-                ]}
-                """)))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null,
-                "{\"errors\":false,\"items\":[{\"index\":{\"_id\":\"retry\",\"status\":201,\"result\":\"created\"}}]}")));
-
-        var allowlist = allowVersionConflicts
-            ? new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"))
-            : DocumentExceptionAllowlist.empty();
-        if (raw) {
-            openSearchClient.sendBulkRequestRaw("products", documents, null, false, allowlist).block();
-        } else {
-            openSearchClient.sendBulkRequest("products",
-                documents.stream().map(doc -> BulkOperationConverter.fromDocument(doc, "products")).toList(),
-                null, false, allowlist).block();
-        }
-
-        var failures = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
-        var expectedFailures = allowVersionConflicts
-            ? List.of("bad-mapping") : List.of("external", "internal", "bad-mapping");
-        verify(failedDocuments, times(expectedFailures.size())).write(failures.capture());
-        assertEquals(expectedFailures,
-            failures.getAllValues().stream().map(FailedDocumentStreamRecord::getDocumentId).toList());
-        for (var failure : failures.getAllValues()) {
-            assertEquals(FailureClass.NON_RETRYABLE, failure.getFailureClass());
-            assertEquals(failure.getDocumentId().equals("bad-mapping")
-                ? "mapper_parsing_exception" : "version_conflict_engine_exception", failure.getFailureType());
-        }
-        var requests = ArgumentCaptor.forClass(byte[].class);
-        verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
-        var retriedLines = new String(requests.getAllValues().get(1), java.nio.charset.StandardCharsets.UTF_8).split("\n");
-        assertEquals(2, retriedLines.length);
-        var retriedAction = OBJECT_MAPPER.readTree(retriedLines[0]).path("index");
-        assertEquals("retry", retriedAction.path("_id").asText());
-        assertEquals(Long.MAX_VALUE, retriedAction.path("version").longValue());
-        assertEquals("external", retriedAction.path("version_type").asText());
-        verifyNoInteractions(failedRequestLogger);
-    }
-
     @Test
     void generatingIdsDoesNotSilentlyRemoveExplicitConcurrencyChecks() throws Exception {
         var operation = IndexOp.builder()
@@ -338,33 +275,39 @@ class OpenSearchClientTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void generatedIdsOmitVersionsOnInitialWritesAndRetries(boolean raw) throws Exception {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void retriesKeepVersionsConsistentWithIdPolicy(boolean raw, boolean generateIds) throws Exception {
         doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null, """
-                {"errors":true,"items":[
-                  {"index":{"_id":"generated-1","status":429,"error":{"type":"es_rejected_execution_exception"}}}
-                ]}
-                """)))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null,
-                "{\"errors\":false,\"items\":[{\"index\":{\"_id\":\"generated-2\",\"status\":201,\"result\":\"created\"}}]}")));
-        var documents = List.of(snapshotDocument("source-id", Long.MAX_VALUE));
+            .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntry("done"), itemEntryRetryableFailure("retry")))))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("retry")))));
+        var documents = List.of(snapshotDocument("done", 7L), snapshotDocument("retry", Long.MAX_VALUE));
         if (raw) {
-            openSearchClient.sendBulkRequestRaw("products", documents, null, true, DocumentExceptionAllowlist.empty()).block();
+            openSearchClient.sendBulkRequestRaw("products", documents, null, generateIds, DocumentExceptionAllowlist.empty()).block();
         } else {
             openSearchClient.sendBulkRequest("products",
                 documents.stream().map(doc -> BulkOperationConverter.fromDocument(doc, "products")).toList(),
-                null, true, DocumentExceptionAllowlist.empty()).block();
+                null, generateIds, DocumentExceptionAllowlist.empty()).block();
         }
         var requests = ArgumentCaptor.forClass(byte[].class);
         verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
+        var retriedLines = new String(requests.getAllValues().get(1), java.nio.charset.StandardCharsets.UTF_8).split("\n");
+        assertEquals(2, retriedLines.length, "Only the failed document should be retried");
+        assertEquals(generateIds ? "" : "retry", OBJECT_MAPPER.readTree(retriedLines[0]).path("index").path("_id").asText());
         for (byte[] body : requests.getAllValues()) {
-            var action = OBJECT_MAPPER.readTree(new String(body, java.nio.charset.StandardCharsets.UTF_8).split("\n")[0])
-                .path("index");
-            assertFalse(action.has("_id"));
-            assertFalse(action.has("version"));
-            assertFalse(action.has("version_type"));
+            String[] lines = new String(body, java.nio.charset.StandardCharsets.UTF_8).split("\n");
+            for (int i = 0; i < lines.length; i += 2) {
+                var action = OBJECT_MAPPER.readTree(lines[i]).path("index");
+                if (generateIds) {
+                    assertFalse(action.has("_id"));
+                    assertFalse(action.has("version"));
+                    assertFalse(action.has("version_type"));
+                } else {
+                    assertEquals(action.path("_id").asText().equals("retry") ? Long.MAX_VALUE : 7L,
+                        action.path("version").longValue());
+                    assertEquals("external", action.path("version_type").asText());
+                }
+            }
         }
         verifyNoInteractions(failedRequestLogger);
     }

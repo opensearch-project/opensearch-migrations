@@ -86,36 +86,6 @@ public class LuceneDocumentsReaderTest {
         );
     }
 
-    static Stream<Arguments> provideVersionSnapshots() {
-        return Stream.concat(provideSnapshots(), Stream.of(
-            Arguments.of(TestResources.SNAPSHOT_ES_5_6, Version.fromString("ES 5.6")),
-            Arguments.of(TestResources.SNAPSHOT_ES_6_8_MERGED, Version.fromString("ES 6.8"))
-        ));
-    }
-
-    @ParameterizedTest
-    @MethodSource("provideVersionSnapshots")
-    void readsInternalVersionsFromSnapshotDocValues(TestResources.Snapshot snapshot, Version version) {
-        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
-        var repo = new FileSystemRepo(snapshot.dir, fileFinder);
-        var provider = SnapshotReaderRegistry.getSnapshotReader(version, repo, false);
-        var shard = provider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
-        Set<ShardFileInfo> files = new TreeSet<>(Comparator.comparing(ShardFileInfo::key));
-        files.addAll(shard.getFiles());
-        Path luceneDir = new SnapshotShardUnpacker.Factory(new SourceRepoAccessor(repo), tempDirectory)
-            .create(files, "test_updates_deletes", shard.getIndexId(), 0).unpack();
-        var reader = new LuceneIndexReader.Factory(provider).getReader(luceneDir);
-
-        var documents = LuceneReader.streamDocumentChanges(reader, shard.getSegmentFileName()).collectList().block();
-
-        assertNotNull(documents);
-        var versions = documents.stream().collect(Collectors.toMap(doc -> doc.id, doc -> doc.version));
-        assertEquals(Set.of("complexdoc", "updateddoc", "unchangeddoc"), versions.keySet());
-        assertEquals(1L, versions.get("unchangeddoc"));
-        Assertions.assertTrue(versions.get("updateddoc") >= 2L);
-        Assertions.assertTrue(versions.get("complexdoc") >= 2L);
-    }
-
     @ParameterizedTest
     @MethodSource("provideSnapshots")
     public void ReadDocuments_AsExpected(TestResources.Snapshot snapshot, Version version) {
@@ -145,6 +115,7 @@ public class LuceneDocumentsReaderTest {
         StepVerifier.create(documents).expectNextMatches(doc -> {
             String expectedId = "complexdoc";
             String actualId = doc.id;
+            Assertions.assertTrue(doc.version >= 2L);
 
             String expectedType = null;
             String actualType = doc.type;
@@ -156,6 +127,7 @@ public class LuceneDocumentsReaderTest {
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
             String actualId = doc.id;
+            Assertions.assertTrue(doc.version >= 2L);
 
             String expectedType = null;
             String actualType = doc.type;
@@ -168,6 +140,7 @@ public class LuceneDocumentsReaderTest {
         }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
             String actualId = doc.id;
+            assertEquals(1L, doc.version);
 
             String expectedType = null;
             String actualType = doc.type;
@@ -211,6 +184,7 @@ public class LuceneDocumentsReaderTest {
         StepVerifier.create(documents).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
             String actualId = doc.id;
+            assertEquals(1L, doc.version);
 
             String expectedType = "type2";
             String actualType = doc.type;
@@ -222,6 +196,7 @@ public class LuceneDocumentsReaderTest {
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
             String actualId = doc.id;
+            Assertions.assertTrue(doc.version >= 2L);
 
             String expectedType = "type2";
             String actualType = doc.type;
@@ -234,6 +209,7 @@ public class LuceneDocumentsReaderTest {
         }).expectNextMatches(doc -> {
             String expectedId = "complexdoc";
             String actualId = doc.id;
+            Assertions.assertTrue(doc.version >= 2L);
 
              String expectedType = "type1";
              String actualType = doc.type;

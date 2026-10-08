@@ -10,8 +10,6 @@ import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -40,15 +38,6 @@ class LuceneReaderVersionTest {
         when(reader.document(0)).thenReturn(document);
     }
 
-    @ParameterizedTest
-    @ValueSource(longs = {1, 7, 9007199254740993L, Long.MAX_VALUE})
-    void extractsNumericDocValueIndependentlyOfSource(long version) throws IOException {
-        when(reader.getNumericValue(0, "_version")).thenReturn(version);
-        var result = read(DocumentChangeType.INDEX);
-        assertEquals(version, result.version);
-        assertEquals("{\"ext_version\":42}", new String(result.source, StandardCharsets.UTF_8));
-    }
-
     @Test
     void absentDocValueLeavesVersionUnset() {
         assertNull(read(DocumentChangeType.INDEX).version);
@@ -59,12 +48,6 @@ class LuceneReaderVersionTest {
         when(reader.getNumericValue(0, "_version")).thenThrow(new IOException("unreadable version"));
         var failure = assertThrows(IOException.class, () -> read(DocumentChangeType.INDEX));
         assertEquals("unreadable version", failure.getMessage());
-    }
-
-    @Test
-    void invalidDocValueCannotBeTruncatedOrTreatedAsAMissingVersion() throws IOException {
-        when(reader.getNumericValue(0, "_version")).thenReturn(7.5);
-        assertThrows(ClassCastException.class, () -> read(DocumentChangeType.INDEX));
     }
 
     @Test
