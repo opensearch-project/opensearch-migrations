@@ -1,0 +1,3 @@
+textual
+rich>=14.0.0
+textual-serve
