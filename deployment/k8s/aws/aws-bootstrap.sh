@@ -1015,6 +1015,17 @@ else
 fi
 echo ""
 
+# The AWS partition of an ARN (arn:<partition>:...), e.g. aws, aws-cn or aws-iso-e.
+# Falls back to aws for anything that isn't an ARN.
+arn_partition() {
+  local rest="${1#arn:}"
+  if [[ "$rest" == "$1" || -z "${rest%%:*}" ]]; then
+    echo "aws"
+  else
+    echo "${rest%%:*}"
+  fi
+}
+
 # --- EKS access entry (optional) ---
 grant_eks_cluster_admin() {
   local principal_arn="$1"
@@ -1032,7 +1043,7 @@ grant_eks_cluster_admin() {
   aws eks associate-access-policy \
     --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --principal-arn "$principal_arn" \
-    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+    --policy-arn "arn:$(arn_partition "$principal_arn"):eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy" \
     --access-scope type=cluster \
     ${region:+--region "$region"}
   echo "EKS access configured for $principal_arn"
@@ -1172,8 +1183,7 @@ ensure_auto_mode_tag_propagation_policy() {
     exit 1
   fi
   cluster_role_name="${cluster_role_arn##*/}"
-  part="${cluster_role_arn#arn:}"
-  part="${part%%:*}"
+  part="$(arn_partition "$cluster_role_arn")"
 
   # Keep this aligned with the EKS Auto Mode tag-propagation policy:
   # https://docs.aws.amazon.com/eks/latest/userguide/auto-learn-iam.html
@@ -1341,7 +1351,7 @@ enforce_tags_on_cluster_role_for_tests() {
   # Parallel arrays rather than an associative array: bash 3.2 (macOS) has none.
   # Each group pairs a set of actions with ONLY the resource types that receive those actions'
   # request tags -- see the note above about RunInstances and launch-template/*.
-  local part="${AWS_PARTITION:-aws}"
+  local part="${AWS_PARTITION:-$(arn_partition "$cluster_role_arn")}"
   local group_sids=(InstanceLaunch StandaloneStorage NetworkInterface LoadBalancer TargetGroup ListenerAndRule)
   local group_actions=(
     '"ec2:RunInstances"'
@@ -1439,7 +1449,7 @@ ensure_auto_node_access_entry() {
   aws eks associate-access-policy \
     --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --principal-arn "$node_role_arn" \
-    --policy-arn "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAutoNodePolicy" \
+    --policy-arn "arn:$(arn_partition "$node_role_arn"):eks::aws:cluster-access-policy/AmazonEKSAutoNodePolicy" \
     --access-scope type=cluster \
     --region "${AWS_CFN_REGION}" >/dev/null \
     || {
