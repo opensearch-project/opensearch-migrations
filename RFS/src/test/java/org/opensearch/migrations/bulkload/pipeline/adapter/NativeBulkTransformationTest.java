@@ -69,10 +69,13 @@ class NativeBulkTransformationTest {
             assertFalse(action.has("version_type"));
             assertEquals("d1", action.path("_id").asText());
             assertEquals("tenant", action.path("routing").asText());
+            assertFalse(action.has("source_hints"));
             assertFalse(action.has("source_metadata"));
         }
         assertEquals(version == null ? null : version.toString(),
             converted.getSourceMetadata().get(Document.SOURCE_META_VERSION));
+        assertSame(document.hints(), converted.getSourceHints());
+        assertSame(document.hints(), nativeOperation.getSourceHints());
         assertEquals(converted.getSourceMetadata(), nativeOperation.getSourceMetadata());
         assertEquals(SOURCE, raw.split("\n")[1]);
     }
@@ -99,6 +102,8 @@ class NativeBulkTransformationTest {
             assertEquals("after delete", MAPPER.readTree(lines[2]).path("title").asText());
         }
         assertSame(deletion.source(), nativeOperations.get(0).getOriginalSourceBytes());
+        assertSame(deletion.hints(), nativeOperations.get(0).getSourceHints());
+        assertSame(deletion.hints(), jsonOperations.get(0).getSourceHints());
     }
 
     @ParameterizedTest
@@ -189,13 +194,14 @@ class NativeBulkTransformationTest {
         assertFalse(MAPPER.valueToTree(operation).has("raw_document"));
     }
 
-    @Test
-    void nativeCapabilitiesSupportMetadataAndFilteringThroughWrappers() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void nativeCapabilitiesSupportHintsMetadataAndFilteringThroughWrappers(boolean nativePath) throws Exception {
         BulkOperationTransformer reroute = operations -> {
             for (var operation : operations) {
                 if (operation instanceof IndexOp index) {
-                    index.getOperation().setIndex("archive");
-                    index.getOperation().setRouting("archived-tenant");
+                    index.getOperation().setIndex((String) operation.getSourceMetadata().get("archiveIndex"));
+                    index.getOperation().setRouting(operation.getSourceHints().get("archiveRouting"));
                 }
             }
             return operations;
@@ -214,20 +220,37 @@ class NativeBulkTransformationTest {
 
             @Override
             public <T> Optional<List<T>> getNativeStages(Class<T> nativeType) {
-                return chain.getNativeStages(nativeType);
+                return nativePath ? chain.getNativeStages(nativeType) : Optional.empty();
             }
         };
-        var retained = document(SOURCE);
-        var dropped = new Document("drop", retained.source(), Document.Operation.UPSERT, Map.of(), Map.of());
+        var retained = new Document("d1", SOURCE.getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT,
+            Map.of(Document.HINT_ROUTING, "tenant", "archiveRouting", "archived-tenant"),
+            Map.of("archiveIndex", "archive"));
+        var dropped = new Document("drop", retained.source(), Document.Operation.UPSERT,
+            retained.hints(), retained.sourceMetadata());
         var result = sendBatch(wrapper, List.of(dropped, retained));
         assertEquals(1, result.size());
-        assertSame(retained.source(), result.get(0).getRawDocument());
+        if (nativePath) {
+            assertSame(retained.source(), result.get(0).getRawDocument());
+            assertSame(retained.hints(), result.get(0).getSourceHints());
+            assertSame(retained.sourceMetadata(), result.get(0).getSourceMetadata());
+        } else {
+            assertNull(result.get(0).getRawDocument());
+        }
+        assertEquals(retained.hints(), result.get(0).getSourceHints());
+        assertEquals(retained.sourceMetadata(), result.get(0).getSourceMetadata());
         var lines = BulkNdjson.toBulkNdjson(result, MAPPER).split("\n");
         var action = MAPPER.readTree(lines[0]).path("index");
         assertEquals("d1", action.path("_id").asText());
         assertEquals("archive", action.path("_index").asText());
         assertEquals("archived-tenant", action.path("routing").asText());
-        assertEquals(SOURCE, lines[1]);
+        assertFalse(action.has("source_hints"));
+        assertFalse(action.has("source_metadata"));
+        if (nativePath) {
+            assertEquals(SOURCE, lines[1]);
+        } else {
+            assertEquals(MAPPER.readTree(SOURCE), MAPPER.readTree(lines[1]));
+        }
     }
 
     @SuppressWarnings("unchecked")

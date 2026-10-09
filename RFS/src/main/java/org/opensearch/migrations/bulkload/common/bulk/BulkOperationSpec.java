@@ -63,6 +63,15 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
     private transient byte[] rawDocument;
 
     /**
+     * Original document hints available to transformations, including keys unknown
+     * to the OpenSearch sink. These are input context, not outgoing action fields:
+     * use the typed operation metadata to change routing, index, or other bulk fields.
+     * {@link BulkNdjson} never serializes this map to the bulk request.
+     */
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private Map<String, String> sourceHints;
+
+    /**
      * Source metadata exposed to document transformations, such as the snapshot's
      * {@code _version}. This is separate from the operation metadata that controls
      * target writes, so transformations can remove or override the operation's

@@ -64,6 +64,7 @@ public class BulkOperationConverter {
                 .rawDocument(retainRawSource ? doc.source() : null)
                 .originalSource(document)
                 .originalSourceBytes(retainRawSource ? doc.source() : null)
+                .sourceHints(doc.hints())
                 .sourceMetadata(doc.sourceMetadata())
                 .build();
         }
@@ -73,6 +74,7 @@ public class BulkOperationConverter {
             .rawDocument(retainRawSource ? doc.source() : null)
             .originalSource(document)
             .originalSourceBytes(retainRawSource ? doc.source() : null)
+            .sourceHints(doc.hints())
             .sourceMetadata(doc.sourceMetadata())
             .build();
     }

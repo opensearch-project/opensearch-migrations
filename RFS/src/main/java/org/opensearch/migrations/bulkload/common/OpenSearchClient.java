@@ -498,6 +498,7 @@ public abstract class OpenSearchClient {
                 .includeDocument(original.isIncludeDocument())
                 .originalSource(original.getOriginalSourceBytes() == null ? original.getOriginalSource() : null)
                 .originalSourceBytes(original.getOriginalSourceBytes())
+                .sourceHints(original.getSourceHints())
                 .sourceMetadata(original.getSourceMetadata())
                 .build();
         }

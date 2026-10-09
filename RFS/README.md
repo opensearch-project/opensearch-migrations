@@ -21,20 +21,33 @@ It is recommended to refer to the respective README of the tool you want to use 
 Java document providers can implement the functional interface
 [`BulkOperationTransformer`](src/main/java/org/opensearch/migrations/bulkload/transformers/BulkOperationTransformer.java)
 and return it through the existing `IJsonTransformerProvider` service interface.
-Its `transformOperations` method receives typed bulk metadata and unparsed document
-bodies. Versioning, metadata edits, filtering, and body changes use the same contract.
-For example, an index-write transformation can be a lambda:
+Its `transformOperations` method receives typed bulk metadata, source context, and
+unparsed document bodies. Versioning, metadata edits, filtering, and body changes
+use the same contract. `getSourceHints()` exposes every original `Document.hints()`
+entry, including keys unknown to the sink; `getSourceMetadata()` exposes arbitrary
+source metadata such as the snapshot's `_version`. Source adapters supply these
+values, and new keys require no changes to the transformation interface.
+
+For example, a source adapter can supply a `tenantRouting` hint and a Java
+transformation can use it to set routing for index writes:
 
 ```java
-BulkOperationTransformer renameIndex = operations -> {
+BulkOperationTransformer routeByTenant = operations -> {
     for (var operation : operations) {
-        if (operation instanceof IndexOp index) {
-            index.getOperation().setIndex("archive");
+        var hints = operation.getSourceHints();
+        if (operation instanceof IndexOp index && hints != null && hints.containsKey("tenantRouting")) {
+            index.getOperation().setRouting(hints.get("tenantRouting"));
         }
     }
     return operations;
 };
 ```
+
+Hints and source metadata are input context and are never emitted as bulk action
+fields. Use the typed operation setters to change outgoing metadata. Native
+conversion retains the existing hint and metadata maps by reference without
+parsing the body. JSON transformations receive the same context as `source_hints`
+and `source_metadata`.
 
 Register the provider with the existing Java service loader and select it with
 `--doc-transformer-config`. The loader returns a single configured transformer

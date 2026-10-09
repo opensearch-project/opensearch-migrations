@@ -9,7 +9,10 @@ import org.opensearch.migrations.transform.IJsonTransformer;
  * Native Java transformation of RFS bulk operations.
  *
  * <p>The document sink passes typed metadata and unparsed source bytes when every
- * stage implements this contract. Accessing {@link BulkOperationSpec#getDocument()}
+ * stage implements this contract. {@link BulkOperationSpec#getSourceHints()} and
+ * {@link BulkOperationSpec#getSourceMetadata()} expose source-provided context with
+ * arbitrary keys; implementations choose which values affect the typed operation.
+ * Accessing {@link BulkOperationSpec#getDocument()}
  * opts that operation into parsing and serializing its body. Metadata-only changes
  * keep the original bytes. Operations may be edited in place; to filter, reorder
  * or add operations, return a new list rather than modifying the input list.
