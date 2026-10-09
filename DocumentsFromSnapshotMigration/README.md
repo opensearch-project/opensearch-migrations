@@ -251,6 +251,14 @@ removes both `version` and `version_type`: OpenSearch rejects an explicit snapsh
 version with internal versioning, including when `version_type` is omitted.
 Explicit `if_seq_no` and `if_primary_term` checks are preserved.
 
+Use this internal mode when rolling back to an older snapshot. Also use it for
+experimental delta restores that can delete and reindex the same document ID.
+Delta comparison operates on Lucene segments, so updates or segment merges can
+produce such pairs. The target deletion advances the version, which can cause
+the subsequent index operation to conflict under either external policy.
+Internal mode restores the content using target-managed versions. Allowlisting
+these conflicts does not restore a document whose index operation was rejected.
+
 Use `"external"` for strict greater-than versioning. Unknown version types are
 rejected. The modifier is not applied by default because the native RFS write
 path already preserves snapshot versions using `external`.

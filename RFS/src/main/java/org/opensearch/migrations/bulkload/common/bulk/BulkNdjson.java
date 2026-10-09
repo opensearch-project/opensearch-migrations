@@ -106,16 +106,20 @@ public final class BulkNdjson {
         List<? extends Document> docs,
         String indexName, boolean stripIds, ObjectMapper mapper
     ) {
-        long sourceBytes = docs.stream().mapToLong(Document::sourceLength).sum();
+        long sourceBytes = docs.stream()
+            .mapToLong(doc -> doc.operation() == Document.Operation.DELETE ? 0 : doc.sourceLength())
+            .sum();
         try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, docs.size()))) {
             for (var doc : docs) {
-                String opType = doc.operation() == Document.Operation.DELETE ? "delete" : "index";
+                boolean isDelete = doc.operation() == Document.Operation.DELETE;
+                String opType = isDelete ? "delete" : "index";
                 String docId = stripIds ? null : doc.id();
                 String routing = doc.hints().get(Document.HINT_ROUTING);
-                var meta = doc.operation() == Document.Operation.DELETE
+                var meta = isDelete
                     ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(routing).build()
                     : BulkOperationConverter.indexMetadata(doc, indexName, stripIds);
-                writeRawOperation(opType, meta, doc.source(), baos, mapper);
+                // Delta deletions retain the old source for diagnostics, but bulk deletes have no payload.
+                writeRawOperation(opType, meta, isDelete ? null : doc.source(), baos, mapper);
                 baos.write(NEWLINE_BYTES);
             }
             return baos.toByteArray();

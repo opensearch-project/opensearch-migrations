@@ -121,8 +121,9 @@ public class OpenSearchDocumentSinkEndToEndTest {
             );
             sink.writeBatch("sink_deletes", additions).block();
 
+            // Lucene delta deletions carry the previous document's source bytes.
             var deletions = List.of(
-                new Document("to_delete", null, Document.Operation.DELETE, Map.of(), Map.of())
+                new Document("to_delete", additions.get(2).source(), Document.Operation.DELETE, Map.of(), Map.of())
             );
             sink.writeBatch("sink_deletes", deletions).block();
 

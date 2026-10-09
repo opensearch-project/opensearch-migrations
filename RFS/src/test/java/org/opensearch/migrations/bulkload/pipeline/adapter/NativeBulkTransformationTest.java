@@ -75,6 +75,30 @@ class NativeBulkTransformationTest {
         assertEquals(SOURCE, raw.split("\n")[1]);
     }
 
+    @Test
+    void deletesWithSnapshotSourceDoNotEmitABulkPayload() throws Exception {
+        var deletion = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "deleted", null,
+            SOURCE.getBytes(StandardCharsets.UTF_8), "tenant", DocumentChangeType.DELETE));
+        var documents = List.of(deletion, document("{\"title\":\"after delete\"}", 7L));
+        var nativeOperations = documents.stream()
+            .map(doc -> BulkOperationConverter.fromRawDocument(doc, "products")).toList();
+        var jsonOperations = documents.stream()
+            .map(doc -> BulkOperationConverter.fromDocument(doc, "products")).toList();
+
+        for (String request : List.of(
+            new String(BulkNdjson.toRawNdjsonBytes(documents, "products", false, MAPPER), StandardCharsets.UTF_8),
+            BulkNdjson.toBulkNdjson(nativeOperations, MAPPER),
+            BulkNdjson.toBulkNdjson(jsonOperations, MAPPER)
+        )) {
+            String[] lines = request.split("\n");
+            assertEquals(3, lines.length, "A delete must be followed by the next action, not its snapshot source");
+            assertEquals("deleted", MAPPER.readTree(lines[0]).path("delete").path("_id").asText());
+            assertEquals("d1", MAPPER.readTree(lines[1]).path("index").path("_id").asText());
+            assertEquals("after delete", MAPPER.readTree(lines[2]).path("title").asText());
+        }
+        assertSame(deletion.source(), nativeOperations.get(0).getOriginalSourceBytes());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"internal", "external", "external_gte"})
     void configuredPoliciesKeepSourceBytesUnparsed(String policy) throws Exception {

@@ -271,7 +271,8 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
 
-            // Run second time reversing base and current snapshot
+            // Run second time reversing base and current snapshot.
+            // Rollback needs internal versioning to restore an older version after a target-side deletion.
             targetClusterOperations.delete("/.migrations_working_state");
             {
                 final var testDocMigrationContext = DocumentMigrationTestContext.factory()
@@ -291,7 +292,9 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     testDocMigrationContext,
                     sourceCluster.getContainerVersion().getVersion(),
                     targetCluster.getContainerVersion().getVersion(),
-                    null,
+                    """
+                    [{"BulkVersioningTransformerProvider":{"versionType":"internal"}}]
+                    """,
                     null,
                     maxRuns
                 ));
