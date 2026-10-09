@@ -277,7 +277,7 @@ class OpenSearchClientTest {
 
     @ParameterizedTest
     @CsvSource({"raw,false", "raw,true", "map,false", "map,true", "native,false", "native,true"})
-    void retriesKeepVersionsConsistentWithIdPolicy(String path, boolean generateIds) throws Exception {
+    void retriesPreserveOnlyExplicitVersioningAndRespectIdPolicy(String path, boolean generateIds) throws Exception {
         doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntry("done"), itemEntryRetryableFailure("retry")))))
@@ -308,12 +308,14 @@ class OpenSearchClientTest {
                 var action = OBJECT_MAPPER.readTree(lines[i]).path("index");
                 if (generateIds) {
                     assertFalse(action.has("_id"));
+                }
+                if (generateIds || !path.equals("native")) {
                     assertFalse(action.has("version"));
                     assertFalse(action.has("version_type"));
                 } else {
                     assertEquals(action.path("_id").asText().equals("retry") ? Long.MAX_VALUE : 7L,
                         action.path("version").longValue());
-                    assertEquals(path.equals("native") ? "external_gte" : "external", action.path("version_type").asText());
+                    assertEquals("external_gte", action.path("version_type").asText());
                 }
                 if (path.equals("native")) {
                     assertEquals("{ \"value\" : 9007199254740993 }", lines[i + 1],

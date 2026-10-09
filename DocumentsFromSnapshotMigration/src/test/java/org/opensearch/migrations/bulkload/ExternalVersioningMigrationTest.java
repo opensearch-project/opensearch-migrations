@@ -55,10 +55,14 @@ class ExternalVersioningMigrationTest {
     }
 
     @Tag("isolatedTest")
-    @ParameterizedTest(name = "preserves Lucene versions from {0}")
+    @ParameterizedTest(name = "opts into preserving Lucene versions from {0}")
     @MethodSource("sourceVersions")
-    void preservesSnapshotVersions(ContainerVersion sourceVersion) throws Exception {
-        verifySnapshotMigration(sourceVersion, null, 1);
+    void preservesSnapshotVersionsWhenExternalVersioningIsEnabled(ContainerVersion sourceVersion) throws Exception {
+        try (var transformer = new TransformationLoader().getTransformerFactoryLoader("""
+            [{"BulkVersioningTransformerProvider":{"versionType":"external"}}]
+            """)) {
+            verifySnapshotMigration(sourceVersion, transformer, 1);
+        }
     }
 
     @Test
@@ -84,7 +88,7 @@ class ExternalVersioningMigrationTest {
             client.setFailedDocumentStreamContext(failures, "native-versioning", "worker");
             for (int pass = 0; pass < passes; pass++) {
                 try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT, directory.resolve("lucene-" + pass)).build()) {
-                    var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
+                    var sink = new OpenSearchDocumentSink(client, () -> transformer,
                         false, DocumentExceptionAllowlist.empty(), null);
                     var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE, 1, 1);
                     var cursors = pipeline.migrateAll().collectList().block();

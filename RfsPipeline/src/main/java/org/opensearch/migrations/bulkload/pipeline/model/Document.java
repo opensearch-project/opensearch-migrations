@@ -30,7 +30,6 @@ public record Document(
     /** Well-known hint keys for ES-compatible sinks. */
     public static final String HINT_TYPE = "_type";
     public static final String HINT_ROUTING = "routing";
-    public static final String HINT_VERSION = "version";
 
     /** Well-known sourceMetadata keys for Lucene-based sources. */
     public static final String SOURCE_META_LUCENE_DOC_NUMBER = "luceneDocNumber";

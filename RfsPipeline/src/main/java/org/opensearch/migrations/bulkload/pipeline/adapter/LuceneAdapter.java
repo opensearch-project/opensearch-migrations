@@ -13,8 +13,7 @@ import org.opensearch.migrations.bulkload.pipeline.model.Document;
  * <p>This adapter is the bridge between the existing codebase and the clean pipeline.
  * It lives in the adapter package — the pipeline core never imports Lucene types directly.
  *
- * <p>Populates {@link Document#hints()} with ES-specific fields ({@code _type}, {@code routing},
- * and {@code version})
+ * <p>Populates {@link Document#hints()} with ES-specific fields ({@code _type}, {@code routing})
  * and {@link Document#sourceMetadata()} with {@code luceneDocNumber} and the snapshot's {@code _version}.
  */
 public final class LuceneAdapter {
@@ -43,10 +42,6 @@ public final class LuceneAdapter {
             hints.put(Document.HINT_ROUTING, luceneDoc.getRouting());
         }
         String version = luceneDoc.getVersion() == null ? null : luceneDoc.getVersion().toString();
-        if (version != null && luceneDoc.getOperation() == DocumentChangeType.INDEX
-            && luceneDoc.getId() != null && !luceneDoc.getId().isEmpty()) {
-            hints.put(Document.HINT_VERSION, version);
-        }
         Map<String, Object> sourceMetadata = version == null
             ? Map.of(Document.SOURCE_META_LUCENE_DOC_NUMBER, luceneDoc.getLuceneDocNumber())
             : Map.of(Document.SOURCE_META_LUCENE_DOC_NUMBER, luceneDoc.getLuceneDocNumber(),

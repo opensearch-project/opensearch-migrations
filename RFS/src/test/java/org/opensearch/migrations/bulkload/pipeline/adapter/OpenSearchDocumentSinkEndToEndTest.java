@@ -176,14 +176,14 @@ public class OpenSearchDocumentSinkEndToEndTest {
             client.setFailedDocumentStreamContext(failedDocuments, "version-test", "worker");
 
             for (String policy : List.of("default", "internal", "external", "external_gte")) {
-                boolean internal = policy.equals("internal");
-                boolean strict = policy.equals("default") || policy.equals("external");
+                boolean internal = policy.equals("default") || policy.equals("internal");
+                boolean strict = policy.equals("external");
                 try (var transformer = policy.equals("default") ? null : versioningTransformer(Map.of("versionType", policy))) {
                     var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
                         false, DocumentExceptionAllowlist.empty(), null);
                     String index = "versions_" + policy;
                     sink.createCollection(new CollectionMetadata(index, 1, Map.of())).block();
-                    if (internal) {
+                    if (policy.equals("internal")) {
                         // Removing only version_type still leaves an explicit internal version, which is invalid.
                         for (var metadata : List.of(
                             Map.of("_index", index, "_id", "v1", "version", 7),
@@ -246,8 +246,8 @@ public class OpenSearchDocumentSinkEndToEndTest {
             }
 
             var failures = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
-            verify(failedDocuments, times(5)).write(failures.capture());
-            assertEquals(List.of("versions_default", "versions_default", "versions_external", "versions_external", "versions_external_gte"),
+            verify(failedDocuments, times(3)).write(failures.capture());
+            assertEquals(List.of("versions_external", "versions_external", "versions_external_gte"),
                 failures.getAllValues().stream().map(FailedDocumentStreamRecord::getTargetIndex).toList());
             for (var failure : failures.getAllValues()) {
                 assertEquals("version_conflict_engine_exception", failure.getFailureType());

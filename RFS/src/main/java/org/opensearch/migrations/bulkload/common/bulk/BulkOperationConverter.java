@@ -5,8 +5,6 @@ import java.io.UncheckedIOException;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
-import org.opensearch.migrations.bulkload.common.bulk.enums.VersionType;
-import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -80,25 +78,16 @@ public class BulkOperationConverter {
     }
 
     /**
-     * Build index action metadata without parsing the document body. Shared by
-     * the raw bulk path and the transformation path so both preserve versions.
+     * Build index action metadata without parsing the document body.
+     * Versioning is added only by an explicitly configured transformation.
      */
     public static IndexOperationMeta indexMetadata(Document doc, String indexName, boolean stripIds) {
         String id = stripIds ? null : doc.id();
-        String version = doc.hints().get(Document.HINT_VERSION);
-        VersionControlMetadata versioning = null;
-        if (id != null && !id.isEmpty() && version != null) {
-            versioning = VersionControlMetadata.builder()
-                .version(Long.parseLong(version))
-                .versionType(VersionType.EXTERNAL)
-                .build();
-        }
         return IndexOperationMeta.builder()
             .id(id)
             .index(indexName)
             .type(doc.hints().get(Document.HINT_TYPE))
             .routing(doc.hints().get(Document.HINT_ROUTING))
-            .versioning(versioning)
             .build();
     }
 }

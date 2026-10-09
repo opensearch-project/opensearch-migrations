@@ -53,25 +53,27 @@ class NativeBulkTransformationTest {
     @ParameterizedTest
     @NullSource
     @ValueSource(longs = {0, 9007199254740993L, Long.MAX_VALUE})
-    void rawAndConvertedWritesPreserveAvailableVersions(Long version) throws Exception {
+    void defaultWritesKeepSnapshotVersionOnlyInSourceMetadata(Long version) throws Exception {
         var document = document(SOURCE, version);
         var raw = new String(BulkNdjson.toRawNdjsonBytes(List.of(document), "products", false, MAPPER),
             StandardCharsets.UTF_8);
-        var converted = BulkNdjson.toBulkNdjson(List.of(BulkOperationConverter.fromDocument(document, "products")), MAPPER);
-        for (String ndjson : List.of(raw, converted)) {
+        var converted = BulkOperationConverter.fromDocument(document, "products");
+        var nativeOperation = BulkOperationConverter.fromRawDocument(document, "products");
+        for (String ndjson : List.of(
+            raw,
+            BulkNdjson.toBulkNdjson(List.of(converted), MAPPER),
+            BulkNdjson.toBulkNdjson(List.of(nativeOperation), MAPPER)
+        )) {
             var action = MAPPER.readTree(ndjson.split("\n")[0]).path("index");
-            if (version == null) {
-                assertFalse(action.has("version"));
-                assertFalse(action.has("version_type"));
-            } else {
-                assertEquals(version.longValue(), action.path("version").longValue());
-                assertTrue(action.path("version").isIntegralNumber());
-                assertEquals("external", action.path("version_type").asText());
-            }
+            assertFalse(action.has("version"));
+            assertFalse(action.has("version_type"));
             assertEquals("d1", action.path("_id").asText());
             assertEquals("tenant", action.path("routing").asText());
             assertFalse(action.has("source_metadata"));
         }
+        assertEquals(version == null ? null : version.toString(),
+            converted.getSourceMetadata().get(Document.SOURCE_META_VERSION));
+        assertEquals(converted.getSourceMetadata(), nativeOperation.getSourceMetadata());
         assertEquals(SOURCE, raw.split("\n")[1]);
     }
 
@@ -126,16 +128,20 @@ class NativeBulkTransformationTest {
     }
 
     @Test
-    void nativeChainRestoresSnapshotVersionWithoutParsingSource() throws Exception {
+    void nativeChainCanRemoveAndRestoreVersionWithoutParsingSource() throws Exception {
         String config = """
             [
-              {"BulkVersioningTransformerProvider":{"versionType":"internal"}},
-              {"BulkVersioningTransformerProvider":{"versionType":"external_gte"}}
+              {"BulkVersioningTransformerProvider":{"versionType":"external"}},
+              {"BulkVersioningTransformerProvider":{"versionType":"internal"}}
             ]
             """;
         var document = document(SOURCE);
         try (var transformer = new TransformationLoader().getTransformerFactoryLoader(config)) {
             var operation = (IndexOp) send(transformer, document);
+            assertNull(operation.getOperation().getVersioning().getVersion());
+            assertNull(operation.getOperation().getVersioning().getVersionType());
+            new BulkVersioningTransformerProvider().createTransformer(Map.of("versionType", "external_gte"))
+                .transformOperations(List.of(operation));
             assertSame(document.source(), operation.getRawDocument());
             assertEquals(Long.MAX_VALUE, operation.getOperation().getVersioning().getVersion());
             assertEquals("external_gte", operation.getOperation().getVersioning().getVersionType().getValue());
@@ -149,17 +155,18 @@ class NativeBulkTransformationTest {
         String javascriptStage = """
             {"JsonJSTransformerProvider":{"initializationScript":
               "context => documents => documents.map(doc => { \
-                if (doc.operation.version !== '9223372036854775807') { \
+                if (doc.source_metadata._version !== '9223372036854775807' \
+                    || (doc.operation.version != null && doc.operation.version !== doc.source_metadata._version)) { \
                   throw new Error('The snapshot version must reach JavaScript as an exact decimal string'); \
                 } \
-                doc.document.seen = doc.operation.version_type; \
+                doc.document.seen = doc.operation.version_type || 'internal'; \
                 doc.operation.version = '9007199254740993'; return doc; })"}}
             """;
         String config = "[" + (nativeFirst ? nativeStage + "," + javascriptStage : javascriptStage + "," + nativeStage) + "]";
         try (var transformer = new TransformationLoader().getTransformerFactoryLoader(config)) {
             var operation = (IndexOp) send(transformer, document(SOURCE));
             assertNull(operation.getRawDocument(), "Mixed chains retain the existing JSON transformation path");
-            assertEquals(nativeFirst ? "external_gte" : "external", operation.getDocument().get("seen"));
+            assertEquals(nativeFirst ? "external_gte" : "internal", operation.getDocument().get("seen"));
             assertEquals(9007199254740993L, operation.getOperation().getVersioning().getVersion());
             assertEquals(Long.toString(Long.MAX_VALUE), operation.getSourceMetadata().get(Document.SOURCE_META_VERSION));
             assertEquals(Map.of("title", "source"), operation.getOriginalSource());
@@ -262,7 +269,7 @@ class NativeBulkTransformationTest {
     @Test
     void deletesDoNotInheritSnapshotVersionAndInternalModePreservesConcurrencyChecks() throws Exception {
         var deletion = new Document("d1", null, Document.Operation.DELETE,
-            Map.of(Document.HINT_VERSION, "7"), Map.of(Document.SOURCE_META_VERSION, "7"));
+            Map.of(), Map.of(Document.SOURCE_META_VERSION, "7"));
         var operation = send(configured("external_gte"), deletion);
         var metadata = (DeleteOperationMeta) operation.getOperation();
         assertNull(metadata.getVersioning());

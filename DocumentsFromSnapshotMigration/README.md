@@ -191,15 +191,18 @@ The migration will treat these conflicts as successful operations instead of rec
 
 ### Document versioning
 
-RFS always reads the Lucene `_version` for indexed documents. When a version and
-source ID are available, RFS includes that `version` and `version_type: "external"`
-in the bulk action by default. A document at version 7 in the snapshot is indexed
-at version 7 on the target. No extraction flag or transformation is needed; the
-default path still sends the original source bytes without parsing the body into
-a Map.
+RFS uses target-managed internal versioning by default. Bulk actions omit both
+`version` and `version_type`: a document at version 7 in the snapshot starts at
+version 1 on an empty target. Repeated writes replace the content and increment
+the target version, including when restoring an older snapshot.
 
-External versioning accepts only a version greater than the target's current
-version. Equal-version retries and attempts to replace newer target versions
+RFS always reads the Lucene `_version` for indexed documents and exposes it to
+transformations as `source_metadata._version`. Reading it does not enable external
+versioning. The default path sends the original source bytes without parsing the
+body into a Map.
+
+External versioning is opt-in and accepts only a version greater than the target's
+current version. Equal-version retries and attempts to replace newer target versions
 produce `version_conflict_engine_exception`. These follow the normal non-retryable
 document failure path, including failed-document records when configured.
 To explicitly treat conflicts as successful operations, use
@@ -208,15 +211,17 @@ mode automatically suppresses these failures.
 
 `version_type` is a per-request concurrency policy, not persistent document
 metadata. The snapshot's `_version` cannot reveal whether source writes used
-`internal`, `external`, or `external_gte`. RFS preserves the number regardless of
-how it was assigned. Ordinary ingestion after backfill continues to increment
-the target version: a normal write after version 7 becomes version 8.
+`internal`, `external`, or `external_gte`. When external versioning is enabled, RFS
+preserves the number regardless of how it was assigned. Ordinary ingestion after
+backfill continues to increment the target version: a normal write after a
+preserved version 7 becomes version 8.
 
-Documents without a snapshot version use internal versioning. When RFS uses
+The external modifier requires a snapshot version, a write version selected by an
+earlier transformation, or a configured application version field. When RFS uses
 server-generated IDs, it omits both the source ID and the explicit version.
 Delete operations do not inherit snapshot versions: a delta snapshot contains
-the previous document's version, not the deletion's version. External versioning
-requires index operations; transformations producing create-only operations
+the previous document's version, not the deletion's version. Snapshot version
+preservation applies to index operations; transformations producing create-only operations
 must remove the explicit version. The bundled data-stream backing-index
 transformation does this when it selects `op_type: "create"`.
 
@@ -225,33 +230,43 @@ The optional built-in Java modifier supports all three policies:
 | `versionType` | Behavior |
 |---|---|
 | `internal` | Remove `version` and `version_type`; the target assigns or increments its own version. |
-| `external` (default) | Retain the selected write version or use a configured source field; only higher versions overwrite. |
-| `external_gte` | Retain the selected write version or use a configured source field; equal or higher versions overwrite. |
+| `external` | Preserve the selected version; only higher versions overwrite. |
+| `external_gte` | Preserve the selected version; equal or higher versions overwrite. |
 
 #### Native Java versioning
 
-`BulkVersioningTransformerProvider` is bundled in the standard image. For
-equal-version replay, pass this inline startup argument:
+`BulkVersioningTransformerProvider` is bundled in the standard image. To opt into
+preserving snapshot versions with strict greater-than comparison, pass this inline
+startup argument:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external"}}]'
+```
+
+For equal-version replay, explicitly choose `external_gte`:
 
 ```shell
 --doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external_gte"}}]'
 ```
 
 This permits replacing different target content at the same version; older
-versions still fail unless conflicts are explicitly allowlisted. To use
-target-managed internal versions instead:
+versions still conflict. Allowlisting a conflict suppresses its failure record
+without applying the rejected write.
+
+No modifier is needed for the default internal behavior. To remove versioning
+added by an earlier transformation, use:
 
 ```shell
 --doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"internal"}}]'
 ```
 
-New target documents then start at version 1. Existing documents increment
-their current version; opting out does not reset existing counters. The modifier
+New target documents start at version 1. Existing documents increment
+their current version; internal mode does not reset existing counters. The modifier
 removes both `version` and `version_type`: OpenSearch rejects an explicit snapshot
-version with internal versioning, including when `version_type` is omitted.
+version with internal versioning in bulk index requests, including when `version_type` is omitted.
 Explicit `if_seq_no` and `if_primary_term` checks are preserved.
 
-Use this internal mode when rolling back to an older snapshot. Also use it for
+Keep the default internal mode when rolling back to an older snapshot and for
 experimental delta restores that can delete and reindex the same document ID.
 Delta comparison operates on Lucene segments, so updates or segment merges can
 produce such pairs. The target deletion advances the version, which can cause
@@ -259,9 +274,8 @@ the subsequent index operation to conflict under either external policy.
 Internal mode restores the content using target-managed versions. Allowlisting
 these conflicts does not restore a document whose index operation was rejected.
 
-Use `"external"` for strict greater-than versioning. Unknown version types are
-rejected. The modifier is not applied by default because the native RFS write
-path already preserves snapshot versions using `external`.
+Declaring the modifier without `versionType` selects `external`; the modifier
+itself is never applied by default. Unknown version types are rejected.
 
 In either external mode, changing `versionType` preserves the selected action
 version, including a value selected by an earlier transformation. If absent, it
@@ -292,14 +306,15 @@ range, including integer values above JavaScript's precision limit.
 Floating-point values and out-of-range strings such as `"92233720368547758070"`
 are rejected. Bulk requests always write the version as a JSON integer.
 
-Custom JSON transformations receive `operation.version` and the original
-`source_metadata._version` as decimal strings to preserve 64-bit precision.
-Keep these strings intact when using JavaScript; conversion to `Number` can
-lose precision. Source metadata is never emitted in bulk requests.
+Custom JSON transformations can read the original `source_metadata._version`.
+`operation.version` is present only after a transformation selects a write version.
+Both use decimal strings to preserve 64-bit precision. Keep these strings intact
+when using JavaScript; conversion to `Number` can lose precision. Source metadata
+is never emitted in bulk requests.
 
-At `Long.MAX_VALUE`, there is no higher valid version and an internal increment
-can overflow. For such documents, consider opting out when populating a new
-target if subsequent ingestion needs internal increments.
+When preserving `Long.MAX_VALUE`, there is no higher valid version and a subsequent
+internal increment can overflow. The default internal mode starts new target
+documents at version 1 regardless of the snapshot version.
 
 Version preservation does not order independent source and target write
 histories. An old snapshot document at version 100 can overwrite a newly
