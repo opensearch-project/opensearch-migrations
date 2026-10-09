@@ -22,6 +22,7 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -471,20 +472,34 @@ public abstract class OpenSearchClient {
     private BulkOperationSpec stripDocumentId(BulkOperationSpec original) {
         if (original instanceof IndexOp indexOp) {
             var metadata = indexOp.getOperation();
+            var versioning = metadata.getVersioning();
+            // Explicit versions require an ID. Keep unrelated concurrency checks
+            // intact so invalid custom combinations are still rejected by the target.
+            var unversioned = versioning != null
+                && (versioning.getIfSeqNo() != null || versioning.getIfPrimaryTerm() != null)
+                    ? VersionControlMetadata.builder()
+                        .ifSeqNo(versioning.getIfSeqNo())
+                        .ifPrimaryTerm(versioning.getIfPrimaryTerm())
+                        .build()
+                    : null;
             var newMetadata = IndexOperationMeta.builder()
                 .index(metadata.getIndex())
                 .type(metadata.getType())
                 .routing(metadata.getRouting())
                 .write(metadata.getWrite())
-                .versioning(metadata.getVersioning())
+                .versioning(unversioned)
                 .opType(metadata.getOpType())
                 .build();
             
             return IndexOp.builder()
                 .operation(newMetadata)
-                .document(original.getDocument())
+                .document(original.getRawDocument() == null ? original.getDocument() : null)
+                .rawDocument(original.getRawDocument())
                 .includeDocument(original.isIncludeDocument())
-                .originalSource(original.getOriginalSource())
+                .originalSource(original.getOriginalSourceBytes() == null ? original.getOriginalSource() : null)
+                .originalSourceBytes(original.getOriginalSourceBytes())
+                .sourceHints(original.getSourceHints())
+                .sourceMetadata(original.getSourceMetadata())
                 .build();
         }
         return original;

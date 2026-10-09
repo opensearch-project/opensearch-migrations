@@ -187,7 +187,148 @@ If a transformation causes exceptions on the target, either from existing docs o
   --allowed-doc-exception-types version_conflict_engine_exception"
 ```
 
-This will prevent the migration from retrying indefinitely when encountering documents that already exist on the target cluster. The migration will treat these conflicts as successful operations and proceed with the remaining documents.
+The migration will treat these conflicts as successful operations instead of recording them as non-retryable document failures.
+
+### Document versioning
+
+RFS uses target-managed internal versioning by default. Bulk actions omit both
+`version` and `version_type`: a document at version 7 in the snapshot starts at
+version 1 on an empty target. Repeated writes replace the content and increment
+the target version, including when restoring an older snapshot.
+
+RFS always reads the Lucene `_version` for indexed documents and exposes it to
+transformations as `source_metadata._version`. Reading it does not enable external
+versioning. The default path sends the original source bytes without parsing the
+body into a Map.
+
+External versioning is opt-in and accepts only a version greater than the target's
+current version. Equal-version retries and attempts to replace newer target versions
+produce `version_conflict_engine_exception`. These follow the normal non-retryable
+document failure path, including failed-document records when configured.
+To explicitly treat conflicts as successful operations, use
+`--allowed-doc-exception-types version_conflict_engine_exception`. No versioning
+mode automatically suppresses these failures.
+
+`version_type` is a per-request concurrency policy, not persistent document
+metadata. The snapshot's `_version` cannot reveal whether source writes used
+`internal`, `external`, or `external_gte`. When external versioning is enabled, RFS
+preserves the number regardless of how it was assigned. Ordinary ingestion after
+backfill continues to increment the target version: a normal write after a
+preserved version 7 becomes version 8.
+
+The external modifier requires a snapshot version, a write version selected by an
+earlier transformation, or a configured application version field. When RFS uses
+server-generated IDs, it omits both the source ID and the explicit version.
+Delete operations do not inherit snapshot versions: a delta snapshot contains
+the previous document's version, not the deletion's version. Snapshot version
+preservation applies to index operations; transformations producing create-only operations
+must remove the explicit version. The bundled data-stream backing-index
+transformation does this when it selects `op_type: "create"`.
+
+The optional built-in Java modifier supports all three policies:
+
+| `versionType` | Behavior |
+|---|---|
+| `internal` | Remove `version` and `version_type`; the target assigns or increments its own version. |
+| `external` | Preserve the selected version; only higher versions overwrite. |
+| `external_gte` | Preserve the selected version; equal or higher versions overwrite. |
+
+#### Native Java versioning
+
+`BulkVersioningTransformerProvider` is bundled in the standard image. To opt into
+preserving snapshot versions with strict greater-than comparison, pass this inline
+startup argument:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external"}}]'
+```
+
+For equal-version replay, explicitly choose `external_gte`:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external_gte"}}]'
+```
+
+This permits replacing different target content at the same version; older
+versions still conflict. Allowlisting a conflict suppresses its failure record
+without applying the rejected write.
+
+No modifier is needed for the default internal behavior. To remove versioning
+added by an earlier transformation, use:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"internal"}}]'
+```
+
+New target documents start at version 1. Existing documents increment
+their current version; internal mode does not reset existing counters. The modifier
+removes both `version` and `version_type`: OpenSearch rejects an explicit snapshot
+version with internal versioning in bulk index requests, including when `version_type` is omitted.
+Explicit `if_seq_no` and `if_primary_term` checks are preserved.
+
+Keep the default internal mode when rolling back to an older snapshot and for
+experimental delta restores that can delete and reindex the same document ID.
+Delta comparison operates on Lucene segments, so updates or segment merges can
+produce such pairs. The target deletion advances the version, which can cause
+the subsequent index operation to conflict under either external policy.
+Internal mode restores the content using target-managed versions. Allowlisting
+these conflicts does not restore a document whose index operation was rejected.
+
+Declaring the modifier without `versionType` selects `external`; the modifier
+itself is never applied by default. Unknown version types are rejected.
+
+In either external mode, changing `versionType` preserves the selected action
+version, including a value selected by an earlier transformation. If absent, it
+falls back to the original snapshot version, allowing internal mode to be followed
+by an external mode. Metadata changes do not parse document bodies. A chain composed entirely
+of native `BulkOperationTransformer` implementations retains the source bytes through
+metadata changes, serialization, and retries. Adding a JavaScript or other JSON
+transformer uses the existing JSON path, in the configured order.
+
+#### Application version fields
+
+In either external mode, the modifier can replace the selected write version with a
+field from `_source`:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external_gte","versionField":"ext_version"}}]'
+```
+
+A string names a literal field, including any dots in its name. For a nested
+field, use an array such as `"versionField": ["metadata", "revision"]`.
+Selecting an application field parses the body but preserves its contents.
+Missing or invalid values fail the transformation. `versionField` is ignored in
+internal mode.
+
+Versions must be integers or decimal strings from 0 through
+`9223372036854775807` (`Long.MAX_VALUE`). The Java provider preserves the full
+range, including integer values above JavaScript's precision limit.
+Floating-point values and out-of-range strings such as `"92233720368547758070"`
+are rejected. Bulk requests always write the version as a JSON integer.
+
+Custom JSON transformations can read the original `source_metadata._version`.
+`operation.version` is present only after a transformation selects a write version.
+Both use decimal strings to preserve 64-bit precision. Keep these strings intact
+when using JavaScript; conversion to `Number` can lose precision. Source metadata
+is never emitted in bulk requests.
+
+When preserving `Long.MAX_VALUE`, there is no higher valid version and a subsequent
+internal increment can overflow. The default internal mode starts new target
+documents at version 1 regardless of the snapshot version.
+
+Version preservation does not order independent source and target write
+histories. An old snapshot document at version 100 can overwrite a newly
+ingested target document at version 1. Plan backfill and live-ingestion ordering
+accordingly.
+
+The native provider has a JUnit end-to-end test under the normal `test` task.
+With Docker available, it creates a real OpenSearch snapshot and migrates it twice
+using `external_gte`, verifying exact versions and no failed-document records.
+The test is skipped when Docker is unavailable:
+
+```shell
+./gradlew :DocumentsFromSnapshotMigration:test --tests '*ExternalVersioningMigrationTest.nativeJavaTransformationReplaysSnapshot'
+```
 
 ### Supported Exception Types
 

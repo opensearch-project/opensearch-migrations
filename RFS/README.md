@@ -16,6 +16,64 @@ Several entrypoints are provided to handle different aspects of an overall clust
 
 It is recommended to refer to the respective README of the tool you want to use for more details about how to use them.
 
+## Native bulk transformations
+
+Java document providers can implement the functional interface
+[`BulkOperationTransformer`](src/main/java/org/opensearch/migrations/bulkload/transformers/BulkOperationTransformer.java)
+and return it through the existing `IJsonTransformerProvider` service interface.
+Its `transformOperations` method receives typed bulk metadata, source context, and
+unparsed document bodies. Versioning, metadata edits, filtering, and body changes
+use the same contract. `getSourceHints()` exposes every original `Document.hints()`
+entry, including keys unknown to the sink; `getSourceMetadata()` exposes arbitrary
+source metadata such as the snapshot's `_version`. Source adapters supply these
+values, and new keys require no changes to the transformation interface.
+
+For example, a source adapter can supply a `tenantRouting` hint and a Java
+transformation can use it to set routing for index writes:
+
+```java
+BulkOperationTransformer routeByTenant = operations -> {
+    for (var operation : operations) {
+        var hints = operation.getSourceHints();
+        if (operation instanceof IndexOp index && hints != null && hints.containsKey("tenantRouting")) {
+            index.getOperation().setRouting(hints.get("tenantRouting"));
+        }
+    }
+    return operations;
+};
+```
+
+Hints and source metadata are input context and are never emitted as bulk action
+fields. Use the typed operation setters to change outgoing metadata. Native
+conversion retains the existing hint and metadata maps by reference without
+parsing the body. JSON transformations receive the same context as `source_hints`
+and `source_metadata`.
+
+Register the provider with the existing Java service loader and select it with
+`--doc-transformer-config`. The loader returns a single configured transformer
+directly. RFS requests `getNativeStages(BulkOperationTransformer.class)` once when
+constructing the sink; the shared transformer interfaces handle composition.
+This capability query also supports other typed transformation contracts without
+depending on RFS or versioning.
+
+Metadata changes can edit `IndexOp` or `DeleteOp` directly without creating body
+Maps. Calling `operation.getDocument()` materializes a mutable Map and switches
+that operation to normal JSON serialization. To replace a body with already
+encoded JSON, use `setRawDocument(byte[])`; treat the original byte arrays as
+immutable. The original source is retained separately for failed-document records.
+To filter, reorder, or add operations, return a new list; operations themselves
+can be edited in place.
+
+All stages must be native to retain the raw path. Mixed Java/JavaScript chains
+use the existing JSON representation and preserve configuration order.
+`BulkOperationJsonAdapter` contains the JSON conversion; native execution bypasses
+it. Custom wrappers can expose a native contract through `getNativeStages` only
+when that contract preserves their full behavior.
+
+The built-in `BulkVersioningTransformerProvider` supports `internal`, `external`,
+and `external_gte`; see the
+[startup examples](../DocumentsFromSnapshotMigration/README.md#native-java-versioning).
+
 ## Benchmarking
 
 This library supports benchmarks via [Java Microbenchmark Harness or JMH](https://github.com/openjdk/jmh).  These are best to be used with A/B testing that does not involve any external systems, such as string parsers.  Run the command with `./gradlew RFS:jmh` after it has completed results will be available in {project.dir}/build/reports/jmh in addition to the human readable logs.
@@ -148,4 +206,3 @@ curl -u "elastic-admin:elastic-password" -X GET "http://localhost:9200/"
 ## How to run an ES 7.10 Source Cluster w/ an attached debugger
 
 The process is the same as for 6.8; see [that guide](#how-to-run-an-es-68-source-cluster-w-an-attached-debugger).
-

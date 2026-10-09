@@ -27,11 +27,24 @@ public class BulkOperationConverter {
      * Convert a {@link Document} to a {@link BulkOperationSpec} for the given index.
      */
     public static BulkOperationSpec fromDocument(Document doc, String indexName) {
+        return fromDocument(doc, indexName, false);
+    }
+
+    /** Build typed metadata for a native transformation, retaining the unparsed source. */
+    public static BulkOperationSpec fromRawDocument(Document doc, String indexName) {
+        return fromDocument(doc, indexName, true);
+    }
+
+    private static BulkOperationSpec fromDocument(Document doc, String indexName, boolean retainRawSource) {
         Map<String, Object> document;
         try {
-            document = doc.source() != null
-                ? OBJECT_MAPPER.readValue(doc.source(), new TypeReference<>() {})
-                : Map.of();
+            if (doc.source() == null) {
+                document = Map.of();
+            } else if (retainRawSource) {
+                document = null;
+            } else {
+                document = OBJECT_MAPPER.readValue(doc.source(), new TypeReference<>() {});
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -48,18 +61,35 @@ public class BulkOperationConverter {
                     .routing(routing)
                     .build())
                 .document(document)
+                .rawDocument(retainRawSource ? doc.source() : null)
                 .originalSource(document)
+                .originalSourceBytes(retainRawSource ? doc.source() : null)
+                .sourceHints(doc.hints())
+                .sourceMetadata(doc.sourceMetadata())
                 .build();
         }
         return IndexOp.builder()
-            .operation(IndexOperationMeta.builder()
-                .id(doc.id())
-                .index(indexName)
-                .type(type)
-                .routing(routing)
-                .build())
+            .operation(indexMetadata(doc, indexName, false))
             .document(document)
+            .rawDocument(retainRawSource ? doc.source() : null)
             .originalSource(document)
+            .originalSourceBytes(retainRawSource ? doc.source() : null)
+            .sourceHints(doc.hints())
+            .sourceMetadata(doc.sourceMetadata())
+            .build();
+    }
+
+    /**
+     * Build index action metadata without parsing the document body.
+     * Versioning is added only by an explicitly configured transformation.
+     */
+    public static IndexOperationMeta indexMetadata(Document doc, String indexName, boolean stripIds) {
+        String id = stripIds ? null : doc.id();
+        return IndexOperationMeta.builder()
+            .id(id)
+            .index(indexName)
+            .type(doc.hints().get(Document.HINT_TYPE))
+            .routing(doc.hints().get(Document.HINT_ROUTING))
             .build();
     }
 }

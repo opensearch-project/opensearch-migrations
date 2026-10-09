@@ -13,12 +13,10 @@ import java.util.Objects;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
-import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.SneakyThrows;
@@ -32,6 +30,8 @@ public final class BulkNdjson {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final JsonFactory JSON_FACTORY = new JsonFactory();
     private static final byte[] NEWLINE_BYTES = "\n".getBytes(StandardCharsets.UTF_8);
+    private static final int ESTIMATED_ACTION_BYTES = 256;
+    private static final int MAX_INITIAL_BUFFER_BYTES = 16 * 1024 * 1024;
 
     /**
      * Write a single operation to an output stream in NDJSON format.
@@ -41,9 +41,13 @@ public final class BulkNdjson {
      */
     @SneakyThrows
     public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
+        if (op.getRawDocument() != null) {
+            writeRawOperation(op.getOperationType().getValue(), op.getOperation(),
+                op.isIncludeDocument() ? op.getRawDocument() : null, out, mapper);
+            return;
+        }
         // action line: {"<op>": {...meta...}}
-        Map<String, Object> meta = mapper.convertValue(op.getOperation(), new TypeReference<>() {});
-        Map<String, Object> actionLine = Map.of(op.getOperationType().name().toLowerCase(), meta);
+        Map<String, Object> actionLine = Map.of(op.getOperationType().getValue(), op.getOperation());
 
         out.write(mapper.writeValueAsBytes(actionLine));
 
@@ -61,8 +65,9 @@ public final class BulkNdjson {
     @SneakyThrows
     public static void writeRawOperation(String operationType, BaseOperationMeta meta,
                                          byte[] rawSource, OutputStream out, ObjectMapper mapper) {
-        Map<String, Object> metaMap = mapper.convertValue(meta, new TypeReference<>() {});
-        Map<String, Object> actionLine = Map.of(operationType, metaMap);
+        // Jackson already serializes the metadata's unwrapped fields. Avoid a
+        // metadata -> Map -> JSON round trip on every document, including raw writes.
+        Map<String, Object> actionLine = Map.of(operationType, meta);
         out.write(mapper.writeValueAsBytes(actionLine));
 
         if (rawSource != null && rawSource.length > 0) {
@@ -101,15 +106,20 @@ public final class BulkNdjson {
         List<? extends Document> docs,
         String indexName, boolean stripIds, ObjectMapper mapper
     ) {
-        try (var baos = new ByteArrayOutputStream()) {
+        long sourceBytes = docs.stream()
+            .mapToLong(doc -> doc.operation() == Document.Operation.DELETE ? 0 : doc.sourceLength())
+            .sum();
+        try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, docs.size()))) {
             for (var doc : docs) {
-                String opType = doc.operation() == Document.Operation.DELETE ? "delete" : "index";
+                boolean isDelete = doc.operation() == Document.Operation.DELETE;
+                String opType = isDelete ? "delete" : "index";
                 String docId = stripIds ? null : doc.id();
                 String routing = doc.hints().get(Document.HINT_ROUTING);
-                var meta = doc.operation() == Document.Operation.DELETE
+                var meta = isDelete
                     ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(routing).build()
-                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(routing).build();
-                writeRawOperation(opType, meta, doc.source(), baos, mapper);
+                    : BulkOperationConverter.indexMetadata(doc, indexName, stripIds);
+                // Delta deletions retain the old source for diagnostics, but bulk deletes have no payload.
+                writeRawOperation(opType, meta, isDelete ? null : doc.source(), baos, mapper);
                 baos.write(NEWLINE_BYTES);
             }
             return baos.toByteArray();
@@ -137,12 +147,22 @@ public final class BulkNdjson {
      * Avoids the byte[]→Map→byte[] round-trip for document bodies.
      */
     public static byte[] toBulkNdjsonBytes(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
-        try (var baos = new ByteArrayOutputStream()) {
+        long sourceBytes = ops.stream()
+            .mapToLong(op -> op.isIncludeDocument() && op.getRawDocument() != null ? op.getRawDocument().length : 0)
+            .sum();
+        try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, ops.size()))) {
             writeAll(ops, baos, mapper);
             return baos.toByteArray();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static int initialBufferSize(long sourceBytes, int operationCount) {
+        // Source lengths are already known on the raw path. Reserve room for them
+        // and typical action lines to avoid repeatedly copying multi-megabyte bodies
+        // as the buffer grows. This is an allocation estimate, not a request-size limit.
+        return (int) Math.min(MAX_INITIAL_BUFFER_BYTES, sourceBytes + (long) ESTIMATED_ACTION_BYTES * operationCount);
     }
 
     /**

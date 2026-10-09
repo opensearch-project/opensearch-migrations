@@ -115,6 +115,7 @@ public class LuceneDocumentsReaderTest {
         StepVerifier.create(documents).expectNextMatches(doc -> {
             String expectedId = "complexdoc";
             String actualId = doc.id;
+            Assertions.assertTrue(doc.version >= 2L);
 
             String expectedType = null;
             String actualType = doc.type;
@@ -126,6 +127,7 @@ public class LuceneDocumentsReaderTest {
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
             String actualId = doc.id;
+            Assertions.assertTrue(doc.version >= 2L);
 
             String expectedType = null;
             String actualType = doc.type;
@@ -138,6 +140,7 @@ public class LuceneDocumentsReaderTest {
         }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
             String actualId = doc.id;
+            assertEquals(1L, doc.version);
 
             String expectedType = null;
             String actualType = doc.type;
@@ -181,6 +184,7 @@ public class LuceneDocumentsReaderTest {
         StepVerifier.create(documents).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
             String actualId = doc.id;
+            assertEquals(1L, doc.version);
 
             String expectedType = "type2";
             String actualType = doc.type;
@@ -192,6 +196,7 @@ public class LuceneDocumentsReaderTest {
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
             String actualId = doc.id;
+            Assertions.assertTrue(doc.version >= 2L);
 
             String expectedType = "type2";
             String actualType = doc.type;
@@ -204,6 +209,7 @@ public class LuceneDocumentsReaderTest {
         }).expectNextMatches(doc -> {
             String expectedId = "complexdoc";
             String actualId = doc.id;
+            Assertions.assertTrue(doc.version >= 2L);
 
              String expectedType = "type1";
              String actualType = doc.type;
