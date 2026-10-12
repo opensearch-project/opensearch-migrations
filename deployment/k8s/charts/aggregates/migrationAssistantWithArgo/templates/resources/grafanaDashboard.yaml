@@ -14,7 +14,7 @@ data:
       "tags": ["capture", "replay", "kubernetes"],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 2,
+      "version": 3,
       "refresh": "15s",
       "time": {"from": "now-6h", "to": "now"},
       "panels": [
@@ -150,13 +150,18 @@ data:
         {
           "type": "timeseries",
           "title": "Source-to-target replay lag",
-          "description": "Windowed mean age, in seconds, when a source request is sent to the replay target. It uses rates of the histogram sum and count, not a lifetime cumulative average.",
+          "description": "Windowed mean age, in seconds, when a source request is sent to the replay target. It uses rates of the histogram sum and count, not a lifetime cumulative average. The selected catch-up floor is shown for reference.",
           "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
             {
               "refId": "A",
               "expr": "sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval])) / 1000",
               "legendFormat": "lag seconds"
+            },
+            {
+              "refId": "B",
+              "expr": "vector(${catchup_floor_seconds:raw})",
+              "legendFormat": "selected floor (${catchup_floor_seconds:text})"
             }
           ],
           "fieldConfig": {"defaults": {"unit": "s", "min": 0}},
@@ -179,14 +184,14 @@ data:
         },
         {
           "type": "stat",
-          "title": "Estimated catch-up time",
-          "description": "Estimated hours to eliminate current source-to-target lag at the recent 15-minute lag-reduction rate. The panel intentionally has no value when lag is flat or growing, when the reduction rate is zero, or when no lag samples exist.",
+          "title": "Estimated catch-up time to ${catchup_floor_seconds:text}",
+          "description": "Estimated hours for the recently observed mean source-to-target replay lag to reach the selected floor, using the recent 15-minute lag-reduction rate. This is not authoritative Kafka backlog drain time. The panel intentionally has no value when lag is at or below the floor, when lag is not decreasing by more than 0.01 seconds per second, or when lag history is insufficient.",
           "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
             {
               "refId": "A",
-              "expr": "(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000 / 3600) / (-deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]))) and on() (deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]) < 0)",
-              "legendFormat": "catch-up hours",
+              "expr": "(((((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000) - ${catchup_floor_seconds:raw}) / 3600) / (-deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]))) and on() (((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000) > ${catchup_floor_seconds:raw}) and on() (deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]) < -0.01)",
+              "legendFormat": "catch-up to ${catchup_floor_seconds:text}",
               "instant": true
             }
           ],
@@ -195,14 +200,14 @@ data:
         },
         {
           "type": "timeseries",
-          "title": "Historical catch-up estimate",
-          "description": "Historical version of the catch-up estimate. Gaps are intentional whenever effective speedup is at or below real time or lag samples are unavailable.",
+          "title": "Historical catch-up estimate to ${catchup_floor_seconds:text}",
+          "description": "Historical estimate of the hours needed for the recently observed mean source-to-target replay lag to reach the selected floor at the recent 15-minute lag-reduction rate. This is not authoritative Kafka backlog drain time. Gaps are intentional when lag is at or below the floor, the reduction rate is not greater than 0.01 seconds per second, or lag history is insufficient.",
           "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
             {
               "refId": "A",
-              "expr": "(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000 / 3600) / (-deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]))) and on() (deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]) < 0)",
-              "legendFormat": "catch-up hours"
+              "expr": "(((((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000) - ${catchup_floor_seconds:raw}) / 3600) / (-deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]))) and on() (((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000) > ${catchup_floor_seconds:raw}) and on() (deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]) < -0.01)",
+              "legendFormat": "catch-up to ${catchup_floor_seconds:text}"
             }
           ],
           "fieldConfig": {"defaults": {"unit": "h", "min": 0}},
@@ -255,26 +260,73 @@ data:
         {
           "type": "timeseries",
           "title": "Capture publishing throughput",
+          "description": "Records and bytes accepted at the Kafka producer boundary, with terminal publication completions. Acknowledged completions should track accepted records; failures should remain zero.",
           "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
             {"refId": "A", "expr": "sum(rate(capturePublishingRecordsAccepted_records_total[$__rate_interval]))", "legendFormat": "records/s"},
-            {"refId": "B", "expr": "sum(rate(capturePublishingBytesAccepted_bytes_total[$__rate_interval]))", "legendFormat": "bytes/s"}
+            {"refId": "B", "expr": "sum(rate(capturePublishingBytesAccepted_bytes_total[$__rate_interval]))", "legendFormat": "bytes/s"},
+            {"refId": "C", "expr": "sum(rate(capturePublishingCompletions_records_total{outcome=\"acknowledged\"}[$__rate_interval]))", "legendFormat": "acknowledged/s"},
+            {"refId": "D", "expr": "sum(rate(capturePublishingCompletions_records_total{outcome=\"failed\"}[$__rate_interval]))", "legendFormat": "failed/s"}
           ],
-          "fieldConfig": {"defaults": {"min": 0}},
+          "fieldConfig": {
+            "defaults": {"min": 0},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "bytes/s"},
+                "properties": [
+                  {"id": "unit", "value": "Bps"},
+                  {"id": "custom.axisPlacement", "value": "right"}
+                ]
+              }
+            ]
+          },
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 57}
         },
         {
           "type": "timeseries",
-          "title": "Capture backlog and writers",
+          "title": "Capture Kafka backlog, connections, and writers",
+          "description": "Records and payload bytes accepted by the producer but not yet acknowledged by Kafka, correlated with active proxy connections and writer routing state.",
           "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
             {"refId": "A", "expr": "sum(capturePublishingRecordsAwaitingAcknowledgement_records)", "legendFormat": "records awaiting ack"},
-            {"refId": "B", "expr": "sum(captureWritersActive_writers)", "legendFormat": "active writers"},
-            {"refId": "C", "expr": "sum(captureWritersDraining_writers)", "legendFormat": "draining writers"},
-            {"refId": "D", "expr": "sum(captureConnectionsActive_connections)", "legendFormat": "active connections"}
+            {"refId": "B", "expr": "sum(capturePublishingBytesAwaitingAcknowledgement_bytes)", "legendFormat": "bytes awaiting ack"},
+            {"refId": "C", "expr": "sum(captureWritersActive_writers)", "legendFormat": "active writers"},
+            {"refId": "D", "expr": "sum(captureWritersDraining_writers)", "legendFormat": "draining writers"},
+            {"refId": "E", "expr": "sum(captureConnectionsActive_connections)", "legendFormat": "active connections"}
           ],
-          "fieldConfig": {"defaults": {"min": 0}},
+          "fieldConfig": {
+            "defaults": {"min": 0},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "bytes awaiting ack"},
+                "properties": [
+                  {"id": "unit", "value": "bytes"},
+                  {"id": "custom.axisPlacement", "value": "right"}
+                ]
+              }
+            ]
+          },
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 57}
+        },
+        {
+          "type": "timeseries",
+          "title": "Capture proxy working-set memory",
+          "description": "Fleet total and hottest-pod working-set memory for capture proxy containers. Correlate this panel with active connections and Kafka-awaiting bytes; connection-local TrafficStream buffer capacity is not yet exported directly.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "fleet total"
+            },
+            {
+              "refId": "B",
+              "expr": "max(sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "hottest pod"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}},
+          "gridPos": {"h": 5, "w": 12, "x": 0, "y": 65}
         },
         {
           "type": "stat",
@@ -288,7 +340,7 @@ data:
             {"refId": "D", "expr": "sum(captureGapActive_processes)", "legendFormat": "capture gap active"}
           ],
           "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}},
-          "gridPos": {"h": 5, "w": 24, "x": 0, "y": 65}
+          "gridPos": {"h": 5, "w": 12, "x": 12, "y": 65}
         },
         {
           "type": "row",
@@ -421,6 +473,73 @@ data:
           ],
           "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}},
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 106}
+        },
+        {
+          "type": "row",
+          "title": "Capture proxy saturation and load distribution",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 114},
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Capture requests and active connections by proxy",
+          "description": "Per-proxy parsed request rate and active frontside connections for currently ready pods. A newly ready pod with little traffic joined after long-lived NLB flows were assigned; a pod with many connections but little request completion is overloaded or slow to drain. Compare with proxy CPU. The NLB balances TCP flows, not HTTP request rate.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "label_replace(sum by (exported_instance) (rate(fullRequest_count_total[$__rate_interval])), \"pod\", \"$1\", \"exported_instance\", \"([^_]+)_.*\") and on (pod) (kube_pod_status_ready{namespace=\"$namespace\",condition=\"true\"} == 1)",
+              "legendFormat": "\u007b\u007bpod\u007d\u007d requests/s"
+            },
+            {
+              "refId": "B",
+              "expr": "label_replace(sum by (exported_instance) (activeConnection_count), \"pod\", \"$1\", \"exported_instance\", \"([^_]+)_.*\") and on (pod) (kube_pod_status_ready{namespace=\"$namespace\",condition=\"true\"} == 1)",
+              "legendFormat": "\u007b\u007bpod\u007d\u007d connections"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"min": 0},
+            "overrides": [
+              {
+                "matcher": {"id": "byRegexp", "options": "/ connections$/"},
+                "properties": [
+                  {"id": "unit", "value": "short"},
+                  {"id": "custom.axisPlacement", "value": "right"}
+                ]
+              },
+              {
+                "matcher": {"id": "byRegexp", "options": "/ requests\\/s$/"},
+                "properties": [
+                  {"id": "unit", "value": "reqps"}
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "gridPos": {"h": 9, "w": 12, "x": 0, "y": 115}
+        },
+        {
+          "type": "timeseries",
+          "title": "Capture proxy CPU utilization by pod",
+          "description": "CPU cores used by each capture-proxy pod. A fleet whose pods flatten near one core despite higher CPU limits is consistent with a single-worker-thread bottleneck.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}[$__rate_interval])) and on (pod) (kube_pod_status_ready{namespace=\"$namespace\",condition=\"true\"} == 1)",
+              "legendFormat": "\u007b\u007bpod\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "cores", "min": 0}},
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "gridPos": {"h": 9, "w": 12, "x": 12, "y": 115}
         }
       ],
       "templating": {
@@ -430,6 +549,20 @@ data:
             "type": "datasource",
             "query": "prometheus",
             "current": {}
+          },
+          {
+            "name": "catchup_floor_seconds",
+            "type": "custom",
+            "label": "Catch-up lag floor",
+            "query": "1 second : 1,5 seconds : 5,1 minute : 60",
+            "current": {"selected": true, "text": "5 seconds", "value": "5"},
+            "options": [
+              {"selected": false, "text": "1 second", "value": "1"},
+              {"selected": true, "text": "5 seconds", "value": "5"},
+              {"selected": false, "text": "1 minute", "value": "60"}
+            ],
+            "includeAll": false,
+            "multi": false
           },
           {
             "name": "namespace",

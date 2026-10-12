@@ -134,7 +134,7 @@ metrics:
         namespace: 'OpenSearchMigrations'
         dimension_rollup_option: NoDimensionRollup
         metric_declarations:
-          - dimensions: [[container, namespace]]
+          - dimensions: [[container, namespace], [container, namespace, pod]]
             metric_name_selectors:
               - container_cpu_usage_seconds_total
               - container_memory_working_set_bytes

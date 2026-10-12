@@ -237,6 +237,14 @@ class RequestReplayOwnerTest {
                 "response_attempts=5",
                 "maximum_response_retries=4"
             ));
+            Assertions.assertEquals(
+                1,
+                logs.count("target_retries_exhausted", org.apache.logging.log4j.Level.DEBUG)
+            );
+            Assertions.assertEquals(
+                0,
+                logs.count("target_retries_exhausted", org.apache.logging.log4j.Level.WARN)
+            );
             Assertions.assertTrue(logs.contains(
                 "target_attempt_started",
                 "request=",

@@ -166,6 +166,14 @@ class TargetConnectionOwnerFirstWriteTest {
                 "kind=transport_failure",
                 "completed_attempts=1"
             ));
+            Assertions.assertEquals(
+                5,
+                logs.count("target_response_unavailable", org.apache.logging.log4j.Level.DEBUG)
+            );
+            Assertions.assertEquals(
+                0,
+                logs.count("target_response_unavailable", org.apache.logging.log4j.Level.WARN)
+            );
 
             var cancellation = new java.util.concurrent.CancellationException("cancel retry loop");
             fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(

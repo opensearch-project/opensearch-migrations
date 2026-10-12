@@ -33,9 +33,13 @@ combined accidentally. Other metric backends may expose different suffixes.
 
 The dashboard's replay-progress panels use the windowed mean of
 `lagBetweenSourceAndTargetRequests` and the recent derivative of that mean. The
-catch-up estimate is shown only while lag is decreasing; no value is displayed
-when effective speedup is at or below real time or when the interval has no lag
-samples. Broker consumer-group lag remains a separate CLI-derived signal.
+operator-selectable catch-up floor defaults to five seconds, with one-second and
+one-minute alternatives. The estimate projects when the recently observed mean
+replay lag will reach that floor; it is not authoritative Kafka backlog drain
+time. It is shown only while lag is above the floor and decreasing by more than
+0.01 seconds per second. No value is displayed for below-floor, non-converging,
+or insufficient-history cases. Broker consumer-group lag remains a separate
+CLI-derived signal.
 
 ### Capture
 

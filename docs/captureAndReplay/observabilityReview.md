@@ -62,7 +62,7 @@ and no-alert policy hardening.
 | O-5 | Remediated | `targetAttemptsWithoutResponse` has bounded `noResponseKind`; `targetRetriesExhausted` is separate. Owner behavior emits structured events. Covered by `TargetExecutionMetricsTest` and `RequestReplayOwnerTest`. |
 | O-6 | Remediated | Capture publishing, routing, heartbeat, write-gate and terminal state have metrics and bounded events. Covered by `CaptureKafkaPublisherTest`, membership tests and `CaptureProcessMetricsTest`. |
 | O-7 | Remediated | Capture connection drops include connection identity and bounded reason metrics/events. Covered by `ConditionallyReliableLoggingHttpHandlerTest`. |
-| O-8 | Remediated | Grafana, CloudWatch, the Kubernetes README and gameday helper expose the production signals. `verifyCaptureReplayObservability` rejects stale names. |
+| O-8 | Remediated | Grafana, CloudWatch, the Kubernetes README and gameday helper expose the production signals. `verifyCaptureReplayObservability` smoke-tests that Helm installs the Grafana dashboard and ACK Dashboard resources. |
 | O-9 | Remediated | Named global and by-activity trackers feed separate collectors and one reporter; owner and immutable Kafka diagnostics remain supplemental. Exact membership now uses `startTimeNano, contextId`, with thread-local ID blocks. Covered by `ActiveContextMonitorTest`, `ActiveContextTrackerTest` and `ContextIdAllocatorTest`. |
 | O-10 | Remediated; live gameday pending | Production owners emit bounded `event=<name> key=value` narratives and behavior tests assert critical log and metric effects. The gameday helper has an executable self-test; Kubernetes fault-injection validation remains the release exercise. |
 
@@ -828,8 +828,9 @@ Execution checkpoint (2026-10-06): upstream commit `a5705abb8` landed the
 `service.instance.id` metric-resource change and was incorporated through merge
 commit `a3275f79a` before telemetry wiring changed. The EKS application-metric
 pipeline removes `service.instance.id` before `resource_to_telemetry_conversion`;
-`deployment/k8s:verifyCaptureReplayObservability` now enforces that fleet-cardinality
-safeguard and the traces-disabled Kubernetes default.
+The console OTel pipeline test enforces that fleet-cardinality safeguard.
+`deployment/k8s:verifyCaptureReplayObservability` separately smoke-tests the rendered
+Grafana and ACK Dashboard installation paths.
 
 #### Mainline integration checkpoint
 
@@ -1010,12 +1011,15 @@ aggregate instruments. Those identities belong in logs.
 - `replay_oldest_record`
 - `replay_stall_detected`
 - `capture_protocol_violation`
-- `source_connection_expired`
-- `target_response_unavailable`
-- `target_retries_exhausted`
 - `tuple_durability_degraded`
 - `replayer_fatal_failure`
 - `replayer_shutdown_summary`
+
+Per-request `target_response_unavailable`, `target_retries_exhausted`, and
+per-expiration `source_connection_expired` events are DEBUG because their volume
+can grow with workload failures; bounded counters are the operational fleet-wide
+signals. Post-response-boundary observations are DEBUG when bytes are present and
+TRACE when they are zero-byte lifecycle evidence.
 
 `replay_health` should be periodic and bounded. Include total contexts, counts by
 activity, globally oldest age, oldest age/over-threshold count by activity, oldest

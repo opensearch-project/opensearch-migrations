@@ -7,6 +7,8 @@ metadata:
   namespace: {{ .root.Release.Namespace }}
   annotations:
     services.k8s.aws/deletion-policy: {{ $deletionPolicy }}
+    services.k8s.aws/adoption-policy: adopt-or-create
+    services.k8s.aws/adoption-fields: {{ dict "dashboardName" (printf "MA-%s-%s-CaptureReplay" .stage .region) | toJson | quote }}
 spec:
   dashboardName: "MA-{{ .stage }}-{{ .region }}-CaptureReplay"
   dashboardBody: {{ .root.Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | trim | toJson }}
@@ -18,6 +20,8 @@ metadata:
   namespace: {{ .root.Release.Namespace }}
   annotations:
     services.k8s.aws/deletion-policy: {{ $deletionPolicy }}
+    services.k8s.aws/adoption-policy: adopt-or-create
+    services.k8s.aws/adoption-fields: {{ dict "dashboardName" (printf "MA-%s-%s-ReindexFromSnapshot" .stage .region) | toJson | quote }}
 spec:
   dashboardName: "MA-{{ .stage }}-{{ .region }}-ReindexFromSnapshot"
   dashboardBody: {{ .root.Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-account-id" .account | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | trim | toJson }}

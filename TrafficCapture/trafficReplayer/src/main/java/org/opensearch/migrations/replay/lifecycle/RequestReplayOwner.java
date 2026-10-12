@@ -1014,7 +1014,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         switch (outcome) {
             case TargetAttemptOutcome.NoTargetResponseObtained<R> noResponse -> {
                 metrics.targetAttemptWithoutResponse(noResponse.diagnostic().kind());
-                log.atWarn()
+                log.atDebug()
                     .setMessage(
                         "event=target_response_unavailable request={} kind={} completed_attempts={}"
                     )
@@ -1103,7 +1103,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             case RetryDecision.RetryRequired ignored -> {
                 if (responseAttemptCount() > maximumResponseRetries) {
                     metrics.targetRetriesExhausted();
-                    log.atWarn()
+                    log.atDebug()
                         .setMessage(
                             "event=target_retries_exhausted request={} response_attempts={} "
                                 + "maximum_response_retries={}"

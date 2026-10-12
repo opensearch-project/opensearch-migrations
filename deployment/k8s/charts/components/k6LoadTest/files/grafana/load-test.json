@@ -93,6 +93,32 @@
         "type": "custom",
         "multi": false,
         "includeAll": false
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(container_cpu_usage_seconds_total{container=\"proxy\"}, namespace)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Namespace",
+        "multi": false,
+        "name": "namespace",
+        "options": [],
+        "query": {
+          "query": "label_values(container_cpu_usage_seconds_total{container=\"proxy\"}, namespace)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query",
+        "current": {
+          "selected": true,
+          "text": "ma",
+          "value": "ma"
+        }
       }
     ]
   },
@@ -747,8 +773,8 @@
     {
       "id": 14,
       "type": "timeseries",
-      "title": "Request Rate: k6 sent vs proxy captured",
-      "description": "Compare k6 outbound request rate with requests actually captured by the proxy. A gap indicates drops.",
+      "title": "Offered, completed, and captured request rate",
+      "description": "Scheduled arrivals are completed iterations plus arrivals k6 could not start. HTTP attempts include retries; proxy parsed requests are the application-side completion boundary. A sustained dropped-arrival rate means the configured load is not reaching the proxy.",
       "gridPos": {
         "x": 0,
         "y": 39,
@@ -765,8 +791,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_reqs_total[1m]))",
-          "legendFormat": "k6 sent (req/s)",
+          "expr": "sum(rate(iterations_total{scenario=~\"$scenario\"}[1m])) + sum(rate(dropped_iterations_total{scenario=~\"$scenario\"}[1m]))",
+          "legendFormat": "scheduled arrivals",
           "refId": "A"
         },
         {
@@ -774,9 +800,36 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(fullRequest_count_total{exported_job=\"capture\"}[1m]))",
-          "legendFormat": "proxy captured (req/s)",
+          "expr": "sum(rate(iterations_total{scenario=~\"$scenario\"}[1m]))",
+          "legendFormat": "completed iterations",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(http_reqs_total{scenario=~\"$scenario\"}[1m]))",
+          "legendFormat": "HTTP attempts",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(fullRequest_count_total{exported_job=\"capture\"}[1m]))",
+          "legendFormat": "proxy parsed requests",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(dropped_iterations_total{scenario=~\"$scenario\"}[1m]))",
+          "legendFormat": "dropped arrivals",
+          "refId": "E"
         }
       ],
       "options": {
@@ -1074,6 +1127,295 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Load-generation and proxy bottlenecks",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "k6 failures by transport error",
+      "description": "Status-zero HTTP attempts are transport failures before an HTTP response. This separates request timeouts, EOFs, and other connection failures from valid HTTP error responses.",
+      "gridPos": {
+        "x": 0,
+        "y": 65,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (error) (rate(http_reqs_total{scenario=~\"$scenario\",status=\"0\"}[1m]))",
+          "legendFormat": "{{error}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "k6 request latency stages (p95)",
+      "description": "Separates time waiting for the proxy/source response from client-side blocking, TCP connect, and TLS handshake time. A high waiting series points downstream; high blocked or TLS series points to connection churn or load-generator pressure.",
+      "gridPos": {
+        "x": 12,
+        "y": 65,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_req_waiting_milliseconds_bucket{scenario=~\"$scenario\"}[1m])))",
+          "legendFormat": "waiting for response",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_req_blocked_milliseconds_bucket{scenario=~\"$scenario\"}[1m])))",
+          "legendFormat": "blocked",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_req_connecting_milliseconds_bucket{scenario=~\"$scenario\"}[1m])))",
+          "legendFormat": "TCP connect",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_req_tls_handshaking_milliseconds_bucket{scenario=~\"$scenario\"}[1m])))",
+          "legendFormat": "TLS handshake",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Proxy request and connection skew by pod",
+      "description": "Per-proxy parsed request rate and active frontside connections for currently ready pods. A newly ready pod with little traffic joined after long-lived NLB flows were assigned; a pod with many connections but little request completion is overloaded or slow to drain. Compare with proxy CPU. The NLB balances TCP flows, not HTTP request rate.",
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "label_replace(sum by (exported_instance) (rate(fullRequest_count_total{exported_job=\"capture\"}[1m])), \"pod\", \"$1\", \"exported_instance\", \"([^_]+)_.*\") and on (pod) (kube_pod_status_ready{namespace=\"$namespace\",condition=\"true\"} == 1)",
+          "legendFormat": "{{pod}} requests/s",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "label_replace(sum by (exported_instance) (activeConnection_count{exported_job=\"capture\"}), \"pod\", \"$1\", \"exported_instance\", \"([^_]+)_.*\") and on (pod) (kube_pod_status_ready{namespace=\"$namespace\",condition=\"true\"} == 1)",
+          "legendFormat": "{{pod}} connections",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/ connections$/"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/ requests\\/s$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "reqps"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Capture proxy CPU by pod",
+      "description": "CPU cores consumed by each proxy pod. A flat ceiling near one core while higher CPU is allocated indicates a single-worker-thread bottleneck.",
+      "gridPos": {
+        "x": 12,
+        "y": 73,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}[1m])) and on (pod) (kube_pod_status_ready{namespace=\"$namespace\",condition=\"true\"} == 1)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0,
             "showPoints": "never"
           }
         },

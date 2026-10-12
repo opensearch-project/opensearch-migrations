@@ -784,6 +784,12 @@ charts:
         service:
           type: ClusterIP
           port: 9090
+      # The OTel DaemonSet already scrapes each node's cAdvisor endpoint and
+      # exposes those metrics to Prometheus as well as CloudWatch. Avoid a
+      # second, direct kubelet cAdvisor scrape of the same container series.
+      kubelet:
+        serviceMonitor:
+          cAdvisor: false
       alertmanager:
         enabled: false
       nodeExporter:
