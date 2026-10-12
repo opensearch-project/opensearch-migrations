@@ -242,6 +242,8 @@ public class LuceneDocumentsReaderTest {
         for (int i = 0; i < numSegments; i++) {
             var context = mock(LuceneLeafReaderContext.class);
             var leafReader = mock(LuceneLeafReader.class);
+            when(leafReader.openNumericValueReader("_version")).thenReturn(docId -> null);
+            when(leafReader.openDocumentReader()).thenCallRealMethod();
             when(context.reader()).thenAnswer(invocation -> leafReader);
             var segmentName = "__" + i;
             when(leafReader.getSegmentName()).thenReturn(segmentName);

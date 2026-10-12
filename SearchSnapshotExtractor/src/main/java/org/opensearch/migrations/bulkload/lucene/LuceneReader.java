@@ -135,6 +135,13 @@ public class LuceneReader {
     public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 Path indexDirectoryPath, DocumentChangeType operation,
                                                 FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return Flux.defer(() -> readDocsFromSegmentSubscription(readerAndBase, docStartingId,
+            indexDirectoryPath, operation, mappingContext, useRecoverySource));
+    }
+
+    private static Flux<LuceneDocumentChange> readDocsFromSegmentSubscription(ReaderAndBase readerAndBase,
+            int docStartingId, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, boolean useRecoverySource) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -170,10 +177,16 @@ public class LuceneReader {
         // sourceless to honor the cursor's monotonic-docId contract. For stored-source
         // (non-sourceless) reads the cursor is unused, so we keep the parallel fast path.
         int innerConcurrency = (mappingContext != null) ? 1 : SEGMENT_READ_CONCURRENCY;
+        var versions = operation == DocumentChangeType.INDEX ? new OrderedVersionReader(segmentReader) : null;
+        var storedFields = new SegmentDocumentReader(segmentReader);
         return Flux.fromStream(idxStream.boxed())
-            .flatMapSequential(docIdx -> Mono.defer(() -> {
+            .flatMapSequential(docIdx -> {
+                Object version = versions == null ? null : versions.read(docIdx);
+                return Mono.defer(() -> {
                     try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource);
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
+                            getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex,
+                            useRecoverySource, version, true, storedFields);
                         return Mono.justOrEmpty(document);
                     } catch (Exception e) {
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
@@ -184,8 +197,33 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), innerConcurrency, 1)
-            .doFinally(sig -> termIndex.close());
+                }).subscribeOn(LUCENE_IO_SCHEDULER);
+            }, innerConcurrency, 1)
+            .doFinally(sig -> {
+                storedFields.close();
+                termIndex.close();
+            });
+    }
+
+    private static final class OrderedVersionReader {
+        private final LuceneLeafReader reader;
+        private LuceneLeafReader.NumericValueReader values;
+
+        private OrderedVersionReader(LuceneLeafReader reader) {
+            this.reader = reader;
+        }
+
+        private Object read(int docId) {
+            try {
+                if (values == null) {
+                    values = reader.openNumericValueReader("_version");
+                }
+                return values.get(docId);
+            } catch (IOException | RuntimeException e) {
+                values = null;
+                return e;
+            }
+        }
     }
 
     /**
@@ -221,9 +259,17 @@ public class LuceneReader {
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
             final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
             FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource) {
+        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath,
+            operation, mappingContext, termIndex, useRecoverySource, null, false, null);
+    }
+
+    private static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
+            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource,
+            Object preloadedVersion, boolean versionPreloaded, LuceneLeafReader.DocumentReader storedFields) {
         LuceneDocument document;
         try {
-            document = reader.document(luceneDocId);
+            document = storedFields == null ? reader.document(luceneDocId) : storedFields.document(luceneDocId);
         } catch (IOException e) {
             log.atError().setCause(e).setMessage("Failed to read document at Lucene index location {}")
                 .addArgument(luceneDocId).log();
@@ -307,7 +353,17 @@ public class LuceneReader {
         // _version is a numeric doc value, not a stored field returned by document().
         // Read it outside the catch above so an I/O failure fails the work item
         // instead of silently dropping the document.
-        Long version = operation == DocumentChangeType.INDEX ? readVersion(reader, luceneDocId) : null;
+        Long version = null;
+        if (operation == DocumentChangeType.INDEX) {
+            if (versionPreloaded) {
+                if (preloadedVersion instanceof Exception failure) {
+                    throw Lombok.sneakyThrow(failure);
+                }
+                version = (Long) preloadedVersion;
+            } else {
+                version = readVersion(reader, luceneDocId);
+            }
+        }
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
         return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes,
             routing, operation, version);
