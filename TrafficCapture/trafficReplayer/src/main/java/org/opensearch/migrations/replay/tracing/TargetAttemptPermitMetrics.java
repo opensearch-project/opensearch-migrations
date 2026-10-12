@@ -11,6 +11,7 @@ package org.opensearch.migrations.replay.tracing;
 import java.time.Duration;
 
 import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
+import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
@@ -83,6 +84,7 @@ public final class TargetAttemptPermitMetrics implements TargetAttemptPermitProv
             .setUnit(UNIT_PERMITS)
             .build();
         permitHeldDuration = meter.histogramBuilder(MetricNames.PERMIT_HELD_DURATION)
+                    .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS)
             .setUnit("ms")
             .build();
     }

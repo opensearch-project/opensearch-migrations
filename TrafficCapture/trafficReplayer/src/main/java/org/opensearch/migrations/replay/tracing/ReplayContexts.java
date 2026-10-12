@@ -47,7 +47,7 @@ public interface ReplayContexts extends IReplayContexts {
             final LongCounter channelClosedCounter;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 activeSocketConnectionsCounter = meter.upDownCounterBuilder(MetricNames.ACTIVE_TARGET_CONNECTIONS)
                     .build();
                 channelCreatedCounter = meter.counterBuilder(MetricNames.CONNECTIONS_OPENED).build();
@@ -93,7 +93,7 @@ public interface ReplayContexts extends IReplayContexts {
             final LongCounter unretryableConnectionFailures;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 activeChannelCounter = meter.upDownCounterBuilder(MetricNames.ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED)
                     .build();
                 unretryableConnectionFailures = meter.counterBuilder(MetricNames.NONRETRYABLE_CONNECTION_FAILURES).build();
@@ -165,7 +165,7 @@ public interface ReplayContexts extends IReplayContexts {
             final LongCounter bytesCounter;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 recordCounter = meter.counterBuilder(MetricNames.KAFKA_RECORD_READ).setUnit("records").build();
                 bytesCounter = meter.counterBuilder(MetricNames.KAFKA_BYTES_READ).setUnit(BYTES_UNIT_STR).build();
             }
@@ -232,7 +232,7 @@ public interface ReplayContexts extends IReplayContexts {
             private final LongCounter streamsRead;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 streamsRead = meter.counterBuilder(MetricNames.TRAFFIC_STREAMS_READ).setUnit("objects").build();
             }
         }
@@ -296,7 +296,7 @@ public interface ReplayContexts extends IReplayContexts {
             final LongCounter numRetries;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 numRetries = meter.counterBuilder(MetricNames.NUM_REQUEST_RETRIES).setUnit(COUNT_UNIT_STR).build();
             }
 
@@ -430,7 +430,7 @@ public interface ReplayContexts extends IReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
             }
         }
 
@@ -640,8 +640,9 @@ public interface ReplayContexts extends IReplayContexts {
             DoubleHistogram lag;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
-                lag = meter.histogramBuilder(MetricNames.NETTY_SCHEDULE_LAG).setUnit("ms").build();
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
+                lag = meter.histogramBuilder(MetricNames.NETTY_SCHEDULE_LAG).setUnit("ms")
+                    .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS).build();
             }
         }
 
@@ -684,8 +685,9 @@ public interface ReplayContexts extends IReplayContexts {
             private final LongCounter bytesRead;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 sourceTargetGap = meter.histogramBuilder(MetricNames.SOURCE_TO_TARGET_REQUEST_LAG)
+                    .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS)
                     .setUnit("ms")
                     .build();
                 bytesWritten = meter.counterBuilder(MetricNames.BYTES_WRITTEN_TO_TARGET)
@@ -806,7 +808,7 @@ public interface ReplayContexts extends IReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
             }
         }
 
@@ -864,7 +866,7 @@ public interface ReplayContexts extends IReplayContexts {
             private final LongCounter resultCounter;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 resultCounter = meter.counterBuilder(MetricNames.TUPLE_COMPARISON).build();
             }
         }

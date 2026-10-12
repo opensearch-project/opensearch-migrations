@@ -223,7 +223,7 @@ public interface WireCaptureContexts extends IWireCaptureContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
             }
         }
 

@@ -443,7 +443,7 @@ data:
         {
           "type": "timeseries",
           "title": "Replay lag, schedule slip and speedup",
-          "description": "Windowed mean replay lag and schedule slip (histogram sum/count rates) with the selected catch-up floor; p95 lag from buckets. Percentiles come from histogram buckets whose highest finite bound is 10 s (10000 ms): once more than 5% of observations exceed 10 s the p95 line pins at 10 s, so trust the mean above that. Right axis: 1 minus the 10-minute derivative of the 5-minute mean lag (speedup ×).",
+          "description": "Windowed mean replay lag and schedule slip (histogram sum/count rates) with the selected catch-up floor; p95 lag from buckets. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it. Right axis: 1 minus the 10-minute derivative of the 5-minute mean lag (speedup ×).",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -1255,7 +1255,7 @@ data:
         {
           "type": "timeseries",
           "title": "Proxy latency (mean ms)",
-          "description": "Windowed means (histogram sum/count rates) plus p95 of Kafka publish → ack. Percentiles come from histogram buckets whose highest finite bound is 10 s (10000 ms): once more than 5% of observations exceed 10 s the p95 line pins at 10 s, so trust the mean above that.",
+          "description": "Windowed means (histogram sum/count rates) plus p95 of Kafka publish → ack. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -1430,7 +1430,7 @@ data:
         {
           "type": "timeseries",
           "title": "Replayer → target latency (mean seconds)",
-          "description": "Windowed means (histogram sum/count rates) of each target-request phase, plus p95 target transaction. Percentiles come from histogram buckets whose highest finite bound is 10 s (10000 ms): once more than 5% of observations exceed 10 s the p95 line pins at 10 s, so trust the mean above that.",
+          "description": "Windowed means (histogram sum/count rates) of each target-request phase, plus p95 target transaction. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -2245,7 +2245,7 @@ data:
         {
           "type": "timeseries",
           "title": "Kafka poll and commit timing (mean ms)",
-          "description": "Windowed means (histogram sum/count rates) plus p95 poll duration. Percentiles come from histogram buckets whose highest finite bound is 10 s (10000 ms): once more than 5% of observations exceed 10 s the p95 line pins at 10 s, so trust the mean above that.",
+          "description": "Windowed means (histogram sum/count rates) plus p95 poll duration. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -2520,7 +2520,7 @@ data:
         {
           "type": "timeseries",
           "title": "Tuple durability latency (seconds)",
-          "description": "Windowed mean and p95 tuple write latency, and the oldest context still comparing results (pending tuple) on the hottest process. Percentiles come from histogram buckets whose highest finite bound is 10 s (10000 ms): once more than 5% of observations exceed 10 s the p95 line pins at 10 s, so trust the mean above that.",
+          "description": "Windowed mean and p95 tuple write latency, and the oldest context still comparing results (pending tuple) on the hottest process. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"

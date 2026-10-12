@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.Locale;
 
 import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
@@ -77,6 +78,7 @@ public final class TupleDurabilityMetrics implements TupleWriter.Metrics {
             .setUnit("writes")
             .build();
         writeLatency = meter.histogramBuilder(MetricNames.WRITE_LATENCY)
+                    .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS)
             .setDescription("Elapsed time from logical write acceptance to durable completion")
             .setUnit("ms")
             .build();

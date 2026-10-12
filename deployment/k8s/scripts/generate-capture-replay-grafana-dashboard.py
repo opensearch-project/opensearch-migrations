@@ -12,8 +12,9 @@ MIB = 1048576
 RI = "$__rate_interval"
 STALE = (" Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, "
          "so fleet sums of gauges can briefly over-count after pod churn.")
-TOPB = (" Percentiles come from histogram buckets whose highest finite bound is 10 s (10000 ms): once more than "
-        "5% of observations exceed 10 s the p95 line pins at 10 s, so trust the mean above that.")
+TOPB = (" Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and "
+        "waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust "
+        "the mean above it.")
 
 
 def cadv(container, extra=""):
