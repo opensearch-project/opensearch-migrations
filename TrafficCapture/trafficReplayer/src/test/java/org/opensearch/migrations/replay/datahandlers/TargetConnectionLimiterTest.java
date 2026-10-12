@@ -46,73 +46,96 @@ class TargetConnectionLimiterTest {
     }
 
     @Test
-    void failuresHalveTheRate() {
+    void twoConsecutiveFailingWindowsHalveTheRate() {
         var limiter = new TargetConnectionLimiter(400, now::get);
-        completeConnects(limiter, 20, 80);
-        now.addAndGet(SECOND);
-        limiter.reserveConnect();
+        failingWindow(limiter, 30, 70);
+        Assertions.assertEquals(400, limiter.ratePerSecond(), 0.001, "one failing window is not enough");
+        failingWindow(limiter, 30, 70);
 
         Assertions.assertEquals(200, limiter.ratePerSecond(), 0.001);
         Assertions.assertEquals(1, limiter.totalRateDecreases());
     }
 
     @Test
-    void failuresOfConnectsStartedBeforeADecreaseDoNotHalveTheNewRate() {
+    void aSingleFailingWindowBetweenHealthyOnesDoesNotReduceTheRate() {
         var limiter = new TargetConnectionLimiter(400, now::get);
+        failingWindow(limiter, 30, 70);
+        failingWindow(limiter, 0, 100);
+        failingWindow(limiter, 30, 70);
+
+        Assertions.assertEquals(0, limiter.totalRateDecreases());
+    }
+
+    @Test
+    void theBackgroundHandshakeFailuresOfAHealthyTargetDoNotReduceTheRate() {
+        var limiter = new TargetConnectionLimiter(400, now::get);
+        for (var window = 0; window < 5; window++) {
+            failingWindow(limiter, 8, 192);
+        }
+
+        Assertions.assertEquals(0, limiter.totalRateDecreases());
+    }
+
+    @Test
+    void oneIncidentCannotTakeTheRateBelowAQuarterOfWhereItStarted() {
+        var limiter = new TargetConnectionLimiter(400, now::get);
+        for (var window = 0; window < 12; window++) {
+            failingWindow(limiter, 50, 50);
+        }
+        Assertions.assertEquals(100, limiter.ratePerSecond(), 0.001);
+
+        // A healthy window ends the incident, and its saturated demand grows the rate to 125.
+        failingWindow(limiter, 0, 100);
+        Assertions.assertEquals(125, limiter.ratePerSecond(), 0.001);
+        for (var window = 0; window < 6; window++) {
+            failingWindow(limiter, 50, 50);
+        }
+        Assertions.assertEquals(31.25, limiter.ratePerSecond(), 0.001, "a new incident's floor is a quarter of 125");
+    }
+
+    @Test
+    void windowsTooSmallToJudgeNeitherEndAnIncidentNorGrowWhileFailing() {
+        var limiter = new TargetConnectionLimiter(400, now::get);
+        failingWindow(limiter, 50, 50);
+        failingWindow(limiter, 5, 5);
+        failingWindow(limiter, 50, 50);
+
+        Assertions.assertEquals(200, limiter.ratePerSecond(), 0.001);
+    }
+
+    @Test
+    void failuresOfConnectsStartedBeforeADecreaseDoNotCountAgainstTheNewRate() {
+        var limiter = new TargetConnectionLimiter(400, now::get);
+        failingWindow(limiter, 30, 70);
         var startedAtTheOldRate = new java.util.ArrayList<TargetConnectionLimiter.Reservation>();
         for (var i = 0; i < 100; i++) {
             startedAtTheOldRate.add(limiter.reserveConnect());
         }
-        startedAtTheOldRate.subList(0, 20).forEach(limiter::connectFailed);
-        startedAtTheOldRate.subList(20, 40).forEach(limiter::connectSucceeded);
+        startedAtTheOldRate.subList(0, 30).forEach(limiter::connectFailed);
+        startedAtTheOldRate.subList(30, 60).forEach(limiter::connectSucceeded);
         now.addAndGet(SECOND);
         limiter.reserveConnect();
         Assertions.assertEquals(200, limiter.ratePerSecond(), 0.001);
 
-        startedAtTheOldRate.subList(40, 100).forEach(limiter::connectFailed);
-        now.addAndGet(SECOND);
-        limiter.reserveConnect();
-        Assertions.assertEquals(200, limiter.ratePerSecond(), 0.001);
-
-        completeConnects(limiter, 20, 20);
-        now.addAndGet(SECOND);
-        limiter.reserveConnect();
-        Assertions.assertEquals(100, limiter.ratePerSecond(), 0.001);
-        Assertions.assertEquals(2, limiter.totalRateDecreases());
+        startedAtTheOldRate.subList(60, 100).forEach(limiter::connectFailed);
+        failingWindow(limiter, 0, 40);
+        failingWindow(limiter, 0, 40);
+        Assertions.assertEquals(1, limiter.totalRateDecreases());
         Assertions.assertEquals(100, limiter.totalFailures());
     }
 
     @Test
-    void aWindowWithTooFewCompletionsDoesNotReduceTheRate() {
-        var limiter = new TargetConnectionLimiter(400, now::get);
-        completeConnects(limiter, 10, 9);
-        now.addAndGet(SECOND);
-        limiter.reserveConnect();
-
-        Assertions.assertEquals(400, limiter.ratePerSecond(), 0.001);
-    }
-
-    @Test
-    void aFewStrayFailuresDoNotReduceTheRate() {
-        var limiter = new TargetConnectionLimiter(400, now::get);
-        completeConnects(limiter, 4, 200);
-        now.addAndGet(SECOND);
-        limiter.reserveConnect();
-
-        Assertions.assertEquals(0, limiter.totalRateDecreases());
-        Assertions.assertTrue(limiter.ratePerSecond() >= 400);
-    }
-
-    @Test
-    void theRateGrowsQuicklyUntilTheFirstDecreaseAndGentlyAfter() {
+    void theRateGrowsQuicklyUntilTheFirstDecreaseAndModeratelyAfter() {
         var limiter = new TargetConnectionLimiter(100, now::get);
         saturateOneWindow(limiter, 0);
         Assertions.assertEquals(150, limiter.ratePerSecond(), 0.001);
 
-        saturateOneWindow(limiter, 30);
+        saturateOneWindow(limiter, 100);
+        Assertions.assertEquals(150, limiter.ratePerSecond(), 0.001, "no growth while failing");
+        saturateOneWindow(limiter, 150);
         Assertions.assertEquals(75, limiter.ratePerSecond(), 0.001);
         saturateOneWindow(limiter, 0);
-        Assertions.assertEquals(82.5, limiter.ratePerSecond(), 0.001);
+        Assertions.assertEquals(93.75, limiter.ratePerSecond(), 0.001);
     }
 
     @Test
@@ -132,6 +155,12 @@ class TargetConnectionLimiterTest {
         }
         TargetConnectionLimiter.UNLIMITED.connectFailed(TargetConnectionLimiter.UNLIMITED.reserveConnect());
         Assertions.assertEquals(Double.POSITIVE_INFINITY, TargetConnectionLimiter.UNLIMITED.ratePerSecond());
+    }
+
+    private void failingWindow(TargetConnectionLimiter limiter, int failures, int successes) {
+        completeConnects(limiter, failures, successes);
+        now.addAndGet(SECOND);
+        limiter.reserveConnect();
     }
 
     private void completeConnects(TargetConnectionLimiter limiter, int failures, int successes) {

@@ -17,11 +17,14 @@ import lombok.extern.slf4j.Slf4j;
  * Paces new target connections for one replayer process.
  *
  * <p>Replayed traffic opens roughly one target connection per source connection, and a target whose
- * front end is failing handshakes is not helped by more handshakes. The limiter is additive-increase,
- * multiplicative-decrease over one-second windows: it halves the allowed connection rate when more than
- * {@link #FAILURE_FRACTION} of a window's completed connects and TLS handshakes failed, and while connects
- * are succeeding and demand fills the allowance it grows the rate, quickly until the first decrease and
- * gently after. When the target is healthy and the allowance exceeds demand, connects are not delayed.
+ * front end is failing handshakes is not helped by more handshakes. The limiter adjusts over one-second
+ * windows: after {@link #FAILING_WINDOWS_TO_DECREASE} consecutive windows in which more than
+ * {@link #FAILURE_FRACTION} of completed connects and TLS handshakes failed, it halves the allowed
+ * connection rate, but one incident never takes the rate below {@link #INCIDENT_FLOOR_FRACTION} of where
+ * it started. While connects are succeeding and demand fills the allowance it grows the rate, quickly
+ * until the first decrease and more gently after. A healthy target sheds a few percent of handshakes
+ * all the time, so only sustained, substantial failure counts. When the allowance exceeds demand,
+ * connects are not delayed.
  *
  * <p>Each decrease starts a new epoch, and only connects reserved in the current epoch are judged. A
  * connect that was started at the old rate and fails afterwards is evidence about the old rate, so it
@@ -36,11 +39,13 @@ public final class TargetConnectionLimiter {
     public static final double MAXIMUM_INITIAL_RATE = 1_000_000;
     static final double MINIMUM_RATE = MINIMUM_INITIAL_RATE;
     static final double MAXIMUM_RATE = MAXIMUM_INITIAL_RATE;
-    static final double FAILURE_FRACTION = 0.05;
+    static final double FAILURE_FRACTION = 0.15;
+    static final int FAILING_WINDOWS_TO_DECREASE = 2;
+    static final double INCIDENT_FLOOR_FRACTION = 0.25;
     static final long MINIMUM_FAILURES_TO_DECREASE = 5;
     static final long MINIMUM_COMPLETIONS_TO_DECREASE = 20;
     static final double SLOW_START_GROWTH = 1.5;
-    static final double STEADY_GROWTH = 1.1;
+    static final double STEADY_GROWTH = 1.25;
 
     private static final long NANOS_PER_SECOND = 1_000_000_000L;
     private static final long WINDOW_NANOS = NANOS_PER_SECOND;
@@ -56,6 +61,8 @@ public final class TargetConnectionLimiter {
     private final LongSupplier nanoTime;
     private double ratePerSecond;
     private boolean decreasedOnce;
+    private int consecutiveFailingWindows;
+    private double incidentStartRate;
     private long epoch;
     private long windowStartNanos;
     private long windowReservations;
@@ -173,25 +180,20 @@ public final class TargetConnectionLimiter {
 
     private void adjustRate() {
         var completed = windowSuccesses + windowFailures;
-        var failing = completed >= MINIMUM_COMPLETIONS_TO_DECREASE
+        var conclusive = completed >= MINIMUM_COMPLETIONS_TO_DECREASE;
+        var failing = conclusive
             && windowFailures >= MINIMUM_FAILURES_TO_DECREASE
             && windowFailures > FAILURE_FRACTION * completed;
         if (failing) {
-            var previous = ratePerSecond;
-            ratePerSecond = Math.max(MINIMUM_RATE, ratePerSecond / 2);
-            decreasedOnce = true;
-            epoch++;
-            totalRateDecreases++;
-            log.atInfo()
-                .setMessage(
-                    "event=target_connection_rate_decreased previous_per_s={} current_per_s={} "
-                        + "window_failures={} window_successes={}"
-                )
-                .addArgument(() -> Math.round(previous))
-                .addArgument(() -> Math.round(ratePerSecond))
-                .addArgument(windowFailures)
-                .addArgument(windowSuccesses)
-                .log();
+            if (++consecutiveFailingWindows >= FAILING_WINDOWS_TO_DECREASE) {
+                decrease();
+            }
+            return;
+        }
+        if (conclusive) {
+            consecutiveFailingWindows = 0;
+            incidentStartRate = 0;
+        } else if (windowFailures > 0) {
             return;
         }
         var demandFilledAllowance = windowDelayedReservations > 0
@@ -202,5 +204,30 @@ public final class TargetConnectionLimiter {
                 ratePerSecond * (decreasedOnce ? STEADY_GROWTH : SLOW_START_GROWTH)
             );
         }
+    }
+
+    private void decrease() {
+        if (incidentStartRate == 0) {
+            incidentStartRate = ratePerSecond;
+        }
+        var previous = ratePerSecond;
+        ratePerSecond = Math.max(
+            MINIMUM_RATE,
+            Math.max(incidentStartRate * INCIDENT_FLOOR_FRACTION, ratePerSecond / 2)
+        );
+        consecutiveFailingWindows = 0;
+        decreasedOnce = true;
+        epoch++;
+        totalRateDecreases++;
+        log.atInfo()
+            .setMessage(
+                "event=target_connection_rate_decreased previous_per_s={} current_per_s={} "
+                    + "window_failures={} window_successes={}"
+            )
+            .addArgument(() -> Math.round(previous))
+            .addArgument(() -> Math.round(ratePerSecond))
+            .addArgument(windowFailures)
+            .addArgument(windowSuccesses)
+            .log();
     }
 }
