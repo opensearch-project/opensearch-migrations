@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Set;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
+import org.opensearch.migrations.replay.SourceResponseFramingFallbackReason;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
@@ -130,6 +132,308 @@ class SourceReconstructionTest {
         Assertions.assertEquals(
             1,
             metricValue(ReplayIntakeMetrics.MetricNames.RETRY_SOURCE_RESPONSES_COMPLETE)
+        );
+    }
+
+    @Test
+    void aSelfDelimitedResponseCompletesWithoutAnotherRequestOrConnectionClose() {
+        var responseBytes = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody";
+        var script = new RecordScript(TOPIC)
+            .addTraffic(
+                0,
+                0,
+                Instant.ofEpochMilli(1_000),
+                WRITER,
+                stream(
+                    0,
+                    read(1, REQUEST_BYTES),
+                    endOfMessage(2),
+                    write(3, responseBytes)
+                )
+            )
+            .addProbe(
+                0,
+                1,
+                Instant.ofEpochMilli(7_000),
+                "other-writer",
+                "retry-boundary-proof"
+            );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.completeResponses);
+        Assertions.assertEquals(responseBytes, bytesOf(sink.responses.get(0)));
+        Assertions.assertTrue(
+            sink.unprovenResponses.isEmpty(),
+            "HTTP framing proves completion without waiting for connection activity"
+        );
+        Assertions.assertEquals(
+            List.of("retry-complete", "final-complete"),
+            sink.sourceResponseEvents
+        );
+        Assertions.assertEquals(
+            List.of(SourceResponseCompletionEvidence.HTTP_FRAMING),
+            sink.responseCompletionEvidence
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.RESPONSES_PROVEN_COMPLETE)
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.RESPONSES_FRAMED_COMPLETE)
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.RETRY_SOURCE_RESPONSES_COMPLETE)
+        );
+        Assertions.assertEquals(
+            0,
+            metricValue(ReplayIntakeMetrics.MetricNames.RETRY_SOURCE_RESPONSES_UNAVAILABLE)
+        );
+    }
+
+    @Test
+    @ResourceLock("ReplayIntakeOwnerLogger")
+    void malformedResponseFramingFallsBackOnceAndUsesTheNextRequestBoundary() {
+        try (var logs = new TestLogAppender(ReplayIntakeOwner.class)) {
+            var malformedResponse =
+                "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n12";
+            var script = new RecordScript(TOPIC).addTraffic(
+                0,
+                0,
+                Instant.ofEpochMilli(1_000),
+                WRITER,
+                stream(
+                    0,
+                    read(1, REQUEST_BYTES),
+                    endOfMessage(2),
+                    write(3, malformedResponse),
+                    read(4, REQUEST_BYTES),
+                    endOfMessage(5)
+                )
+            );
+
+            applyAll(script);
+
+            Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.completeResponses);
+            Assertions.assertEquals(malformedResponse, bytesOf(sink.responses.get(0)));
+            Assertions.assertTrue(
+                sink.unprovenResponses.isEmpty(),
+                "the next request remains valid completion evidence after framing fallback"
+            );
+            Assertions.assertEquals(
+                1,
+                logs.count("source_response_framing_fallback", org.apache.logging.log4j.Level.WARN)
+            );
+            Assertions.assertTrue(
+                logs.contains(
+                    "source_response_framing_fallback",
+                    "reason=malformed_response",
+                    "exception_type="
+                )
+            );
+            Assertions.assertEquals(
+                1,
+                metricValue(ReplayIntakeMetrics.MetricNames.RESPONSE_FRAMING_FALLBACKS)
+            );
+            Assertions.assertEquals(
+                Set.of(SourceResponseFramingFallbackReason.MALFORMED_RESPONSE.name()),
+                metricAttributeValues(
+                    ReplayIntakeMetrics.MetricNames.RESPONSE_FRAMING_FALLBACKS,
+                    ReplayIntakeMetrics.FRAMING_FALLBACK_REASON_ATTRIBUTE
+                )
+            );
+            Assertions.assertEquals(
+                0,
+                metricValue(ReplayIntakeMetrics.MetricNames.RESPONSES_FRAMED_COMPLETE)
+            );
+        }
+    }
+
+    @Test
+    void aSelfDelimitedResponseThatPrecedesRequestEomCompletesAfterRequestRegistration() {
+        var responseBytes = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                write(2, responseBytes),
+                endOfMessage(3)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(1, sink.requests.size());
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.completeResponses);
+        Assertions.assertEquals(responseBytes, bytesOf(sink.responses.get(0)));
+        Assertions.assertEquals(
+            List.of("retry-complete", "final-complete"),
+            sink.sourceResponseEvents,
+            "request registration must precede both response callbacks"
+        );
+    }
+
+    @Test
+    void aSegmentedSelfDelimitedResponseCompletesOnlyAfterTheCaptureSegmentEnds() {
+        var responseBytes = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody";
+        var split = responseBytes.indexOf("\r\n\r\n") + 2;
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                writeSegment(3, responseBytes.substring(0, split)),
+                writeSegment(4, responseBytes.substring(split)),
+                segmentEnd(5)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.completeResponses);
+        Assertions.assertEquals(responseBytes, bytesOf(sink.responses.get(0)));
+        Assertions.assertTrue(sink.unprovenResponses.isEmpty());
+    }
+
+    @Test
+    void aHeadResponseUsesTheRequestMethodToCompleteAfterHeaders() {
+        var headRequest = "HEAD /thing HTTP/1.1\r\nHost: source\r\n\r\n";
+        var responseBytes = "HTTP/1.1 200 OK\r\nContent-Length: 999\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, headRequest),
+                endOfMessage(2),
+                write(3, responseBytes)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.completeResponses);
+        Assertions.assertEquals(responseBytes, bytesOf(sink.responses.get(0)));
+        Assertions.assertTrue(sink.unprovenResponses.isEmpty());
+    }
+
+    @Test
+    @ResourceLock("ReplayIntakeOwnerLogger")
+    void responseObservationsAfterAFramedBoundaryAreNonfatalAndBoundedlyObservable() {
+        var firstResponse = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var firstTrailing = "unexpected trailing response bytes";
+        var secondTrailing = "more unexpected trailing response bytes";
+        var secondResponse = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
+        try (var logs = new TestLogAppender(ReplayIntakeOwner.class)) {
+            var script = new RecordScript(TOPIC).addTraffic(
+                0,
+                0,
+                Instant.ofEpochMilli(1_000),
+                WRITER,
+                stream(
+                    0,
+                    read(1, REQUEST_BYTES),
+                    endOfMessage(2),
+                    write(3, firstResponse),
+                    write(4, firstTrailing),
+                    write(5, ""),
+                    write(6, secondTrailing),
+                    read(7, "GET /next HTTP/1.1\r\n\r\n"),
+                    endOfMessage(8),
+                    write(9, secondResponse)
+                )
+            );
+
+            applyAll(script);
+
+            Assertions.assertTrue(
+                drainSource().stream()
+                    .noneMatch(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance),
+                "a broken source can emit extra bytes without making the capture stream invalid"
+            );
+            Assertions.assertEquals(0, metricValue(ReplayIntakeMetrics.MetricNames.CAPTURE_PROTOCOL_VIOLATIONS));
+            Assertions.assertEquals(2, sink.responses.size());
+            Assertions.assertEquals(
+                firstResponse,
+                bytesOf(sink.responses.get(0)),
+                "later observations must not be attached to the already completed response"
+            );
+            Assertions.assertEquals(secondResponse, bytesOf(sink.responses.get(1)));
+            Assertions.assertEquals(
+                3,
+                metricValue(ReplayIntakeMetrics.MetricNames.POST_FRAMING_RESPONSE_OBSERVATIONS)
+            );
+            Assertions.assertEquals(
+                firstTrailing.getBytes(StandardCharsets.UTF_8).length
+                    + secondTrailing.getBytes(StandardCharsets.UTF_8).length,
+                metricValue(ReplayIntakeMetrics.MetricNames.POST_FRAMING_RESPONSE_BYTES)
+            );
+            Assertions.assertEquals(
+                0,
+                logs.count("source_response_post_boundary_observation", org.apache.logging.log4j.Level.WARN)
+            );
+            Assertions.assertEquals(
+                2,
+                logs.count("source_response_post_boundary_observation", org.apache.logging.log4j.Level.DEBUG)
+            );
+            Assertions.assertEquals(
+                1,
+                logs.count("source_response_post_boundary_observation", org.apache.logging.log4j.Level.TRACE)
+            );
+            Assertions.assertTrue(logs.contains(
+                "source_response_post_boundary_observation",
+                "observation_type=write",
+                "bytes=" + firstTrailing.getBytes(StandardCharsets.UTF_8).length
+            ));
+            Assertions.assertTrue(logs.contains(
+                "source_response_post_boundary_observation",
+                "observation_type=write",
+                "bytes=0"
+            ));
+        }
+    }
+
+    @Test
+    void theBoundaryObservationRetainsAllBytesAndStillCompletesImmediately() {
+        var responseAndTail =
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+                + "HTTP/1.1 599 Bogus Second Response\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                write(3, responseAndTail)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.completeResponses);
+        Assertions.assertEquals(
+            responseAndTail,
+            bytesOf(sink.responses.get(0)),
+            "the finite observation containing the boundary remains intact as raw evidence"
+        );
+        Assertions.assertEquals(
+            List.of(SourceResponseCompletionEvidence.HTTP_FRAMING),
+            sink.responseCompletionEvidence
         );
     }
 
@@ -315,6 +619,14 @@ class SourceReconstructionTest {
             "connection_count=1",
             "target_owner_count=1"
         ));
+        Assertions.assertEquals(
+            2,
+            logs.count("source_connection_expired", org.apache.logging.log4j.Level.DEBUG)
+        );
+        Assertions.assertEquals(
+            0,
+            logs.count("source_connection_expired", org.apache.logging.log4j.Level.WARN)
+        );
         Assertions.assertTrue(logs.contains(
             "source_connection_created",
             "topic=traffic",
@@ -790,7 +1102,7 @@ class SourceReconstructionTest {
         Assertions.assertTrue(sink.incompleteResponses.isEmpty());
     }
 
-    /** A next-request boundary proves the previous response finished and must set {@code keptAlive=true}. */
+    /** A next-request boundary remains proof when streaming framing could not finish the response earlier. */
     @Test
     void aNextRequestBoundaryMarksThePreviousResponseProven() {
         var script = new RecordScript(TOPIC).addTraffic(
@@ -995,7 +1307,8 @@ class SourceReconstructionTest {
             "an observation after the close must not become a request on the closed lifetime"
         );
         // §9.2: a captured close is a boundary the replayer observed, so the response completes. What it
-        // cannot know is whether the source had finished writing, and keptAlive=false is that admission.
+        // cannot know is whether the source had finished a self-delimited response, and unproven completion
+        // evidence is that admission.
         // Reporting it incomplete would describe the capture rather than the replayer, and would label every
         // response on a closing connection unusable -- which is most of them.
         Assertions.assertEquals(
@@ -1216,7 +1529,8 @@ class SourceReconstructionTest {
         private final List<HttpMessageAndTimestamp.InterimResponse> interimResponses = new ArrayList<>();
         private final List<ReplayRequestId> completeResponses = new ArrayList<>();
         private final List<HttpMessageAndTimestamp.Response> responses = new ArrayList<>();
-        /** Completed, but with nothing proving the source finished writing — {@code §9.2}'s {@code keptAlive}. */
+        private final List<SourceResponseCompletionEvidence> responseCompletionEvidence = new ArrayList<>();
+        /** Completed, but with nothing proving the source finished writing a self-delimited response. */
         private final List<ReplayRequestId> unprovenResponses = new ArrayList<>();
         private final List<ReplayRequestId> incompleteResponses = new ArrayList<>();
         private final List<ConnectionProcessingId> closes = new ArrayList<>();
@@ -1254,12 +1568,13 @@ class SourceReconstructionTest {
         public void onSourceResponseComplete(
             ReplayRequestId replayRequestId,
             HttpMessageAndTimestamp.Response response,
-            boolean keptAlive
+            SourceResponseCompletionEvidence completionEvidence
         ) {
             sourceResponseEvents.add("final-complete");
             completeResponses.add(replayRequestId);
             responses.add(response);
-            if (!keptAlive) {
+            responseCompletionEvidence.add(completionEvidence);
+            if (!completionEvidence.provenComplete()) {
                 unprovenResponses.add(replayRequestId);
             }
         }

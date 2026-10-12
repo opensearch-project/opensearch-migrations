@@ -119,10 +119,12 @@ public class HttpMessageAndTimestamp {
         }
     }
 
-    public void finalizeRequestSegments(Instant timestamp) {
-        packetBytes.add(currentSegmentBytes.toByteArray());
+    public byte[] finalizeRequestSegments(Instant timestamp) {
+        var finalizedSegment = currentSegmentBytes.toByteArray();
+        packetBytes.add(finalizedSegment);
         this.lastPacketTimestamp = timestamp;
         currentSegmentBytes = null;
+        return finalizedSegment;
     }
 
     @Override

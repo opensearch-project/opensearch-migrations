@@ -11,6 +11,8 @@ package org.opensearch.migrations.replay.intake;
 import java.time.Instant;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
+import org.opensearch.migrations.replay.SourceResponseFramingFallbackReason;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
@@ -79,18 +81,44 @@ public interface SourceAssemblySink {
     /**
      * A source response that reached a terminal boundary ({@code §9.2}).
      *
-     * @param keptAlive true when the next request's read observation on the same connection ended this
-     *                  response, which proves the source finished it. False when a close or a connection
-     *                  exception ended it, where completion is unproven — nothing else can prove it, because
-     *                  the capture protocol carries an end-of-message indication for requests only and the
-     *                  replayer deliberately does not parse response framing. A consumer needing certainty
-     *                  reads this rather than inferring from the outcome type
+     * @param completionEvidence the observed boundary and whether it proves a complete HTTP response
      */
     void onSourceResponseComplete(
         ReplayRequestId replayRequestId,
         HttpMessageAndTimestamp.Response response,
-        boolean keptAlive
+        SourceResponseCompletionEvidence completionEvidence
     );
+
+    /** Streaming HTTP framing could not safely determine this response's end. */
+    default void onSourceResponseFramingFallback(
+        ReplayRequestId replayRequestId,
+        SourceResponseFramingFallbackReason reason,
+        Throwable failure
+    ) {}
+
+    /**
+     * Captured source output observed after HTTP framing already proved the preceding response complete.
+     *
+     * <p>This is diagnostic source evidence, not invalid capture input. Replay retains the complete capture
+     * observation that contained the boundary, ignores later observations for that completed response, and
+     * continues waiting for the next request or connection boundary. Zero-byte observations may be capture
+     * lifecycle artifacts; positive-byte observations may indicate trailing source output.</p>
+     */
+    default void onPostFramingResponseObservation(
+        ReplayRequestId replayRequestId,
+        PostFramingObservationType observationType,
+        int byteCount
+    ) {}
+
+    /** Fixed-cardinality classification for post-framing source observations. */
+    enum PostFramingObservationType {
+        WRITE,
+        WRITE_SEGMENT,
+        INTERIM_RESPONSE,
+        INTERIM_RESPONSE_SEGMENT,
+        SEGMENT_END,
+        BUFFERED_WRITE
+    }
 
     /**
      * The complete response frozen as the request's retry-policy input ({@code §11}).

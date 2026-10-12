@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -81,7 +82,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
     public record CompleteFinalSourceResponse<F>(
         @NonNull F response,
-        boolean keptAlive
+        @NonNull SourceResponseCompletionEvidence completionEvidence
     ) implements FinalSourceResponse<F> {}
 
     public record IncompleteFinalSourceResponse<F>(
@@ -300,7 +301,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
 
         record Unresolved<F>() implements FinalSourceState<F> {}
 
-        record Complete<F>(F response, boolean keptAlive) implements FinalSourceState<F> {}
+        record Complete<F>(
+            F response,
+            SourceResponseCompletionEvidence completionEvidence
+        ) implements FinalSourceState<F> {}
 
         record Incomplete<F>(String reason) implements FinalSourceState<F> {}
     }
@@ -598,10 +602,13 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         sourceResponseChanged();
     }
 
-    void finalSourceResponseComplete(F response, boolean keptAlive) {
+    void finalSourceResponseComplete(
+        F response,
+        SourceResponseCompletionEvidence completionEvidence
+    ) {
         requireOwnerThread();
         if (finalSourceState instanceof FinalSourceState.Unresolved<F>) {
-            finalSourceState = new FinalSourceState.Complete<>(response, keptAlive);
+            finalSourceState = new FinalSourceState.Complete<>(response, completionEvidence);
         } else {
             impossible(
                 "complete final source response",
@@ -1352,7 +1359,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             case FinalSourceState.Complete<F> complete ->
                 finalResponse = new CompleteFinalSourceResponse<>(
                     complete.response(),
-                    complete.keptAlive()
+                    complete.completionEvidence()
                 );
             case FinalSourceState.Incomplete<F> incomplete ->
                 finalResponse = new IncompleteFinalSourceResponse<>(incomplete.reason());

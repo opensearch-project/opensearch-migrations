@@ -760,19 +760,29 @@ For every source-response observation:
 
 - the containing record is associated with the applicable `ReplayRequestId`;
 - bytes remain in replay intake until the response is complete or becomes incomplete;
-- source-response assembly ends at a terminal boundary: the first read observation of the next
-  request on that connection, a captured close, or a connection exception. All three send
-  `SourceResponseComplete`;
+- replay intake streams final-response bytes through an HTTP framing detector without retaining a
+  second response body. A self-delimited response ends when framing observes its terminal
+  `LastHttpContent`;
+- if framing cannot safely identify the boundary, source-response assembly retains the historical
+  fallback boundaries: the first read observation of the next request, a captured close, or a
+  connection exception;
+- all four boundaries send `SourceResponseComplete`;
 - only expiration and generation cancellation send `SourceResponseIncomplete`. "Incomplete" states
   that replay intake stopped assembling, not that the captured bytes are partial;
-- `SourceResponseComplete` carries `keptAlive`: true when the next request's read observation on the
-  same connection ended the response, which proves the source finished it, and false when a close or
-  connection exception ended it, where completion is unproven. Nothing else can prove it. The capture
-  protocol carries no end-of-message indication for a response — only for a request — and the
-  replayer deliberately does not parse response framing, because the proxy's request parser is
-  optimized for memory footprint and a second parser for responses would cost more than the
-  distinction is worth. A consumer that needs certainty uses `keptAlive`; and
+- `SourceResponseComplete` carries `SourceResponseCompletionEvidence`. `HTTP_FRAMING` and
+  `NEXT_REQUEST` prove completion. `CONNECTION_CLOSE` and `CONNECTION_EXCEPTION` end assembly but
+  remain unproven because the source may have terminated a self-delimited response early; and
 - the request's record associations remain until `RequestProcessingFinished`.
+
+Malformed response framing and upgraded protocols fall back once, emit bounded operational evidence,
+and continue using the next-request or connection boundary. A parser failure never manufactures an
+early response completion.
+
+The capture observation containing a framed boundary remains intact as raw response evidence.
+Source output in later observations before the next request is ignored for that completed response,
+emits one WARN followed by DEBUG detail and bounded metrics, and creates no record association.
+This is a source-protocol anomaly rather than a capture-protocol violation; ordinary capture can
+faithfully record bytes emitted by a broken or hostile source.
 
 `SourceResponseUnavailableForRetry` is separate. It freezes only retry-policy input and does not
 finish source-response assembly or any record association.
@@ -793,7 +803,7 @@ and may contribute to tuple processing, but the count does not change.
 
 1. ends incomplete source-request assembly without creating a request or tuple;
 2. completes any source-response assembly with
-   `SourceResponseComplete(keptAlive=false)`;
+   `SourceResponseComplete(CONNECTION_CLOSE)`;
 3. sends the ordered `AdmitCapturedClose` command to the applicable target-connection owner;
 4. marks the current process-local source lifetime closed; and
 5. prevents later observations from joining that lifetime.

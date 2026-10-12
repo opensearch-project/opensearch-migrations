@@ -8,6 +8,8 @@
 
 package org.opensearch.migrations.replay.tracing;
 
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
+import org.opensearch.migrations.replay.SourceResponseFramingFallbackReason;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.intake.PartitionIntakeState;
 import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
@@ -38,6 +40,7 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private static final String UNIT_REQUESTS = "requests";
     private static final String UNIT_RESPONSES = "responses";
     private static final String UNIT_GENERATIONS = "generations";
+    private static final String UNIT_BYTES = "bytes";
 
     public static final AttributeKey<String> INPUT_KIND_ATTRIBUTE = AttributeKey.stringKey("inputKind");
     public static final AttributeKey<String> INCOMPLETE_REASON_ATTRIBUTE =
@@ -50,6 +53,10 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         AttributeKey.stringKey("demandState");
     public static final AttributeKey<String> GRACE_MODE_ATTRIBUTE =
         AttributeKey.stringKey("graceMode");
+    public static final AttributeKey<String> FRAMING_FALLBACK_REASON_ATTRIBUTE =
+        AttributeKey.stringKey("framingFallbackReason");
+    public static final AttributeKey<String> POST_FRAMING_OBSERVATION_TYPE_ATTRIBUTE =
+        AttributeKey.stringKey("postFramingObservationType");
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -63,8 +70,15 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         public static final String REQUESTS_RECONSTITUTED = "replayIntakeRequestsReconstituted";
         public static final String INTERIM_RESPONSES_OBSERVED = "replayIntakeInterimResponsesObserved";
         public static final String RESPONSES_PROVEN_COMPLETE = "replayIntakeResponsesProvenComplete";
+        public static final String RESPONSES_FRAMED_COMPLETE = "replayIntakeResponsesFramedComplete";
         public static final String RESPONSES_UNPROVEN_COMPLETE = "replayIntakeResponsesUnprovenComplete";
         public static final String RESPONSES_INCOMPLETE = "replayIntakeResponsesIncomplete";
+        public static final String RESPONSE_FRAMING_FALLBACKS =
+            "replayIntakeResponseFramingFallbacks";
+        public static final String POST_FRAMING_RESPONSE_OBSERVATIONS =
+            "replayIntakePostFramingResponseObservations";
+        public static final String POST_FRAMING_RESPONSE_BYTES =
+            "replayIntakePostFramingResponseBytes";
         public static final String RETRY_SOURCE_RESPONSES_COMPLETE =
             "replayIntakeRetrySourceResponsesComplete";
         public static final String RETRY_SOURCE_RESPONSES_UNAVAILABLE =
@@ -111,8 +125,12 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private final LongCounter requestsReconstituted;
     private final LongCounter interimResponsesObserved;
     private final LongCounter responsesProvenComplete;
+    private final LongCounter responsesFramedComplete;
     private final LongCounter responsesUnprovenComplete;
     private final LongCounter responsesIncomplete;
+    private final LongCounter responseFramingFallbacks;
+    private final LongCounter postFramingResponseObservations;
+    private final LongCounter postFramingResponseBytes;
     private final LongCounter retrySourceResponsesComplete;
     private final LongCounter retrySourceResponsesUnavailable;
     private final LongCounter writerTimeTransitions;
@@ -145,8 +163,15 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         requestsReconstituted = counter(meter, MetricNames.REQUESTS_RECONSTITUTED, UNIT_REQUESTS);
         interimResponsesObserved = counter(meter, MetricNames.INTERIM_RESPONSES_OBSERVED, UNIT_RESPONSES);
         responsesProvenComplete = counter(meter, MetricNames.RESPONSES_PROVEN_COMPLETE, UNIT_RESPONSES);
+        responsesFramedComplete = counter(meter, MetricNames.RESPONSES_FRAMED_COMPLETE, UNIT_RESPONSES);
         responsesUnprovenComplete = counter(meter, MetricNames.RESPONSES_UNPROVEN_COMPLETE, UNIT_RESPONSES);
         responsesIncomplete = counter(meter, MetricNames.RESPONSES_INCOMPLETE, UNIT_RESPONSES);
+        responseFramingFallbacks =
+            counter(meter, MetricNames.RESPONSE_FRAMING_FALLBACKS, UNIT_RESPONSES);
+        postFramingResponseObservations =
+            counter(meter, MetricNames.POST_FRAMING_RESPONSE_OBSERVATIONS, "observations");
+        postFramingResponseBytes =
+            counter(meter, MetricNames.POST_FRAMING_RESPONSE_BYTES, UNIT_BYTES);
         retrySourceResponsesComplete =
             counter(meter, MetricNames.RETRY_SOURCE_RESPONSES_COMPLETE, UNIT_RESPONSES);
         retrySourceResponsesUnavailable =
@@ -220,8 +245,34 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     }
 
     @Override
-    public void responseCompleted(boolean keptAlive) {
-        (keptAlive ? responsesProvenComplete : responsesUnprovenComplete).add(1);
+    public void responseCompleted(@NonNull SourceResponseCompletionEvidence completionEvidence) {
+        (completionEvidence.provenComplete() ? responsesProvenComplete : responsesUnprovenComplete).add(1);
+        if (completionEvidence == SourceResponseCompletionEvidence.HTTP_FRAMING) {
+            responsesFramedComplete.add(1);
+        }
+    }
+
+    @Override
+    public void responseFramingFallback(@NonNull SourceResponseFramingFallbackReason reason) {
+        responseFramingFallbacks.add(
+            1,
+            Attributes.of(FRAMING_FALLBACK_REASON_ATTRIBUTE, reason.name())
+        );
+    }
+
+    @Override
+    public void postFramingResponseObservation(
+        @NonNull SourceAssemblySink.PostFramingObservationType observationType,
+        int byteCount
+    ) {
+        var attributes = Attributes.of(
+            POST_FRAMING_OBSERVATION_TYPE_ATTRIBUTE,
+            observationType.name()
+        );
+        postFramingResponseObservations.add(1, attributes);
+        if (byteCount > 0) {
+            postFramingResponseBytes.add(byteCount, attributes);
+        }
     }
 
     @Override

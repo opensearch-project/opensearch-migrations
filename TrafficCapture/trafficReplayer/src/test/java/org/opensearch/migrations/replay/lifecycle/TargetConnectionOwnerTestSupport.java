@@ -21,6 +21,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -283,7 +284,7 @@ final class TargetConnectionOwnerTestSupport {
                 generation,
                 requestFor(ordinal),
                 response,
-                true
+                SourceResponseCompletionEvidence.NEXT_REQUEST
             ));
         }
 

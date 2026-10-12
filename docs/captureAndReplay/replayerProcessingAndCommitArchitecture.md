@@ -720,6 +720,12 @@ A typed interim response observed while replay intake is discarding an inherited
 between requests has no current request identity. Replay intake ignores it and never assigns its bytes
 or record associations to a later request.
 
+When HTTP framing completes a final response, replay intake retains the entire capture observation
+that contained the boundary and completes without waiting for later connection activity. Additional
+source-write observations before the next request are ignored for that completed response and create
+no record work. They emit bounded anomaly metrics, one WARN, and DEBUG repeats rather than entering
+the capture-protocol-fatal path: the proxy can correctly capture invalid bytes from a broken source.
+
 `CaptureCapabilityProbe` is inert. It creates no writer, partition, connection, heartbeat,
 expiration, request, target, tuple, or record-completion state.
 
@@ -790,15 +796,16 @@ sends `SourceResponseUnavailableForRetry` before any observation in the crossing
 complete the response. The result is irreversible even if a still-later record has a lower
 timestamp.
 
-Source-response assembly ends at a terminal boundary: the first read observation of the next request
-on that connection, a captured close, or a connection exception. All three send
-`SourceResponseComplete`. The result carries `keptAlive`: true for the next-request boundary, which
-proves the source finished the response, and false for close or connection exception, where completion
-is unproven. Only expiration and generation cancellation send `SourceResponseIncomplete`; that result
-states that replay intake stopped assembling, not that the captured bytes are partial. If retry input
-is unresolved, the same transition also resolves or makes it unavailable as applicable. The connection
-owner routes every result immediately to the matching request-replay owner without placing it in a
-connection-order queue.
+Replay intake streams final-response bytes through HTTP framing without retaining a second body.
+Source-response assembly ends when framing proves a self-delimited response complete, or at the
+historical fallback boundaries: the first read observation of the next request, a captured close, or
+a connection exception. All four send `SourceResponseComplete` with explicit completion evidence.
+HTTP framing and a following request prove completion; close and connection exception remain
+unproven because either may truncate a self-delimited response. Only expiration and generation
+cancellation send `SourceResponseIncomplete`; that result states that replay intake stopped
+assembling, not that the captured bytes are partial. If retry input is unresolved, the same transition
+also resolves or makes it unavailable as applicable. The connection owner routes every result
+immediately to the matching request-replay owner without placing it in a connection-order queue.
 For example, request 1’s source response should not wait behind request 2’s target send.
 
 Broker-time expiration ends only the incomplete request and response assembly currently held for known connections. Already-reconstituted requests and tuple work continue, and a later observation may start fresh reconstruction.

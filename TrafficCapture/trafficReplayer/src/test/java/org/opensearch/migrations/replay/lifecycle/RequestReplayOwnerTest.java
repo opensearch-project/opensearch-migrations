@@ -14,13 +14,14 @@ import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.testing.TestLogAppender;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.TargetExecutionMetrics;
-import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -381,7 +382,7 @@ class RequestReplayOwnerTest {
                 TargetConnectionOwnerTestSupport.GENERATION,
                 TargetConnectionOwnerTestSupport.request(6),
                 "wrong-request",
-                true
+                SourceResponseCompletionEvidence.NEXT_REQUEST
             )
         );
         fixture.eventLoop.runUntilIdle();

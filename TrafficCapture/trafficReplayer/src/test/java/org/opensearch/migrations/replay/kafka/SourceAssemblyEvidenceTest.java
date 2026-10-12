@@ -179,10 +179,9 @@ class SourceAssemblyEvidenceTest {
      * A response whose completion nothing proved is marked {@code UNPROVEN}, and one a following request
      * proved is not.
      *
-     * <p>{@code kafkaLLD §9.2}: only the next request's read observation on the same connection proves the
-     * source finished a response. Truncation itself is undetectable — the capture protocol marks the end of a
-     * request but not of a response, and the replayer deliberately does not parse response framing — so this is
-     * the strongest honest claim the output can make, and it is what Plan A's exit criterion asks for now.
+     * <p>{@code kafkaLLD §9.2}: HTTP framing or the next request can prove a response complete. This fixture
+     * deliberately supplies a close-ended response that framing cannot prove complete, so `UNPROVEN` remains
+     * the strongest honest claim the output can make.
      *
      * <p>The close-ended connection is produced directly rather than through the proxy: a proxied request
      * completes, and there is no way to ask the proxy for a connection that closes mid-response. The bytes are

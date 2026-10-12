@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 
@@ -43,7 +44,10 @@ class ReplayOutcomesTest {
             ready.transformationStatus(),
             List.of(terminal),
             terminal,
-            new RequestReplayOwner.CompleteFinalSourceResponse<>("source response", true)
+            new RequestReplayOwner.CompleteFinalSourceResponse<>(
+                "source response",
+                SourceResponseCompletionEvidence.NEXT_REQUEST
+            )
         );
 
         Assertions.assertSame(transformationFailure, result.transformationStatus().getException());

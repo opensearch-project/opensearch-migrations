@@ -17,6 +17,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ThreadFactory;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
+import org.opensearch.migrations.replay.SourceResponseFramingFallbackReason;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -73,7 +75,12 @@ public final class ReplayIntakeOwner {
         void recordTrackerRetired();
         void requestReconstituted();
         void interimResponseObserved();
-        void responseCompleted(boolean keptAlive);
+        void responseCompleted(SourceResponseCompletionEvidence completionEvidence);
+        void responseFramingFallback(SourceResponseFramingFallbackReason reason);
+        void postFramingResponseObservation(
+            SourceAssemblySink.PostFramingObservationType observationType,
+            int byteCount
+        );
         void responseIncomplete(SourceAssemblySink.IncompleteReason reason);
         void retrySourceResponseCompleted();
         void retrySourceResponseUnavailable();
@@ -817,7 +824,7 @@ public final class ReplayIntakeOwner {
         if (expiration.expiredSourceConnections() == 0) {
             return;
         }
-        log.atWarn()
+        log.atDebug()
             .setMessage(
                 "event=source_connection_expired topic={} partition={} generation={} cause={} "
                     + "connection_count={} target_owner_count={}"
@@ -963,15 +970,58 @@ public final class ReplayIntakeOwner {
         public void onSourceResponseComplete(
             ReplayRequestId replayRequestId,
             HttpMessageAndTimestamp.Response response,
-            boolean keptAlive
+            SourceResponseCompletionEvidence completionEvidence
         ) {
             var state = requireGeneration(replayRequestId.connectionProcessingId().generation());
             if (state.sourceResponseCompleted(replayRequestId)) {
                 delegate.onRetrySourceResponseComplete(replayRequestId, response);
                 metrics.retrySourceResponseCompleted();
             }
-            delegate.onSourceResponseComplete(replayRequestId, response, keptAlive);
-            metrics.responseCompleted(keptAlive);
+            delegate.onSourceResponseComplete(replayRequestId, response, completionEvidence);
+            metrics.responseCompleted(completionEvidence);
+        }
+
+        @Override
+        public void onSourceResponseFramingFallback(
+            ReplayRequestId replayRequestId,
+            SourceResponseFramingFallbackReason reason,
+            Throwable failure
+        ) {
+            metrics.responseFramingFallback(reason);
+            log.atWarn()
+                .setCause(failure)
+                .setMessage(
+                    "event=source_response_framing_fallback request={} reason={} exception_type={}"
+                )
+                .addArgument(replayRequestId)
+                .addArgument(() -> reason.name().toLowerCase(java.util.Locale.ROOT))
+                .addArgument(() -> failure == null ? "none" : failure.getClass().getSimpleName())
+                .log();
+            delegate.onSourceResponseFramingFallback(replayRequestId, reason, failure);
+        }
+
+        @Override
+        public void onPostFramingResponseObservation(
+            ReplayRequestId replayRequestId,
+            PostFramingObservationType observationType,
+            int byteCount
+        ) {
+            metrics.postFramingResponseObservation(observationType, byteCount);
+            var logBuilder = byteCount == 0 ? log.atTrace() : log.atDebug();
+            logBuilder
+                .setMessage(
+                    "event=source_response_post_boundary_observation request={} "
+                        + "observation_type={} bytes={}"
+                )
+                .addArgument(replayRequestId)
+                .addArgument(() -> observationType.name().toLowerCase(java.util.Locale.ROOT))
+                .addArgument(byteCount)
+                .log();
+            delegate.onPostFramingResponseObservation(
+                replayRequestId,
+                observationType,
+                byteCount
+            );
         }
 
         @Override

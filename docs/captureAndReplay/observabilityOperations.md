@@ -85,6 +85,10 @@ CLI-derived signal.
 | `replayIntakeActiveRecordTrackers` | up-down / records | — | Bounded; drains to zero |
 | `replayIntakeRecordTrackersRetired` | counter / records | — | Advances as record work finishes |
 | `replayIntakeRequestsReconstituted` | counter / requests | — | Advances with request capture |
+| `replayIntakeResponsesFramedComplete` | counter / responses | — | Advances for self-delimited source responses |
+| `replayIntakeResponseFramingFallbacks` | counter / responses | `framingFallbackReason` | Zero or explained malformed/upgraded source traffic |
+| `replayIntakePostFramingResponseObservations` | counter / observations | `postFramingObservationType` | Compare with baseline; investigate abrupt rate changes |
+| `replayIntakePostFramingResponseBytes` | counter / bytes | `postFramingObservationType` | Compare with baseline; investigate positive-byte growth |
 | `replayIntakeResponsesIncomplete` | counter / responses | `incompleteReason` | Zero except explained source termination |
 | `replayIntakeRetryReadyRequestSupply` | up-down / requests | — | Bounded by configured replay supply |
 | `replayIntakeBrokerTimeViolations` | counter / violations | — | Zero |
@@ -225,8 +229,7 @@ Useful bounded event names include:
   `replay_generation_grace_started`, `replay_generation_force_started`,
   `replay_generation_cleanup_finished`, `replay_health`,
   `replay_oldest_record`, `replay_stall_detected`,
-  `capture_protocol_violation`, `source_connection_expired`,
-  `target_response_unavailable`, `target_retries_exhausted`,
+  `capture_protocol_violation`,
   `tuple_durability_degraded`, `tuple_durability_recovered`,
   `tuple_sink_upload_degraded`, `tuple_sink_upload_recovered`,
   `replayer_fatal_failure`, `replayer_shutdown_summary`.
@@ -234,6 +237,13 @@ Useful bounded event names include:
 Repeated inner S3 retry failures are DEBUG
 `event=tuple_sink_upload_retry_failed`; the transition into degradation is one WARN,
 and complete recovery is one INFO.
+
+Per-attempt target failures, retry exhaustion, source-connection expiration, and
+positive-byte post-response-boundary observations can scale with workload volume
+and are DEBUG (`target_response_unavailable`, `target_retries_exhausted`,
+`source_connection_expired`, and `source_response_post_boundary_observation`).
+Expected zero-byte post-boundary observations are TRACE. Use the bounded metrics
+for fleet-wide diagnosis, then enable detailed logging for individual evidence.
 
 Follow one record using `topic`, `partition`, `generation`, and `offset`, then follow
 its descendants using `writer`, `connection`, `lifetime`, `request`, and `attempt`.
@@ -271,7 +281,8 @@ No trace or span ID is required.
 
 1. Check `targetAttemptsWithoutResponse` by `noResponseKind` and
    `targetRetriesExhausted`.
-2. Inspect `target_response_unavailable`, target-attempt DEBUG events, and
+2. If individual request detail is needed, enable DEBUG and inspect
+   `target_response_unavailable`, target-attempt events, and
    `target_retries_exhausted`.
 3. Separate connection, write, read/response, and retry-policy outcomes.
 

@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
@@ -96,16 +97,14 @@ public class HttpTransactionDumper implements SourceAssemblySink {
     /**
      * Prints a response, and marks it {@code UNPROVEN} when nothing proved the source finished writing it.
      *
-     * <p>{@code kafkaLLD §9.2}: only a following request on the same connection proves completion. A response
-     * ended by a close or a connection exception may have been truncated and there is no way to tell, so the
-     * line says so rather than presenting it as though it were whole. That marker is the honest form of what
-     * Plan A asks this output to show.
+     * <p>A response proven by HTTP framing or by a following request is printed normally. A response ended
+     * only by close or connection exception may have been truncated, so the line identifies it as unproven.
      */
     @Override
     public void onSourceResponseComplete(
         @NonNull ReplayRequestId replayRequestId,
         @NonNull HttpMessageAndTimestamp.Response response,
-        boolean keptAlive
+        @NonNull SourceResponseCompletionEvidence completionEvidence
     ) {
         out.println(linePrefix
             + buildPrefix(
@@ -113,7 +112,7 @@ public class HttpTransactionDumper implements SourceAssemblySink {
                 response.getFirstPacketTimestamp(),
                 response.getLastPacketTimestamp())
             + " RSP[" + messageSize(response) + "]"
-            + (keptAlive ? "" : " UNPROVEN")
+            + (completionEvidence.provenComplete() ? "" : " UNPROVEN")
             + " " + extractFirstLine(response));
     }
 

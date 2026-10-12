@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
@@ -31,8 +32,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Traffic observations are applied in strict capture-sequence order through phases for discarding an
  * inherited message tail, waiting between requests, assembling a request, and assembling its source
  * response. Capture continuity fields establish the initial request ordinal and whether parsing may begin
- * immediately; request end markers allocate stable request identities, while later read, close, exception,
- * and drop observations delimit response state without pretending to parse response framing.</p>
+ * immediately; request end markers allocate stable request identities, while streaming HTTP framing, later
+ * reads, close, exception, and drop observations delimit response state.</p>
  *
  * <p>The class owns only message-assembly state. Each applied observation returns the record associations
  * that must be added, relabelled, or completed, allowing partition-level accounting to remain separate.
@@ -126,6 +127,11 @@ public final class SourceConnectionState {
     private ReplayRequestId responseBeingAssembledFor;
     private final Map<ReplayRequestId, HttpMessageAndTimestamp.Response> responseStateByRequest =
         new LinkedHashMap<>();
+    private String responseRequestMethod;
+    private SourceResponseFramingDetector responseFramingDetector;
+    private boolean framedResponseComplete;
+    private boolean responseFramingFallback;
+    private ReplayRequestId framedResponseCompletedAwaitingNextRequest;
     private Lifetime lifetime = Lifetime.OPEN;
     private Instant latestObservationTime = Instant.EPOCH;
 
@@ -294,12 +300,23 @@ public final class SourceConnectionState {
         long logAppendTimeMillis,
         IReplayContexts.ITrafficStreamsLifecycleContext trafficContext
     ) {
+        var postFramingType = postFramingObservationType(observation);
+        if (framedResponseCompletedAwaitingNextRequest != null
+            && postFramingType != null) {
+            reportPostFramingObservation(
+                framedResponseCompletedAwaitingNextRequest,
+                postFramingType,
+                postFramingObservationByteCount(observation)
+            );
+            return ObservationOutcome.none();
+        }
         if (!(observation.hasRead() || observation.hasReadSegment())) {
             // A write with no request in front of it belongs to the discarded tail or to a request this
             // lifetime never saw. Ignoring it is what keeps it from being parsed as a response to the
             // request that is about to start.
             return ObservationOutcome.none();
         }
+        clearPostFramingResponseState();
         phase = Phase.ASSEMBLING_REQUEST;
         return applyToRequest(observation, containingRecord, logAppendTimeMillis, trafficContext);
     }
@@ -380,7 +397,10 @@ public final class SourceConnectionState {
         var requestId = responseBeingAssembledFor;
         var association = new RecordAssociationId.Request(requestId);
         if (observation.hasWrite()) {
-            appendTo(responseUnderAssembly(timestamp), observation.getWrite().getData().toByteArray(), timestamp);
+            var responseBytes = observation.getWrite().getData().toByteArray();
+            appendTo(responseUnderAssembly(timestamp), responseBytes, timestamp);
+            acceptResponseFramingBytes(responseBytes);
+            tryCompleteFramedResponse();
             return added(association);
         }
         if (observation.hasWriteSegment()) {
@@ -399,15 +419,21 @@ public final class SourceConnectionState {
             if (!response.hasInProgressSegment()) {
                 return ObservationOutcome.none();
             }
-            response.finalizeRequestSegments(timestamp);
+            var finalizedSegment = response.finalizeRequestSegments(timestamp);
+            var detectorAlreadyExisted = responseFramingDetector != null;
+            initializeResponseFramingIfReady();
+            if (detectorAlreadyExisted && responseFramingDetector != null) {
+                acceptResponseFramingBytes(finalizedSegment);
+            }
+            tryCompleteFramedResponse();
             return added(association);
         }
         if (observation.hasRead() || observation.hasReadSegment()) {
             // Keep-alive: the next request begins, which is what ends the previous response. The response's
             // association stays until its tuple is durable, so nothing is finished here.
-            // §9.2: the next request's read is the boundary that proves the source finished the previous
-            // response. It is the only evidence of that available anywhere in the protocol.
-            var completed = completeResponse(true);
+            // §9.2: when streaming framing could not complete the response earlier, the next request's read
+            // is still conclusive evidence that the source finished the previous response.
+            var completed = completeResponse(SourceResponseCompletionEvidence.NEXT_REQUEST);
             phase = Phase.ASSEMBLING_REQUEST;
             var next = applyToRequest(
                 observation,
@@ -447,6 +473,7 @@ public final class SourceConnectionState {
 
         incomingRequest = null;
         responseBeingAssembledFor = replayRequestId;
+        responseRequestMethod = requestMethod(request);
         responseStateByRequest.put(
             replayRequestId,
             finalResponseBeforeRequestEnd == null
@@ -485,6 +512,8 @@ public final class SourceConnectionState {
             interimResponse -> sink.onSourceInterimResponse(replayRequestId, interimResponse)
         );
         pendingInterimResponses.clear();
+        initializeResponseFramingIfReady();
+        tryCompleteFramedResponse();
         // The end-of-message record contributes to the request too, and its association is the request's
         // from the outset rather than an assembly identity that is immediately relabelled.
         return new ObservationOutcome(
@@ -498,16 +527,16 @@ public final class SourceConnectionState {
     /**
      * Ends response assembly at a terminal boundary ({@code §9.2}).
      *
-     * @param keptAlive whether the next request's read observation ended it, which is the only thing that
-     *                  proves the source finished the response
+     * @param completionEvidence the observed boundary and whether it proves the response complete
      */
-    private ObservationOutcome completeResponse(boolean keptAlive) {
+    private ObservationOutcome completeResponse(SourceResponseCompletionEvidence completionEvidence) {
         var requestId = responseBeingAssembledFor;
         var response = responseStateByRequest.remove(requestId);
         responseBeingAssembledFor = null;
+        clearResponseFraming();
         if (response != null) {
             closeResponseAccumulationContext();
-            sink.onSourceResponseComplete(requestId, response, keptAlive);
+            sink.onSourceResponseComplete(requestId, response, completionEvidence);
             currentCapturedRequestOrdinal++;
         }
         return ObservationOutcome.none();
@@ -521,9 +550,10 @@ public final class SourceConnectionState {
      */
     private ObservationOutcome applyConnectionException() {
         if (phase != Phase.ASSEMBLING_RESPONSE) {
+            clearPostFramingResponseState();
             return ObservationOutcome.none();
         }
-        var completed = completeResponse(false);
+        var completed = completeResponse(SourceResponseCompletionEvidence.CONNECTION_EXCEPTION);
         phase = Phase.BETWEEN_REQUESTS;
         return completed;
     }
@@ -569,6 +599,8 @@ public final class SourceConnectionState {
         closeIncompleteRequestContexts();
         clearInterimResponses();
         finalResponseBeforeRequestEnd = null;
+        clearResponseFraming();
+        clearPostFramingResponseState();
         currentCapturedRequestOrdinal++;
         phase = Phase.BETWEEN_REQUESTS;
         return new ObservationOutcome(List.of(), finished, List.of(), false);
@@ -577,9 +609,10 @@ public final class SourceConnectionState {
     /**
      * Ends assembly at a captured close.
      *
-     * <p>A response already under assembly is completed with {@code keptAlive = false}: it reached an end the
-     * replayer observed, while whether the source had finished writing it is unprovable. Connection exceptions
-     * use {@link #applyConnectionException()} because {@code §9.3} leaves an incomplete request untouched.
+     * <p>A response still under assembly is completed with {@code CONNECTION_CLOSE}: it reached an end the
+     * replayer observed, while whether the source had finished writing a self-delimited response is unproven.
+     * Connection exceptions use {@link #applyConnectionException()} because {@code §9.3} leaves an incomplete
+     * request untouched.
      *
      * <p>A request that never reached end-of-message has no identity at all, so nothing is notified about it
      * and its assembly association is simply released ({@code §8.2}).
@@ -594,8 +627,11 @@ public final class SourceConnectionState {
         clearInterimResponses();
         finalResponseBeforeRequestEnd = null;
         if (responseBeingAssembledFor != null) {
-            completeResponse(false);
+            completeResponse(SourceResponseCompletionEvidence.CONNECTION_CLOSE);
+        } else {
+            clearResponseFraming();
         }
+        clearPostFramingResponseState();
         phase = Phase.BETWEEN_REQUESTS;
         return new ObservationOutcome(List.of(), finished, List.of(), false);
     }
@@ -623,6 +659,8 @@ public final class SourceConnectionState {
             closeResponseAccumulationContext();
             sink.onSourceResponseIncomplete(requestId, reason);
         }
+        clearResponseFraming();
+        clearPostFramingResponseState();
         phase = Phase.BETWEEN_REQUESTS;
         return new ObservationOutcome(List.of(), finished, List.of(), false);
     }
@@ -803,6 +841,155 @@ public final class SourceConnectionState {
     private static void appendTo(HttpMessageAndTimestamp message, byte[] packet, Instant timestamp) {
         message.add(packet);
         message.setLastPacketTimestamp(timestamp);
+    }
+
+    private void initializeResponseFramingIfReady() {
+        if (responseFramingDetector != null
+            || responseFramingFallback
+            || responseBeingAssembledFor == null) {
+            return;
+        }
+        var response = responseStateByRequest.get(responseBeingAssembledFor);
+        if (response == null || response.hasInProgressSegment()) {
+            return;
+        }
+        responseFramingDetector = new SourceResponseFramingDetector(
+            responseRequestMethod == null ? "" : responseRequestMethod
+        );
+        try (var packets = response.stream()) {
+            var iterator = packets.iterator();
+            while (iterator.hasNext()) {
+                var packet = iterator.next();
+                if (framedResponseComplete) {
+                    reportPostFramingObservation(
+                        responseBeingAssembledFor,
+                        SourceAssemblySink.PostFramingObservationType.BUFFERED_WRITE,
+                        packet.length
+                    );
+                    continue;
+                }
+                acceptResponseFramingBytes(packet);
+            }
+        }
+    }
+
+    private void acceptResponseFramingBytes(byte[] responseBytes) {
+        if (responseFramingDetector == null || framedResponseComplete || responseFramingFallback) {
+            return;
+        }
+        var result = responseFramingDetector.accept(responseBytes);
+        switch (result.status()) {
+            case IN_PROGRESS -> {}
+            case COMPLETE -> framedResponseComplete = true;
+            case FALLBACK -> {
+                responseFramingFallback = true;
+                sink.onSourceResponseFramingFallback(
+                    responseBeingAssembledFor,
+                    result.fallbackReason(),
+                    responseFramingDetector.failureCause()
+                );
+            }
+        }
+    }
+
+    private void tryCompleteFramedResponse() {
+        if (!framedResponseComplete || responseBeingAssembledFor == null) {
+            return;
+        }
+        var response = responseStateByRequest.get(responseBeingAssembledFor);
+        if (response == null || response.hasInProgressSegment()) {
+            return;
+        }
+        var completedRequestId = responseBeingAssembledFor;
+        completeResponse(SourceResponseCompletionEvidence.HTTP_FRAMING);
+        framedResponseCompletedAwaitingNextRequest = completedRequestId;
+        phase = Phase.BETWEEN_REQUESTS;
+    }
+
+    private void clearResponseFraming() {
+        if (responseFramingDetector != null) {
+            responseFramingDetector.close();
+            responseFramingDetector = null;
+        }
+        responseRequestMethod = null;
+        framedResponseComplete = false;
+        responseFramingFallback = false;
+    }
+
+    private void reportPostFramingObservation(
+        ReplayRequestId replayRequestId,
+        SourceAssemblySink.PostFramingObservationType observationType,
+        int byteCount
+    ) {
+        sink.onPostFramingResponseObservation(
+            replayRequestId,
+            observationType,
+            byteCount
+        );
+    }
+
+    private void clearPostFramingResponseState() {
+        framedResponseCompletedAwaitingNextRequest = null;
+    }
+
+    private static String requestMethod(HttpMessageAndTimestamp.Request request) {
+        var method = new StringBuilder();
+        try (var packets = request.stream()) {
+            var iterator = packets.iterator();
+            while (iterator.hasNext()) {
+                for (var value : iterator.next()) {
+                    var next = value & 0xff;
+                    if (method.isEmpty() && (next == '\r' || next == '\n')) {
+                        continue;
+                    }
+                    if (next == ' ' || next == '\t') {
+                        return method.toString();
+                    }
+                    if (next == '\r' || next == '\n' || method.length() >= 32) {
+                        return "";
+                    }
+                    method.append((char) next);
+                }
+            }
+        }
+        return "";
+    }
+
+    private static SourceAssemblySink.PostFramingObservationType postFramingObservationType(
+        TrafficObservation observation
+    ) {
+        if (observation.hasWrite()) {
+            return SourceAssemblySink.PostFramingObservationType.WRITE;
+        }
+        if (observation.hasWriteSegment()) {
+            return SourceAssemblySink.PostFramingObservationType.WRITE_SEGMENT;
+        }
+        if (observation.hasInterimResponse()) {
+            return SourceAssemblySink.PostFramingObservationType.INTERIM_RESPONSE;
+        }
+        if (observation.hasInterimResponseSegment()) {
+            return SourceAssemblySink.PostFramingObservationType.INTERIM_RESPONSE_SEGMENT;
+        }
+        if (observation.hasSegmentEnd()) {
+            return SourceAssemblySink.PostFramingObservationType.SEGMENT_END;
+        }
+        return null;
+    }
+
+    private static int postFramingObservationByteCount(TrafficObservation observation) {
+        if (observation.hasWrite()) {
+            return observation.getWrite().getData().size();
+        }
+        if (observation.hasWriteSegment()) {
+            return observation.getWriteSegment().getData().size();
+        }
+        if (observation.hasInterimResponse()) {
+            return observation.getInterimResponse().getData().size();
+        }
+        if (observation.hasInterimResponseSegment()) {
+            return observation.getInterimResponseSegment().getData().size();
+        }
+        return 0;
     }
 
     private static ObservationOutcome added(RecordAssociationId association) {

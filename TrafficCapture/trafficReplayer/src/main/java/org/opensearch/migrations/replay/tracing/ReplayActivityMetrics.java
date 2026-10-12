@@ -8,10 +8,10 @@
 
 package org.opensearch.migrations.replay.tracing;
 
+import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
 import org.opensearch.migrations.replay.util.ContextActivityCollector;
 import org.opensearch.migrations.replay.util.KafkaDiagnosticCollector;
 import org.opensearch.migrations.replay.util.OwnerOperationCollector;
-import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;

@@ -191,6 +191,29 @@ public class HttpByteBufFormatterTest {
         }
     }
 
+    @Test
+    void parsesOnlyTheFirstFinalResponseFromRawEvidenceContainingTwoResponses() {
+        var responseBytes = (
+            "HTTP/1.1 200 OK\r\n"
+                + "Content-Length: 5\r\n\r\n"
+                + "first"
+                + "HTTP/1.1 599 Bogus Second Response\r\n"
+                + "Content-Length: 6\r\n\r\n"
+                + "second"
+        ).getBytes(StandardCharsets.US_ASCII);
+
+        FullHttpResponse response = HttpByteBufFormatter.parseHttpResponseFromBufs(
+            Stream.of(Unpooled.wrappedBuffer(responseBytes)),
+            responseBytes.length
+        );
+        try {
+            Assertions.assertEquals(200, response.status().code());
+            Assertions.assertEquals("first", response.content().toString(StandardCharsets.US_ASCII));
+        } finally {
+            response.release();
+        }
+    }
+
     private static String prettyPrint(
         List<byte[]> byteArrays,
         HttpByteBufFormatter.HttpMessageType messageType,

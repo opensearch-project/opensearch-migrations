@@ -1622,8 +1622,14 @@ class TrafficReplayerTopLevelConstructionTest {
         }
     }
 
-    @Test
-    void deployedTupleFactoryPopulatesComparisonAttributesFromActualMessages() {
+    @ParameterizedTest(name = "source response tail: {0}")
+    @ValueSource(strings = {
+        "unexpected trailing response bytes",
+        "HTTP/1.1 599 Bogus Second Response\r\nContent-Length: 0\r\n\r\n"
+    })
+    void deployedTupleFactoryUsesTheFirstResponseWhenRawEvidenceHasTrailingBytes(
+        String sourceResponseTail
+    ) {
         var generation = new PartitionGenerationId(TOPIC_PARTITION, 11);
         var connection = new ConnectionProcessingId(
             generation,
@@ -1637,7 +1643,7 @@ class TrafficReplayerTopLevelConstructionTest {
                 + "Content-Length: 0\r\n\r\n"
         );
         var sourceResponse = response(
-            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n" + sourceResponseTail
         );
         var targetRequestBytes = (
             "POST /index HTTP/1.1\r\n"
@@ -1692,7 +1698,7 @@ class TrafficReplayerTopLevelConstructionTest {
                     terminal,
                     new RequestReplayOwner.CompleteFinalSourceResponse<>(
                         sourceResponse,
-                        true
+                        SourceResponseCompletionEvidence.NEXT_REQUEST
                     )
                 );
                 var tuple = TrafficReplayerTopLevel.deployedTupleFactory().create(

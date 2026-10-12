@@ -26,6 +26,7 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -131,7 +132,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ReplayRequestId requestId,
         @NonNull F response,
-        boolean keptAlive
+        @NonNull SourceResponseCompletionEvidence completionEvidence
     ) implements ConnectionInput<S, F> {}
 
     public record FinalSourceResponseIncomplete<S, F>(
@@ -646,7 +647,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 if (request != null) {
                     request.finalSourceResponseComplete(
                         complete.response(),
-                        complete.keptAlive()
+                        complete.completionEvidence()
                     );
                 }
                 yield new InputApplied();

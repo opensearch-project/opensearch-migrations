@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -215,6 +216,17 @@ class RecordAssociationAccumulatorTest {
             completedTransactions,
             "complete request/response bytes must be independent of the process cut point"
         );
+        var completionEvidence = new ArrayList<>(firstPass.completionEvidence());
+        completionEvidence.addAll(secondPass.completionEvidence());
+        Assertions.assertEquals(
+            List.of(
+                SourceResponseCompletionEvidence.HTTP_FRAMING,
+                SourceResponseCompletionEvidence.HTTP_FRAMING,
+                SourceResponseCompletionEvidence.HTTP_FRAMING
+            ),
+            completionEvidence,
+            "idle self-delimited responses must advance the restart cursor without a close or next request"
+        );
 
         var completedOffsets = new ArrayList<>(firstPass.completedRecordOffsets());
         completedOffsets.addAll(secondPass.completedRecordOffsets());
@@ -244,8 +256,7 @@ class RecordAssociationAccumulatorTest {
         var first = stream(0, read(1, "GET / HTTP/1.1\r\n\r\n"), endOfMessage(2));
         var response = stream(
             1,
-            write(3, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"),
-            close(4)
+            write(3, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
         );
         var script = new RecordScript(TOPIC)
             .addTraffic(0, 0, Instant.ofEpochMilli(1_000), WRITER, first)
@@ -300,6 +311,43 @@ class RecordAssociationAccumulatorTest {
                 telemetry.getFinishedMetrics(),
                 ReplayIntakeMetrics.MetricNames.RETRY_READY_SUPPLY_REMOVALS
             )
+        );
+    }
+
+    @Test
+    void aPostFramingOnlyRecordCompletesWithoutHoldingThePriorRequest() {
+        var request = stream(0, read(1, "GET / HTTP/1.1\r\n\r\n"), endOfMessage(2));
+        var response = stream(
+            1,
+            write(3, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+        );
+        var trailing = stream(2, write(4, "unexpected trailing response bytes"));
+        var script = new RecordScript(TOPIC)
+            .addTraffic(0, 0, Instant.ofEpochMilli(1_000), WRITER, request)
+            .addTraffic(0, 1, Instant.ofEpochMilli(2_000), WRITER, response)
+            .addTraffic(0, 2, Instant.ofEpochMilli(3_000), WRITER, trailing);
+        assignAndApply(script);
+
+        Assertions.assertEquals(
+            List.of(new KafkaRecordId(script.generation(0), 2)),
+            sourceCompletions(),
+            "a record containing only ignored post-boundary bytes creates no replay work"
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.POST_FRAMING_RESPONSE_OBSERVATIONS)
+        );
+
+        finishRequest(script, 0);
+
+        Assertions.assertEquals(
+            Set.of(
+                new KafkaRecordId(script.generation(0), 0),
+                new KafkaRecordId(script.generation(0), 1),
+                new KafkaRecordId(script.generation(0), 2)
+            ),
+            Set.copyOf(sourceCompletions()),
+            "the prior request still controls only its request and response records"
         );
     }
 
@@ -1115,7 +1163,7 @@ class RecordAssociationAccumulatorTest {
         int toOffset
     ) {
         if (fromOffset == toOffset) {
-            return new CutPointPassResult(List.of(), List.of());
+            return new CutPointPassResult(List.of(), List.of(), List.of());
         }
         var passTelemetry = new InMemoryInstrumentationBundle(false, true);
         try {
@@ -1158,7 +1206,8 @@ class RecordAssociationAccumulatorTest {
                 .toList();
             return new CutPointPassResult(
                 passSink.completedTransactions(),
-                completedRecordOffsets
+                completedRecordOffsets,
+                List.copyOf(passSink.completeResponseEvidence)
             );
         } finally {
             passTelemetry.close();
@@ -1191,8 +1240,7 @@ class RecordAssociationAccumulatorTest {
                 0,
                 read(1, "GET /a HTTP/1.1\r\n\r\n"),
                 endOfMessage(2),
-                write(3, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na"),
-                close(4)
+                write(3, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na")
             ),
             streamForConnection(
                 "connection-b",
@@ -1206,8 +1254,7 @@ class RecordAssociationAccumulatorTest {
                 true,
                 read(2, "st: source\r\n\r\n"),
                 endOfMessage(3),
-                write(4, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nb"),
-                close(5)
+                write(4, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nb")
             ),
             streamForConnection(
                 "connection-c",
@@ -1221,8 +1268,7 @@ class RecordAssociationAccumulatorTest {
                 1,
                 1,
                 false,
-                write(4, "dy"),
-                close(5)
+                write(4, "dy")
             )
         );
     }
@@ -1242,13 +1288,16 @@ class RecordAssociationAccumulatorTest {
 
     private record CutPointPassResult(
         List<CompletedTransaction> completedTransactions,
-        List<Long> completedRecordOffsets
+        List<Long> completedRecordOffsets,
+        List<SourceResponseCompletionEvidence> completionEvidence
     ) {}
 
     /** Records what source assembly emitted, so a test can read the lifetime it allocated. */
     private static final class RecordingSink implements SourceAssemblySink {
         private final List<ReplayRequestId> reconstituted = new ArrayList<>();
         private final List<ReplayRequestId> completeResponses = new ArrayList<>();
+        private final List<SourceResponseCompletionEvidence> completeResponseEvidence =
+            new ArrayList<>();
         private final List<ReplayRequestId> incompleteResponses = new ArrayList<>();
         private final Map<ReplayRequestId, String> requestBytes = new HashMap<>();
         private final Map<ReplayRequestId, String> responseBytes = new HashMap<>();
@@ -1281,9 +1330,10 @@ class RecordAssociationAccumulatorTest {
         public void onSourceResponseComplete(
             ReplayRequestId replayRequestId,
             HttpMessageAndTimestamp.Response response,
-            boolean keptAlive
+            SourceResponseCompletionEvidence completionEvidence
         ) {
             completeResponses.add(replayRequestId);
+            completeResponseEvidence.add(completionEvidence);
             responseBytes.put(replayRequestId, bytesOf(response));
         }
 

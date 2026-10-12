@@ -1255,10 +1255,10 @@ Hooks for expanding this review:
 
 ## Appendix A — new metric inventory
 
-57 instruments across 7 classes. `UD` = up-down counter, `H` = histogram, otherwise
+61 instruments across 7 classes. `UD` = up-down counter, `H` = histogram, otherwise
 monotonic counter.
 
-### `ReplayIntakeMetrics` — scope `replayer`, 30 instruments
+### `ReplayIntakeMetrics` — scope `replayer`, 34 instruments
 
 | Name | Type | Unit | Attributes |
 |---|---|---|---|
@@ -1271,8 +1271,12 @@ monotonic counter.
 | `replayIntakeRequestsReconstituted` | counter | requests | — |
 | `replayIntakeInterimResponsesObserved` | counter | responses | — |
 | `replayIntakeResponsesProvenComplete` | counter | responses | — |
+| `replayIntakeResponsesFramedComplete` | counter | responses | — |
 | `replayIntakeResponsesUnprovenComplete` | counter | responses | — |
 | `replayIntakeResponsesIncomplete` | counter | responses | `incompleteReason` |
+| `replayIntakeResponseFramingFallbacks` | counter | responses | `framingFallbackReason` |
+| `replayIntakePostFramingResponseObservations` | counter | observations | `postFramingObservationType` |
+| `replayIntakePostFramingResponseBytes` | counter | bytes | `postFramingObservationType` |
 | `replayIntakeRetrySourceResponsesComplete` | counter | responses | — |
 | `replayIntakeRetrySourceResponsesUnavailable` | counter | responses | — |
 | `replayIntakeWriterTimeTransitions` | counter | transitions | `writerTimeTransition` |

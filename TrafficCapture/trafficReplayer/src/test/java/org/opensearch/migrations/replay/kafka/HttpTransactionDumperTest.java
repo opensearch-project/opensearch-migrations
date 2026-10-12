@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
@@ -62,7 +63,11 @@ class HttpTransactionDumperTest {
             1_000L
         );
         dumper.onSourceInterimResponse(requestId, interim);
-        dumper.onSourceResponseComplete(requestId, response, true);
+        dumper.onSourceResponseComplete(
+            requestId,
+            response,
+            SourceResponseCompletionEvidence.NEXT_REQUEST
+        );
         dumper.onCapturedClose(CONNECTION, 1, Instant.ofEpochSecond(104));
 
         var output = baos.toString(StandardCharsets.UTF_8);

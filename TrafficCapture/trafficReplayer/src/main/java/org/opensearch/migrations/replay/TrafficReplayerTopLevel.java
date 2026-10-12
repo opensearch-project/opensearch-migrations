@@ -1534,7 +1534,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         public void onSourceResponseComplete(
             ReplayRequestId requestId,
             HttpMessageAndTimestamp.Response response,
-            boolean keptAlive
+            SourceResponseCompletionEvidence completionEvidence
         ) {
             var connectionId = requestId.connectionProcessingId();
             requireConnection(connectionId).owner.submit(
@@ -1546,7 +1546,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                     connectionId.generation(),
                     requestId,
                     response,
-                    keptAlive
+                    completionEvidence
                 )
             );
         }

@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.SourceResponseCompletionEvidence;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
@@ -642,7 +643,7 @@ class ReplayIntakeOwnerThreadTest {
         public void onSourceResponseComplete(
             ReplayRequestId replayRequestId,
             HttpMessageAndTimestamp.Response response,
-            boolean keptAlive
+            SourceResponseCompletionEvidence completionEvidence
         ) {
             everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
             completeResponses.add(replayRequestId);
