@@ -31,6 +31,8 @@ import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.intake.PartitionIntakeState;
 import org.opensearch.migrations.replay.kafka.KafkaConsumerProperties;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
+import org.opensearch.migrations.replay.kafkasource.assignor.AssignorControl;
+import org.opensearch.migrations.replay.kafkasource.assignor.QuietWindowAssignor;
 import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.sink.S3TupleSink;
 import org.opensearch.migrations.replay.sink.TupleWriter;
@@ -261,6 +263,14 @@ public class TrafficReplayer {
         long cancellationGraceMs = 1_000;
         @Parameter(
             required = false,
+            names = { "--kafka-quiet-window-ms", "--kafkaQuietWindowMs" },
+            arity = 1,
+            description = "How long consumer-group membership must stop growing before partitions are "
+                + "rebalanced across new workers. Replacements for departed workers are filled immediately. "
+                + "Also the delay before the first assignment after a full-fleet start.")
+        long kafkaQuietWindowMs = QuietWindowAssignor.DEFAULT_QUIET_MILLIS;
+        @Parameter(
+            required = false,
             names = {
                 "--heartbeat-expiration-interval-seconds",
                 "--heartbeatExpirationIntervalSeconds"
@@ -483,6 +493,13 @@ public class TrafficReplayer {
             }
             if (cancellationGraceMs < 0) {
                 throw new ParameterException("--cancellation-grace-ms must not be negative");
+            }
+            if (kafkaQuietWindowMs <= cancellationGraceMs) {
+                // The quiet window is also the cooperative follow-up safety net, which must outlast a
+                // revocation's grace wait or it would fire while the revoking members are still finishing.
+                throw new ParameterException(
+                    "--kafka-quiet-window-ms must be greater than --cancellation-grace-ms"
+                );
             }
             if (heartbeatExpirationIntervalSeconds <= 0) {
                 throw new ParameterException(
@@ -1045,6 +1062,9 @@ public class TrafficReplayer {
             params.kafkaTrafficPassword,
             params.kafkaTrafficPropertyFile
         );
+        var assignorControl = new AssignorControl();
+        kafkaProperties.put(QuietWindowAssignor.CONTROL_CONFIG, assignorControl);
+        kafkaProperties.put(QuietWindowAssignor.QUIET_MILLIS_CONFIG, params.kafkaQuietWindowMs);
         var consumer = new KafkaConsumer<String, byte[]>(kafkaProperties);
         var targetEventLoopGroup = new NioEventLoopGroup(
             params.numClientThreads,
@@ -1069,7 +1089,8 @@ public class TrafficReplayer {
                 tupleSinkResources,
                 Clock.systemUTC(),
                 System::nanoTime,
-                ProcessSupervisor::new
+                ProcessSupervisor::new,
+                assignorControl
             );
         } catch (Throwable failure) {
             closeAfterConstructionFailure(
@@ -1115,6 +1136,41 @@ public class TrafficReplayer {
         );
     }
 
+    static DeployedReplayApplication createDeployedReplayApplication(
+        Parameters params,
+        URI targetUri,
+        PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
+        TupleWriter.RetryDelayPolicy tupleRetryDelayPolicy,
+        RootReplayerContext rootContext,
+        Consumer<String, byte[]> consumer,
+        NioEventLoopGroup targetEventLoopGroup,
+        IAuthTransformerFactory authTransformerFactory,
+        Optional<TupleSinkResources> tupleSinkResources,
+        Clock clock,
+        LongSupplier nanoTime,
+        ProcessSupervisorFactory processSupervisorFactory
+    ) throws Exception {
+        return createDeployedReplayApplication(
+            params,
+            targetUri,
+            brokerTimeConfiguration,
+            tupleRetryDelayPolicy,
+            rootContext,
+            consumer,
+            targetEventLoopGroup,
+            authTransformerFactory,
+            tupleSinkResources,
+            clock,
+            nanoTime,
+            processSupervisorFactory,
+            new AssignorControl()
+        );
+    }
+
+    /**
+     * @param assignorControl the instance the consumer's {@link QuietWindowAssignor} was configured with,
+     *                        so the Kafka owner's polls can carry out its rebalance requests
+     */
     // Construction rollback must close resources and rethrow every Throwable without narrowing it.
     @SuppressWarnings("java:S1181")
     static DeployedReplayApplication createDeployedReplayApplication(
@@ -1129,7 +1185,8 @@ public class TrafficReplayer {
         Optional<TupleSinkResources> tupleSinkResources,
         Clock clock,
         LongSupplier nanoTime,
-        ProcessSupervisorFactory processSupervisorFactory
+        ProcessSupervisorFactory processSupervisorFactory,
+        AssignorControl assignorControl
     ) throws Exception {
         var eventLoops = targetEventLoops(targetEventLoopGroup);
         var sslContext = loadTargetSslContext(
@@ -1244,7 +1301,8 @@ public class TrafficReplayer {
             DEFAULT_KAFKA_POLL_TIMEOUT,
             Duration.ofMillis(params.cancellationGraceMs),
             ignored -> supervisor.captureProtocolViolationDrainExpired(),
-            supervisor.failureSink()
+            supervisor.failureSink(),
+            assignorControl
         );
         topLevelReference.set(replayer);
         var lifecycle = new DeployedReplayLifecycle(

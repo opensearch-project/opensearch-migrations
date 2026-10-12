@@ -334,6 +334,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "fromCapturedTrafficSourceKind": "proxy",
       "heartbeatExpirationIntervalSeconds": 30,
       "jvmArgs": "",
+      "kafkaQuietWindowMs": 60000,
       "kafkaTrafficEnableMSKAuth": false,
       "loggingConfigurationOverrideConfigMap": "",
       "maximumBackwardSkewSeconds": 5,

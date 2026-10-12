@@ -17,6 +17,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.replay.kafkasource.assignor.AssignorControl;
+
 import com.google.protobuf.ByteString;
 import lombok.NonNull;
 import org.apache.kafka.clients.consumer.CommitFailedException;
@@ -48,18 +50,37 @@ import org.apache.kafka.common.errors.WakeupException;
  * acknowledged completion, retriable failure, stale membership, or an outcome that may already have reached
  * the broker. Preserving those distinctions prevents an uncertain commit from being treated as a definite
  * failure and retried blindly.</p>
+ *
+ * <p>Polling is also where the quiet-window assignor's deadline is consumed: the assignor cannot call the
+ * consumer, so it arms a deadline on the shared {@link AssignorControl}, and the poll that reaches it calls
+ * {@code enforceRebalance()}. Each poll's wait is capped at the time remaining, so the deadline is met on
+ * time without a separate timer.</p>
  */
 public final class KafkaConsumerSourcePort implements KafkaSourcePort {
 
     private final Consumer<String, byte[]> consumer;
     private final Duration pollTimeout;
+    private final AssignorControl rebalanceRequests;
 
     public KafkaConsumerSourcePort(
         @NonNull Consumer<String, byte[]> consumer,
         @NonNull Duration pollTimeout
     ) {
+        this(consumer, pollTimeout, new AssignorControl());
+    }
+
+    /**
+     * @param rebalanceRequests the same instance the consumer's {@code QuietWindowAssignor} was configured
+     *                          with; a different instance is never armed, so no rebalance is ever requested
+     */
+    public KafkaConsumerSourcePort(
+        @NonNull Consumer<String, byte[]> consumer,
+        @NonNull Duration pollTimeout,
+        @NonNull AssignorControl rebalanceRequests
+    ) {
         this.consumer = consumer;
         this.pollTimeout = pollTimeout;
+        this.rebalanceRequests = rebalanceRequests;
     }
 
     @Override
@@ -83,6 +104,14 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         var effectiveTimeout = maximumWait.compareTo(pollTimeout) < 0
             ? maximumWait
             : pollTimeout;
+        long now = rebalanceRequests.nowMillis();
+        if (rebalanceRequests.takeDueDeadline(now)) {
+            consumer.enforceRebalance("quiet-window deadline");
+        }
+        var untilDeadline = Duration.ofMillis(rebalanceRequests.millisUntilDeadline(now));
+        if (untilDeadline.compareTo(effectiveTimeout) < 0) {
+            effectiveTimeout = untilDeadline;
+        }
         var polled = consumer.poll(effectiveTimeout);
         var byPartition = new LinkedHashMap<TopicPartition, List<PolledKafkaRecord>>();
         for (var topicPartition : polled.partitions()) {

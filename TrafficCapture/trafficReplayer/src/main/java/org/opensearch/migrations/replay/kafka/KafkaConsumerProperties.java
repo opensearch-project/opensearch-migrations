@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
 
+import org.opensearch.migrations.replay.kafkasource.assignor.QuietWindowAssignor;
+
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -58,9 +60,9 @@ public class KafkaConsumerProperties {
         KafkaSaslAuthHelper.applySaslAuthProperties(kafkaProps, authType, kafkaUserName, kafkaPassword);
         kafkaProps.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers);
         kafkaProps.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        // Use cooperative sticky rebalancing to avoid stop-the-world partition revocation
+        // Cooperative (no stop-the-world revocation) and churn-minimizing; see QuietWindowAssignor.
         kafkaProps.putIfAbsent(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
-            "org.apache.kafka.clients.consumer.CooperativeStickyAssignor");
+            QuietWindowAssignor.class.getName());
         return kafkaProps;
     }
 }

@@ -3099,6 +3099,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "minimum": 0,
                       "default": 1000
                     },
+                    "kafkaQuietWindowMs": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 60000
+                    },
                     "heartbeatExpirationIntervalSeconds": {
                       "type": "integer",
                       "minimum": 1,
@@ -6151,6 +6156,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "minimum": 0,
                     "default": 1000,
                     "description": "Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown."
+                  },
+                  "kafkaQuietWindowMs": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 60000,
+                    "description": "Milliseconds Kafka consumer-group membership must stop growing before partitions are rebalanced across new replayers. Replacements for departed replayers are filled immediately. Also the delay before the first assignment after the whole replayer fleet starts. Must be greater than cancellationGraceMs."
                   },
                   "heartbeatExpirationIntervalSeconds": {
                     "type": "integer",

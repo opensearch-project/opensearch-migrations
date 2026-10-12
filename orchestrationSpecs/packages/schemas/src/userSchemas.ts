@@ -763,6 +763,10 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("Number of target Netty event-loop threads. 0 uses Netty's default of 2 times the available processors."),
     cancellationGraceMs: z.number().int().nonnegative().default(1000).optional()
         .describe("Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown."),
+    kafkaQuietWindowMs: z.number().int().min(1).default(60000).optional()
+        .describe("Milliseconds Kafka consumer-group membership must stop growing before partitions are rebalanced across new replayers. " +
+            "Replacements for departed replayers are filled immediately. Also the delay before the first assignment after the whole " +
+            "replayer fleet starts. Must be greater than cancellationGraceMs."),
     heartbeatExpirationIntervalSeconds: z.number().int().min(1).default(30).optional()
         .describe("Broker-time heartbeat expiration interval E in seconds."),
     maximumBackwardSkewSeconds: z.number().int().nonnegative().default(5).optional()

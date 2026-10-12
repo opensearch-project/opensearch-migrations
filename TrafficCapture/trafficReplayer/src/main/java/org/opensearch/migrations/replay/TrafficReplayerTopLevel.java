@@ -42,6 +42,7 @@ import org.opensearch.migrations.replay.kafkasource.KafkaConsumerSourcePort;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.kafkasource.assignor.AssignorControl;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationCancelled;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
@@ -382,6 +383,32 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull IntConsumer protocolViolationTermination,
         @NonNull ProcessSupervisor.FailureSink fatalSink
     ) {
+        this(
+            consumer,
+            rootContext,
+            configuration,
+            kafkaPollTimeout,
+            cancellationGrace,
+            protocolViolationTermination,
+            fatalSink,
+            new AssignorControl()
+        );
+    }
+
+    /**
+     * @param assignorControl the instance the consumer's {@code QuietWindowAssignor} was configured with;
+     *                        the Kafka source's polls consume its rebalance deadlines
+     */
+    public TrafficReplayerTopLevel(
+        @NonNull org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
+        @NonNull RootReplayerContext rootContext,
+        @NonNull Configuration<P, R, T> configuration,
+        @NonNull Duration kafkaPollTimeout,
+        @NonNull Duration cancellationGrace,
+        @NonNull IntConsumer protocolViolationTermination,
+        @NonNull ProcessSupervisor.FailureSink fatalSink,
+        @NonNull AssignorControl assignorControl
+    ) {
         this.configuration = configuration;
         this.fatalSink = fatalSink;
         this.kafkaWakeup = consumer::wakeup;
@@ -422,7 +449,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             configuration.retryReadyRequestSupplyTarget()
         );
         this.sourceOwner = new KafkaSourceOwner(
-            new KafkaConsumerSourcePort(consumer, kafkaPollTimeout),
+            new KafkaConsumerSourcePort(consumer, kafkaPollTimeout, assignorControl),
             sourceInputs,
             intakeInputs,
             wakeupController,
