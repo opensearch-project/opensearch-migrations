@@ -18,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.DoubleSupplier;
@@ -58,6 +59,10 @@ import org.slf4j.LoggerFactory;
 public final class KafkaSourceOwner {
     public static final Duration DEFAULT_REVOCATION_GRACE = Duration.ofSeconds(1);
     public static final Duration DEFAULT_HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
+    /** How often {@link Metrics#sourcePositionObserved} is refreshed; frequent enough for 1-minute dashboards. */
+    public static final Duration SOURCE_POSITION_INTERVAL = Duration.ofSeconds(5);
+    /** A commit head observed longer ago than this counts as stale, which is what pins a committed position. */
+    public static final Duration STALE_COMMIT_HEAD_AGE = Duration.ofMinutes(5);
     public static final Duration DEFAULT_INITIAL_COMMIT_RETRY_DELAY = Duration.ofMillis(100);
     public static final Duration DEFAULT_MAXIMUM_COMMIT_RETRY_DELAY = Duration.ofSeconds(5);
     public static final double DEFAULT_COMMIT_RETRY_JITTER_FRACTION = 0.20;
@@ -166,6 +171,27 @@ public final class KafkaSourceOwner {
         }
     }
 
+    /**
+     * Where this owner's Kafka read and commit positions stand, sampled on the owner thread.
+     *
+     * @param consumerLagRecords sum over owned partitions of records between the fetch position and the high
+     *                           watermark; records already read but not yet committed are in
+     *                           {@code recordsOutstanding}, so committed backlog is the sum of the two
+     * @param lagUnknownPartitions owned partitions with no fetch response yet, excluded from the lag sums
+     * @param oldestCommitHeadLogAppendTimeMillis broker append time of the oldest record holding back any owned
+     *                                            partition's commit position, empty when nothing is held
+     * @param staleCommitHeadPartitions owned partitions whose commit head was observed more than
+     *                                  {@link #STALE_COMMIT_HEAD_AGE} ago
+     */
+    public record SourcePosition(
+        int assignedPartitions,
+        long consumerLagRecords,
+        long maxPartitionLagRecords,
+        int lagUnknownPartitions,
+        @NonNull OptionalLong oldestCommitHeadLogAppendTimeMillis,
+        int staleCommitHeadPartitions
+    ) {}
+
     public interface Metrics {
         void recordsRead(long count);
         void recordsCommitted(long count);
@@ -178,6 +204,7 @@ public final class KafkaSourceOwner {
         void commitRetryAttempted(KafkaSourcePort.CommitFailureClass failureClass);
         void commitRetryDegradedChanged(long delta);
         void commitRetryRecovered();
+        void sourcePositionObserved(SourcePosition position);
     }
 
     @FunctionalInterface
@@ -256,6 +283,7 @@ public final class KafkaSourceOwner {
     private boolean orderlyShutdownClosed;
     private boolean protocolViolationDetected;
     private long nextHeartbeatNanos;
+    private long nextSourcePositionNanos;
     private long pollsSinceLastHeartbeat;
     private long emptyPollsSinceLastHeartbeat;
     private long commitsSinceLastHeartbeat;
@@ -407,6 +435,7 @@ public final class KafkaSourceOwner {
         }
         heartbeatIntervalNanos = heartbeatInterval.toNanos();
         nextHeartbeatNanos = monotonicNanos.getAsLong() + heartbeatIntervalNanos;
+        nextSourcePositionNanos = monotonicNanos.getAsLong();
     }
 
     private static CommitRetryDelayPolicy defaultCommitRetryDelayPolicy() {
@@ -474,6 +503,7 @@ public final class KafkaSourceOwner {
             applyPauseAndResumeDecisions();
             pollAndDeliver();
         } finally {
+            publishSourcePositionIfDue();
             logHeartbeatIfDue();
         }
     }
@@ -1495,6 +1525,53 @@ public final class KafkaSourceOwner {
             );
         }
         metrics.recordsOutstandingChanged(delta);
+    }
+
+    private void publishSourcePositionIfDue() {
+        var nowNanos = monotonicNanos.getAsLong();
+        if (orderlyShutdownClosed || nowNanos - nextSourcePositionNanos < 0) {
+            return;
+        }
+        nextSourcePositionNanos = nowNanos + SOURCE_POSITION_INTERVAL.toNanos();
+        // The client throws for a partition it no longer owns, and owned state can briefly outlive Kafka's
+        // assignment during a rebalance, so lag is only asked of partitions Kafka still assigns.
+        var kafkaAssignment = port.assignment();
+        long lagRecords = 0;
+        long maxPartitionLag = 0;
+        int lagUnknown = 0;
+        int staleHeads = 0;
+        var oldestHeadAppendTime = OptionalLong.empty();
+        for (var state : partitions.values()) {
+            var lag = kafkaAssignment.contains(state.topicPartition())
+                ? port.currentLag(state.topicPartition())
+                : OptionalLong.empty();
+            if (lag.isPresent()) {
+                lagRecords = Math.addExact(lagRecords, lag.getAsLong());
+                maxPartitionLag = Math.max(maxPartitionLag, lag.getAsLong());
+            } else {
+                lagUnknown++;
+            }
+            var queue = state.commitQueue();
+            var headAppendTime = queue.headLogAppendTimeMillis();
+            if (headAppendTime.isPresent()
+                && (oldestHeadAppendTime.isEmpty()
+                    || headAppendTime.getAsLong() < oldestHeadAppendTime.getAsLong())) {
+                oldestHeadAppendTime = headAppendTime;
+            }
+            var headObservedAt = queue.headRecordId().map(recordObservedAtNanos::get);
+            if (headObservedAt.isPresent()
+                && nowNanos - headObservedAt.get() > STALE_COMMIT_HEAD_AGE.toNanos()) {
+                staleHeads++;
+            }
+        }
+        metrics.sourcePositionObserved(new SourcePosition(
+            partitions.size(),
+            lagRecords,
+            maxPartitionLag,
+            lagUnknown,
+            oldestHeadAppendTime,
+            staleHeads
+        ));
     }
 
     private void logHeartbeatIfDue() {

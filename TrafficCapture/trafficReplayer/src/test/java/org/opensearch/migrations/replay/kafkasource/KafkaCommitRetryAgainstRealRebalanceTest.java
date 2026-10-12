@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -109,6 +110,11 @@ class KafkaCommitRetryAgainstRealRebalanceTest {
         @Override
         public Optional<Long> committedPosition(TopicPartition topicPartition) {
             return delegate.committedPosition(topicPartition);
+        }
+
+        @Override
+        public OptionalLong currentLag(TopicPartition topicPartition) {
+            return delegate.currentLag(topicPartition);
         }
 
         @Override

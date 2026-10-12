@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.tracing;
 
 import java.util.Locale;
+import java.util.function.LongSupplier;
 
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort;
@@ -8,6 +9,7 @@ import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.LongGauge;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
@@ -50,6 +52,12 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
             "kafkaSourceCommitRetryDegraded";
         public static final String COMMIT_RETRY_RECOVERIES =
             "kafkaSourceCommitRetryRecoveries";
+        public static final String ASSIGNED_PARTITIONS = "kafkaSourceAssignedPartitions";
+        public static final String CONSUMER_LAG = "kafkaSourceConsumerLag";
+        public static final String MAX_PARTITION_LAG = "kafkaSourceMaxPartitionLag";
+        public static final String LAG_UNKNOWN_PARTITIONS = "kafkaSourceLagUnknownPartitions";
+        public static final String OLDEST_COMMIT_HEAD_AGE = "kafkaSourceOldestCommitHeadAge";
+        public static final String STALE_COMMIT_HEAD_PARTITIONS = "kafkaSourceStaleCommitHeadPartitions";
     }
 
     private final LongCounter recordsRead;
@@ -63,8 +71,20 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
     private final LongCounter commitRetryAttempts;
     private final LongUpDownCounter commitRetryDegraded;
     private final LongCounter commitRetryRecoveries;
+    private final LongGauge assignedPartitions;
+    private final LongGauge consumerLag;
+    private final LongGauge maxPartitionLag;
+    private final LongGauge lagUnknownPartitions;
+    private final LongGauge oldestCommitHeadAge;
+    private final LongGauge staleCommitHeadPartitions;
+    private final LongSupplier wallClockMillis;
 
     public KafkaCommitStateMetrics(@NonNull Meter meter) {
+        this(meter, System::currentTimeMillis);
+    }
+
+    public KafkaCommitStateMetrics(@NonNull Meter meter, @NonNull LongSupplier wallClockMillis) {
+        this.wallClockMillis = wallClockMillis;
         recordsRead = meter.counterBuilder(MetricNames.RECORDS_READ)
             .setDescription("Kafka records admitted into replay source processing")
             .setUnit(RECORDS_UNIT)
@@ -109,6 +129,36 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
         commitRetryRecoveries = meter.counterBuilder(MetricNames.COMMIT_RETRY_RECOVERIES)
             .setDescription("Kafka commit retry episodes recovered by an acknowledged commit")
             .setUnit("events")
+            .build();
+        assignedPartitions = meter.gaugeBuilder(MetricNames.ASSIGNED_PARTITIONS)
+            .ofLongs()
+            .setDescription("Kafka partitions this replayer currently owns")
+            .setUnit("partitions")
+            .build();
+        consumerLag = meter.gaugeBuilder(MetricNames.CONSUMER_LAG)
+            .ofLongs()
+            .setDescription("Records between the fetch position and the high watermark, summed over owned partitions")
+            .setUnit(RECORDS_UNIT)
+            .build();
+        maxPartitionLag = meter.gaugeBuilder(MetricNames.MAX_PARTITION_LAG)
+            .ofLongs()
+            .setDescription("Largest fetch-position lag among owned partitions")
+            .setUnit(RECORDS_UNIT)
+            .build();
+        lagUnknownPartitions = meter.gaugeBuilder(MetricNames.LAG_UNKNOWN_PARTITIONS)
+            .ofLongs()
+            .setDescription("Owned partitions without a fetch response yet, excluded from the lag gauges")
+            .setUnit("partitions")
+            .build();
+        oldestCommitHeadAge = meter.gaugeBuilder(MetricNames.OLDEST_COMMIT_HEAD_AGE)
+            .ofLongs()
+            .setDescription("Wall-clock time since the broker appended the oldest record holding back a commit")
+            .setUnit("ms")
+            .build();
+        staleCommitHeadPartitions = meter.gaugeBuilder(MetricNames.STALE_COMMIT_HEAD_PARTITIONS)
+            .ofLongs()
+            .setDescription("Owned partitions whose commit head has been held longer than the stale threshold")
+            .setUnit("partitions")
             .build();
     }
 
@@ -176,6 +226,19 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
     @Override
     public void commitRetryRecovered() {
         commitRetryRecoveries.add(1);
+    }
+
+    @Override
+    public void sourcePositionObserved(@NonNull KafkaSourceOwner.SourcePosition position) {
+        assignedPartitions.set(position.assignedPartitions());
+        consumerLag.set(position.consumerLagRecords());
+        maxPartitionLag.set(position.maxPartitionLagRecords());
+        lagUnknownPartitions.set(position.lagUnknownPartitions());
+        var headAppendTime = position.oldestCommitHeadLogAppendTimeMillis();
+        oldestCommitHeadAge.set(
+            headAppendTime.isPresent() ? Math.max(0, wallClockMillis.getAsLong() - headAppendTime.getAsLong()) : 0
+        );
+        staleCommitHeadPartitions.set(position.staleCommitHeadPartitions());
     }
 
     private static String label(Enum<?> value) {

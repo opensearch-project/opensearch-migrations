@@ -18,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.LongConsumer;
 
@@ -88,6 +89,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private final Set<TopicPartition> assignment = new LinkedHashSet<>();
     private final Set<TopicPartition> paused = new LinkedHashSet<>();
     private final Map<TopicPartition, Long> committedPositions = new LinkedHashMap<>();
+    private final Map<TopicPartition, Long> currentLags = new LinkedHashMap<>();
     private final Deque<Map<TopicPartition, List<PolledKafkaRecord>>> scriptedPolls = new ArrayDeque<>();
     private final List<Observation> observations = new ArrayList<>();
     private final Deque<ThrowingRunnable> scriptedRebalances = new ArrayDeque<>();
@@ -232,6 +234,11 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         committedPositions.put(topicPartition, position);
     }
 
+    /** Scripts the client-local lag the owner reads; unscripted partitions report no lag yet. */
+    public void setCurrentLag(TopicPartition topicPartition, long lag) {
+        currentLags.put(topicPartition, lag);
+    }
+
     public void addAssignedPartition(TopicPartition topicPartition) {
         assignment.add(topicPartition);
     }
@@ -329,6 +336,16 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     @Override
     public Optional<Long> committedPosition(TopicPartition topicPartition) {
         return Optional.ofNullable(committedPositions.get(topicPartition));
+    }
+
+    @Override
+    public OptionalLong currentLag(TopicPartition topicPartition) {
+        // The real client throws for a partition it does not have assigned, so the fixture does too.
+        if (!assignment.contains(topicPartition)) {
+            throw new IllegalStateException("No current assignment for partition " + topicPartition);
+        }
+        var lag = currentLags.get(topicPartition);
+        return lag == null ? OptionalLong.empty() : OptionalLong.of(lag);
     }
 
     @Override

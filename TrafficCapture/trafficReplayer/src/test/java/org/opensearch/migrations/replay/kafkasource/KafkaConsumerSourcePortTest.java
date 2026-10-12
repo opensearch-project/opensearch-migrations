@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import org.apache.kafka.clients.consumer.CommitFailedException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -97,6 +98,20 @@ class KafkaConsumerSourcePortTest {
             new ScriptedCommitConsumer(failure, null, null),
             Duration.ofSeconds(1)
         );
+    }
+
+    @Test
+    void currentLagIsTheClientsOwnViewWithoutABrokerCall() {
+        var consumer = new MockConsumer<String, byte[]>("earliest");
+        consumer.assign(List.of(PARTITION));
+        consumer.updateBeginningOffsets(Map.of(PARTITION, 0L));
+        consumer.updateEndOffsets(Map.of(PARTITION, 10L));
+        consumer.addRecord(new ConsumerRecord<>(PARTITION.topic(), PARTITION.partition(), 0, "key", new byte[0]));
+        var port = new KafkaConsumerSourcePort(consumer, Duration.ZERO);
+
+        port.poll();
+
+        Assertions.assertEquals(OptionalLong.of(9), port.currentLag(PARTITION));
     }
 
     @Test

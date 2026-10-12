@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
+import java.util.OptionalLong;
 import java.util.Set;
 
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
@@ -150,6 +151,36 @@ class KafkaCommitStateMetricsTest {
                 Attributes.of(KafkaCommitStateMetrics.FAILURE_CLASS_ATTRIBUTE, "transport")
             )
         );
+    }
+
+    @Test
+    void sourcePositionPublishesLagAndCommitHeadAgeAsGauges() {
+        var metrics = new KafkaCommitStateMetrics(telemetry.openTelemetrySdk.getMeter("test"), () -> 61_000L);
+        metrics.sourcePositionObserved(new KafkaSourceOwner.SourcePosition(3, 900, 500, 1, OptionalLong.of(1_000L), 2));
+
+        var recorded = telemetry.getFinishedMetrics();
+        assertGauge(recorded, KafkaCommitStateMetrics.MetricNames.ASSIGNED_PARTITIONS, 3);
+        assertGauge(recorded, KafkaCommitStateMetrics.MetricNames.CONSUMER_LAG, 900);
+        assertGauge(recorded, KafkaCommitStateMetrics.MetricNames.MAX_PARTITION_LAG, 500);
+        assertGauge(recorded, KafkaCommitStateMetrics.MetricNames.LAG_UNKNOWN_PARTITIONS, 1);
+        assertGauge(recorded, KafkaCommitStateMetrics.MetricNames.OLDEST_COMMIT_HEAD_AGE, 60_000);
+        assertGauge(recorded, KafkaCommitStateMetrics.MetricNames.STALE_COMMIT_HEAD_PARTITIONS, 2);
+
+        metrics.sourcePositionObserved(new KafkaSourceOwner.SourcePosition(0, 0, 0, 0, OptionalLong.empty(), 0));
+        assertGauge(telemetry.getFinishedMetrics(), KafkaCommitStateMetrics.MetricNames.OLDEST_COMMIT_HEAD_AGE, 0);
+    }
+
+    private void assertGauge(Iterable<MetricData> metrics, String name, long expectedValue) {
+        for (var metric : metrics) {
+            if (metric.getName().equals(name)) {
+                Assertions.assertEquals(
+                    expectedValue,
+                    metric.getLongGaugeData().getPoints().stream().findFirst().orElseThrow().getValue()
+                );
+                return;
+            }
+        }
+        throw new AssertionError("Missing metric " + name);
     }
 
     private void assertPoint(

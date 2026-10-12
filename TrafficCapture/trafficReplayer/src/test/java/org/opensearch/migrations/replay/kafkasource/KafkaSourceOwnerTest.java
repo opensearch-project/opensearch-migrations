@@ -9,10 +9,12 @@
 package org.opensearch.migrations.replay.kafkasource;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -146,6 +148,79 @@ class KafkaSourceOwnerTest {
         );
         Assertions.assertTrue(
             lowerBound.delayAfterFailure(100).compareTo(Duration.ofSeconds(5)) <= 0
+        );
+    }
+
+    @Test
+    void sourcePositionReportsLagAndCommitHeadsOnItsOwnCadence() {
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
+        var owner = ownerFor(port, GRACE);
+        assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+        drainIntake();
+        var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        var generation1 = owner.partitionState(PARTITION_1).orElseThrow().generation();
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation0, 1)
+        ));
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation1, 1)
+        ));
+        port.setCurrentLag(PARTITION_0, 40);
+        port.scriptPoll(Map.of(
+            PARTITION_0, List.of(record(10)),
+            PARTITION_1, List.of(record(20))
+        ));
+        clockNanos.set(KafkaSourceOwner.SOURCE_POSITION_INTERVAL.toNanos());
+        owner.runOnce();
+        drainIntake();
+
+        var held = commitMetrics.sourcePositions.getLast();
+        Assertions.assertAll(
+            () -> Assertions.assertEquals(2, held.assignedPartitions()),
+            () -> Assertions.assertEquals(40, held.consumerLagRecords()),
+            () -> Assertions.assertEquals(40, held.maxPartitionLagRecords()),
+            () -> Assertions.assertEquals(1, held.lagUnknownPartitions(), "partition 1 has no fetch response yet"),
+            () -> Assertions.assertEquals(OptionalLong.of(1_010L), held.oldestCommitHeadLogAppendTimeMillis()),
+            () -> Assertions.assertEquals(0, held.staleCommitHeadPartitions())
+        );
+
+        var published = commitMetrics.sourcePositions.size();
+        owner.runOnce();
+        Assertions.assertEquals(published, commitMetrics.sourcePositions.size(), "must not publish every loop");
+
+        port.setCurrentLag(PARTITION_1, 75);
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(new KafkaRecordId(generation0, 10)));
+        clockNanos.addAndGet(KafkaSourceOwner.STALE_COMMIT_HEAD_AGE.toNanos() + 1);
+        owner.runOnce();
+
+        var stale = commitMetrics.sourcePositions.getLast();
+        Assertions.assertAll(
+            () -> Assertions.assertEquals(115, stale.consumerLagRecords()),
+            () -> Assertions.assertEquals(75, stale.maxPartitionLagRecords()),
+            () -> Assertions.assertEquals(0, stale.lagUnknownPartitions()),
+            () -> Assertions.assertEquals(
+                OptionalLong.of(1_020L),
+                stale.oldestCommitHeadLogAppendTimeMillis(),
+                "completing partition 0's head leaves partition 1's record as the oldest held"
+            ),
+            () -> Assertions.assertEquals(1, stale.staleCommitHeadPartitions())
+        );
+    }
+
+    @Test
+    void sourcePositionDoesNotAskKafkaForLagOfAPartitionItNoLongerAssigns() {
+        // Owned state can outlive Kafka's assignment mid-rebalance; asking the client about it would throw.
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port, GRACE);
+        port.setCurrentLag(PARTITION_0, 7);
+        clockNanos.set(KafkaSourceOwner.SOURCE_POSITION_INTERVAL.toNanos());
+        assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+
+        var position = commitMetrics.sourcePositions.getLast();
+        Assertions.assertAll(
+            () -> Assertions.assertEquals(2, position.assignedPartitions()),
+            () -> Assertions.assertEquals(7, position.consumerLagRecords()),
+            () -> Assertions.assertEquals(1, position.lagUnknownPartitions())
         );
     }
 
@@ -367,6 +442,7 @@ class KafkaSourceOwnerTest {
         private long commitRetryAttempts;
         private long commitRetryDegraded;
         private long commitRetryRecoveries;
+        private final List<KafkaSourceOwner.SourcePosition> sourcePositions = new ArrayList<>();
         private final EnumMap<KafkaSourceOwner.AbandonmentCause, Long> abandoned =
             new EnumMap<>(KafkaSourceOwner.AbandonmentCause.class);
         private final EnumMap<KafkaSourceOwner.CommitResolution, Long> resolutions =
@@ -431,6 +507,11 @@ class KafkaSourceOwnerTest {
         @Override
         public void commitRetryRecovered() {
             commitRetryRecoveries++;
+        }
+
+        @Override
+        public void sourcePositionObserved(KafkaSourceOwner.SourcePosition position) {
+            sourcePositions.add(position);
         }
 
         private long abandoned(KafkaSourceOwner.AbandonmentCause cause) {

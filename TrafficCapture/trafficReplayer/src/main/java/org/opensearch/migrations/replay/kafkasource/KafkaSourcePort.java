@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -63,6 +64,15 @@ public interface KafkaSourcePort {
 
     /** Kafka's committed position for a newly assigned partition, empty when it has none. */
     Optional<Long> committedPosition(TopicPartition topicPartition);
+
+    /**
+     * Records between this consumer's fetch position and the partition's high watermark, as of the last fetch
+     * response; empty until a fetch has returned one.
+     *
+     * <p>Answered from client-local state, never a broker round-trip, so it is cheap enough for the owner loop.
+     * A paused partition is not fetched, so its value is only as fresh as its last fetch.</p>
+     */
+    OptionalLong currentLag(TopicPartition topicPartition);
 
     /**
      * Submits the given durable commit points without waiting, for use in the ordinary loop.

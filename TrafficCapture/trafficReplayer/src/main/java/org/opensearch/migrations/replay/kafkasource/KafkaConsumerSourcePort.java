@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -132,6 +133,11 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
             byPartition.put(topicPartition, List.copyOf(records));
         }
         return byPartition;
+    }
+
+    @Override
+    public OptionalLong currentLag(TopicPartition topicPartition) {
+        return consumer.currentLag(topicPartition);
     }
 
     @Override

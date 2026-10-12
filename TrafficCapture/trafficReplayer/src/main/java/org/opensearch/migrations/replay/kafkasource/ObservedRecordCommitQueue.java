@@ -148,6 +148,20 @@ public final class ObservedRecordCommitQueue {
         return new Completion(List.copyOf(contiguous), commitPoint);
     }
 
+    /** The record holding back this partition's commit position, without copying the queue as snapshot() does. */
+    public Optional<KafkaRecordId> headRecordId() {
+        ownerThreadGuard.requireOwnerThread();
+        var head = observedRecords.peekFirst();
+        return head == null ? Optional.empty() : Optional.of(head.recordId);
+    }
+
+    /** The broker append time of the record holding back this partition's commit position, if any. */
+    public OptionalLong headLogAppendTimeMillis() {
+        ownerThreadGuard.requireOwnerThread();
+        var head = observedRecords.peekFirst();
+        return head == null ? OptionalLong.empty() : OptionalLong.of(head.logAppendTimeMillis);
+    }
+
     public int size() {
         ownerThreadGuard.requireOwnerThread();
         return observedRecords.size();

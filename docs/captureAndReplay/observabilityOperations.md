@@ -18,9 +18,13 @@ integrated into the permanent operator documentation afterward.
 - EKS removes `service.instance.id` before CloudWatch metric conversion so fleet
   queries remain aggregate. The restart-scoped value remains available in logs and
   telemetry resources.
-- Kafka consumer-group lag comes from the broker-side
-  `kafka-consumer-groups.sh --describe` view. No Kafka-exporter lag series is
-  deployed.
+- Each replayer reports its own consumer lag (`kafkaSourceConsumerLag`, from the
+  client's last fetch response) and commit-head age. Summed across the fleet these
+  approximate group lag; `kafka-consumer-groups.sh --describe` remains the
+  authoritative broker-side view. No Kafka-exporter lag series is deployed.
+- CloudWatch gauge samples arrive once per pod per export, so `Maximum` is the
+  hottest pod, `Sum / PERIOD` the fleet total, and percentiles the spread across
+  pods. Histograms carry only a usable mean in CloudWatch.
 - `console kafka describe-consumer-group` appends a metadata-only replay watermark:
   the timestamp span from the last contiguously and durably replayed record to
   the newest partition record. It fetches no traffic payloads, and it is not the
@@ -122,6 +126,12 @@ in `ReplayIntakeMetrics`; all dimensions are bounded enums.
 | `kafkaSourceCommitRetryAttempts` | counter / attempts | `failure_class` | Low; exponential pacing during an outage |
 | `kafkaSourceCommitRetryDegraded` | up-down / episodes | — | Zero; one while this process is backing off |
 | `kafkaSourceCommitRetryRecoveries` | counter / events | — | Advances when an acknowledged commit ends degradation |
+| `kafkaSourceAssignedPartitions` | gauge / partitions | — | Even across pods; spread shows assignment skew |
+| `kafkaSourceConsumerLag` | gauge / records | — | Bounded at steady state; unread records only, add `kafkaSourceRecordsOutstanding` for uncommitted backlog |
+| `kafkaSourceMaxPartitionLag` | gauge / records | — | Close to the per-partition average; one high partition is a hot spot |
+| `kafkaSourceLagUnknownPartitions` | gauge / partitions | — | Zero once each owned partition has been fetched |
+| `kafkaSourceOldestCommitHeadAge` | gauge / ms | — | Bounded by replay lag plus response time; steady growth means a stuck head |
+| `kafkaSourceStaleCommitHeadPartitions` | gauge / partitions | — | Zero; counts heads held more than five minutes |
 | `targetAttemptPermitsActive` | up-down / permits | — | At or below configured capacity; drains to zero |
 | `targetAttemptPermitAcquisitionsPending` | up-down / requests | — | Normally zero or short lived |
 | `targetAttemptPermitHeldDuration` | histogram / ms | — | Stable around target latency |
@@ -202,9 +212,10 @@ alerts:
 - after workload termination, investigate any draining population that remains
   nonzero.
 
-Consumer-lag thresholds are derived from `kafka-consumer-groups.sh` output, not a
-Prometheus or CloudWatch metric. Use `console kafka describe-consumer-group` when
-the offset count also needs the replayer's temporal watermark context.
+Fleet consumer lag is `kafkaSourceConsumerLag` summed across replayers; confirm a
+lag investigation with `kafka-consumer-groups.sh` output. Use
+`console kafka describe-consumer-group` when the offset count also needs the
+replayer's temporal watermark context.
 
 ## Log queries
 
