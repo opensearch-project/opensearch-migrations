@@ -19,6 +19,7 @@ import java.util.OptionalLong;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort.CommitPoint;
 import org.opensearch.migrations.replay.lifecycle.OwnerThreadGuard;
 
 import lombok.NonNull;
@@ -48,7 +49,7 @@ public final class ObservedRecordCommitQueue {
     @SuppressWarnings({"java:S100", "java:S1186"})
     public record Completion(
         @NonNull List<KafkaRecordId> newlyContiguousRecords,
-        @NonNull OptionalLong nextCommitOffset
+        @NonNull Optional<CommitPoint> commitPoint
     ) {}
 
     // The warnings target compiler-generated members of this public diagnostic contract.
@@ -64,11 +65,13 @@ public final class ObservedRecordCommitQueue {
 
     private static final class Entry {
         private final KafkaRecordId recordId;
+        private final long logAppendTimeMillis;
         private boolean completed;
         private boolean commitIneligible;
 
-        private Entry(KafkaRecordId recordId) {
+        private Entry(KafkaRecordId recordId, long logAppendTimeMillis) {
             this.recordId = recordId;
+            this.logAppendTimeMillis = logAppendTimeMillis;
         }
     }
 
@@ -88,7 +91,7 @@ public final class ObservedRecordCommitQueue {
         return generation;
     }
 
-    public void register(@NonNull KafkaRecordId recordId) {
+    public void register(@NonNull KafkaRecordId recordId, long logAppendTimeMillis) {
         ownerThreadGuard.requireOwnerThread();
         requireGeneration(recordId);
         if (recordsById.containsKey(recordId)) {
@@ -104,7 +107,7 @@ public final class ObservedRecordCommitQueue {
                     + recordId.offset()
             );
         }
-        var entry = new Entry(recordId);
+        var entry = new Entry(recordId, logAppendTimeMillis);
         observedRecords.addLast(entry);
         recordsById.put(recordId, entry);
         greatestObservedOffset = recordId.offset();
@@ -128,15 +131,20 @@ public final class ObservedRecordCommitQueue {
         entry.completed = true;
 
         var contiguous = new ArrayList<KafkaRecordId>();
+        Entry lastCompleted = null;
         while (!observedRecords.isEmpty() && observedRecords.peekFirst().completed) {
             var completed = observedRecords.removeFirst();
             recordsById.remove(completed.recordId);
             contiguous.add(completed.recordId);
+            lastCompleted = completed;
         }
-        var nextCommitOffset = contiguous.isEmpty()
-            ? OptionalLong.empty()
-            : OptionalLong.of(contiguous.get(contiguous.size() - 1).offset() + 1);
-        return new Completion(List.copyOf(contiguous), nextCommitOffset);
+        var commitPoint = lastCompleted == null
+            ? Optional.<CommitPoint>empty()
+            : Optional.of(new CommitPoint(
+                lastCompleted.recordId.offset() + 1,
+                lastCompleted.logAppendTimeMillis
+            ));
+        return new Completion(List.copyOf(contiguous), commitPoint);
     }
 
     public int size() {

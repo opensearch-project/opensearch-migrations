@@ -58,7 +58,12 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     public record Polled(Set<TopicPartition> partitionsReturned) implements Observation {}
 
     /** An asynchronous submission from the ordinary loop; its outcome arrives at a later {@link #poll()}. */
-    public record CommitSubmittedAsync(Map<TopicPartition, Long> nextPositions) implements Observation {}
+    public record CommitSubmittedAsync(Map<TopicPartition, CommitPoint> commitPoints)
+        implements Observation {
+        public Map<TopicPartition, Long> nextPositions() {
+            return nextPositionsOf(commitPoints);
+        }
+    }
 
     /**
      * A bounded synchronous submission from inside a rebalance callback.
@@ -66,8 +71,14 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
      * @param bound what the owner allowed it, which is the observable form of "cannot hold the callback past
      *              the grace deadline" — assert on this rather than on elapsed time
      */
-    public record CommitAttempted(Map<TopicPartition, Long> nextPositions, Duration bound)
-        implements Observation {}
+    public record CommitAttempted(
+        Map<TopicPartition, CommitPoint> commitPoints,
+        Duration bound
+    ) implements Observation {
+        public Map<TopicPartition, Long> nextPositions() {
+            return nextPositionsOf(commitPoints);
+        }
+    }
 
     public record SourceClosed() implements Observation {}
 
@@ -311,10 +322,10 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
 
     @Override
     public AsyncCommitSubmission commitAsync(
-        Map<TopicPartition, Long> nextPositions,
+        Map<TopicPartition, CommitPoint> commitPoints,
         java.util.function.Consumer<CommitOutcome> onResolved
     ) {
-        var submitted = Map.copyOf(nextPositions);
+        var submitted = Map.copyOf(commitPoints);
         record(new CommitSubmittedAsync(submitted));
         if (nextRejectedCommitOutcome != null) {
             var rejected = nextRejectedCommitOutcome;
@@ -346,8 +357,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
      * sleeping: a commit that "takes" longer than the remaining grace is expressed as a clock advance.
      */
     @Override
-    public CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound) {
-        record(new CommitAttempted(Map.copyOf(nextPositions), bound));
+    public CommitOutcome commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound) {
+        record(new CommitAttempted(Map.copyOf(commitPoints), bound));
         // Pending async callbacks run first even when this call is about to be interrupted. The real client
         // invokes completed commit callbacks at the top of commitOffsetsSync, before the network poll that
         // raises WakeupException, so a callback resolving during an interrupted commit is reachable.
@@ -414,6 +425,16 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
             case CommitAttempted commit -> "commitSync" + commit.nextPositions();
             case SourceClosed ignored -> "close";
         };
+    }
+
+    private static Map<TopicPartition, Long> nextPositionsOf(
+        Map<TopicPartition, CommitPoint> commitPoints
+    ) {
+        var positions = new LinkedHashMap<TopicPartition, Long>();
+        commitPoints.forEach((topicPartition, commitPoint) ->
+            positions.put(topicPartition, commitPoint.nextPosition())
+        );
+        return Map.copyOf(positions);
     }
 
     /** Renders the call history compactly, so a failure message shows the sequence rather than a count. */

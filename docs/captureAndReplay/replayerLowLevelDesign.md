@@ -103,7 +103,7 @@ are still typed and explicit so that completion and cleanup cannot hide in detac
 flowchart TD
     Demand["Replay intake requests the next batch<br/>for one partition generation"]
     Poll["Kafka source resumes partitions with batch demand<br/>and polls"]
-    Register["Kafka source registers every observed record<br/>in partition and offset order"]
+    Register["Kafka source registers every observed record<br/>with offset and Kafka timestamp"]
     Deliver["Kafka source pauses each partition returned<br/>and sends its partition batch"]
     Apply["Replay intake applies each CaptureRecord payload<br/>then may request another batch"]
     Accumulate["Replay intake updates source HTTP assembly"]
@@ -115,7 +115,7 @@ flowchart TD
     Durable["Tuple writer reports durable output"]
     Finish["Request-processing completion returns<br/>through connection owner to replay intake"]
     Ready["Every associated Kafka record with no remaining work<br/>emits one record-processing-finished message"]
-    Commit["Kafka source commits consecutive completed records<br/>beginning with the earliest uncommitted record"]
+    Commit["Kafka source commits the next offset and replay watermark<br/>for the consecutive completed prefix"]
 
     Demand --> Poll
     Poll --> Register
@@ -191,6 +191,7 @@ record path
     -> every record association finishes
     -> one record-processing-finished message reaches Kafka source
     -> Kafka source advances only across consecutive completed records beginning with the earliest uncommitted record
+    -> the commit metadata records the Kafka timestamp of the last record in that prefix
 ```
 
 Normal completion of an inner asynchronous operation is not enough. The returned stage for a
@@ -211,7 +212,8 @@ Cancellation is scoped to one `PartitionGenerationId`.
   ordinary target, retry, and tuple path. It has no process-local deadline.
 
 Both modes put tuple output into eager-flush operation and cause the Kafka source owner to attempt
-each newly eligible contiguous commit position without intentional batching delay. Existing
+each newly eligible contiguous commit point without intentional batching delay. A commit point is
+the next Kafka position plus the Kafka timestamp of the last durably replayed record before it. Existing
 one-operation commit serialization and commit authority remain unchanged.
 
 `ForceGenerationCancellation`:

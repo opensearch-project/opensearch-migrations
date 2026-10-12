@@ -168,7 +168,8 @@ public final class KafkaSourceOwner {
     private final Map<KafkaRecordId, IReplayContexts.IKafkaRecordContext> recordContexts =
         new LinkedHashMap<>();
     private final Map<KafkaRecordId, Long> recordObservedAtNanos = new LinkedHashMap<>();
-    private final Map<TopicPartition, Long> stagedCommitPositions = new LinkedHashMap<>();
+    private final Map<TopicPartition, KafkaSourcePort.CommitPoint> stagedCommitPoints =
+        new LinkedHashMap<>();
     /**
      * The one accepted asynchronous operation that has not resolved.
      *
@@ -357,7 +358,7 @@ public final class KafkaSourceOwner {
         return orderlyShutdownStarted
             && cleanupOutstanding.isEmpty()
             && sourceInputs.isEmpty()
-            && stagedCommitPositions.isEmpty()
+            && stagedCommitPoints.isEmpty()
             && inFlightCommitOperation == null;
     }
 
@@ -438,8 +439,8 @@ public final class KafkaSourceOwner {
         // Counted as records, not as an offset delta: physical offset gaps exist and §17.1 requires that they
         // not block advancement, so offset arithmetic would over-count by every gap.
         state.countRecordsAwaitingCommit(completion.newlyContiguousRecords().size());
-        completion.nextCommitOffset().ifPresent(nextOffset ->
-            stageCommitPosition(finished.generation().topicPartition(), nextOffset)
+        completion.commitPoint().ifPresent(commitPoint ->
+            stageCommitPoint(finished.generation().topicPartition(), commitPoint)
         );
     }
 
@@ -511,20 +512,50 @@ public final class KafkaSourceOwner {
         protocolViolationHandler.begin(violation);
     }
 
-    private void stageCommitPosition(TopicPartition topicPartition, long nextPosition) {
-        var stagedPosition = stagedCommitPositions.merge(topicPartition, nextPosition, Math::max);
+    private void stageCommitPoint(
+        TopicPartition topicPartition,
+        KafkaSourcePort.CommitPoint commitPoint
+    ) {
+        var stagedPoint = stagedCommitPoints.merge(
+            topicPartition,
+            commitPoint,
+            KafkaSourceOwner::laterCommitPoint
+        );
         log.atDebug()
-            .setMessage("event=kafka_commit_staged topic={} partition={} next_position={}")
+            .setMessage(
+                "event=kafka_commit_staged topic={} partition={} next_position={} "
+                    + "replayed_through_log_append_time_ms={}"
+            )
             .addArgument(topicPartition::topic)
             .addArgument(topicPartition::partition)
-            .addArgument(stagedPosition)
+            .addArgument(stagedPoint::nextPosition)
+            .addArgument(stagedPoint::replayedThroughLogAppendTimeMillis)
             .log();
+    }
+
+    private static KafkaSourcePort.CommitPoint laterCommitPoint(
+        KafkaSourcePort.CommitPoint first,
+        KafkaSourcePort.CommitPoint second
+    ) {
+        if (first.nextPosition() == second.nextPosition()) {
+            if (first.replayedThroughLogAppendTimeMillis()
+                != second.replayedThroughLogAppendTimeMillis()) {
+                throw new IllegalStateException(
+                    "one Kafka position cannot have two replay-through timestamps: "
+                        + first
+                        + " and "
+                        + second
+                );
+            }
+            return first;
+        }
+        return first.nextPosition() > second.nextPosition() ? first : second;
     }
 
     // ---------------------------------------------------------------- commit
 
     /**
-     * Submits one asynchronous commit for every staged position, if none is already in flight.
+     * Submits one asynchronous commit for every staged commit point, if none is already in flight.
      *
      * <p>Asynchronous because a synchronous commit here blocks for as long as the client retries internally —
      * up to {@code default.api.timeout.ms} — while this owner does not poll, which can exceed
@@ -536,7 +567,7 @@ public final class KafkaSourceOwner {
      * partition that advances mid-flight stages the newer position rather than racing the old one.
      */
     private void submitLoopCommitIfEligible() {
-        if (stagedCommitPositions.isEmpty() || inFlightCommitOperation != null) {
+        if (stagedCommitPoints.isEmpty() || inFlightCommitOperation != null) {
             return;
         }
         var submitted = detachForSubmission();
@@ -553,7 +584,7 @@ public final class KafkaSourceOwner {
         wakeupController.enterProtectedOperation();
         try {
             var submission = port.commitAsync(
-                positionsOf(submitted),
+                commitPointsOf(submitted),
                 outcome -> resolveCommitOperation(operation, outcome, false)
             );
             if (!submission.accepted()) {
@@ -577,44 +608,56 @@ public final class KafkaSourceOwner {
     }
 
     /**
-     * Removes the staged positions and records, per partition, the generation they belong to and how many
+     * Removes the staged commit points and records, per partition, the generation they belong to and how many
      * records they cover.
      *
      * <p>The generation is what makes a callback resolvable. Without it a callback that arrives after the
      * partition was revoked and reassigned would be indistinguishable from one for the current generation, and
      * would credit or re-stage against a successor that never submitted it.
      */
-    private Map<TopicPartition, SubmittedPosition> detachForSubmission() {
-        var submitted = new LinkedHashMap<TopicPartition, SubmittedPosition>();
-        stagedCommitPositions.forEach((topicPartition, position) -> {
+    private Map<TopicPartition, SubmittedCommitPoint> detachForSubmission() {
+        var submitted = new LinkedHashMap<TopicPartition, SubmittedCommitPoint>();
+        stagedCommitPoints.forEach((topicPartition, commitPoint) -> {
             var state = partitions.get(topicPartition);
             if (state == null) {
                 return;
             }
             submitted.put(
                 topicPartition,
-                new SubmittedPosition(state.generation(), position, state.takeRecordsAwaitingCommit())
+                new SubmittedCommitPoint(
+                    state.generation(),
+                    commitPoint,
+                    state.takeRecordsAwaitingCommit()
+                )
             );
         });
-        stagedCommitPositions.clear();
+        stagedCommitPoints.clear();
         return submitted;
     }
 
-    private static Map<TopicPartition, Long> positionsOf(Map<TopicPartition, SubmittedPosition> submitted) {
-        var positions = new LinkedHashMap<TopicPartition, Long>();
-        submitted.forEach((topicPartition, detail) -> positions.put(topicPartition, detail.nextPosition()));
-        return positions;
+    private static Map<TopicPartition, KafkaSourcePort.CommitPoint> commitPointsOf(
+        Map<TopicPartition, SubmittedCommitPoint> submitted
+    ) {
+        var commitPoints = new LinkedHashMap<TopicPartition, KafkaSourcePort.CommitPoint>();
+        submitted.forEach((topicPartition, detail) ->
+            commitPoints.put(topicPartition, detail.commitPoint())
+        );
+        return commitPoints;
     }
 
     /**
-     * One partition's position in a submitted commit, with the generation that submitted it and how many
+     * One partition's point in a submitted commit, with the generation that submitted it and how many
      * records it covers.
      */
-    private record SubmittedPosition(
+    private record SubmittedCommitPoint(
         PartitionGenerationId generation,
-        long nextPosition,
+        KafkaSourcePort.CommitPoint commitPoint,
         PartitionSourceState.CommitCoverage recordsCovered
-    ) {}
+    ) {
+        long nextPosition() {
+            return commitPoint.nextPosition();
+        }
+    }
 
     /**
      * One operation-level identity and latch.
@@ -625,10 +668,10 @@ public final class KafkaSourceOwner {
      */
     private static final class CommitOperation {
         private final long operationId;
-        private final Map<TopicPartition, SubmittedPosition> submitted;
+        private final Map<TopicPartition, SubmittedCommitPoint> submitted;
         private boolean resolved;
 
-        private CommitOperation(long operationId, Map<TopicPartition, SubmittedPosition> submitted) {
+        private CommitOperation(long operationId, Map<TopicPartition, SubmittedCommitPoint> submitted) {
             this.operationId = operationId;
             this.submitted = Map.copyOf(submitted);
         }
@@ -749,7 +792,7 @@ public final class KafkaSourceOwner {
                 state.restoreUncertainRecords(detail.recordsCovered());
             }
             if (stillOwnsForCommit(topicPartition)) {
-                stageCommitPosition(topicPartition, detail.nextPosition());
+                stageCommitPoint(topicPartition, detail.commitPoint());
             } else {
                 log.atInfo().setMessage("Dropping commit position {} for {}: {} and no longer committable")
                     .addArgument(detail::nextPosition).addArgument(topicPartition).addArgument(outcome).log();
@@ -872,7 +915,7 @@ public final class KafkaSourceOwner {
         }).toList();
         var observedAtNanos = monotonicNanos.getAsLong();
         stamped.forEach(record -> {
-            state.commitQueue().register(record.recordId());
+            state.commitQueue().register(record.recordId(), record.logAppendTimeMillis());
             recordObservedAtNanos.put(record.recordId(), observedAtNanos);
         });
         state.countRecordsRead(stamped.size());
@@ -945,7 +988,7 @@ public final class KafkaSourceOwner {
         // A newly assigned generation cannot reuse mutable state from the previous one, so both the state and
         // the commit queue are replaced rather than reset (kafkaLLD §5.2).
         partitions.put(topicPartition, state);
-        stagedCommitPositions.remove(topicPartition);
+        stagedCommitPoints.remove(topicPartition);
         // Gated on whether any earlier generation of this partition is still cleaning up, which map membership
         // cannot answer: the predecessor's state was removed when it was revoked, before this point.
         if (cleanupOutstanding.containsKey(topicPartition)) {
@@ -1058,7 +1101,7 @@ public final class KafkaSourceOwner {
         var state = partitions.remove(topicPartition);
         // The old generation must not go on offering a commit: kafkaLLD §5.7 has it neither retrying nor
         // waiting, with the next assigned position deciding redelivery instead.
-        stagedCommitPositions.remove(topicPartition);
+        stagedCommitPoints.remove(topicPartition);
         if (state == null) {
             return;
         }
@@ -1110,7 +1153,7 @@ public final class KafkaSourceOwner {
 
     private void recordRetirementConservation(
         PartitionSourceState state,
-        SubmittedPosition activeSubmission
+        SubmittedCommitPoint activeSubmission
     ) {
         var staged = state.recordsAwaitingCommit();
         var completedBehindHead = state.commitQueue().completedBehindHeadCount();
@@ -1216,7 +1259,7 @@ public final class KafkaSourceOwner {
             );
         }
 
-        var pendingCommitPartitions = new LinkedHashSet<>(stagedCommitPositions.keySet());
+        var pendingCommitPartitions = new LinkedHashSet<>(stagedCommitPoints.keySet());
         if (inFlightCommitOperation != null) {
             pendingCommitPartitions.addAll(inFlightCommitOperation.submitted.keySet());
         }
@@ -1242,7 +1285,7 @@ public final class KafkaSourceOwner {
             .addArgument(polls)
             .addArgument(emptyPolls)
             .addArgument(commits)
-            .addArgument(() -> !stagedCommitPositions.isEmpty())
+            .addArgument(() -> !stagedCommitPoints.isEmpty())
             .addArgument(pendingCommitPartitions.size())
             .addArgument(recordsRead)
             .addArgument(recordsCommitted)
@@ -1339,7 +1382,7 @@ public final class KafkaSourceOwner {
         // revocation begins -- a prefix that advanced earlier in this iteration, or one reclaimed from an
         // abandoned async submission -- and `procCommit §9.2` step 5 permits attempting them without making the
         // attempt conditional on further inputs. Only reaching this inside the loop meant that with no new input
-        // during the interval, a staged position was never committed at all.
+        // during the interval, a staged commit point was never committed at all.
         submitRevocationCommit(deadline);
         if (allCleanupReported(revokedGenerations)) {
             return true;
@@ -1373,7 +1416,7 @@ public final class KafkaSourceOwner {
      * before one happens. Bounded, because the callback is holding the whole consumer: nothing is polled for any
      * partition while it runs, the group's rebalance waits on it, and overrunning
      * {@code max.poll.interval.ms} — which is also the rebalance timeout — fences the member and converts this
-     * graceful revocation into a lost one, discarding every staged position.
+     * graceful revocation into a lost one, discarding every staged commit point.
      *
      * <p>Attempted however little grace remains. The bound is what confines the call to the deadline, so a
      * sliver is a small budget rather than a hazard, and declining to try would discard a position a fast
@@ -1381,7 +1424,7 @@ public final class KafkaSourceOwner {
      * callback returns, so attempting is never the worse choice.
      */
     private void submitRevocationCommit(CancellationDeadline deadline) {
-        if (stagedCommitPositions.isEmpty()) {
+        if (stagedCommitPoints.isEmpty()) {
             return;
         }
         if (inFlightCommitOperation != null) {
@@ -1423,7 +1466,7 @@ public final class KafkaSourceOwner {
         wakeupController.enterProtectedOperation();
         KafkaSourcePort.CommitOutcome outcome;
         try {
-            outcome = port.commitSync(positionsOf(submitted), Duration.ofNanos(remainingNanos));
+            outcome = port.commitSync(commitPointsOf(submitted), Duration.ofNanos(remainingNanos));
         } catch (WakeupException absorbedByTheCommit) {
             // §5.7 classifies a wakeup-interrupted commit as an unknown outcome. Recording the absorption is
             // what keeps the callback's exit able to issue its deferred wakeup: the commit spent the one that
@@ -1488,7 +1531,8 @@ public final class KafkaSourceOwner {
     }
 
     public Optional<Long> stagedCommitPosition(TopicPartition topicPartition) {
-        return Optional.ofNullable(stagedCommitPositions.get(topicPartition));
+        return Optional.ofNullable(stagedCommitPoints.get(topicPartition))
+            .map(KafkaSourcePort.CommitPoint::nextPosition);
     }
 
     /**
@@ -1506,12 +1550,13 @@ public final class KafkaSourceOwner {
             var generation = state.generation();
             var topicPartition = state.topicPartition();
             var queue = state.commitQueue().snapshot();
-            var stagedPosition = Optional.ofNullable(stagedCommitPositions.get(topicPartition));
+            var stagedPosition = Optional.ofNullable(stagedCommitPoints.get(topicPartition))
+                .map(KafkaSourcePort.CommitPoint::nextPosition);
             var inFlightPosition = inFlightCommitOperation == null
                 ? Optional.<Long>empty()
                 : Optional.ofNullable(inFlightCommitOperation.submitted.get(topicPartition))
                     .filter(submitted -> submitted.generation().equals(generation))
-                    .map(SubmittedPosition::nextPosition);
+                    .map(SubmittedCommitPoint::nextPosition);
             partitionCopies.put(
                 generation,
                 new PartitionDiagnostic(

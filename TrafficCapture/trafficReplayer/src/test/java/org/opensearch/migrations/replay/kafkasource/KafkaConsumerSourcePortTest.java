@@ -43,6 +43,9 @@ class KafkaConsumerSourcePortTest {
 
     private static final TopicPartition PARTITION = new TopicPartition("traffic", 0);
     private static final Duration BOUND = Duration.ofMillis(250);
+    private static final long REPLAYED_THROUGH_TIMESTAMP = 1_700_000_000_123L;
+    private static final Map<TopicPartition, KafkaSourcePort.CommitPoint> COMMIT_POINTS =
+        Map.of(PARTITION, new KafkaSourcePort.CommitPoint(11, REPLAYED_THROUGH_TIMESTAMP));
 
     /**
      * A scripted consumer, configured at construction rather than stubbed per call.
@@ -159,7 +162,7 @@ class KafkaConsumerSourcePortTest {
 
         Assertions.assertThrows(
             WakeupException.class,
-            () -> port.commitSync(Map.of(PARTITION, 11L), BOUND),
+            () -> port.commitSync(COMMIT_POINTS, BOUND),
             "a wakeup must reach the owner; classifying it here makes a routine queued input fatal"
         );
     }
@@ -170,7 +173,7 @@ class KafkaConsumerSourcePortTest {
 
         Assertions.assertEquals(
             KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN,
-            port.commitSync(Map.of(PARTITION, 11L), BOUND)
+            port.commitSync(COMMIT_POINTS, BOUND)
         );
     }
 
@@ -178,12 +181,12 @@ class KafkaConsumerSourcePortTest {
     void aLostGenerationIsStaleRatherThanRetriable() {
         Assertions.assertEquals(
             KafkaSourcePort.CommitOutcome.GENERATION_STALE,
-            portThrowingFromSync(new CommitFailedException()).commitSync(Map.of(PARTITION, 11L), BOUND)
+            portThrowingFromSync(new CommitFailedException()).commitSync(COMMIT_POINTS, BOUND)
         );
         Assertions.assertEquals(
             KafkaSourcePort.CommitOutcome.GENERATION_STALE,
             portThrowingFromSync(new FencedInstanceIdException("fenced"))
-                .commitSync(Map.of(PARTITION, 11L), BOUND)
+                .commitSync(COMMIT_POINTS, BOUND)
         );
     }
 
@@ -197,7 +200,7 @@ class KafkaConsumerSourcePortTest {
         Assertions.assertEquals(
             KafkaSourcePort.CommitOutcome.RETRIABLE,
             portThrowingFromSync(new RebalanceInProgressException("rejoining"))
-                .commitSync(Map.of(PARTITION, 11L), BOUND)
+                .commitSync(COMMIT_POINTS, BOUND)
         );
     }
 
@@ -207,7 +210,7 @@ class KafkaConsumerSourcePortTest {
 
         var fatal = Assertions.assertThrows(
             IllegalStateException.class,
-            () -> port.commitSync(Map.of(PARTITION, 11L), BOUND)
+            () -> port.commitSync(COMMIT_POINTS, BOUND)
         );
         Assertions.assertInstanceOf(TopicAuthorizationException.class, fatal.getCause());
     }
@@ -220,7 +223,7 @@ class KafkaConsumerSourcePortTest {
         );
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
 
-        port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+        port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(List.of(KafkaSourcePort.CommitOutcome.RETRIABLE), resolutions);
     }
@@ -240,7 +243,7 @@ class KafkaConsumerSourcePortTest {
         );
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
 
-        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+        var submission = port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(
             KafkaSourcePort.AsyncCommitSubmission.rejectedBeforeAcceptance(
@@ -268,7 +271,7 @@ class KafkaConsumerSourcePortTest {
         );
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
 
-        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+        var submission = port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(
             List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
@@ -289,7 +292,7 @@ class KafkaConsumerSourcePortTest {
         );
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
 
-        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+        var submission = port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(
             List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
@@ -305,12 +308,17 @@ class KafkaConsumerSourcePortTest {
 
         Assertions.assertEquals(
             KafkaSourcePort.CommitOutcome.ACKNOWLEDGED,
-            port.commitSync(Map.of(PARTITION, 11L), BOUND)
+            port.commitSync(COMMIT_POINTS, BOUND)
         );
         Assertions.assertEquals(
             Optional.of(11L),
             Optional.ofNullable(consumer.syncCommits.get(0).get(PARTITION)).map(OffsetAndMetadata::offset),
             "the offset committed is the next position to read, not the last one read"
+        );
+        Assertions.assertEquals(
+            Long.toString(REPLAYED_THROUGH_TIMESTAMP),
+            consumer.syncCommits.get(0).get(PARTITION).metadata(),
+            "the offset metadata is the broker timestamp of the last durably replayed contiguous record"
         );
     }
 
@@ -332,7 +340,7 @@ class KafkaConsumerSourcePortTest {
 
         Assertions.assertThrows(
             WakeupException.class,
-            () -> port.commitAsync(Map.of(PARTITION, 11L), resolutions::add),
+            () -> port.commitAsync(COMMIT_POINTS, resolutions::add),
             "a wakeup must reach the owner; classifying it here makes a routine queued input fatal"
         );
         Assertions.assertEquals(
@@ -387,7 +395,7 @@ class KafkaConsumerSourcePortTest {
         var port = new KafkaConsumerSourcePort(new ThrowsAfterRegisteringConsumer(), Duration.ofSeconds(1));
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
 
-        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+        var submission = port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(
             List.of(KafkaSourcePort.CommitOutcome.RETRIABLE),
@@ -407,7 +415,7 @@ class KafkaConsumerSourcePortTest {
 
         Assertions.assertThrows(
             IllegalStateException.class,
-            () -> port.commitAsync(Map.of(PARTITION, 11L), resolutions::add)
+            () -> port.commitAsync(COMMIT_POINTS, resolutions::add)
         );
 
         Assertions.assertEquals(

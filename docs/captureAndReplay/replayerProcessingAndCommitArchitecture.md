@@ -655,7 +655,7 @@ flowchart TD
     D{"Is the earliest registered<br/>record finished?"}
     E["Stop<br/>The commit position cannot advance"]
     F["Remove the finished record<br/>from the head"]
-    G["Stage the offset immediately after<br/>the removed record"]
+    G["Stage the offset immediately after the removed record<br/>with that record's Kafka timestamp"]
     H{"Is the next record at the head<br/>also finished?"}
     I["Submit the staged commit<br/>through KafkaConsumer"]
 
@@ -916,9 +916,10 @@ Rejection of that required submission is process-fatal.
 
 The Kafka source owner:
 
-1. registers the completed offset in its observed-record commit tracker when the partition
+1. registers the completed record in its observed-record commit tracker when the partition
    generation is still known;
-2. submits the next eligible commit through the Kafka consumer; and
+2. submits the next eligible commit point through the Kafka consumer: the next offset plus the
+   Kafka timestamp of the last contiguous durably replayed record; and
 3. discards its process-local request after Kafka accepts, rejects, or leaves the broker outcome
    unknown.
 
@@ -938,6 +939,12 @@ committable offset only across consecutive finished records beginning with the e
 
 If offset 40 is unfinished while offsets 41 through 50 are complete, the committed position cannot
 advance past offset 40.
+
+The source retains each observed record's Kafka timestamp beside its identity. When it removes a
+completed prefix ending at offset `O` with timestamp `T`, it stages `(O + 1, T)`. Kafka stores `T`
+in the committed offset metadata, making replay-through time observable without reading record
+values. The watermark is supplemental operational evidence; it is not an additional completion
+condition and is not consulted by replay correctness logic.
 
 ## 7. Target connection and request replay
 
@@ -1845,6 +1852,9 @@ output, and Kafka-record completion remain independent and may continue afterwar
 - No hard record or byte cap prevents a readable partition from reaching the record that resolves
   retry input, connection completion, or broker-time expiration.
 - Completed offsets advance only across consecutive finished records beginning with the earliest uncommitted record.
+- The committed offset metadata is the Kafka timestamp of the final record in that exact
+  contiguous prefix, including with out-of-order completion and physical offset gaps.
+- An uncertain older commit retry cannot replace a newer staged offset/timestamp pair.
 - A record with no downstream work follows the same commit-order rule.
 - Commits completed during revocation grace are attempted; broker rejection after ownership loss
   leaves the record available for redelivery.

@@ -68,11 +68,19 @@ public class KafkaCommitsWorkBetweenLongPollsTest {
                 1,
                 records.getOrDefault(partition, List.of()).size()
             );
+            var replayedThroughTimestamp =
+                records.get(partition).getFirst().logAppendTimeMillis();
 
             var resolution =
                 new AtomicReference<KafkaSourcePort.CommitOutcome>();
             var submission = port.commitAsync(
-                Map.of(partition, 1L),
+                Map.of(
+                    partition,
+                    new KafkaSourcePort.CommitPoint(
+                        1,
+                        replayedThroughTimestamp
+                    )
+                ),
                 resolution::set
             );
             Assertions.assertTrue(submission.accepted());
@@ -83,9 +91,11 @@ public class KafkaCommitsWorkBetweenLongPollsTest {
                 KafkaSourcePort.CommitOutcome.ACKNOWLEDGED,
                 resolution.get()
             );
+            var committed = consumer.committed(Set.of(partition)).get(partition);
+            Assertions.assertEquals(1L, committed.offset());
             Assertions.assertEquals(
-                1L,
-                consumer.committed(Set.of(partition)).get(partition).offset()
+                Long.toString(replayedThroughTimestamp),
+                committed.metadata()
             );
         } finally {
             port.close();

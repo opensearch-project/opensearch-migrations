@@ -2092,6 +2092,16 @@ class KafkaSourceOwnerTest {
             port.history().contains("commitAsync{traffic-0=11}"),
             () -> "the contiguous prefix should commit at offset+1; history: " + port.history()
         );
+        var commit = port.observations().stream()
+            .filter(PumpedKafkaSource.CommitSubmittedAsync.class::isInstance)
+            .map(PumpedKafkaSource.CommitSubmittedAsync.class::cast)
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(
+            Map.of(PARTITION_0, new KafkaSourcePort.CommitPoint(11, 1_010L)),
+            commit.commitPoints(),
+            "the durable watermark must carry the completed record's broker timestamp"
+        );
     }
 
     /**
@@ -2274,6 +2284,18 @@ class KafkaSourceOwnerTest {
             List.of("commitAsync{traffic-0=11}", "commitAsync{traffic-0=13}"),
             port.history().stream().filter(call -> call.startsWith("commitAsync")).toList(),
             "restaging the uncertain older position must preserve the newer prefix already staged"
+        );
+        Assertions.assertEquals(
+            List.of(
+                Map.of(PARTITION_0, new KafkaSourcePort.CommitPoint(11, 1_010L)),
+                Map.of(PARTITION_0, new KafkaSourcePort.CommitPoint(13, 1_012L))
+            ),
+            port.observations().stream()
+                .filter(PumpedKafkaSource.CommitSubmittedAsync.class::isInstance)
+                .map(PumpedKafkaSource.CommitSubmittedAsync.class::cast)
+                .map(PumpedKafkaSource.CommitSubmittedAsync::commitPoints)
+                .toList(),
+            "an older uncertain commit must not replace the offset or timestamp of a newer staged watermark"
         );
         Assertions.assertEquals(2, commitMetrics.recordsCommitted);
         Assertions.assertEquals(0, commitMetrics.recordsOutstanding);

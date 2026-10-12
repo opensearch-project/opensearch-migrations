@@ -996,6 +996,19 @@ contiguous-offset commit rule.
 Retaining one record prevents the replayer from committing a later Kafka offset past it. This
 preserves redelivery of the retained record.
 
+Every successful group-offset commit stores one diagnostic replay watermark beside the next-read
+offset: the committed metadata is the Kafka record timestamp of the last record in that contiguous,
+durably replayed prefix. The offset and timestamp advance as one commit point. This metadata does
+not authorize replay, expiration, retry, or record completion; those decisions continue to use the
+records themselves. Missing or malformed metadata therefore reduces operator visibility but does
+not change which offset Kafka assigns after a restart.
+
+For workflow-managed live-capture topics, whose timestamps are broker-assigned `LogAppendTime`,
+operators can compare this watermark with Kafka's latest partition timestamp without fetching a
+captured-traffic value. The result is a temporal replay-backlog estimate: the timestamp span from
+the last durably replayed record to the newest appended record. It is not the timestamp of the exact
+next unprocessed record and is not a substitute for the consumer group's offset lag.
+
 ## 10. Target replay and durable tuples
 
 When the replayer recognizes a complete captured request, it may begin the target HTTP transaction

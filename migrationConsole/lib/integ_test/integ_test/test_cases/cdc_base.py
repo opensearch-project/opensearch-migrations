@@ -665,7 +665,7 @@ def _iter_native_describe_rows(describe_output: str):
     """Yield column-name -> token dicts for each data row of the native
     `kafka-consumer-groups.sh --describe` table embedded in describe_output.
 
-    The augmented `PARTITION TIME LAG` section is skipped because it has its
+    The augmented `REPLAY WATERMARK` section is skipped because it has its
     own header. We anchor on the native header row (`GROUP TOPIC PARTITION
     CURRENT-OFFSET LOG-END-OFFSET LAG ...`) and split subsequent non-blank
     rows by whitespace; rows shorter than the header are ignored.
@@ -681,7 +681,7 @@ def _iter_native_describe_rows(describe_output: str):
             if tokens[0] == "GROUP" and "PARTITION" in tokens and "CURRENT-OFFSET" in tokens:
                 header_indices = {tok: i for i, tok in enumerate(tokens)}
             continue
-        # Skip the augmented "PARTITION TIME LAG" sub-table: its header starts
+        # Skip the augmented "REPLAY WATERMARK" sub-table: its header starts
         # with TOPIC, not GROUP, so we drop the native header on a blank line
         # (above) and refuse to parse rows under a non-native header here.
         if "GROUP" not in header_indices:
@@ -716,7 +716,7 @@ def _consumer_group_max_lag(
 
     A row whose LAG is `-` (no committed offset yet) is treated as unbounded
     lag and forces the function to return None — callers will keep polling
-    until at least one commit lands.
+    until at least one replayer commit lands.
     """
     out = _run_describe_consumer_group(group_name, probe_timeout_seconds)
     if out is None:
@@ -753,8 +753,8 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
     """Bounded poll until the group's max per-partition LAG drops to <=
     `max_allowed_lag`. Returns (succeeded: bool, last_observed: Optional[int]).
 
-    LAG=`-` on any partition (no commit yet) keeps the wait polling — the
-    time-lag table is uninformative until at least one auto-commit lands.
+    LAG=`-` on any partition (no commit yet) keeps the wait polling until at
+    least one replayer commit lands.
 
     The replayer's in-order commit constraint (OffsetLifecycleTracker) can
     keep LAG=1 around well after every response landed on the target because
@@ -830,7 +830,7 @@ def _emit_describe_snapshot(label: str, group_name: Optional[str],
 def log_kafka_consumer_group_state(label: str, group_name: Optional[str] = None,
                                    timeout_seconds: int = 120) -> None:
     """Pure snapshot: run `console kafka describe-consumer-group` and log
-    its output (including the per-partition TIME LAG section). Used for
+    its output (including the per-partition REPLAY WATERMARK section). Used for
     in-progress checkpoints like [replay-start] where the replayer hasn't
     drained yet — no waits, no asserts.
 

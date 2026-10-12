@@ -21,6 +21,10 @@ integrated into the permanent operator documentation afterward.
 - Kafka consumer-group lag comes from the broker-side
   `kafka-consumer-groups.sh --describe` view. No Kafka-exporter lag series is
   deployed.
+- `console kafka describe-consumer-group` appends a metadata-only replay watermark:
+  the timestamp span from the last contiguously and durably replayed record to
+  the newest partition record. It fetches no traffic payloads, and it is not the
+  exact age of the next unprocessed record or authoritative backlog drain time.
 - This repository installs no alerts, alarm rules, notifications, or notification
   targets. Thresholds below are investigation guidance and dashboard coloring only.
 
@@ -196,7 +200,8 @@ alerts:
   nonzero.
 
 Consumer-lag thresholds are derived from `kafka-consumer-groups.sh` output, not a
-Prometheus or CloudWatch metric.
+Prometheus or CloudWatch metric. Use `console kafka describe-consumer-group` when
+the offset count also needs the replayer's temporal watermark context.
 
 ## Log queries
 

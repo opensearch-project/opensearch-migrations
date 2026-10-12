@@ -9,10 +9,11 @@
 package org.opensearch.migrations.replay.kafkasource;
 
 import java.util.List;
-import java.util.OptionalLong;
+import java.util.Optional;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort.CommitPoint;
 
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
@@ -28,37 +29,44 @@ class ObservedRecordCommitQueueTest {
         var first = record(10);
         var second = record(12);
         var third = record(20);
-        queue.register(first);
-        queue.register(second);
-        queue.register(third);
+        register(queue, first);
+        register(queue, second);
+        register(queue, third);
 
         var blocked = queue.recordProcessingFinished(second);
         Assertions.assertEquals(List.of(), blocked.newlyContiguousRecords());
-        Assertions.assertEquals(OptionalLong.empty(), blocked.nextCommitOffset());
+        Assertions.assertEquals(Optional.empty(), blocked.commitPoint());
 
         var throughSecond = queue.recordProcessingFinished(first);
         Assertions.assertEquals(List.of(first, second), throughSecond.newlyContiguousRecords());
-        Assertions.assertEquals(OptionalLong.of(13), throughSecond.nextCommitOffset());
-        Assertions.assertEquals(OptionalLong.of(20), queue.headOffset());
+        Assertions.assertEquals(
+            Optional.of(new CommitPoint(13, timestampFor(second))),
+            throughSecond.commitPoint(),
+            "the watermark belongs to the last contiguous record, not the record whose callback arrived last"
+        );
+        Assertions.assertEquals(java.util.OptionalLong.of(20), queue.headOffset());
 
         var throughThird = queue.recordProcessingFinished(third);
         Assertions.assertEquals(List.of(third), throughThird.newlyContiguousRecords());
-        Assertions.assertEquals(OptionalLong.of(21), throughThird.nextCommitOffset());
+        Assertions.assertEquals(
+            Optional.of(new CommitPoint(21, timestampFor(third))),
+            throughThird.commitPoint()
+        );
         Assertions.assertTrue(queue.isEmpty());
     }
 
     @Test
     void duplicateRegistrationAndCompletionAreInvariantFailures() {
         var duplicateRegistration = new ObservedRecordCommitQueue(GENERATION);
-        duplicateRegistration.register(record(10));
+        register(duplicateRegistration, record(10));
         Assertions.assertThrows(
             IllegalStateException.class,
-            () -> duplicateRegistration.register(record(10))
+            () -> register(duplicateRegistration, record(10))
         );
 
         var duplicateCompletion = new ObservedRecordCommitQueue(GENERATION);
-        duplicateCompletion.register(record(10));
-        duplicateCompletion.register(record(12));
+        register(duplicateCompletion, record(10));
+        register(duplicateCompletion, record(12));
         duplicateCompletion.recordProcessingFinished(record(12));
         Assertions.assertThrows(
             IllegalStateException.class,
@@ -69,7 +77,7 @@ class ObservedRecordCommitQueueTest {
     @Test
     void unknownRecordAndWrongGenerationAreRejected() {
         var queue = new ObservedRecordCommitQueue(GENERATION);
-        queue.register(record(10));
+        register(queue, record(10));
 
         Assertions.assertThrows(
             IllegalStateException.class,
@@ -79,7 +87,7 @@ class ObservedRecordCommitQueueTest {
             new PartitionGenerationId(GENERATION.topicPartition(), GENERATION.localSequence() + 1);
         Assertions.assertThrows(
             IllegalArgumentException.class,
-            () -> queue.register(new KafkaRecordId(laterGenerationOfTheSamePartition, 12))
+            () -> queue.register(new KafkaRecordId(laterGenerationOfTheSamePartition, 12), 1_012L)
         );
     }
 
@@ -88,15 +96,15 @@ class ObservedRecordCommitQueueTest {
         var queue = new ObservedRecordCommitQueue(GENERATION);
         var head = record(10);
         var later = record(12);
-        queue.register(head);
-        queue.register(later);
+        register(queue, head);
+        register(queue, later);
 
         queue.markCommitIneligible(head);
         var blocked = queue.recordProcessingFinished(later);
 
         Assertions.assertEquals(List.of(), blocked.newlyContiguousRecords());
-        Assertions.assertEquals(OptionalLong.empty(), blocked.nextCommitOffset());
-        Assertions.assertEquals(OptionalLong.of(10), queue.headOffset());
+        Assertions.assertEquals(Optional.empty(), blocked.commitPoint());
+        Assertions.assertEquals(java.util.OptionalLong.of(10), queue.headOffset());
         Assertions.assertEquals(1, queue.commitIneligibleCount());
         Assertions.assertEquals(0, queue.unfinishedCount());
         Assertions.assertEquals(1, queue.completedBehindHeadCount());
@@ -112,5 +120,13 @@ class ObservedRecordCommitQueueTest {
 
     private static KafkaRecordId record(long offset) {
         return new KafkaRecordId(GENERATION, offset);
+    }
+
+    private static void register(ObservedRecordCommitQueue queue, KafkaRecordId recordId) {
+        queue.register(recordId, timestampFor(recordId));
+    }
+
+    private static long timestampFor(KafkaRecordId recordId) {
+        return 1_000L + recordId.offset();
     }
 }

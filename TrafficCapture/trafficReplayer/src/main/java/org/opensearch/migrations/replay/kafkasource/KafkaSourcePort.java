@@ -54,7 +54,7 @@ public interface KafkaSourcePort {
     Optional<Long> committedPosition(TopicPartition topicPartition);
 
     /**
-     * Submits the given next-read positions without waiting, for use in the ordinary loop.
+     * Submits the given durable commit points without waiting, for use in the ordinary loop.
      *
      * <p>Asynchronous because a synchronous commit here blocks for as long as the client retries internally
      * while the owner does not poll, which can exceed {@code max.poll.interval.ms} and provoke the rebalance
@@ -64,11 +64,11 @@ public interface KafkaSourcePort {
      * @param onResolved invoked with the operation's outcome, on the Kafka thread, from within a later
      *                   {@code poll()}. Travels with the submission rather than being registered once, so
      *                   there is no mutable wiring and no question which submission a callback belongs to —
-     *                   which is also why it carries no echo of the positions: the caller already holds them,
+     *                   which is also why it carries no echo of the commit points: the caller already holds them,
      *                   along with the generation each belongs to, which this port has no knowledge of
      */
     AsyncCommitSubmission commitAsync(
-        Map<TopicPartition, Long> nextPositions,
+        Map<TopicPartition, CommitPoint> commitPoints,
         Consumer<CommitOutcome> onResolved
     );
 
@@ -101,7 +101,7 @@ public interface KafkaSourcePort {
     }
 
     /**
-     * Submits the given next-read positions and waits at most {@code bound} for the result.
+     * Submits the given durable commit points and waits at most {@code bound} for the result.
      *
      * <p>Only for {@code onPartitionsRevoked}. Asynchronous submission cannot be used there because its
      * callback needs a later poll, and the generation is gone before that poll happens
@@ -110,7 +110,23 @@ public interface KafkaSourcePort {
      * of one second, and overrunning the rebalance timeout fences the member and turns this graceful
      * revocation into a lost one.
      */
-    CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound);
+    CommitOutcome commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound);
+
+    /**
+     * One durable replay watermark committed atomically for a partition.
+     *
+     * <p>{@code nextPosition} retains Kafka's normal meaning: the next offset the group should read.
+     * {@code replayedThroughLogAppendTimeMillis} is the broker timestamp of the immediately preceding
+     * contiguously and durably replayed record. The adapter stores that timestamp in Kafka's offset metadata,
+     * allowing diagnostics to measure temporal replay backlog without fetching record payloads.</p>
+     */
+    record CommitPoint(long nextPosition, long replayedThroughLogAppendTimeMillis) {
+        public CommitPoint {
+            if (nextPosition < 0) {
+                throw new IllegalArgumentException("nextPosition must be non-negative");
+            }
+        }
+    }
 
     /** Closes the Kafka client after orderly shutdown has drained and resolved its final commits. */
     void close();

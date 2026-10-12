@@ -430,6 +430,7 @@ The queue stores observed records in poll order:
 ```text
 ObservedRecordEntry
     KafkaRecordId
+    logAppendTimeMillis
     completed = false
 ```
 
@@ -462,8 +463,13 @@ completion for a record that was never registered in the active generation is an
 failure unless the generation has already been cleaned up, in which case a late message is
 diagnostic only.
 
-The owner removes complete entries from the head of the deque. If entries through offset `O` were
-removed, the next commit position is `O + 1`.
+The owner removes complete entries from the head of the deque. If the last removed entry has offset
+`O` and Kafka timestamp `T`, the next commit point is:
+
+```text
+nextPosition = O + 1
+replayedThroughLogAppendTimeMillis = T
+```
 
 Later complete entries remain queued behind an incomplete head.
 
@@ -475,8 +481,12 @@ state needed to submit or abandon the Kafka commit.
 
 Only `KafkaSourceOwner` invokes the Kafka commit API.
 
-For each partition generation it stages at most one next contiguous commit position. It may batch
-positions for several partitions in one Kafka operation.
+For each partition generation it stages at most one next contiguous commit point. It may batch
+commit points for several partitions in one Kafka operation. The Kafka adapter writes
+`nextPosition` as the committed offset and the decimal
+`replayedThroughLogAppendTimeMillis` as that offset's metadata. The metadata is diagnostic: Kafka
+assignment continues to use the offset, while an operator can read the timestamp without fetching
+the captured-traffic value.
 
 **Two submission modes, chosen by where the commit happens.**
 
@@ -502,6 +512,11 @@ because the rest of the interval belongs to force-cancellation delivery (§15.2)
 held apart from staged positions, so a partition whose contiguous prefix advances again while its
 commit is outstanding stages the newer position rather than racing a second operation for the same
 partition. This is also what keeps the source from spamming the broker (`procCommit §9.4`).
+
+Commit-point merging compares `nextPosition`. The greater position wins together with its matching
+timestamp; the source never combines an offset from one point with a timestamp from another. Two
+points with the same position and different timestamps are an invariant failure. This preserves
+the newer watermark when an uncertain older operation is re-staged after the prefix has advanced.
 
 Commit handling distinguishes:
 
@@ -532,9 +547,9 @@ operation's result.
 None of these outcomes returns a Kafka-record disposition to replay intake. Replay intake already
 finished its record-processing decision before sending `RecordProcessingFinished`.
 
-A staged position is discarded when its commit is acknowledged, not when it is attempted. If an
+A staged commit point is discarded when its commit is acknowledged, not when it is attempted. If an
 operation does not succeed, every partition in it that this consumer still owns under the same
-generation keeps its staged position and is offered again in a later operation. Re-offering a position
+generation keeps its staged commit point and is offered again in a later operation. Re-offering a point
 that was in fact recorded is harmless, which is what makes this sound while partial application stays
 unobservable. Abandoning the position instead would hold that partition's committed progress until its
 next contiguous prefix advances, which work blocked behind an unfinished record can delay without
@@ -1296,6 +1311,11 @@ the process supervisor immediately.
   next poll before the commit resolves.
 - At most one commit operation is in flight; a position advancing while a commit is outstanding is
   staged rather than submitted as a second operation for the same partition.
+- Out-of-order completion and physical offset gaps commit the timestamp of the last record removed
+  from the contiguous head, not the timestamp of the callback that happened to arrive last.
+- The Kafka adapter writes the next position as the offset and the replay-through timestamp as
+  decimal offset metadata.
+- Re-staging an uncertain older commit point cannot replace a newer staged offset or its timestamp.
 - A retriable asynchronous commit failure re-stages its positions; an acknowledged one clears them.
 - A commit callback for a generation no longer held locally is recorded and changes no state.
 - A structurally invalid commit — authorization, oversized metadata, invalid offset size — reaches the

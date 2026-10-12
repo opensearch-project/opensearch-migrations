@@ -110,7 +110,7 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
 
     @Override
     public AsyncCommitSubmission commitAsync(
-        Map<TopicPartition, Long> nextPositions,
+        Map<TopicPartition, CommitPoint> commitPoints,
         java.util.function.Consumer<CommitOutcome> onResolved
     ) {
         // The operation-level resolution latch belongs to KafkaSourceOwner, which owns the operation identity
@@ -119,7 +119,7 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         // Kafka confines both this call and callback delivery to the consumer thread.
         var callbackDelivered = new boolean[] { false };
         try {
-            consumer.commitAsync(toOffsets(nextPositions), (offsets, failure) -> {
+            consumer.commitAsync(toOffsets(commitPoints), (offsets, failure) -> {
                 onResolved.accept(classifyAsync(failure));
                 callbackDelivered[0] = true;
             });
@@ -188,9 +188,9 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
      * dressed as a distinction.
      */
     @Override
-    public CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound) {
+    public CommitOutcome commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound) {
         try {
-            consumer.commitSync(toOffsets(nextPositions), bound);
+            consumer.commitSync(toOffsets(commitPoints), bound);
             return CommitOutcome.ACKNOWLEDGED;
         } catch (WakeupException absorbedByTheCommit) {
             // Re-thrown rather than classified, even though §5.7 makes a wakeup-interrupted commit an unknown
@@ -253,9 +253,17 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         );
     }
 
-    private static Map<TopicPartition, OffsetAndMetadata> toOffsets(Map<TopicPartition, Long> nextPositions) {
-        return nextPositions.entrySet()
+    private static Map<TopicPartition, OffsetAndMetadata> toOffsets(
+        Map<TopicPartition, CommitPoint> commitPoints
+    ) {
+        return commitPoints.entrySet()
             .stream()
-            .collect(Collectors.toMap(Map.Entry::getKey, e -> new OffsetAndMetadata(e.getValue())));
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                entry -> new OffsetAndMetadata(
+                    entry.getValue().nextPosition(),
+                    Long.toString(entry.getValue().replayedThroughLogAppendTimeMillis())
+                )
+            ));
     }
 }

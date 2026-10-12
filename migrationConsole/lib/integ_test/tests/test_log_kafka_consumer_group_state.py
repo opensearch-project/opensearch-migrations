@@ -17,14 +17,19 @@ import pytest
 from integ_test.test_cases import cdc_base
 
 
-# Realistic native describe output (the augmented TIME LAG section is appended
-# by the augmenter and is not relevant to the readiness gate).
+# Realistic native describe output with the augmented replay-watermark section,
+# which is not relevant to the readiness gate.
 DESCRIBE_OUTPUT_FULLY_DRAINED = """\
 Consumer group 'logging-group-default' has no active members.
 
 GROUP                  TOPIC                  PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID  HOST  CLIENT
 logging-group-default  logging-traffic-topic  0          42              42              0    -            -     -
 logging-group-default  logging-traffic-topic  1          7               7               0    -            -     -
+
+REPLAY WATERMARK (record timestamps; not authoritative Kafka backlog drain time)
+TOPIC                  PARTITION  COMMITTED-OFFSET  OFFSET-LAG  REPLAYED-THROUGH (UTC)  LATEST-RECORD (UTC)  TEMPORAL-BACKLOG  NOTE
+logging-traffic-topic  0          42                0           2026-10-08T12:00:00Z   2026-10-08T12:00:00Z  0s                caught up by offset
+logging-traffic-topic  1          7                 0           2026-10-08T12:00:00Z   2026-10-08T12:00:00Z  0s                caught up by offset
 """
 
 DESCRIBE_OUTPUT_GROUP_MISSING = """\
