@@ -17,6 +17,7 @@ function expectPoolPlacement(
     rendered: any,
     templateName: string,
     configMapKey: string,
+    placementField = "nodeSelector",
 ) {
     const resourceTemplate = template(rendered, templateName);
     const nodePoolInput = resourceTemplate.inputs.parameters.find(
@@ -34,7 +35,7 @@ function expectPoolPlacement(
     });
 
     const manifest = resourceTemplate.resource.manifest as string;
-    expect(manifest).toContain("nodeSelector");
+    expect(manifest).toContain(placementField);
     expect(manifest).toContain(POOL_LABEL);
     expect(manifest).toContain("tolerations");
     expect(manifest).toContain("NoSchedule");
@@ -65,6 +66,13 @@ describe("capture/replay workloads resolve Helm-selected NodePools", () => {
             renderWorkflowTemplate(SetupKafka),
             "deploykafkanodepool",
             "kafkaNodePoolName",
+            "nodeAffinity",
         );
+        const manifest = template(
+            renderWorkflowTemplate(SetupKafka),
+            "deploykafkanodepool",
+        ).resource.manifest as string;
+        expect(manifest).not.toMatch(/["']nodeSelector["']/);
+        expect(manifest).toContain("requiredDuringSchedulingIgnoredDuringExecution");
     });
 });

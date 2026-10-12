@@ -22,8 +22,8 @@ import {ResourceManagement} from "./resourceManagement";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 import {
+    workloadNodeAffinity,
     workloadNodePoolResolvedInput,
-    workloadNodeSelector,
     workloadNodeTolerations,
 } from "./commonUtils/workloadNodePool";
 
@@ -125,7 +125,7 @@ function makeDeployKafkaNodePool(args: {
         expr.makeDict({
             template: expr.makeDict({
                 pod: expr.makeDict({
-                    nodeSelector: workloadNodeSelector(args.workloadNodePoolName),
+                    affinity: workloadNodeAffinity(args.workloadNodePoolName),
                     tolerations: workloadNodeTolerations(args.workloadNodePoolName),
                 }),
             }),

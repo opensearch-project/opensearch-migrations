@@ -121,8 +121,9 @@ workloadsNodePool:
   architectures: []  # e.g. ["arm64"] for Graviton only.
   # With no capacity type, Auto Mode prioritizes reserved, then spot, then on-demand
   # (https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#auto-supported-labels),
-  # so spot will be used where available. A spot interruption stops the migration work on that
-  # node; set ["on-demand"] for long-running migrations that must not be interrupted.
+  # so spot will be used where available. This base value applies to the shared pool and to any
+  # dedicated pool that does not override it. Kafka, capture proxies and replayers override it
+  # below because interruptions destabilize capture availability and replay rate.
   capacityTypes: []
   instanceCategories: []  # e.g. ["c", "m", "r"] for compute, general purpose and memory optimized.
   minInstanceGeneration: null  # Inclusive, e.g. 5 means generation 5 and newer. 0 or null omits it.
@@ -153,12 +154,26 @@ workloadsNodePool:
   dedicatedPools:
     kafka:
       name: kafka-work-pool
+      # Broker interruptions destabilize both capture publishing and replay consumer groups.
+      capacityTypes: ["on-demand"]
+      # Unconstrained, Auto Mode replaced an interrupted broker's node with a p4d.24xlarge GPU instance.
+      instanceCategories: ["c", "m", "r"]
+      minInstanceGeneration: 6
       limits: {}
     proxy:
       name: proxy-work-pool
+      # Capture must remain continuously available; do not place proxies on interruptible capacity.
+      capacityTypes: ["on-demand"]
       limits: {}
     replayer:
       name: replayer-work-pool
+      # Preserve a predictable replay rate and avoid fleet-wide Kafka rebalances from Spot churn.
+      capacityTypes: ["on-demand"]
+      # Replayers are CPU-bound. Unconstrained, Auto Mode packed them onto burstable t-series nodes
+      # (throttled once CPU credits run out) and accelerator families (inf, trn, g) whose separate
+      # quotas left node launches stuck and replayer pods pending.
+      instanceCategories: ["c", "m"]
+      minInstanceGeneration: 6
       limits: {}
     k6:
       name: k6-work-pool

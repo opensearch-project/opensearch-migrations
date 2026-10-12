@@ -125,14 +125,15 @@ passing a Helm values override file through `--helm-values`:
   --helm-values ./deployment/k8s/aws/examples/nodepool-overrides.yaml
 ```
 
-By default the pools leave instance selection, including the capacity type,
-to EKS Auto Mode, within the instance types Auto Mode supports. With no
-capacity type, Auto Mode prefers spot over on-demand, and a spot interruption
-stops the migration work on that node; set `capacityTypes: ["on-demand"]` for
-migrations that must not be interrupted. The sample file at
+By default, instance family and size selection remain with EKS Auto Mode.
+Dedicated Kafka, proxy and replayer pools require On-Demand capacity because
+interruptions affect capture availability and replay-rate stability. The
+shared pool and dedicated k6 pool leave capacity type unconstrained, so Auto
+Mode may select Spot for them. The sample file at
 [`examples/nodepool-overrides.yaml`](./examples/nodepool-overrides.yaml)
-narrows the pool to on-demand c/m/r instances of generation 5 and newer, up to
-`4xlarge`. It sets each of these shared-pool fields:
+requires On-Demand for every pool and narrows selection to c/m/r instances of
+generation 5 and newer, up to `4xlarge`. It sets each of these shared-pool
+fields:
 
 - `workloadsNodePool.mode`
 - `workloadsNodePool.architectures`
@@ -169,7 +170,15 @@ requirements can be set below:
 
 Dedicated pools inherit the shared architecture, capacity type, instance
 category, minimum generation, instance size, and disruption settings unless
-they override them. Their `limits` are independent and empty by default.
+they override them. Kafka, proxy and replayer override the default capacity
+type with `["on-demand"]`; any pool can explicitly select `["spot"]`,
+`["on-demand"]`, or another EKS-supported capacity type through its own
+`capacityTypes` value. Their `limits` are independent and empty by default.
+
+In `shared` mode, Kafka, proxies, and replayers necessarily use the shared
+pool's single capacity policy. Set `workloadsNodePool.capacityTypes:
+["on-demand"]` when using shared mode if proxy and replay interruption is not
+acceptable.
 
 Values files follow normal Helm merge behavior: map fields merge by key, scalar
 conflicts are resolved by the later source, and list fields replace the full

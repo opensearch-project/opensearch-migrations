@@ -45,6 +45,28 @@ export function workloadNodeSelector(
     );
 }
 
+export function workloadNodeAffinity(
+    nodePoolName: BaseExpression<string>,
+) {
+    return expr.ternary(
+        expr.isEmpty(nodePoolName),
+        expr.makeDict({}),
+        expr.makeDict({
+            nodeAffinity: expr.makeDict({
+                requiredDuringSchedulingIgnoredDuringExecution: expr.makeDict({
+                    nodeSelectorTerms: expr.toArray(expr.makeDict({
+                        matchExpressions: expr.toArray(expr.makeDict({
+                            key: WORKLOAD_NODE_POOL_LABEL,
+                            operator: "In",
+                            values: expr.toArray(nodePoolName),
+                        })),
+                    })),
+                }),
+            }),
+        }),
+    );
+}
+
 export function workloadNodeTolerations(
     nodePoolName: BaseExpression<string>,
 ): BaseExpression<any> {
