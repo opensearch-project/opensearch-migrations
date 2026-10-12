@@ -21,6 +21,16 @@ def test_topic_recovery_requires_every_replica_in_isr(isr, healthy):
     assert pod_churn._topic_fully_replicated(description, 8, 3) is healthy
 
 
+def test_topic_replication_factor_can_be_lower_than_broker_count():
+    pod_churn._validate_topic_replica_count(replicas=3, broker_count=12)
+
+
+@pytest.mark.parametrize("replicas", (0, 13))
+def test_topic_replication_factor_must_fit_the_broker_pool(replicas):
+    with pytest.raises(ValueError):
+        pod_churn._validate_topic_replica_count(replicas, broker_count=12)
+
+
 def test_run_specs_preserve_each_child_runner_count():
     assert pod_churn._run_specs(
         '[{"name":"pinned","parallelism":"4"},'

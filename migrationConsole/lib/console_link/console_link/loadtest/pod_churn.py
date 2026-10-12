@@ -249,6 +249,16 @@ def _describe_traffic_topic(custom, namespace, kafka):
     return result.stdout, int(spec["partitions"]), int(spec["replicas"])
 
 
+def _validate_topic_replica_count(replicas, broker_count):
+    if replicas < 1:
+        raise ValueError("traffic topic must have at least one replica")
+    if replicas > broker_count:
+        raise ValueError(
+            f"traffic topic has {replicas} replicas but Kafka node pool has only "
+            f"{broker_count} brokers"
+        )
+
+
 def _fleet_health(core, apps, custom, namespace, kafka, expected_brokers):
     proxy = apps.read_namespaced_deployment("capture-proxy", namespace)
     if not _deployment_ready(proxy):
@@ -292,10 +302,7 @@ def _fleet_health(core, apps, custom, namespace, kafka, expected_brokers):
         return False, "Kafka broker pods are not fully ready"
 
     description, partitions, replicas = _describe_traffic_topic(custom, namespace, kafka)
-    if replicas != expected_brokers:
-        raise ValueError(
-            f"traffic topic has {replicas} replicas, expected {expected_brokers}"
-        )
+    _validate_topic_replica_count(replicas, broker_count)
     if not _topic_fully_replicated(description, partitions, replicas):
         return False, "traffic topic leaders or ISR have not fully recovered"
     return True, "healthy"
