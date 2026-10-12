@@ -35,6 +35,7 @@ import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.sink.S3TupleSink;
 import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.tracing.TupleSinkUploadMetrics;
 import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
@@ -722,13 +723,21 @@ public class TrafficReplayer {
         );
         var shutdownHook = deployed.application().createShutdownHook();
         Runtime.getRuntime().addShutdownHook(shutdownHook);
+        logStartupSummary(params, targetUri);
+        deployed.application().run();
+    }
+
+    static void logStartupSummary(Parameters params, URI targetUri) {
         log.atInfo()
             .setMessage(
-                "ReplayerConfig - speedup={} maxConcurrentRequests={} "
-                    + "serverResponseTimeout={}s targetUri={} numClientThreads={} "
-                    + "heartbeatExpiration={}s maximumBackwardSkew={}s "
-                    + "sourceResponseRetryWindow={}s readyRequestsBufferPerThread={}"
+                "event=replayer_startup_summary mode=replay metric_export_enabled={} "
+                    + "trace_export_enabled={} speedup={} max_concurrent_requests={} "
+                    + "server_response_timeout_s={} target_uri={} client_threads={} "
+                    + "heartbeat_expiration_s={} maximum_backward_skew_s={} "
+                    + "source_response_retry_window_s={} ready_requests_buffer_per_thread={}"
             )
+            .addArgument(() -> endpointConfigured(params.otelMetricsCollectorEndpoint))
+            .addArgument(() -> endpointConfigured(params.otelTraceCollectorEndpoint))
             .addArgument(params.speedupFactor)
             .addArgument(params.maxConcurrentRequests)
             .addArgument(params.targetServerResponseTimeoutSeconds)
@@ -739,7 +748,10 @@ public class TrafficReplayer {
             .addArgument(params.sourceResponseRetryWindowSeconds)
             .addArgument(params.readyRequestsBufferPerThread)
             .log();
-        deployed.application().run();
+    }
+
+    private static boolean endpointConfigured(String endpoint) {
+        return endpoint != null && !endpoint.isBlank();
     }
 
     static Supplier<IJsonTransformer> buildTransformerSupplier(
@@ -793,7 +805,8 @@ public class TrafficReplayer {
     }
 
     static Optional<TupleSinkResources> createS3TupleSinkResourcesIfConfigured(
-        Parameters params
+        Parameters params,
+        TupleSinkUploadMetrics uploadMetrics
     ) {
         if (params.tupleS3Bucket == null || params.tupleS3Bucket.isBlank()) {
             return Optional.empty();
@@ -822,12 +835,15 @@ public class TrafficReplayer {
                 .endpointOverride(URI.create(params.tupleS3Endpoint))
                 .forcePathStyle(true);
         }
-        return Optional.of(createS3TupleSinkResources(params, s3ClientBuilder.build()));
+        return Optional.of(
+            createS3TupleSinkResources(params, s3ClientBuilder.build(), uploadMetrics)
+        );
     }
 
     static TupleSinkResources createS3TupleSinkResources(
         Parameters params,
-        S3AsyncClient s3Client
+        S3AsyncClient s3Client,
+        TupleSinkUploadMetrics uploadMetrics
     ) {
         var replayerId = ProcessHelpers.getNodeInstanceName();
         var prefix = params.tupleS3Prefix == null ? "" : params.tupleS3Prefix;
@@ -841,7 +857,8 @@ public class TrafficReplayer {
                     sinkIndex,
                     Math.multiplyExact(params.tupleMaxFileSizeMb, 1024L * 1024L),
                     Duration.ofSeconds(params.tupleMaxBufferSeconds),
-                    params.tupleMaxPerFile
+                    params.tupleMaxPerFile,
+                    uploadMetrics
                 )
             ),
             s3Client
@@ -1036,7 +1053,10 @@ public class TrafficReplayer {
         var authTransformerFactory = buildAuthTransformerFactory(params);
         Optional<TupleSinkResources> tupleSinkResources = Optional.empty();
         try {
-            tupleSinkResources = createS3TupleSinkResourcesIfConfigured(params);
+            tupleSinkResources = createS3TupleSinkResourcesIfConfigured(
+                params,
+                rootContext.getTupleSinkUploadMetrics()
+            );
             return createDeployedReplayApplication(
                 params,
                 targetUri,
@@ -1185,7 +1205,8 @@ public class TrafficReplayer {
                 TrafficReplayerTopLevel.deployedRequestPreparer(
                     requestTransformerSupplier,
                     authTransformerFactory,
-                    params.speedupFactor
+                    params.speedupFactor,
+                    rootContext.getResourceOwnershipMetrics()
                 ),
             new OpenSearchDefaultRetry(errorClassifier),
             (connectionId, eventLoop, connectionContext) ->
@@ -1392,6 +1413,7 @@ public class TrafficReplayer {
         private final ReplayLifecycle lifecycle;
         private final ProcessSupervisor supervisor;
         private final AtomicBoolean orderlyShutdownRequested = new AtomicBoolean();
+        private final AtomicBoolean shutdownSummaryLogged = new AtomicBoolean();
         private final CompletableFuture<Void> orderlyShutdownFinished = new CompletableFuture<>();
 
         SupervisedReplayApplication(
@@ -1421,6 +1443,7 @@ public class TrafficReplayer {
                 }
                 lifecycle.closeTargetOwnersAfterOrderly();
                 orderlyShutdownFinished.complete(null);
+                logShutdownSummary("orderly");
             } catch (Throwable failure) {
                 var error = failure instanceof Error existing
                     ? existing
@@ -1433,6 +1456,7 @@ public class TrafficReplayer {
                     error
                 );
                 orderlyShutdownFinished.completeExceptionally(error);
+                logShutdownSummary("fatal");
             }
         }
 
@@ -1471,6 +1495,21 @@ public class TrafficReplayer {
                 .map(ProcessSupervisor.FatalSignal::failure)
                 .orElseGet(() -> new Error("fatal replay termination began without a signal"));
             orderlyShutdownFinished.completeExceptionally(failure);
+            logShutdownSummary("fatal");
+        }
+
+        private void logShutdownSummary(String outcome) {
+            if (!shutdownSummaryLogged.compareAndSet(false, true)) {
+                return;
+            }
+            log.atInfo()
+                .setMessage(
+                    "event=replayer_shutdown_summary outcome={} orderly_requested={} fatal_started={}"
+                )
+                .addArgument(outcome)
+                .addArgument(orderlyShutdownRequested::get)
+                .addArgument(supervisor::fatalTerminationStarted)
+                .log();
         }
     }
 

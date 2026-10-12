@@ -35,9 +35,11 @@ public final class ProtocolViolationMetrics implements ProtocolViolationTerminat
 
     public ProtocolViolationMetrics(@NonNull Meter meter) {
         drainsStarted = meter.counterBuilder(MetricNames.DRAINS_STARTED)
+            .setDescription("Bounded replay drains started after capture protocol violations")
             .setUnit("drains")
             .build();
         terminationsTriggered = meter.counterBuilder(MetricNames.TERMINATIONS_TRIGGERED)
+            .setDescription("Replay termination requests triggered after protocol-violation drains")
             .setUnit("terminations")
             .build();
     }

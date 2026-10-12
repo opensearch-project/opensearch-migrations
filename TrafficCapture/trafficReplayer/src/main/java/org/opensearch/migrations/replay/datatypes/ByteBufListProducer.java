@@ -25,7 +25,7 @@ import lombok.NonNull;
 public abstract class ByteBufListProducer extends AbstractReferenceCounted
     implements Supplier<ByteBufList>, OwnedPreparedRequest {
     private final AtomicBoolean closed = new AtomicBoolean();
-    private ResourceOwnership.Metrics ownershipMetrics = ResourceOwnership.Metrics.NOOP;
+    private ResourceOwnership.Metrics ownershipMetrics;
     private ResourceOwnership.Tracker ownership;
 
     @Override
@@ -38,13 +38,13 @@ public abstract class ByteBufListProducer extends AbstractReferenceCounted
     @Override
     public AttemptPayload newAttempt() {
         var copies = get().streamUnretained().toArray(ByteBuf[]::new);
-        return AttemptPayload.owned(new ByteBufList(copies), ownershipMetrics);
+        return AttemptPayload.owned(new ByteBufList(copies), requireOwnershipMetrics());
     }
 
     @Override
     public DiagnosticPayload retainDiagnosticCopy() {
         var copies = get().streamUnretained().toArray(ByteBuf[]::new);
-        return new DiagnosticPayload(new ByteBufList(copies), ownershipMetrics);
+        return new DiagnosticPayload(new ByteBufList(copies), requireOwnershipMetrics());
     }
 
     public final synchronized void trackOwnership(@NonNull ResourceOwnership.Metrics metrics) {
@@ -66,6 +66,13 @@ public abstract class ByteBufListProducer extends AbstractReferenceCounted
     }
 
     protected final ResourceOwnership.Metrics ownershipMetrics() {
+        return requireOwnershipMetrics();
+    }
+
+    private ResourceOwnership.Metrics requireOwnershipMetrics() {
+        if (ownershipMetrics == null) {
+            throw new IllegalStateException("prepared request ownership metrics were not installed");
+        }
         return ownershipMetrics;
     }
 

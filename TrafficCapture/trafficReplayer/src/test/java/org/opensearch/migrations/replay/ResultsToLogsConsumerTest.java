@@ -18,14 +18,13 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
+import org.opensearch.migrations.tracing.TestContext;
 
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
-import io.opentelemetry.api.OpenTelemetry;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -84,8 +83,7 @@ class ResultsToLogsConsumerTest {
             );
         private final ReplayRequestId requestId =
             new ReplayRequestId(connection, 2);
-        private final RootReplayerContext root =
-            new RootReplayerContext(OpenTelemetry.noop());
+        private final TestContext root = TestContext.noOtelTracking();
         private final IReplayContexts.IKafkaRecordContext recordContext =
             root.createKafkaRecordContext(new KafkaRecordId(generation, 1), 0);
         private final IReplayContexts.ITrafficStreamsLifecycleContext trafficContext =
@@ -113,8 +111,10 @@ class ResultsToLogsConsumerTest {
             );
             var packets = new ByteBufList(targetRequest);
             targetRequest.release();
+            var producer = ByteBufListProducer.of(packets);
+            producer.trackOwnership(root.getResourceOwnershipMetrics());
             preparedRequest = new NettyPacketToHttpConsumer.PreparedRequest(
-                ByteBufListProducer.of(packets),
+                producer,
                 Duration.ZERO
             );
             var targetResponse = rawResponse(
@@ -148,6 +148,7 @@ class ResultsToLogsConsumerTest {
             recordContext.complete(
                 IReplayContexts.RecordDisposition.COMMIT_INELIGIBLE
             );
+            root.close();
         }
 
         private static HttpMessageAndTimestamp.Request request(String text) {

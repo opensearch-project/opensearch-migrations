@@ -16,6 +16,11 @@ import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
+import org.opensearch.migrations.replay.tracing.ReplayContexts;
+import org.opensearch.migrations.replay.tracing.TargetExecutionMetrics;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -44,14 +49,33 @@ class RequestReplayOwnerTest {
             List.of("source-0|target|complete-source"),
             fixture.tupleSink.writes
         );
+        Assertions.assertEquals(
+            1,
+            fixture.replayContexts.getActiveContextTrackerByActivityType()
+                .getOldestActiveScopes(tupleHandlingContextClass())
+                .count(),
+            "tuple activity must remain observable while durability is pending"
+        );
 
         fixture.tupleSink.durableNext();
         fixture.eventLoop.runUntilIdle();
+        Assertions.assertEquals(
+            0,
+            fixture.replayContexts.getActiveContextTrackerByActivityType()
+                .getOldestActiveScopes(tupleHandlingContextClass())
+                .count(),
+            "tuple activity must leave the tracker after becoming durable"
+        );
         Assertions.assertEquals(
             List.of("turn:0", "processing:0"),
             fixture.lifecycleEvents
         );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Class<IScopedInstrumentationAttributes> tupleHandlingContextClass() {
+        return (Class<IScopedInstrumentationAttributes>) (Class<?>) ReplayContexts.TupleHandlingContext.class;
     }
 
     @Test
@@ -163,37 +187,82 @@ class RequestReplayOwnerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("RequestReplayOwnerLogger")
     void responsePathStopsAfterTheConfiguredFourRetries() {
-        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
-        fixture.retryPolicy.decisions.addAll(List.of(
-            new ReplayOutcomes.RetryDecision.RetryRequired(),
-            new ReplayOutcomes.RetryDecision.RetryRequired(),
-            new ReplayOutcomes.RetryDecision.RetryRequired(),
-            new ReplayOutcomes.RetryDecision.RetryRequired(),
-            new ReplayOutcomes.RetryDecision.RetryRequired()
-        ));
-        fixture.admit(6, Instant.EPOCH);
-        fixture.eventLoop.runUntilIdle();
-        fixture.preparer.ready(6);
-        fixture.completeSource(6, "source");
-        fixture.eventLoop.runUntilIdle();
-
-        for (int attempt = 0; attempt < 5; attempt++) {
-            fixture.targetChannel.attempt(attempt).targetResponse("target-" + attempt);
+        try (
+            var telemetry = new InMemoryInstrumentationBundle(false, true);
+            var logs = new TestLogAppender(RequestReplayOwner.class)
+        ) {
+            var fixture = new TargetConnectionOwnerTestSupport.Fixture(
+                new TargetExecutionMetrics(telemetry.openTelemetrySdk.getMeter("test"))
+            );
+            fixture.retryPolicy.decisions.addAll(List.of(
+                new ReplayOutcomes.RetryDecision.RetryRequired(),
+                new ReplayOutcomes.RetryDecision.RetryRequired(),
+                new ReplayOutcomes.RetryDecision.RetryRequired(),
+                new ReplayOutcomes.RetryDecision.RetryRequired(),
+                new ReplayOutcomes.RetryDecision.RetryRequired()
+            ));
+            fixture.admit(6, Instant.EPOCH);
             fixture.eventLoop.runUntilIdle();
-            if (attempt < 4) {
-                fixture.eventLoop.advance(java.time.Duration.ofSeconds(1));
-            }
-        }
+            fixture.preparer.ready(6);
+            fixture.completeSource(6, "source");
+            fixture.eventLoop.runUntilIdle();
 
-        Assertions.assertEquals(5, fixture.targetChannel.attempts.size());
-        Assertions.assertEquals(5, fixture.retryPolicy.observedSources.size());
-        Assertions.assertEquals(List.of("turn:6"), fixture.lifecycleEvents);
-        Assertions.assertEquals(
-            List.of("source-6|target-4|source"),
-            fixture.tupleSink.writes
-        );
-        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+            for (int attempt = 0; attempt < 5; attempt++) {
+                fixture.targetChannel.attempt(attempt).targetResponse("target-" + attempt);
+                fixture.eventLoop.runUntilIdle();
+                if (attempt < 4) {
+                    fixture.eventLoop.advance(java.time.Duration.ofSeconds(1));
+                }
+            }
+
+            Assertions.assertEquals(5, fixture.targetChannel.attempts.size());
+            Assertions.assertEquals(5, fixture.retryPolicy.observedSources.size());
+            Assertions.assertEquals(List.of("turn:6"), fixture.lifecycleEvents);
+            Assertions.assertEquals(
+                List.of("source-6|target-4|source"),
+                fixture.tupleSink.writes
+            );
+            Assertions.assertEquals(
+                1,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    telemetry.getFinishedMetrics(),
+                    TargetExecutionMetrics.MetricNames.RETRIES_EXHAUSTED
+                )
+            );
+            Assertions.assertTrue(logs.contains(
+                "target_retries_exhausted",
+                "request=",
+                "response_attempts=5",
+                "maximum_response_retries=4"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "target_attempt_started",
+                "request=",
+                "attempt=1"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "target_attempt_completed",
+                "request=",
+                "attempt=1",
+                "outcome=response"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "target_retry_decided",
+                "request=",
+                "decision=retry",
+                "response_attempts=1",
+                "completed_attempts=1"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "target_retry_scheduled",
+                "request=",
+                "delay_ms=1000",
+                "completed_attempts=1"
+            ));
+            Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+        }
     }
 
     @Test
@@ -237,6 +306,35 @@ class RequestReplayOwnerTest {
                 event.startsWith("processing:")
             ),
             "a retry cancelled by revocation must not manufacture normal processing completion"
+        );
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
+    void retryRegistryAndScheduledContextUseTheActualRetryDueTime() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.retryPolicy.retryDelay = Duration.ofSeconds(7);
+        fixture.retryPolicy.decisions.add(new ReplayOutcomes.RetryDecision.RetryRequired());
+        fixture.admit(9, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(9);
+        fixture.completeSource(9, "source");
+        fixture.eventLoop.runUntilIdle();
+        fixture.clock.advance(Duration.ofSeconds(5));
+
+        fixture.targetChannel.attempt(0).targetResponse("retryable");
+        fixture.eventLoop.runUntilIdle();
+
+        var retry = fixture.owner.activitySnapshot()
+            .stream()
+            .filter(snapshot -> snapshot.operationType() == OutstandingOperationRegistry.OperationType.RETRY_TIMER)
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(Instant.EPOCH.plusSeconds(12), retry.scheduledTargetTime());
+        Assertions.assertTrue(
+            fixture.replayContexts.getActiveContextTrackerByActivityType()
+                .getActiveScopeTypes()
+                .anyMatch(ReplayContexts.ScheduledContext.class::equals)
         );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }

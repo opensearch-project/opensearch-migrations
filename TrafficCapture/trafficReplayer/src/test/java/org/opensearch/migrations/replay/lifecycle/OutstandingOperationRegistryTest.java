@@ -10,7 +10,6 @@ package org.opensearch.migrations.replay.lifecycle;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
@@ -27,18 +26,15 @@ import static org.opensearch.migrations.replay.lifecycle.TargetConnectionOwnerTe
 
 class OutstandingOperationRegistryTest {
     @Test
-    void snapshotsAndCountHooksProjectTheSameRegisteredOperations() {
+    void snapshotsRemainImmutableAndTrackWaitReasonAndCompletion() {
         var clock = new FakeClock();
         var eventLoop = new TestEventLoop(clock);
         var fatalFailures = new ArrayList<Error>();
-        var counts = new ArrayList<String>();
         var registry = new OutstandingOperationRegistry(
             "test owner",
             eventLoop,
             clock,
-            fatalFailures::add,
-            (type, typeCount, totalCount) ->
-                counts.add(type + ":" + typeCount + ":" + totalCount)
+            fatalFailures::add
         );
         var registration = new AtomicReference<OutstandingOperationRegistry.Registration>();
 
@@ -73,11 +69,8 @@ class OutstandingOperationRegistryTest {
 
         eventLoop.execute(() -> registry.complete(registration.get()));
         eventLoop.runUntilIdle();
-        Assertions.assertEquals(List.of(
-            "TARGET_ATTEMPT:1:1",
-            "TARGET_ATTEMPT:0:0"
-        ), counts);
         Assertions.assertTrue(registry.snapshots().isEmpty());
+        Assertions.assertEquals(0, registry.activeCount());
         Assertions.assertTrue(fatalFailures.isEmpty());
     }
 
@@ -90,8 +83,7 @@ class OutstandingOperationRegistryTest {
             "test owner",
             eventLoop,
             clock,
-            fatalFailures::add,
-            OutstandingOperationRegistry.CountHook.NOOP
+            fatalFailures::add
         );
         var registration = new AtomicReference<OutstandingOperationRegistry.Registration>();
         eventLoop.execute(() -> {

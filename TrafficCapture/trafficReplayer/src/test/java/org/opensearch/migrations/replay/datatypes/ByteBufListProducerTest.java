@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.TestContext;
 
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Assertions;
@@ -19,6 +20,7 @@ class ByteBufListProducerTest {
         var packets = new ByteBufList(source);
         source.release();
         var producer = ByteBufListProducer.of(packets);
+        producer.trackOwnership(new RecordingOwnershipMetrics());
 
         var attempt = producer.newAttempt();
         Assertions.assertNotSame(packets, attempt.packets());
@@ -37,6 +39,7 @@ class ByteBufListProducerTest {
         var packets = new ByteBufList(source);
         source.release();
         var producer = ByteBufListProducer.of(packets);
+        producer.trackOwnership(new RecordingOwnershipMetrics());
         var snapshot = producer.retainDiagnosticCopy();
 
         producer.close();
@@ -154,34 +157,43 @@ class ByteBufListProducerTest {
     @Test
     void telemetryFailureCannotCauseAResourceToBeReleasedTwice() {
         var releases = new AtomicInteger();
-        var metrics = new ResourceOwnership.Metrics() {
-            @Override
-            public void ownershipChanged(
-                ResourceOwnership.Type type,
-                int handleDelta,
-                int bufferDelta,
-                long byteDelta
-            ) {
-                if (handleDelta < 0) {
-                    throw new AssertionError("closing metric failed");
+        try (var testContext = TestContext.noOtelTracking()) {
+            var fallbackMetrics = testContext.getResourceOwnershipMetrics();
+            var metrics = new ResourceOwnership.Metrics() {
+                @Override
+                public void ownershipChanged(
+                    ResourceOwnership.Type type,
+                    int handleDelta,
+                    int bufferDelta,
+                    long byteDelta
+                ) {
+                    if (handleDelta < 0) {
+                        throw new AssertionError("closing metric failed");
+                    }
+                    fallbackMetrics.ownershipChanged(type, handleDelta, bufferDelta, byteDelta);
                 }
-            }
 
-            @Override
-            public void duplicateClose(ResourceOwnership.Type type) {
-                throw new AssertionError("duplicate metric failed");
-            }
-        };
-        var tracker = new ResourceOwnership.Tracker(
-            metrics,
-            ResourceOwnership.Type.ATTEMPT_PAYLOAD,
-            1,
-            7
-        );
+                @Override
+                public void duplicateClose(ResourceOwnership.Type type) {
+                    throw new AssertionError("duplicate metric failed");
+                }
 
-        Assertions.assertTrue(tracker.close(releases::incrementAndGet));
-        Assertions.assertFalse(tracker.close(releases::incrementAndGet));
-        Assertions.assertEquals(1, releases.get());
+                @Override
+                public void invariantFailure(ResourceOwnership.Type type) {
+                    fallbackMetrics.invariantFailure(type);
+                }
+            };
+            var tracker = new ResourceOwnership.Tracker(
+                metrics,
+                ResourceOwnership.Type.ATTEMPT_PAYLOAD,
+                1,
+                7
+            );
+
+            Assertions.assertTrue(tracker.close(releases::incrementAndGet));
+            Assertions.assertFalse(tracker.close(releases::incrementAndGet));
+            Assertions.assertEquals(1, releases.get());
+        }
     }
 
     private static final class RecordingOwnershipMetrics implements ResourceOwnership.Metrics {

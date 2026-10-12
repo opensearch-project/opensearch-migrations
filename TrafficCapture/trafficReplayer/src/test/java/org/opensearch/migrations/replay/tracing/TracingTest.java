@@ -12,6 +12,7 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.trace.SpanId;
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import org.apache.kafka.common.TopicPartition;
@@ -26,9 +27,14 @@ class TracingTest {
             var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
             Assertions.assertSame(rootContext.replayIntakeMetrics, rootContext.getReplayIntakeMetrics());
             Assertions.assertSame(rootContext.kafkaCommitStateMetrics, rootContext.getKafkaCommitStateMetrics());
+            Assertions.assertSame(rootContext.tupleDurabilityMetrics, rootContext.getTupleDurabilityMetrics());
             Assertions.assertSame(
                 rootContext.targetAttemptPermitMetrics,
                 rootContext.getTargetAttemptPermitMetrics()
+            );
+            Assertions.assertSame(
+                rootContext.targetExecutionMetrics,
+                rootContext.getTargetExecutionMetrics()
             );
 
             var connectionId = connectionId(7, 2);
@@ -166,6 +172,29 @@ class TracingTest {
                 1
             );
             var spans = telemetry.getFinishedSpans();
+            Assertions.assertEquals(16, spans.size());
+            assertSpanCount(spans, IReplayContexts.ActivityNames.CHANNEL, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.TCP_CONNECTION, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.RECORD_LIFETIME, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.TRAFFIC_STREAM_LIFETIME, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.HTTP_TRANSACTION, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.ACCUMULATING_REQUEST, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.ACCUMULATING_RESPONSE, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.TRANSFORMATION, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.SCHEDULED, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.TARGET_TRANSACTION, 2);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.REQUEST_CONNECTING, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.REQUEST_SENDING, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.WAITING_FOR_RESPONSE, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.RECEIVING_RESPONSE, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.TUPLE_COMPARISON, 1);
+            assertRoot(spans, IReplayContexts.ActivityNames.CHANNEL);
+            assertRoot(spans, IReplayContexts.ActivityNames.RECORD_LIFETIME);
+            assertParent(
+                spans,
+                IReplayContexts.ActivityNames.TCP_CONNECTION,
+                IReplayContexts.ActivityNames.CHANNEL
+            );
             assertParent(
                 spans,
                 IReplayContexts.ActivityNames.TRAFFIC_STREAM_LIFETIME,
@@ -178,17 +207,47 @@ class TracingTest {
             );
             assertParent(
                 spans,
+                IReplayContexts.ActivityNames.ACCUMULATING_REQUEST,
+                IReplayContexts.ActivityNames.HTTP_TRANSACTION
+            );
+            assertParent(
+                spans,
+                IReplayContexts.ActivityNames.ACCUMULATING_RESPONSE,
+                IReplayContexts.ActivityNames.HTTP_TRANSACTION
+            );
+            assertParent(
+                spans,
                 IReplayContexts.ActivityNames.TRANSFORMATION,
                 IReplayContexts.ActivityNames.HTTP_TRANSACTION
             );
             assertParent(
+                spans,
+                IReplayContexts.ActivityNames.SCHEDULED,
+                IReplayContexts.ActivityNames.HTTP_TRANSACTION
+            );
+            assertEveryParent(
                 spans,
                 IReplayContexts.ActivityNames.TARGET_TRANSACTION,
                 IReplayContexts.ActivityNames.HTTP_TRANSACTION
             );
             assertParent(
                 spans,
+                IReplayContexts.ActivityNames.REQUEST_CONNECTING,
+                IReplayContexts.ActivityNames.TARGET_TRANSACTION
+            );
+            assertParent(
+                spans,
                 IReplayContexts.ActivityNames.REQUEST_SENDING,
+                IReplayContexts.ActivityNames.TARGET_TRANSACTION
+            );
+            assertParent(
+                spans,
+                IReplayContexts.ActivityNames.WAITING_FOR_RESPONSE,
+                IReplayContexts.ActivityNames.TARGET_TRANSACTION
+            );
+            assertParent(
+                spans,
+                IReplayContexts.ActivityNames.RECEIVING_RESPONSE,
                 IReplayContexts.ActivityNames.TARGET_TRANSACTION
             );
             assertParent(
@@ -222,6 +281,18 @@ class TracingTest {
         );
     }
 
+    private static void assertRoot(List<SpanData> spans, String name) {
+        Assertions.assertEquals(SpanId.getInvalid(), span(spans, name).getParentSpanId());
+    }
+
+    private static void assertSpanCount(List<SpanData> spans, String name, long expectedCount) {
+        Assertions.assertEquals(
+            expectedCount,
+            spans.stream().filter(candidate -> candidate.getName().equals(name)).count(),
+            () -> "Unexpected span count for " + name
+        );
+    }
+
     private static void assertParent(
         List<SpanData> spans,
         String childName,
@@ -231,6 +302,17 @@ class TracingTest {
             span(spans, parentName).getSpanId(),
             span(spans, childName).getParentSpanId()
         );
+    }
+
+    private static void assertEveryParent(
+        List<SpanData> spans,
+        String childName,
+        String parentName
+    ) {
+        var parentSpanId = span(spans, parentName).getSpanId();
+        spans.stream()
+            .filter(candidate -> candidate.getName().equals(childName))
+            .forEach(child -> Assertions.assertEquals(parentSpanId, child.getParentSpanId()));
     }
 
     private static SpanData span(List<SpanData> spans, String name) {

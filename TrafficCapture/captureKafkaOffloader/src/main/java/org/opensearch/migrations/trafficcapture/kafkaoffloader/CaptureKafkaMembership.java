@@ -9,6 +9,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.RoutingTransition;
+
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
@@ -34,6 +37,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private final String topic;
     private final CaptureRoutingState routingState;
     private final CaptureRoutingGenerationPublisher routingGenerationPublisher;
+    private final CapturePublishingMetrics metrics;
     private final Runnable initialRoutingReadyCallback;
     private final Consumer<Throwable> membershipFailureCallback;
     private final Consumer<Throwable> unstableProcessFailureCallback;
@@ -49,6 +53,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         @NonNull String topic,
         @NonNull CaptureRoutingState routingState,
         @NonNull CaptureRoutingGenerationPublisher routingGenerationPublisher,
+        @NonNull CapturePublishingMetrics metrics,
         @NonNull Runnable initialRoutingReadyCallback,
         @NonNull Consumer<Throwable> membershipFailureCallback,
         @NonNull Consumer<Throwable> unstableProcessFailureCallback
@@ -58,6 +63,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         this.routingState = routingState;
         kafkaAssignment.addAll(routingState.activeRoutingPartitions());
         this.routingGenerationPublisher = routingGenerationPublisher;
+        this.metrics = metrics;
         this.initialRoutingReadyCallback = initialRoutingReadyCallback;
         this.membershipFailureCallback = membershipFailureCallback;
         this.unstableProcessFailureCallback = unstableProcessFailureCallback;
@@ -86,21 +92,25 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         validateTopic(partitions);
         kafkaAssignment.addAll(partitionNumbers(partitions));
         consumer.pause(partitions);
+        metrics.routingTransition(RoutingTransition.ASSIGNMENT_RECEIVED);
+        log.atInfo()
+            .setMessage(
+                "event=capture_assignment_received topic={} assignedPartitions={} routingPartitions={}"
+            )
+            .addArgument(topic)
+            .addArgument(partitionNumbers(partitions))
+            .addArgument(List.copyOf(kafkaAssignment))
+            .log();
         if (kafkaAssignment.isEmpty()) {
             return;
         }
         var kafkaAssignmentSnapshot = List.copyOf(kafkaAssignment);
         routingGenerationPublisher.initializeRoutingGeneration(kafkaAssignmentSnapshot)
-            .whenComplete((writerNodeId, failure) -> {
+            .whenComplete((ignoredWriterNodeId, failure) -> {
                 if (failure != null) {
                     routingGenerationPublisher.stopAfterFailure(failure);
                     return;
                 }
-                log.atInfo()
-                    .setMessage("Initialized proxy routing writer {} for partitions {}")
-                    .addArgument(writerNodeId)
-                    .addArgument(routingState.activeRoutingPartitions())
-                    .log();
                 if (initialRoutingReadyReported.compareAndSet(false, true)) {
                     initialRoutingReadyCallback.run();
                 }
@@ -139,9 +149,10 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
             log.atWarn()
                 .setCause(e)
                 .setMessage(
-                    "Transient Kafka membership poll failure; "
-                        + "continuing with the active routing generation while polling retries"
+                    "event=capture_membership_degraded reason=retriable_poll_failure "
+                        + "activePartitions={}"
                 )
+                .addArgument(routingState.activeRoutingPartitions())
                 .log();
             return true;
         }
@@ -182,9 +193,10 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
                 log.atError()
                     .setCause(failure)
                     .setMessage(
-                        "Kafka membership stopped after initial routing became usable; "
-                            + "continuing capture with the active routing generation"
+                        "event=capture_membership_failed initialRoutingReady=true "
+                            + "activePartitions={}"
                     )
+                    .addArgument(routingState.activeRoutingPartitions())
                     .log();
             } else {
                 membershipFailureCallback.accept(failure);

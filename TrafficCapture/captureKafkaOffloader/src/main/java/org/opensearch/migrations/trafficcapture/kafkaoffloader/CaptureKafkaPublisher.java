@@ -4,12 +4,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
@@ -20,6 +18,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.FailureReason;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.PublishOutcome;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.RecordKind;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.RoutingTransition;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriterPartitionHeartbeat;
@@ -63,6 +66,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 @Slf4j
 public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher, AutoCloseable {
     static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(30);
+    static final Duration HEALTH_REPORT_INTERVAL = Duration.ofSeconds(30);
 
     /**
      * Local lifecycle of one {@code (writerNodeId, partition)} publisher lane. This is separate
@@ -217,12 +221,35 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         }
     }
 
+    private static final class InFlightPublication {
+        private final PublisherLane lane;
+        private final CompletableFuture<RecordMetadata> result;
+        private final RecordKind kind;
+        private final int bytes;
+        private final long acceptedAtMillis;
+
+        private InFlightPublication(
+            PublisherLane lane,
+            CompletableFuture<RecordMetadata> result,
+            RecordKind kind,
+            int bytes,
+            long acceptedAtMillis
+        ) {
+            this.lane = lane;
+            this.result = result;
+            this.kind = kind;
+            this.bytes = bytes;
+            this.acceptedAtMillis = acceptedAtMillis;
+        }
+    }
+
     // Producer, protocol configuration, and process-level failure integration.
     private final Producer<String, byte[]> producer;
     private final String topic;
     @Getter
     private final CaptureRoutingState routingState;
     private final CaptureKafkaWriteGate writeGate;
+    private final CapturePublishingMetrics metrics;
     private final Consumer<Throwable> unstableProcessFailureCallback;
     private final int payloadSizeLimit;
     private final Duration heartbeatInterval;
@@ -248,8 +275,8 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean unstableProcessFailureReported = new AtomicBoolean();
     private final Object inFlightLock = new Object();
-    private final Set<CompletableFuture<RecordMetadata>> inFlightSends =
-        Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Map<CompletableFuture<RecordMetadata>, InFlightPublication> inFlightSends =
+        new IdentityHashMap<>();
     private CompletableFuture<Void> orderlyRetirement;
     private boolean routingGenerationInitializationInProgress;
 
@@ -260,6 +287,7 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         int maximumKafkaMessageSize,
         Duration heartbeatInterval,
         Duration heartbeatExpirationInterval,
+        CapturePublishingMetrics metrics,
         Consumer<Throwable> unstableProcessFailureCallback
     ) {
         this(
@@ -270,7 +298,8 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
             heartbeatInterval,
             heartbeatExpirationInterval,
             Clock.systemUTC(),
-            new CaptureKafkaWriteGate(),
+            metrics,
+            new CaptureKafkaWriteGate(metrics),
             unstableProcessFailureCallback
         );
     }
@@ -283,6 +312,7 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         Duration heartbeatInterval,
         Duration heartbeatExpirationInterval,
         @NonNull Clock clock,
+        @NonNull CapturePublishingMetrics metrics,
         @NonNull CaptureKafkaWriteGate writeGate,
         @NonNull Consumer<Throwable> unstableProcessFailureCallback
     ) {
@@ -290,6 +320,7 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         this.topic = topic;
         this.routingState = routingState;
         this.clock = clock;
+        this.metrics = metrics;
         this.writeGate = writeGate;
         this.unstableProcessFailureCallback = unstableProcessFailureCallback;
         if (maximumKafkaMessageSize <= KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES) {
@@ -319,7 +350,15 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
             return thread;
         });
         acknowledgementDeadlineExecutor.setRemoveOnCancelPolicy(true);
-        writeGate.addTerminalFailureListener(this::failPublisher);
+        writeGate.addTerminalFailureListener(failure ->
+            failPublisher(failure, classifyFailure(failure))
+        );
+        executor.scheduleWithFixedDelay(
+            this::reportHealthSafely,
+            HEALTH_REPORT_INTERVAL.toNanos(),
+            HEALTH_REPORT_INTERVAL.toNanos(),
+            TimeUnit.NANOSECONDS
+        );
     }
 
     @Override
@@ -355,6 +394,15 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         CompletableFuture<String> result
     ) {
         var pendingGeneration = routingState.prepareRoutingGeneration(partitions);
+        metrics.routingTransition(RoutingTransition.GENERATION_PREPARED);
+        log.atInfo()
+            .setMessage(
+                "event=capture_generation_prepared writerNodeId={} generation={} partitions={}"
+            )
+            .addArgument(pendingGeneration.writerNodeId())
+            .addArgument(pendingGeneration.generationSequence())
+            .addArgument(pendingGeneration.partitions())
+            .log();
         var initialHeartbeats = pendingGeneration.writerPartitions()
             .stream()
             .map(writerPartition -> {
@@ -392,7 +440,31 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
             return;
         }
         try {
+            var previousWriterNodeId = routingState.currentWriterNodeId();
+            var previousPartitions = routingState.activeRoutingPartitions();
             routingState.activateRoutingGeneration(pendingGeneration);
+            metrics.routingTransition(RoutingTransition.GENERATION_ACTIVATED);
+            metrics.writersActivated(
+                pendingGeneration.partitions().size(),
+                previousPartitions.size()
+            );
+            if (previousWriterNodeId != null) {
+                log.atInfo()
+                    .setMessage(
+                        "event=capture_writer_draining writerNodeId={} partitions={} reason=replaced"
+                    )
+                    .addArgument(previousWriterNodeId)
+                    .addArgument(previousPartitions)
+                    .log();
+            }
+            log.atInfo()
+                .setMessage(
+                    "event=capture_generation_activated writerNodeId={} generation={} partitions={}"
+                )
+                .addArgument(pendingGeneration.writerNodeId())
+                .addArgument(pendingGeneration.generationSequence())
+                .addArgument(pendingGeneration.partitions())
+                .log();
             result.complete(pendingGeneration.writerNodeId());
             beginDrainedWriterRetirements();
             routingGenerationInitializationInProgress = false;
@@ -424,7 +496,7 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
             var payloadFailure = new IllegalArgumentException(
                 "CaptureRecord exceeds the configured Kafka payload limit"
             );
-            failPublisher(payloadFailure);
+            failPublisher(payloadFailure, FailureReason.PAYLOAD_LIMIT);
             return CompletableFuture.failedFuture(payloadFailure);
         }
         var producerRecord = new ProducerRecord<>(
@@ -465,9 +537,24 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
                 heartbeatExpirationInterval
             );
         } catch (RuntimeException e) {
-            failForThrowable(e);
+            reportBrokerTimeViolation(route.writerPartition(), e);
             throw e;
         }
+    }
+
+    public CaptureRoutingState.ConnectionRoute routeNewConnection(
+        @NonNull String connectionId
+    ) {
+        var route = routingState.routeNewConnection(connectionId);
+        log.atDebug()
+            .setMessage(
+                "event=capture_route_selected writerNodeId={} partition={} connectionId={}"
+            )
+            .addArgument(route.writerNodeId())
+            .addArgument(route.partition())
+            .addArgument(route.connectionId())
+            .log();
+        return route;
     }
 
     CompletableFuture<Void> retireAllWriters() {
@@ -485,7 +572,19 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
             return;
         }
         orderlyRetirement = result;
+        var currentWriterNodeId = routingState.currentWriterNodeId();
+        var currentPartitions = routingState.activeRoutingPartitions();
         routingState.beginOrderlyRetirement();
+        metrics.activeWritersBeganDraining(currentPartitions.size());
+        if (currentWriterNodeId != null) {
+            log.atInfo()
+                .setMessage(
+                    "event=capture_writer_draining writerNodeId={} partitions={} reason=shutdown"
+                )
+                .addArgument(currentWriterNodeId)
+                .addArgument(currentPartitions)
+                .log();
+        }
         beginDrainedWriterRetirements();
         var retirements = publisherLanes.values()
             .stream()
@@ -519,6 +618,15 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
 
     void abandonUnpublishedConnection(CaptureRoutingState.ConnectionRoute route) {
         routingState.abandonUnpublishedConnection(route);
+        log.atWarn()
+            .setMessage(
+                "event=capture_connection_dropped reason=abandoned_before_publication "
+                    + "writerNodeId={} partition={} connectionId={}"
+            )
+            .addArgument(route.writerNodeId())
+            .addArgument(route.partition())
+            .addArgument(route.connectionId())
+            .log();
         var result = new CompletableFuture<Void>();
         executeOnPublisher(() -> {
             beginDrainedWriterRetirements();
@@ -564,6 +672,7 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         return sendFromPublisherThread(
             lane,
             producerRecord,
+            RecordKind.HEARTBEAT,
             lane.acknowledgementDeadline,
             startAcknowledgementDeadlineAfterSubmission,
             metadata -> acceptHeartbeatAcknowledgement(lane, metadata)
@@ -577,11 +686,16 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
                     + lane.writerPartition
             );
         }
-        routingState.acceptHeartbeatLogAppendTime(
-            lane.writerPartition,
-            requireBrokerTimestamp(metadata, "heartbeat"),
-            heartbeatExpirationInterval
-        );
+        try {
+            routingState.acceptHeartbeatLogAppendTime(
+                lane.writerPartition,
+                requireBrokerTimestamp(metadata, "heartbeat"),
+                heartbeatExpirationInterval
+            );
+        } catch (RuntimeException failure) {
+            reportBrokerTimeViolation(lane.writerPartition, failure);
+            throw failure;
+        }
         lane.heartbeatInFlight = false;
         if (lane.status == PublisherLaneStatus.OPEN) {
             renewAcknowledgementDeadline(lane);
@@ -637,9 +751,21 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         if (failure.get() != null || closed.get() || !deadline.expire()) {
             return;
         }
-        failPublisher(new TimeoutException(
-            "Heartbeat acknowledgement deadline expired for " + lane.writerPartition
-        ));
+        metrics.heartbeatDeadlineViolated();
+        log.atWarn()
+            .setMessage(
+                "event=capture_heartbeat_late writerNodeId={} partition={} deadlineMillis={}"
+            )
+            .addArgument(lane.writerPartition.writerNodeId())
+            .addArgument(lane.writerPartition.partition())
+            .addArgument(heartbeatExpirationInterval.toMillis())
+            .log();
+        failPublisher(
+            new TimeoutException(
+                "Heartbeat acknowledgement deadline expired for " + lane.writerPartition
+            ),
+            FailureReason.HEARTBEAT_DEADLINE
+        );
     }
 
     private void cancelAcknowledgementDeadline(PublisherLane lane) {
@@ -681,10 +807,84 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         routingState.completeWriterRetirement(lane.writerPartition);
         lane.status = PublisherLaneStatus.RETIRED;
         lane.retirement.complete(null);
+        metrics.writerRetired();
         log.atInfo()
-            .setMessage("Retired proxy writer {} for partition {}")
+            .setMessage("event=capture_writer_retired writerNodeId={} partition={}")
             .addArgument(lane.writerPartition.writerNodeId())
             .addArgument(lane.writerPartition.partition())
+            .log();
+    }
+
+    CompletableFuture<Void> reportHealthNow() {
+        var result = new CompletableFuture<Void>();
+        executeOnPublisher(() -> {
+            reportHealth();
+            result.complete(null);
+        }, result);
+        return result;
+    }
+
+    private void reportHealthSafely() {
+        try {
+            reportHealth();
+        } catch (Throwable failure) {
+            log.atError()
+                .setCause(failure)
+                .setMessage("event=capture_health_report_failed")
+                .log();
+        }
+    }
+
+    private void reportHealth() {
+        var routing = routingState.diagnosticSnapshot();
+        int inFlightRecords;
+        long inFlightBytes;
+        long oldestAcceptedAtMillis = Long.MAX_VALUE;
+        synchronized (inFlightLock) {
+            inFlightRecords = inFlightSends.size();
+            inFlightBytes = inFlightSends.values()
+                .stream()
+                .mapToLong(publication -> publication.bytes)
+                .sum();
+            for (var publication : inFlightSends.values()) {
+                oldestAcceptedAtMillis = Math.min(
+                    oldestAcceptedAtMillis,
+                    publication.acceptedAtMillis
+                );
+            }
+        }
+        var oldestUnacknowledgedAgeMillis = oldestAcceptedAtMillis == Long.MAX_VALUE
+            ? 0
+            : Math.max(0, clock.millis() - oldestAcceptedAtMillis);
+        log.atInfo()
+            .setMessage(
+                "event=capture_health activeWriters={} drainingWriters={} retiringWriters={} "
+                    + "retiredWriters={} partitions={} activeConnections={} inFlightRecords={} "
+                    + "inFlightBytes={} oldestUnacknowledgedAgeMillis={} "
+                    + "lastHeartbeatBrokerTime={} publisherQueueDepth={} writeGate={}"
+            )
+            .addArgument(routing.activeWriters())
+            .addArgument(routing.drainingWriters())
+            .addArgument(routing.retiringWriters())
+            .addArgument(routing.retiredWriters())
+            .addArgument(routing.activePartitions())
+            .addArgument(routing.activeConnections())
+            .addArgument(inFlightRecords)
+            .addArgument(inFlightBytes)
+            .addArgument(oldestUnacknowledgedAgeMillis)
+            .addArgument(() -> routing.lastHeartbeatBrokerTime()
+                .stream()
+                .mapToObj(Long::toString)
+                .findFirst()
+                .orElse("none"))
+            .addArgument(
+                executor.getQueue()
+                    .stream()
+                    .filter(task -> !(task instanceof java.util.concurrent.Delayed delayed)
+                        || delayed.getDelay(TimeUnit.NANOSECONDS) <= 0)
+                    .count()
+            )
+            .addArgument(writeGate.failureIfNotWritable() == null ? "open" : "closed")
             .log();
     }
 
@@ -699,7 +899,14 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
             try {
                 routingState.acceptTrafficSubmission(route, finalRecord);
                 var lane = requirePublisherLane(route.writerPartition());
-                sendFromPublisherThread(lane, producerRecord, null, false, acknowledgedAction)
+                sendFromPublisherThread(
+                    lane,
+                    producerRecord,
+                    RecordKind.TRAFFIC,
+                    null,
+                    false,
+                    acknowledgedAction
+                )
                     .whenComplete((metadata, throwable) -> completeFrom(metadata, throwable, result));
             } catch (RuntimeException e) {
                 result.completeExceptionally(e);
@@ -712,6 +919,7 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
     private CompletableFuture<RecordMetadata> sendFromPublisherThread(
         PublisherLane lane,
         ProducerRecord<String, byte[]> producerRecord,
+        RecordKind recordKind,
         AcknowledgementDeadline acknowledgementDeadline,
         boolean startAcknowledgementDeadlineAfterSubmission,
         Consumer<RecordMetadata> acknowledgedAction
@@ -726,7 +934,7 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
                     publisherRejection.set(currentFailure);
                     return;
                 }
-                addInFlight(lane, result);
+                addInFlight(lane, result, recordKind, producerRecord.value().length);
                 producer.send(
                     producerRecord,
                     (metadata, exception) ->
@@ -744,13 +952,16 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
                 }
             });
         } catch (Throwable t) {
-            removeInFlight(lane, result);
+            removeInFlight(result, PublishOutcome.FAILED);
             failForThrowable(t);
             result.completeExceptionally(t);
             return result;
         }
         var rejection = gateRejection == null ? publisherRejection.get() : gateRejection;
         if (rejection != null) {
+            if (gateRejection == null) {
+                metrics.writeRejected();
+            }
             failForThrowable(rejection);
             result.completeExceptionally(rejection);
         }
@@ -766,14 +977,12 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         Consumer<RecordMetadata> acknowledgedAction
     ) {
         if (exception != null) {
-            failPublisher(exception);
-            removeInFlight(lane, result);
-            result.completeExceptionally(exception);
+            failPublisher(exception, FailureReason.KAFKA_SEND);
             return;
         }
         if (acknowledgementDeadline != null && !acknowledgementDeadline.acknowledge()) {
             var deadlineStatus = acknowledgementDeadline.status();
-            removeInFlight(lane, result);
+            removeInFlight(result, PublishOutcome.FAILED);
             if (deadlineStatus == AcknowledgementDeadlineStatus.EXPIRED
                 || deadlineStatus == AcknowledgementDeadlineStatus.CANCELLED) {
                 return;
@@ -787,22 +996,22 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         try {
             executor.execute(() -> {
                 if (result.isDone()) {
-                    removeInFlight(lane, result);
+                    removeInFlight(result, PublishOutcome.FAILED);
                     return;
                 }
                 try {
                     acknowledgedAction.accept(metadata);
-                    removeInFlight(lane, result);
+                    removeInFlight(result, PublishOutcome.ACKNOWLEDGED);
                     result.complete(metadata);
                     completeLaneRetirementIfReady(lane);
                 } catch (Throwable t) {
-                    removeInFlight(lane, result);
+                    removeInFlight(result, PublishOutcome.FAILED);
                     failForThrowable(t);
                     result.completeExceptionally(t);
                 }
             });
         } catch (RejectedExecutionException e) {
-            removeInFlight(lane, result);
+            removeInFlight(result, PublishOutcome.FAILED);
             result.completeExceptionally(e);
             if (!closed.get()) {
                 failUnstableProcess(e);
@@ -812,29 +1021,39 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
 
     private void addInFlight(
         PublisherLane lane,
-        CompletableFuture<RecordMetadata> result
+        CompletableFuture<RecordMetadata> result,
+        RecordKind kind,
+        int bytes
     ) {
         lane.acceptedSends++;
         synchronized (inFlightLock) {
-            inFlightSends.add(result);
+            inFlightSends.put(
+                result,
+                new InFlightPublication(lane, result, kind, bytes, clock.millis())
+            );
         }
+        metrics.publicationAccepted(kind, bytes);
     }
 
     private void removeInFlight(
-        PublisherLane lane,
-        CompletableFuture<RecordMetadata> result
+        CompletableFuture<RecordMetadata> result,
+        PublishOutcome outcome
     ) {
+        InFlightPublication publication;
         synchronized (inFlightLock) {
-            if (!inFlightSends.remove(result)) {
+            publication = inFlightSends.remove(result);
+            if (publication == null) {
                 return;
             }
         }
-        lane.acceptedSends--;
-        if (lane.acceptedSends < 0) {
+        publication.lane.acceptedSends--;
+        if (publication.lane.acceptedSends < 0) {
             throw new CorruptedCaptureStateException(
-                "Publisher accepted-send count became negative for " + lane.writerPartition
+                "Publisher accepted-send count became negative for "
+                    + publication.lane.writerPartition
             );
         }
+        metrics.publicationCompleted(publication.kind, outcome, publication.bytes);
     }
 
     private PublisherLane requirePublisherLane(
@@ -902,23 +1121,43 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
     }
 
     private void failPublisher(Throwable throwable) {
+        failPublisher(throwable, classifyFailure(throwable));
+    }
+
+    private void failPublisher(Throwable throwable, FailureReason reason) {
         if (!failure.compareAndSet(null, throwable)) {
             return;
         }
-        writeGate.trip(throwable);
-        List<CompletableFuture<RecordMetadata>> pending;
+        metrics.publisherFailed(reason);
+        writeGate.trip(throwable, reason);
+        List<InFlightPublication> pending;
         synchronized (inFlightLock) {
-            pending = List.copyOf(inFlightSends);
+            pending = List.copyOf(inFlightSends.values());
             inFlightSends.clear();
         }
-        pending.forEach(send -> send.completeExceptionally(throwable));
+        pending.forEach(publication -> {
+            metrics.publicationCompleted(
+                publication.kind,
+                PublishOutcome.FAILED,
+                publication.bytes
+            );
+            publication.result.completeExceptionally(throwable);
+        });
         runFailureCleanupOnPublisherThread(throwable);
+        log.atWarn()
+            .setMessage(
+                "event=capture_write_gate_changed state=closed reason={}"
+            )
+            .addArgument(reason.name().toLowerCase(java.util.Locale.ROOT))
+            .log();
         log.atError()
             .setCause(throwable)
             .setMessage(
-                "Capture Kafka publisher stopped permanently after failure; "
-                    + "no more records will be submitted"
+                "event=capture_publisher_failed reason={} inFlightRecords={} "
+                    + "message=Capture_Kafka_publisher_stopped_permanently"
             )
+            .addArgument(reason.name().toLowerCase(java.util.Locale.ROOT))
+            .addArgument(pending.size())
             .log();
     }
 
@@ -973,6 +1212,35 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
             unstableProcessFailureCallback.accept(throwable);
         }
         failPublisher(throwable);
+    }
+
+    private void reportBrokerTimeViolation(
+        CaptureRoutingState.WriterPartition writerPartition,
+        RuntimeException failure
+    ) {
+        metrics.brokerTimeViolated();
+        log.atWarn()
+            .setCause(failure)
+            .setMessage(
+                "event=capture_broker_time_violation writerNodeId={} partition={}"
+            )
+            .addArgument(writerPartition.writerNodeId())
+            .addArgument(writerPartition.partition())
+            .log();
+        failPublisher(failure, FailureReason.BROKER_TIME);
+    }
+
+    private static FailureReason classifyFailure(Throwable failure) {
+        if (failure instanceof TimeoutException) {
+            return FailureReason.HEARTBEAT_DEADLINE;
+        }
+        if (failure instanceof CorruptedCaptureStateException || failure instanceof Error) {
+            return FailureReason.CORRUPTED_STATE;
+        }
+        if (failure instanceof RejectedExecutionException) {
+            return FailureReason.EXECUTOR_REJECTED;
+        }
+        return FailureReason.OTHER;
     }
 
     private static long requireBrokerTimestamp(RecordMetadata metadata, String recordKind) {

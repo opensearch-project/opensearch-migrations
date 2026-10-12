@@ -93,15 +93,11 @@ public final class ProcessSupervisor {
 
     @FunctionalInterface
     public interface Metrics {
-        Metrics NOOP = ignored -> {};
-
         void fatalFailure(Reason reason);
     }
 
     @FunctionalInterface
     public interface InputStopper {
-        InputStopper NOOP = ignored -> {};
-
         void stopNewInput(FatalSignal signal);
     }
 
@@ -226,8 +222,10 @@ public final class ProcessSupervisor {
         try {
             log.atError()
                 .setCause(signal.failure())
-                .setMessage("{}; owner={}, operation={}")
-                .addArgument(signal.reason().message())
+                .setMessage(
+                    "event=replayer_fatal_failure reason={} owner={} operation={}"
+                )
+                .addArgument(() -> signal.reason().name().toLowerCase(java.util.Locale.ROOT))
                 .addArgument(signal.owner())
                 .addArgument(signal.operation())
                 .log();

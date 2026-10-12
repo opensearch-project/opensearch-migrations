@@ -4,6 +4,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -15,12 +17,18 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.LongUnaryOperator;
 
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.PublishOutcome;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.RecordKind;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.Timestamp;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -43,6 +51,8 @@ class CaptureKafkaPublisherTest {
     private static final int MESSAGE_SIZE = 1024 * 1024;
     private static final Duration LONG_HEARTBEAT_INTERVAL = Duration.ofDays(1);
     private static final Duration LONG_EXPIRATION_INTERVAL = Duration.ofDays(2);
+    private static final CapturePublishingMetrics NOOP_METRICS =
+        new CapturePublishingMetrics(io.opentelemetry.api.OpenTelemetry.noop().getMeter("test"));
 
     @Test
     void initialHeartbeatsMustAllBeAcknowledgedBeforeRoutingGenerationBecomesUsable()
@@ -97,36 +107,60 @@ class CaptureKafkaPublisherTest {
     void heartbeatAcknowledgementDeadlinePermanentlyFailsThePublisher() throws Exception {
         var producer = producer(false);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
-        var writeGate = new CaptureKafkaWriteGate();
-        var terminalFailure = new AtomicReference<Throwable>();
-        writeGate.addTerminalFailureListener(terminalFailure::set);
-        try (var publisher = new CaptureKafkaPublisher(
-            producer,
-            TOPIC,
-            routingState,
-            MESSAGE_SIZE,
-            Duration.ofMillis(20),
-            Duration.ofMillis(75),
-            Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
-            writeGate,
-            ignored -> {}
-        )) {
-            var install = publisher.initializeRoutingGeneration(List.of(0));
-            awaitHistorySize(producer, 1);
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var metrics = new CapturePublishingMetrics(
+                telemetry.openTelemetrySdk.getMeter("captureProxy")
+            );
+            var writeGate = new CaptureKafkaWriteGate(metrics);
+            var terminalFailure = new AtomicReference<Throwable>();
+            writeGate.addTerminalFailureListener(terminalFailure::set);
+            try (var publisher = new CaptureKafkaPublisher(
+                producer,
+                TOPIC,
+                routingState,
+                MESSAGE_SIZE,
+                Duration.ofMillis(20),
+                Duration.ofMillis(75),
+                Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
+                metrics,
+                writeGate,
+                ignored -> {}
+            )) {
+                var install = publisher.initializeRoutingGeneration(List.of(0));
+                awaitHistorySize(producer, 1);
 
-            var failure = assertThrows(
-                ExecutionException.class,
-                () -> install.get(2, TimeUnit.SECONDS)
-            ).getCause();
-            assertInstanceOf(TimeoutException.class, failure);
-            assertSame(failure, terminalFailure.get());
-            assertEquals(List.of(), routingState.activeRoutingPartitions());
-            assertEquals(1, producer.history().size(), "The application never resubmits a timed-out send");
+                var failure = assertThrows(
+                    ExecutionException.class,
+                    () -> install.get(2, TimeUnit.SECONDS)
+                ).getCause();
+                assertInstanceOf(TimeoutException.class, failure);
+                assertSame(failure, terminalFailure.get());
+                assertEquals(List.of(), routingState.activeRoutingPartitions());
+                assertEquals(1, producer.history().size(), "The application never resubmits a timed-out send");
 
-            assertTrue(producer.completeNext(), "Kafka may acknowledge after the application deadline");
-            Thread.sleep(25);
-            assertEquals(List.of(), routingState.activeRoutingPartitions());
-            assertEquals(1, producer.history().size());
+                assertTrue(producer.completeNext(), "Kafka may acknowledge after the application deadline");
+                Thread.sleep(25);
+                assertEquals(List.of(), routingState.activeRoutingPartitions());
+                assertEquals(1, producer.history().size());
+                assertMetricPoint(
+                    telemetry.getFinishedMetrics(),
+                    CapturePublishingMetrics.MetricNames.HEARTBEAT_DEADLINE_VIOLATIONS,
+                    Attributes.empty(),
+                    1
+                );
+                assertMetricPoint(
+                    telemetry.getFinishedMetrics(),
+                    CapturePublishingMetrics.MetricNames.PUBLISHER_FAILURES,
+                    Attributes.of(CapturePublishingMetrics.REASON, "heartbeat_deadline"),
+                    1
+                );
+                assertMetricPoint(
+                    telemetry.getFinishedMetrics(),
+                    CapturePublishingMetrics.MetricNames.RECORDS_AWAITING_ACKNOWLEDGEMENT,
+                    Attributes.of(CapturePublishingMetrics.RECORD_KIND, "heartbeat"),
+                    0
+                );
+            }
         }
     }
 
@@ -143,7 +177,8 @@ class CaptureKafkaPublisherTest {
             Duration.ofMillis(20),
             Duration.ofMillis(75),
             Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
-            CaptureKafkaWriteGate.unrestricted(),
+            NOOP_METRICS,
+            CaptureKafkaWriteGate.unrestricted(NOOP_METRICS),
             ignored -> {}
         )) {
             assertEquals(
@@ -158,7 +193,7 @@ class CaptureKafkaPublisherTest {
     void heartbeatDeadlineStartsAfterTheProducerAcceptsTheSubmission() throws Exception {
         var producer = new BlockedSendProducer();
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
-        var writeGate = new CaptureKafkaWriteGate();
+        var writeGate = new CaptureKafkaWriteGate(NOOP_METRICS);
         var terminalFailure = new AtomicReference<Throwable>();
         var terminalFailureObserved = new CountDownLatch(1);
         writeGate.addTerminalFailureListener(failure -> {
@@ -173,6 +208,7 @@ class CaptureKafkaPublisherTest {
             Duration.ofMillis(20),
             Duration.ofMillis(75),
             Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
+            NOOP_METRICS,
             writeGate,
             ignored -> {}
         )) {
@@ -214,7 +250,8 @@ class CaptureKafkaPublisherTest {
             Duration.ofMillis(20),
             Duration.ofMillis(500),
             Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
-            CaptureKafkaWriteGate.unrestricted(),
+            NOOP_METRICS,
+            CaptureKafkaWriteGate.unrestricted(NOOP_METRICS),
             ignored -> {}
         )) {
             var install = publisher.initializeRoutingGeneration(List.of(0));
@@ -236,27 +273,165 @@ class CaptureKafkaPublisherTest {
     void heartbeatBrokerTimeAtExpirationBoundaryCompromisesCapture() throws Exception {
         var producer = new TimestampingProducer(sendIndex -> sendIndex == 0 ? 1_000L : 6_000L);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
-        var writeGate = new CaptureKafkaWriteGate();
-        var terminalFailure = new AtomicReference<Throwable>();
-        writeGate.addTerminalFailureListener(terminalFailure::set);
-        try (var publisher = new CaptureKafkaPublisher(
-            producer,
-            TOPIC,
-            routingState,
-            MESSAGE_SIZE,
-            Duration.ofMillis(10),
-            Duration.ofSeconds(5),
-            Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
-            writeGate,
-            ignored -> {}
-        )) {
-            publisher.initializeRoutingGeneration(List.of(0)).get(1, TimeUnit.SECONDS);
-            awaitHistorySize(producer, 2);
-            awaitValue(terminalFailure, 1, TimeUnit.SECONDS);
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var metrics = new CapturePublishingMetrics(
+                telemetry.openTelemetrySdk.getMeter("captureProxy")
+            );
+            var writeGate = new CaptureKafkaWriteGate(metrics);
+            var terminalFailure = new AtomicReference<Throwable>();
+            writeGate.addTerminalFailureListener(terminalFailure::set);
+            try (var publisher = new CaptureKafkaPublisher(
+                producer,
+                TOPIC,
+                routingState,
+                MESSAGE_SIZE,
+                Duration.ofMillis(10),
+                Duration.ofSeconds(5),
+                Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
+                metrics,
+                writeGate,
+                ignored -> {}
+            )) {
+                publisher.initializeRoutingGeneration(List.of(0)).get(1, TimeUnit.SECONDS);
+                awaitHistorySize(producer, 2);
+                awaitValue(terminalFailure, 1, TimeUnit.SECONDS);
 
-            assertInstanceOf(IllegalStateException.class, terminalFailure.get());
-            var writerPartition = new CaptureRoutingState.WriterPartition("activation:1", 0);
-            assertEquals(1_000L, routingState.lastAcceptedHeartbeatLogAppendTime(writerPartition));
+                assertInstanceOf(IllegalStateException.class, terminalFailure.get());
+                var writerPartition = new CaptureRoutingState.WriterPartition("activation:1", 0);
+                assertEquals(1_000L, routingState.lastAcceptedHeartbeatLogAppendTime(writerPartition));
+                assertMetricPoint(
+                    telemetry.getFinishedMetrics(),
+                    CapturePublishingMetrics.MetricNames.BROKER_TIME_VIOLATIONS,
+                    Attributes.empty(),
+                    1
+                );
+                assertMetricPoint(
+                    telemetry.getFinishedMetrics(),
+                    CapturePublishingMetrics.MetricNames.PUBLISHER_FAILURES,
+                    Attributes.of(CapturePublishingMetrics.REASON, "broker_time"),
+                    1
+                );
+            }
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("CaptureKafkaPublisher")
+    void healthyLifecycleEmitsConservedMetricsAndBoundedOperationalEvents() throws Exception {
+        var messages = new ArrayList<String>();
+        var appender = new org.apache.logging.log4j.core.appender.AbstractAppender(
+            "capture-publisher-test",
+            null,
+            org.apache.logging.log4j.core.layout.PatternLayout.createDefaultLayout(),
+            false,
+            org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY
+        ) {
+            @Override
+            public void append(org.apache.logging.log4j.core.LogEvent event) {
+                messages.add(event.getMessage().getFormattedMessage());
+            }
+        };
+        var logger = (org.apache.logging.log4j.core.Logger)
+            org.apache.logging.log4j.LogManager.getLogger(CaptureKafkaPublisher.class);
+        appender.start();
+        logger.addAppender(appender);
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var metrics = new CapturePublishingMetrics(
+                telemetry.openTelemetrySdk.getMeter("captureProxy")
+            );
+            var producer = producer(false);
+            var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+            var gate = new CaptureKafkaWriteGate(metrics);
+            try (var publisher = new CaptureKafkaPublisher(
+                producer,
+                TOPIC,
+                routingState,
+                MESSAGE_SIZE,
+                LONG_HEARTBEAT_INTERVAL,
+                LONG_EXPIRATION_INTERVAL,
+                Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
+                metrics,
+                gate,
+                ignored -> {}
+            )) {
+                publisher.reportHealthNow().get(1, TimeUnit.SECONDS);
+                installAndAcknowledge(producer, publisher, List.of(0));
+                var route = publisher.routeNewConnection("connection");
+                var publication = publisher.publishTraffic(route, traffic(route, true), true);
+                awaitHistorySize(producer, 2);
+                publisher.reportHealthNow().get(1, TimeUnit.SECONDS);
+                assertTrue(producer.completeNext());
+                publication.get(1, TimeUnit.SECONDS);
+                publisher.retireAllWriters().get(1, TimeUnit.SECONDS);
+
+                var recorded = telemetry.getFinishedMetrics();
+                assertMetricPoint(
+                    recorded,
+                    CapturePublishingMetrics.MetricNames.RECORDS_ACCEPTED,
+                    Attributes.of(CapturePublishingMetrics.RECORD_KIND, "heartbeat"),
+                    1
+                );
+                assertMetricPoint(
+                    recorded,
+                    CapturePublishingMetrics.MetricNames.RECORDS_ACCEPTED,
+                    Attributes.of(CapturePublishingMetrics.RECORD_KIND, "traffic"),
+                    1
+                );
+                assertMetricPoint(
+                    recorded,
+                    CapturePublishingMetrics.MetricNames.COMPLETIONS,
+                    Attributes.of(
+                        CapturePublishingMetrics.RECORD_KIND,
+                        RecordKind.TRAFFIC.name().toLowerCase(java.util.Locale.ROOT),
+                        CapturePublishingMetrics.OUTCOME,
+                        PublishOutcome.ACKNOWLEDGED.name().toLowerCase(java.util.Locale.ROOT)
+                    ),
+                    1
+                );
+                assertMetricPoint(
+                    recorded,
+                    CapturePublishingMetrics.MetricNames.WRITERS_ACTIVE,
+                    Attributes.empty(),
+                    0
+                );
+                assertMetricPoint(
+                    recorded,
+                    CapturePublishingMetrics.MetricNames.WRITERS_DRAINING,
+                    Attributes.empty(),
+                    0
+                );
+                assertMetricPoint(
+                    recorded,
+                    CapturePublishingMetrics.MetricNames.WRITERS_RETIRED,
+                    Attributes.empty(),
+                    1
+                );
+                assertTrue(messages.stream().anyMatch(message ->
+                    message.startsWith("event=capture_generation_prepared ")
+                ));
+                assertTrue(messages.stream().anyMatch(message ->
+                    message.startsWith("event=capture_generation_activated ")
+                ));
+                assertTrue(messages.stream().anyMatch(message ->
+                    message.startsWith("event=capture_health ")
+                        && message.contains("lastHeartbeatBrokerTime=none")
+                ));
+                assertTrue(messages.stream().anyMatch(message ->
+                    message.startsWith("event=capture_health ")
+                        && message.contains("inFlightRecords=1")
+                        && message.contains("activeConnections=1")
+                        && !message.contains("lastHeartbeatBrokerTime=none")
+                ));
+                assertTrue(messages.stream().anyMatch(message ->
+                    message.startsWith("event=capture_writer_draining ")
+                ));
+                assertTrue(messages.stream().anyMatch(message ->
+                    message.startsWith("event=capture_writer_retired ")
+                ));
+            }
+        } finally {
+            logger.removeAppender(appender);
+            appender.stop();
         }
     }
 
@@ -416,7 +591,8 @@ class CaptureKafkaPublisherTest {
             LONG_HEARTBEAT_INTERVAL,
             LONG_EXPIRATION_INTERVAL,
             Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
-            CaptureKafkaWriteGate.unrestricted(),
+            NOOP_METRICS,
+            CaptureKafkaWriteGate.unrestricted(NOOP_METRICS),
             ignored -> {}
         )) {
             installAndAcknowledge(producer, publisher, List.of(0));
@@ -448,6 +624,7 @@ class CaptureKafkaPublisherTest {
                 MESSAGE_SIZE,
                 Duration.ofSeconds(30),
                 Duration.ofSeconds(30),
+                NOOP_METRICS,
                 ignored -> {}
             )
         );
@@ -473,7 +650,8 @@ class CaptureKafkaPublisherTest {
             LONG_HEARTBEAT_INTERVAL,
             LONG_EXPIRATION_INTERVAL,
             Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
-            CaptureKafkaWriteGate.unrestricted(),
+            NOOP_METRICS,
+            CaptureKafkaWriteGate.unrestricted(NOOP_METRICS),
             unstableProcessFailureCallback
         );
     }
@@ -584,6 +762,22 @@ class CaptureKafkaPublisherTest {
             Thread.sleep(1);
         }
         assertFalse(reference.get() == null);
+    }
+
+    private static void assertMetricPoint(
+        Collection<MetricData> metrics,
+        String name,
+        Attributes attributes,
+        long expected
+    ) {
+        var actual = metrics.stream()
+            .filter(metric -> metric.getName().equals(name))
+            .flatMap(metric -> metric.getLongSumData().getPoints().stream())
+            .filter(point -> point.getAttributes().equals(attributes))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("Missing metric " + name + " " + attributes))
+            .getValue();
+        assertEquals(expected, actual);
     }
 
     private static final class TimestampingProducer extends MockProducer<String, byte[]> {

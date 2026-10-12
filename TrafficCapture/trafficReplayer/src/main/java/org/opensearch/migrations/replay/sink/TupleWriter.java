@@ -10,6 +10,7 @@ package org.opensearch.migrations.replay.sink;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -31,6 +32,7 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Converts one logical replay tuple into a durable sink result despite transient physical-write failures.
@@ -45,6 +47,7 @@ import lombok.NonNull;
  * terminal boundary. During generation grace, reference-counted eager flushing reduces the chance that
  * buffered durable output outlives the bounded revocation window.</p>
  */
+@Slf4j
 public final class TupleWriter<T> {
     public static final Duration DEFAULT_INITIAL_RETRY_DELAY =
         Duration.ofMillis(100);
@@ -105,6 +108,25 @@ public final class TupleWriter<T> {
         Duration delayAfterFailure(int failedAttemptCount);
     }
 
+    public enum FailureReason {
+        OWNER_SUBMISSION_REJECTED,
+        DUPLICATE_REQUEST,
+        TRANSFORMATION,
+        RETRY_SCHEDULING
+    }
+
+    public interface Metrics {
+        void writeAccepted();
+
+        void retryScheduled();
+
+        void writeDurable(Duration latency);
+
+        void writeCancelled();
+
+        void terminalFailure(FailureReason reason);
+    }
+
     public interface LogicalWrite {
         CompletionStage<TupleWriteResult> completion();
 
@@ -127,6 +149,7 @@ public final class TupleWriter<T> {
     private final PhysicalTupleSink<T> sink;
     private final Consumer<T> tupleReleaser;
     private final FatalHandler fatalHandler;
+    private final Metrics metrics;
     private final OutstandingOperationRegistry operations;
     private final Map<ReplayRequestId, WriteOperation> active = new LinkedHashMap<>();
     private final Map<PartitionGenerationId, Integer> eagerFlushReferences =
@@ -139,7 +162,7 @@ public final class TupleWriter<T> {
         @NonNull PhysicalTupleSink<T> sink,
         @NonNull Consumer<T> tupleReleaser,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook
+        @NonNull Metrics metrics
     ) {
         this(
             eventLoop,
@@ -149,7 +172,7 @@ public final class TupleWriter<T> {
             sink,
             tupleReleaser,
             fatalHandler,
-            countHook
+            metrics
         );
     }
 
@@ -160,7 +183,7 @@ public final class TupleWriter<T> {
         @NonNull PhysicalTupleSink<T> sink,
         @NonNull Consumer<T> tupleReleaser,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook
+        @NonNull Metrics metrics
     ) {
         this(
             eventLoop,
@@ -170,7 +193,7 @@ public final class TupleWriter<T> {
             sink,
             tupleReleaser,
             fatalHandler,
-            countHook
+            metrics
         );
     }
 
@@ -182,7 +205,7 @@ public final class TupleWriter<T> {
         @NonNull PhysicalTupleSink<T> sink,
         @NonNull Consumer<T> tupleReleaser,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook
+        @NonNull Metrics metrics
     ) {
         this(
             eventLoop,
@@ -192,7 +215,7 @@ public final class TupleWriter<T> {
             sink,
             tupleReleaser,
             fatalHandler,
-            countHook
+            metrics
         );
     }
 
@@ -204,7 +227,7 @@ public final class TupleWriter<T> {
         @NonNull PhysicalTupleSink<T> sink,
         @NonNull Consumer<T> tupleReleaser,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook
+        @NonNull Metrics metrics
     ) {
         this.eventLoop = eventLoop;
         this.clock = clock;
@@ -213,12 +236,12 @@ public final class TupleWriter<T> {
         this.sink = sink;
         this.tupleReleaser = tupleReleaser;
         this.fatalHandler = fatalHandler;
+        this.metrics = metrics;
         this.operations = new OutstandingOperationRegistry(
             "tuple writer",
             eventLoop,
             clock,
-            fatalHandler::onFatal,
-            countHook
+            fatalHandler::onFatal
         );
     }
 
@@ -270,10 +293,19 @@ public final class TupleWriter<T> {
 
     public LogicalWrite write(@NonNull WriteTuple<T> input) {
         var operation = new WriteOperation(input);
+        metrics.writeAccepted();
+        log.atDebug()
+            .setMessage("event=tuple_write_submitted request={}")
+            .addArgument(input::requestId)
+            .log();
         postRequired(
             "logical tuple write submission " + input.requestId(),
             () -> start(operation),
-            failure -> operation.completion.completeExceptionally(failure)
+            failure -> {
+                operation.state = State.FAILED;
+                operation.completion.completeExceptionally(failure);
+                operation.recordTerminalFailure(FailureReason.OWNER_SUBMISSION_REJECTED);
+            }
         );
         return operation;
     }
@@ -330,6 +362,7 @@ public final class TupleWriter<T> {
             );
             operation.state = State.FAILED;
             operation.completion.completeExceptionally(failure);
+            operation.recordTerminalFailure(FailureReason.DUPLICATE_REQUEST);
             reportFatal("duplicate logical tuple write", failure);
             return;
         }
@@ -476,9 +509,31 @@ public final class TupleWriter<T> {
                 TimeUnit.NANOSECONDS
             );
             operations.complete(registration);
+            metrics.retryScheduled();
+            if (operation.failedAttemptCount == 1) {
+                log.atWarn()
+                    .setMessage(
+                        "event=tuple_durability_degraded request={} state=retrying "
+                            + "failed_attempts={} retry_delay_ms={}"
+                    )
+                    .addArgument(operation.input::requestId)
+                    .addArgument(() -> operation.failedAttemptCount)
+                    .addArgument(retryDelay::toMillis)
+                    .log();
+            } else {
+                log.atDebug()
+                    .setMessage(
+                        "event=tuple_write_retried request={} failed_attempts={} retry_delay_ms={}"
+                    )
+                    .addArgument(operation.input::requestId)
+                    .addArgument(() -> operation.failedAttemptCount)
+                    .addArgument(retryDelay::toMillis)
+                    .log();
+            }
         } catch (Throwable schedulingFailure) {
             operation.state = State.FAILED;
             operation.completion.completeExceptionally(schedulingFailure);
+            operation.recordTerminalFailure(FailureReason.RETRY_SCHEDULING);
             reportFatal("tuple retry timer submission", schedulingFailure);
         }
     }
@@ -511,6 +566,7 @@ public final class TupleWriter<T> {
         }
         releaseCandidate(operation);
         operation.completion.completeExceptionally(failure);
+        operation.recordTerminalFailure(FailureReason.TRANSFORMATION);
         reportFatal("tuple transformation", failure);
     }
 
@@ -522,6 +578,12 @@ public final class TupleWriter<T> {
         }
         releaseCandidate(operation);
         operation.completion.complete(result);
+        switch (result) {
+            case TupleDurable ignored ->
+                operation.recordDurable();
+            case TupleWriteCancelled ignored ->
+                operation.recordCancelled();
+        }
     }
 
     private void releaseCandidate(WriteOperation operation) {
@@ -592,6 +654,8 @@ public final class TupleWriter<T> {
         private final WriteTuple<T> input;
         private final CompletableFuture<TupleWriteResult> completion = new CompletableFuture<>();
         private final AtomicBoolean released = new AtomicBoolean();
+        private final AtomicBoolean metricCompleted = new AtomicBoolean();
+        private final Instant acceptedAt;
         private State state = State.NEW;
         private OutstandingOperationRegistry.Registration logicalRegistration;
         private OutstandingOperationRegistry.Registration physicalRegistration;
@@ -601,6 +665,55 @@ public final class TupleWriter<T> {
 
         private WriteOperation(WriteTuple<T> input) {
             this.input = input;
+            this.acceptedAt = clock.instant();
+        }
+
+        private void recordDurable() {
+            if (metricCompleted.compareAndSet(false, true)) {
+                var latency = Duration.between(acceptedAt, clock.instant());
+                metrics.writeDurable(latency);
+                log.atDebug()
+                    .setMessage(
+                        "event=tuple_write_durable request={} retries={} latency_ms={}"
+                    )
+                    .addArgument(input::requestId)
+                    .addArgument(() -> failedAttemptCount)
+                    .addArgument(latency::toMillis)
+                    .log();
+                if (failedAttemptCount > 0) {
+                    log.atInfo()
+                        .setMessage(
+                            "event=tuple_durability_recovered request={} retries={} latency_ms={}"
+                        )
+                        .addArgument(input::requestId)
+                        .addArgument(() -> failedAttemptCount)
+                        .addArgument(latency::toMillis)
+                        .log();
+                }
+            }
+        }
+
+        private void recordCancelled() {
+            if (metricCompleted.compareAndSet(false, true)) {
+                metrics.writeCancelled();
+                log.atDebug()
+                    .setMessage("event=tuple_write_cancelled request={}")
+                    .addArgument(input::requestId)
+                    .log();
+            }
+        }
+
+        private void recordTerminalFailure(FailureReason reason) {
+            if (metricCompleted.compareAndSet(false, true)) {
+                metrics.terminalFailure(reason);
+                log.atError()
+                    .setMessage(
+                        "event=tuple_durability_degraded request={} state=terminal reason={}"
+                    )
+                    .addArgument(input::requestId)
+                    .addArgument(() -> reason.name().toLowerCase(java.util.Locale.ROOT))
+                    .log();
+            }
         }
 
         @Override

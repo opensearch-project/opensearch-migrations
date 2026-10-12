@@ -4,7 +4,9 @@ import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeOwner;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
+import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
+import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IRootOtelContext;
 
@@ -24,4 +26,8 @@ public interface IRootReplayerContext extends IRootOtelContext, IInstrumentConst
     KafkaSourceOwner.Metrics getKafkaCommitStateMetrics();
 
     TargetAttemptPermitProvider.Metrics getTargetAttemptPermitMetrics();
+
+    RequestReplayOwner.Metrics getTargetExecutionMetrics();
+
+    TupleWriter.Metrics getTupleDurabilityMetrics();
 }

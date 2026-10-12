@@ -9,6 +9,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -30,6 +31,31 @@ import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfi
 public class CaptureProxySetupTest {
 
     public static final String kafkaBrokerString = "invalid:9092";
+
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("CaptureProxy")
+    void startupSummaryStatesCaptureModeAndTelemetryExportConfiguration() {
+        var params = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "8080",
+            "--kafkaConnection", kafkaBrokerString,
+            "--otelMetricsCollectorEndpoint", "http://collector:4317",
+            "--capture-failure-policy", "fail-open"
+        });
+
+        try (var logs = new CloseableLogSetup(CaptureProxy.class.getName())) {
+            CaptureProxy.logStartupSummary(params, "process-1", "activation-1");
+
+            Assertions.assertTrue(logs.getLogEvents().stream().anyMatch(message ->
+                message.equals(
+                    "event=capture_startup_summary processId=process-1 "
+                        + "captureActivationId=activation-1 listenPort=8080 captureMode=kafka "
+                        + "kafkaTopic=logging-traffic-topic failurePolicy=fail_open "
+                        + "traceExportEnabled=false metricExportEnabled=true"
+                )
+            ));
+        }
+    }
 
     @Test
     void captureFailuresDefaultToFailClosedAndCanBeConfiguredFailOpen() {

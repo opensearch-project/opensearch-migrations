@@ -35,13 +35,11 @@ public final class ResourceOwnership {
     }
 
     public interface Metrics {
-        Metrics NOOP = new Metrics() {};
+        void ownershipChanged(Type type, int handleDelta, int bufferDelta, long byteDelta);
 
-        default void ownershipChanged(Type type, int handleDelta, int bufferDelta, long byteDelta) {}
+        void duplicateClose(Type type);
 
-        default void duplicateClose(Type type) {}
-
-        default void invariantFailure(Type type) {}
+        void invariantFailure(Type type);
     }
 
     public static final class Tracker {

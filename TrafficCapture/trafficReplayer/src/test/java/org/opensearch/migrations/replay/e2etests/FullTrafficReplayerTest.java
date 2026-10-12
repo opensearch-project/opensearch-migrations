@@ -217,7 +217,8 @@ public class FullTrafficReplayerTest {
                     TrafficReplayerTopLevel.deployedRequestPreparer(
                         requestTransformerSupplier,
                         null,
-                        1.0
+                        1.0,
+                        rootContext.getResourceOwnershipMetrics()
                     ),
                 new OpenSearchDefaultRetry(new BulkItemErrorClassifier()),
                 (connectionId, owner, connectionContext) -> {

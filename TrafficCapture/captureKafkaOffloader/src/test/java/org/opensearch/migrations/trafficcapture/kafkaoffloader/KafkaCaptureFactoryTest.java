@@ -76,6 +76,32 @@ class KafkaCaptureFactoryTest {
     }
 
     @Test
+    void zeroTopicPartitionMinimumDoesNotRequireKafkaAdminProperties() throws Exception {
+        var producer = new ProtocolProducer(partitionInfo(TOPIC, 4));
+        var consumer = configuredConsumer(TOPIC, 4);
+        var factory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            ACTIVATION_ID,
+            producer,
+            consumer,
+            TOPIC,
+            MAXIMUM_KAFKA_MESSAGE_SIZE,
+            KafkaCaptureFactory.DEFAULT_TRAFFIC_STREAM_FLUSH_INTERVAL,
+            KafkaCaptureFactory.DEFAULT_HEARTBEAT_INTERVAL,
+            KafkaCaptureFactory.DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL,
+            null,
+            0,
+            ignored -> {},
+            ignored -> {}
+        );
+        try {
+            factory.readyForConnections().get(TEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } finally {
+            factory.close();
+        }
+    }
+
+    @Test
     void startupCapabilityProbesAreAcknowledgedBeforeMembershipStarts() throws Exception {
         var producer = new ProtocolProducer(partitionInfo(TOPIC, 4));
         producer.holdCapabilityProbes = true;

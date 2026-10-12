@@ -433,6 +433,128 @@
                     }
                 }
             }
+        },
+        {
+            "height": 1,
+            "width": 24,
+            "y": 55,
+            "x": 0,
+            "type": "text",
+            "properties": {
+                "markdown": "# Capture and Replay Operational Health",
+                "background": "transparent"
+            }
+        },
+        {
+            "height": 6,
+            "width": 12,
+            "y": 56,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"capturePublishingRecordsAwaitingAcknowledgement\"', 'Maximum', 60))", "id": "e1", "label": "Records awaiting acknowledgement", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"captureHeartbeatDeadlineViolations\"', 'Sum', 60))", "id": "e2", "label": "Heartbeat deadline violations", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"capturePublisherFailures\"', 'Sum', 60))", "id": "e3", "label": "Publisher failures", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"captureGapActive\"', 'Maximum', 60))", "id": "e4", "label": "Capture gap active", "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "title": "Capture Publishing and Routing",
+                "region": "REGION",
+                "period": 60,
+                "stat": "Maximum",
+                "yAxis": { "left": { "min": 0 } }
+            }
+        },
+        {
+            "height": 6,
+            "width": 12,
+            "y": 56,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"replayActiveContexts\"', 'Maximum', 60))", "id": "e1", "label": "Active contexts", "region": "REGION" } ],
+                    [ { "expression": "MAX(SEARCH('{OpenSearchMigrations} MetricName=\"replayOldestKafkaRecordAge\"', 'Maximum', 60))", "id": "e2", "label": "Oldest Kafka record age (ms)", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"replayActiveOwnerOperations\"', 'Maximum', 60))", "id": "e3", "label": "Owner operations", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"replayLongRunningOwnerOperations\"', 'Maximum', 60))", "id": "e4", "label": "Long-running operations", "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "title": "Replay Intake and Oldest Work",
+                "region": "REGION",
+                "period": 60,
+                "stat": "Maximum",
+                "yAxis": { "left": { "min": 0 } }
+            }
+        },
+        {
+            "height": 6,
+            "width": 12,
+            "y": 62,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"kafkaSourceRecordsOutstanding\"', 'Maximum', 60))", "id": "e1", "label": "Records outstanding", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"replayKafkaCommitUncertainPartitions\"', 'Maximum', 60))", "id": "e2", "label": "Commit-uncertain partitions", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"kafkaSourceCommitAttemptsRejected\"', 'Sum', 60))", "id": "e3", "label": "Commit attempts rejected", "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "title": "Kafka Commit State",
+                "region": "REGION",
+                "period": 60,
+                "stat": "Maximum",
+                "yAxis": { "left": { "min": 0 } }
+            }
+        },
+        {
+            "height": 6,
+            "width": 12,
+            "y": 62,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"targetAttemptPermitsActive\"', 'Maximum', 60))", "id": "e1", "label": "Active target permits", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"targetAttemptPermitAcquisitionsPending\"', 'Maximum', 60))", "id": "e2", "label": "Pending permits", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"targetAttemptsWithoutResponse\"', 'Sum', 60))", "id": "e3", "label": "Attempts without response", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"targetRetriesExhausted\"', 'Sum', 60))", "id": "e4", "label": "Retries exhausted", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"tupleDurabilityWritesPending\"', 'Maximum', 60))", "id": "e5", "label": "Tuple writes pending", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"tupleSinkUploadsRetrying\"', 'Maximum', 60))", "id": "e6", "label": "S3 objects retrying", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"tupleSinkUploadRetryAttempts\"', 'Sum', 60))", "id": "e7", "label": "S3 upload retry attempts", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"tupleSinkUploadRecoveries\"', 'Sum', 60))", "id": "e8", "label": "S3 upload recoveries", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"tupleDurabilityTerminalFailures\"', 'Sum', 60))", "id": "e9", "label": "Tuple terminal failures", "region": "REGION" } ],
+                    [ { "expression": "MAX(SEARCH('{OpenSearchMigrations,activity} MetricName=\"replayOldestContextAgeByActivity\" activity=\"comparingResults\"', 'Maximum', 60))", "id": "e10", "label": "Oldest pending tuple age (ms)", "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "title": "Target Execution and Tuple Durability",
+                "region": "REGION",
+                "period": 60,
+                "stat": "Maximum",
+                "yAxis": { "left": { "min": 0 } }
+            }
+        },
+        {
+            "height": 6,
+            "width": 24,
+            "y": 68,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"resourceOwnedHandles\"', 'Maximum', 60))", "id": "e1", "label": "Owned handles", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"resourceOwnedBuffers\"', 'Maximum', 60))", "id": "e2", "label": "Owned buffers", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"resourceOwnedBytes\"', 'Maximum', 60))", "id": "e3", "label": "Owned bytes", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"replayFatalFailures\"', 'Sum', 60))", "id": "e4", "label": "Replay fatal failures", "region": "REGION" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations} MetricName=\"replayIntakeCaptureProtocolViolations\"', 'Sum', 60))", "id": "e5", "label": "Protocol violations", "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "title": "Process Safety and Clean Shutdown",
+                "region": "REGION",
+                "period": 60,
+                "stat": "Maximum",
+                "yAxis": { "left": { "min": 0 } }
+            }
         }
     ]
 }

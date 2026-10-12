@@ -38,6 +38,12 @@ import lombok.NonNull;
  * cross-generation identities.</p>
  */
 public final class ObservedRecordCommitQueue {
+    public enum RecordState {
+        PROCESSING,
+        PROCESSING_COMPLETE,
+        COMMIT_INELIGIBLE
+    }
+
     // The warnings target compiler-generated members of this public result contract.
     @SuppressWarnings({"java:S100", "java:S1186"})
     public record Completion(
@@ -52,7 +58,8 @@ public final class ObservedRecordCommitQueue {
         int size,
         int unfinishedCount,
         @NonNull Optional<KafkaRecordId> headRecord,
-        long greatestObservedOffset
+        long greatestObservedOffset,
+        @NonNull Map<KafkaRecordId, RecordState> recordStates
     ) {}
 
     private static final class Entry {
@@ -204,6 +211,13 @@ public final class ObservedRecordCommitQueue {
     public Snapshot snapshot() {
         ownerThreadGuard.requireOwnerThread();
         var head = observedRecords.peekFirst();
+        var states = new LinkedHashMap<KafkaRecordId, RecordState>();
+        observedRecords.forEach(entry -> states.put(
+            entry.recordId,
+            entry.commitIneligible
+                ? RecordState.COMMIT_INELIGIBLE
+                : entry.completed ? RecordState.PROCESSING_COMPLETE : RecordState.PROCESSING
+        ));
         return new Snapshot(
             generation,
             observedRecords.size(),
@@ -211,7 +225,8 @@ public final class ObservedRecordCommitQueue {
                 .filter(entry -> !entry.completed && !entry.commitIneligible)
                 .count(),
             head == null ? Optional.empty() : Optional.of(head.recordId),
-            greatestObservedOffset
+            greatestObservedOffset,
+            Map.copyOf(states)
         );
     }
 

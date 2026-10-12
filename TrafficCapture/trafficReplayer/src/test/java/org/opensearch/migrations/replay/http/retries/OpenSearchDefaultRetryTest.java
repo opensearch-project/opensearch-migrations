@@ -14,16 +14,25 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
 import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
+import org.opensearch.migrations.tracing.TestContext;
 
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 
 class OpenSearchDefaultRetryTest {
+    private final TestContext testContext = TestContext.noOtelTracking();
+
+    @AfterEach
+    void closeTestContext() {
+        testContext.close();
+    }
+
     @Test
     void testStatusCodeResults() {
         record StatusCase(
@@ -303,12 +312,14 @@ class OpenSearchDefaultRetryTest {
         Assertions.assertEquals(Duration.ofSeconds(300), policy.retryDelay(64));
     }
 
-    private static NettyPacketToHttpConsumer.PreparedRequest prepared(String request) {
+    private NettyPacketToHttpConsumer.PreparedRequest prepared(String request) {
         var bytes = Unpooled.copiedBuffer(request, StandardCharsets.UTF_8);
         var packets = new ByteBufList(bytes);
         bytes.release();
+        var producer = ByteBufListProducer.of(packets);
+        producer.trackOwnership(testContext.getResourceOwnershipMetrics());
         return new NettyPacketToHttpConsumer.PreparedRequest(
-            ByteBufListProducer.of(packets),
+            producer,
             Duration.ZERO
         );
     }

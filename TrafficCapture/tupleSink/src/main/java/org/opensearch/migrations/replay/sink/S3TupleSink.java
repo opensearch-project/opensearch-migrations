@@ -17,6 +17,7 @@ import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
 import org.opensearch.migrations.s3sink.RotationPolicy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 
@@ -76,7 +77,33 @@ public class S3TupleSink implements TupleSink {
             rotateAfterBytes,
             rotateAfterAge,
             rotateAfterTuples,
-            DEFAULT_UPLOAD_RETRY_DELAY
+            DEFAULT_UPLOAD_RETRY_DELAY,
+            RotatingGzipS3ObjectWriter.UploadRetryObserver.NONE
+        );
+    }
+
+    public S3TupleSink(
+        S3AsyncClient s3Client,
+        String bucket,
+        String prefix,
+        String replayerId,
+        int sinkIndex,
+        long rotateAfterBytes,
+        Duration rotateAfterAge,
+        int rotateAfterTuples,
+        @NonNull RotatingGzipS3ObjectWriter.UploadRetryObserver uploadRetryObserver
+    ) {
+        this(
+            s3Client,
+            bucket,
+            prefix,
+            replayerId,
+            sinkIndex,
+            rotateAfterBytes,
+            rotateAfterAge,
+            rotateAfterTuples,
+            DEFAULT_UPLOAD_RETRY_DELAY,
+            uploadRetryObserver
         );
     }
 
@@ -91,19 +118,48 @@ public class S3TupleSink implements TupleSink {
         int rotateAfterTuples,
         Duration uploadRetryDelay
     ) {
+        this(
+            s3Client,
+            bucket,
+            prefix,
+            replayerId,
+            sinkIndex,
+            rotateAfterBytes,
+            rotateAfterAge,
+            rotateAfterTuples,
+            uploadRetryDelay,
+            RotatingGzipS3ObjectWriter.UploadRetryObserver.NONE
+        );
+    }
+
+    S3TupleSink(
+        S3AsyncClient s3Client,
+        String bucket,
+        String prefix,
+        String replayerId,
+        int sinkIndex,
+        long rotateAfterBytes,
+        Duration rotateAfterAge,
+        int rotateAfterTuples,
+        Duration uploadRetryDelay,
+        @NonNull RotatingGzipS3ObjectWriter.UploadRetryObserver uploadRetryObserver
+    ) {
         this.sinkIndex = sinkIndex;
         RotatingGzipS3ObjectWriter.KeyFactory keyFactory = (now, seq) ->
             prefix + replayerId + "/" + SHARD_FORMAT.format(now) + "/"
                 + String.format("tuples-%d-%s-%d.log.gz", sinkIndex, TIMESTAMP_FORMAT.format(now), seq);
+        var uploader = RotatingGzipS3ObjectWriter.s3ObjectUploader(s3Client);
+        var rotationPolicy = new RotationPolicy(rotateAfterBytes, rotateAfterAge, rotateAfterTuples);
         this.writer = new RotatingGzipS3ObjectWriter<>(
-            RotatingGzipS3ObjectWriter.s3ObjectUploader(s3Client),
+            uploader,
             bucket,
             keyFactory,
-            bytes -> bytes,   // tuples are already serialized on the calling thread
-            new RotationPolicy(rotateAfterBytes, rotateAfterAge, rotateAfterTuples),
+            bytes -> bytes,
+            rotationPolicy,
             uploadRetryDelay,
-            0,                // retry the same key indefinitely: the replayer has no other durability net
-            "tuple-sink-" + sinkIndex + "-"
+            0,
+            "tuple-sink-" + sinkIndex + "-",
+            uploadRetryObserver
         );
         this.executor = Executors.newSingleThreadScheduledExecutor(makeWorkerThreadFactory());
         // Self-scheduled age flush: re-checks file age on its own thread so a sink that stops

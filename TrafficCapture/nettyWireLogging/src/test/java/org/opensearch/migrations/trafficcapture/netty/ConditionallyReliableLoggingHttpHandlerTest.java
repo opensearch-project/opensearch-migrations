@@ -17,9 +17,11 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.netty.tracing.CaptureConnectionMetrics;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -182,8 +184,10 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("LoggingHttpHandler")
     void requestAssemblyDurationStartsWithTheFirstByteAndIsNotResetByProgress() throws Exception {
-        try (var rootContext = new TestRootContext()) {
+        try (var rootContext = new TestRootContext(false, true);
+             var logs = new CloseableLogSetup(LoggingHttpHandler.class.getName())) {
             var offloader = new DelayedFinalAcknowledgementOffloader();
             var channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(
@@ -218,6 +222,11 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
             offloader.finalAcknowledgement.complete(null);
             channel.finishAndReleaseAll();
+            assertConnectionCloseMetric(
+                rootContext,
+                CaptureConnectionMetrics.CloseReason.ASSEMBLY_DURATION
+            );
+            assertConnectionDropEvent(logs, "assembly_duration");
         }
     }
 
@@ -254,8 +263,10 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("LoggingHttpHandler")
     void aggregateHeaderByteLimitStopsForwardingAndUsesNormalTerminalCapture() throws Exception {
-        try (var rootContext = new TestRootContext()) {
+        try (var rootContext = new TestRootContext(false, true);
+             var logs = new CloseableLogSetup(LoggingHttpHandler.class.getName())) {
             var streamManager = new TestStreamManager();
             var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
             var channel = new EmbeddedChannel(
@@ -278,6 +289,11 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             channel.runPendingTasks();
 
             assertBoundViolationClosesWithCapturedReadThenOneTerminalClose(channel, streamManager);
+            assertConnectionCloseMetric(
+                rootContext,
+                CaptureConnectionMetrics.CloseReason.HEADER_BYTES
+            );
+            assertConnectionDropEvent(logs, "header_bytes");
         }
     }
 
@@ -314,8 +330,10 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("LoggingHttpHandler")
     void aggregateTotalRequestByteLimitIncludesBodyAndStopsForwarding() throws Exception {
-        try (var rootContext = new TestRootContext()) {
+        try (var rootContext = new TestRootContext(false, true);
+             var logs = new CloseableLogSetup(LoggingHttpHandler.class.getName())) {
             var streamManager = new TestStreamManager();
             var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
             var channel = new EmbeddedChannel(
@@ -339,6 +357,11 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             channel.runPendingTasks();
 
             assertBoundViolationClosesWithCapturedReadThenOneTerminalClose(channel, streamManager);
+            assertConnectionCloseMetric(
+                rootContext,
+                CaptureConnectionMetrics.CloseReason.TOTAL_BYTES
+            );
+            assertConnectionDropEvent(logs, "total_bytes");
         }
     }
 
@@ -1061,8 +1084,10 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("LoggingHttpHandler")
     void maximumConnectionDurationClosesAndTerminallyCapturesAnAuthoritativeConnection() throws Exception {
-        try (var rootContext = new TestRootContext()) {
+        try (var rootContext = new TestRootContext(false, true);
+             var logs = new CloseableLogSetup(LoggingHttpHandler.class.getName())) {
             var offloader = new DelayedFinalAcknowledgementOffloader();
             var channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(
@@ -1086,7 +1111,49 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             Assertions.assertEquals(1, offloader.closeObservations.get());
             offloader.finalAcknowledgement.complete(null);
             channel.finishAndReleaseAll();
+            assertConnectionCloseMetric(
+                rootContext,
+                CaptureConnectionMetrics.CloseReason.CONNECTION_DURATION
+            );
+            assertConnectionDropEvent(logs, "connection_duration");
         }
+    }
+
+    private static void assertConnectionCloseMetric(
+        TestRootContext rootContext,
+        CaptureConnectionMetrics.CloseReason reason
+    ) {
+        var attributes = io.opentelemetry.api.common.Attributes.of(
+            CaptureConnectionMetrics.REASON,
+            reason.name().toLowerCase(java.util.Locale.ROOT)
+        );
+        var closeCount = rootContext.instrumentationBundle.getFinishedMetrics()
+            .stream()
+            .filter(metric -> metric.getName().equals(CaptureConnectionMetrics.CONNECTION_CLOSES))
+            .flatMap(metric -> metric.getLongSumData().getPoints().stream())
+            .filter(point -> point.getAttributes().equals(attributes))
+            .findFirst()
+            .orElseThrow()
+            .getValue();
+        Assertions.assertEquals(1, closeCount);
+        Assertions.assertEquals(
+            0,
+            org.opensearch.migrations.tracing.InMemoryInstrumentationBundle.getMetricValueOrZero(
+                rootContext.instrumentationBundle.getFinishedMetrics(),
+                CaptureConnectionMetrics.CONNECTIONS_ACTIVE
+            )
+        );
+    }
+
+    private static void assertConnectionDropEvent(
+        CloseableLogSetup logs,
+        String reason
+    ) {
+        Assertions.assertTrue(logs.getLogEvents().stream().anyMatch(message ->
+            message.startsWith("event=capture_connection_dropped ")
+                && message.contains("reason=" + reason)
+                && message.contains("connectionId=connection")
+        ));
     }
 
     @Test

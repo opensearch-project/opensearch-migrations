@@ -8,6 +8,11 @@ import io.opentelemetry.api.metrics.DoubleHistogram;
 
 public interface IWithStartTimeAndAttributes extends IInstrumentationAttributes {
     /**
+     * A process-unique identity used to preserve exact membership in active-context indexes.
+     */
+    long getContextId();
+
+    /**
      * This is used to calculate the precise duration of the span.  System.nanoTime() is guaranteed to be monotonic
      * and not susceptible to clock fluctuations due to system time resets
      */

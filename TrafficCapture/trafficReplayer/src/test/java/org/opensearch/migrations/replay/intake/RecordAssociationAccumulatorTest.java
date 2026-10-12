@@ -29,6 +29,7 @@ import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
 import org.opensearch.migrations.replay.tracing.ReplayIntakeMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
@@ -46,6 +47,7 @@ import com.google.protobuf.Timestamp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -387,7 +389,9 @@ class RecordAssociationAccumulatorTest {
      * predicate is satisfied at step 9 of the same application.
      */
     @Test
+    @ResourceLock("ReplayIntakeOwnerLogger")
     void aHeartbeatOrProbeRecordCompletesWithinItsOwnApplication() {
+        try (var logs = new TestLogAppender(ReplayIntakeOwner.class)) {
         var script = new RecordScript(TOPIC)
             .addHeartbeat(0, 0, Instant.ofEpochMilli(1_000), WRITER, 1_000L)
             .addProbe(0, 1, Instant.ofEpochMilli(2_000), WRITER, "probe-1");
@@ -423,6 +427,25 @@ class RecordAssociationAccumulatorTest {
             ),
             "tracker retirement is observable without exposing the partition's tracker map"
         );
+        Assertions.assertTrue(logs.contains(
+            "replay_intake_input_applied",
+            "kind=PARTITION_RECORD_BATCH"
+        ));
+        Assertions.assertTrue(logs.contains(
+            "record_tracker_started",
+            "topic=traffic",
+            "partition=0",
+            "generation=0",
+            "offset=0"
+        ));
+        Assertions.assertTrue(logs.contains(
+            "record_tracker_retired",
+            "topic=traffic",
+            "partition=0",
+            "generation=0",
+            "offset=0"
+        ));
+        }
     }
 
     /**
@@ -578,6 +601,10 @@ class RecordAssociationAccumulatorTest {
             ),
             "the replay-wide cutoff must be observable when it rejects another partition's batch"
         );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.CAPTURE_PROTOCOL_VIOLATIONS)
+        );
     }
 
     /**
@@ -585,7 +612,9 @@ class RecordAssociationAccumulatorTest {
      * Old assembly is removed before a successor can apply the same captured connection identity.
      */
     @Test
+    @ResourceLock("ReplayIntakeOwnerLogger")
     void cancelledGenerationReleasesStaleAssemblyAndBalancesItsRecordTrackersBeforeSuccessorInput() {
+        try (var logs = new TestLogAppender(ReplayIntakeOwner.class)) {
         var predecessor = new RecordScript(TOPIC).addTraffic(
             0,
             0,
@@ -634,6 +663,21 @@ class RecordAssociationAccumulatorTest {
             ),
             "cleanup must return the process-wide tracker gauge to its prior value"
         );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.GENERATION_GRACE_STARTED)
+        );
+        Assertions.assertEquals(
+            Set.of("REVOCATION"),
+            metricAttributeValues(
+                ReplayIntakeMetrics.MetricNames.GENERATION_GRACE_STARTED,
+                ReplayIntakeMetrics.GRACE_MODE_ATTRIBUTE
+            )
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.GENERATION_CLEANUP_FINISHED)
+        );
 
         var successor = new RecordScript(TOPIC, 1).addTraffic(
             0,
@@ -663,10 +707,26 @@ class RecordAssociationAccumulatorTest {
             successor.generation(0),
             sink.reconstituted.get(0).connectionProcessingId().generation()
         );
+        Assertions.assertTrue(logs.contains(
+            "replay_generation_grace_started",
+            "topic=traffic",
+            "partition=0",
+            "generation=0",
+            "mode=revocation"
+        ));
+        Assertions.assertTrue(logs.contains(
+            "replay_generation_cleanup_finished",
+            "topic=traffic",
+            "partition=0",
+            "generation=0"
+        ));
+        }
     }
 
     @Test
+    @ResourceLock("ReplayIntakeOwnerLogger")
     void cleanupAcknowledgementIsGenerationScopedIdempotentAndCannotFinishKafkaRecords() {
+        try (var logs = new TestLogAppender(ReplayIntakeOwner.class)) {
         var script = new RecordScript(TOPIC).addTraffic(
             0,
             0,
@@ -745,6 +805,42 @@ class RecordAssociationAccumulatorTest {
                 ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS
             )
         );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.GENERATION_GRACE_STARTED)
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.GENERATION_FORCE_STARTED)
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.GENERATION_CLEANUP_FINISHED)
+        );
+        Assertions.assertEquals(
+            2,
+            metricValue(ReplayIntakeMetrics.MetricNames.STALE_GENERATION_INPUTS_IGNORED)
+        );
+        Assertions.assertEquals(
+            Set.of("CONNECTION_CLEANUP_FINISHED"),
+            metricAttributeValues(
+                ReplayIntakeMetrics.MetricNames.STALE_GENERATION_INPUTS_IGNORED,
+                ReplayIntakeMetrics.INPUT_KIND_ATTRIBUTE
+            )
+        );
+        Assertions.assertTrue(logs.contains(
+            "replay_generation_force_started",
+            "topic=traffic",
+            "partition=0",
+            "generation=0"
+        ));
+        Assertions.assertTrue(logs.contains(
+            "replay_generation_cleanup_finished",
+            "topic=traffic",
+            "partition=0",
+            "generation=0"
+        ));
+        }
     }
 
     @Test
@@ -785,6 +881,21 @@ class RecordAssociationAccumulatorTest {
                 .count()
         );
         Assertions.assertTrue(sink.forceCancellations.isEmpty());
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.GENERATION_GRACE_STARTED)
+        );
+        Assertions.assertEquals(
+            Set.of("SHUTDOWN"),
+            metricAttributeValues(
+                ReplayIntakeMetrics.MetricNames.GENERATION_GRACE_STARTED,
+                ReplayIntakeMetrics.GRACE_MODE_ATTRIBUTE
+            )
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.GENERATION_CLEANUP_FINISHED)
+        );
     }
 
     @Test
@@ -975,6 +1086,25 @@ class RecordAssociationAccumulatorTest {
     private List<KafkaSourceInput> drainSourceInputs() {
         drainedSourceInputs.addAll(sourceInputs.drain());
         return List.copyOf(drainedSourceInputs);
+    }
+
+    private long metricValue(String metricName) {
+        return InMemoryInstrumentationBundle.getMetricValueOrZero(
+            telemetry.getFinishedMetrics(),
+            metricName
+        );
+    }
+
+    private Set<String> metricAttributeValues(
+        String metricName,
+        io.opentelemetry.api.common.AttributeKey<String> attributeKey
+    ) {
+        return telemetry.getFinishedMetrics()
+            .stream()
+            .filter(metric -> metric.getName().equals(metricName))
+            .flatMap(metric -> metric.getLongSumData().getPoints().stream())
+            .map(point -> point.getAttributes().get(attributeKey))
+            .collect(java.util.stream.Collectors.toSet());
     }
 
     private static final int CUT_POINT_RECORD_COUNT = 5;

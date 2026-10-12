@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionStage;
@@ -40,6 +41,7 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Runs the complete event-loop-confined lifecycle state machine for one replay request.
@@ -56,7 +58,14 @@ import lombok.NonNull;
  * until their cleanup boundaries settle. Separate connection-turn, processing, and cleanup milestones let
  * ordering, Kafka record retention, and generation teardown progress at their correct times.</p>
  */
+@Slf4j
 public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
+    public interface Metrics {
+        void targetAttemptWithoutResponse(TargetAttemptOutcome.NoTargetResponseKind kind);
+
+        void targetRetriesExhausted();
+    }
+
     public sealed interface RetrySourceResponse<F>
         permits CompleteSourceResponseForRetry, SourceResponseUnavailableForRetry {}
 
@@ -350,6 +359,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private final ResourceReleaser<S, P, R, F> resourceReleaser;
     private final ConnectionCallbacks callbacks;
     private final FatalHandler fatalHandler;
+    private final Metrics metrics;
     private final OutstandingOperationRegistry operations;
     private final List<TargetAttemptOutcome<R>> attemptHistory = new ArrayList<>();
 
@@ -389,7 +399,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull ResourceReleaser<S, P, R, F> resourceReleaser,
         @NonNull ConnectionCallbacks callbacks,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook,
+        @NonNull Metrics metrics,
         int maximumResponseRetries
     ) {
         if (maximumResponseRetries <= 0) {
@@ -410,6 +420,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         this.resourceReleaser = resourceReleaser;
         this.callbacks = callbacks;
         this.fatalHandler = fatalHandler;
+        this.metrics = metrics;
         this.operations = new OutstandingOperationRegistry(
             "request " + requestId(),
             replayContext.getLogicalEnclosingScope()
@@ -417,8 +428,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                 .getRecordId(),
             eventLoop,
             clock,
-            fatalHandler::onFatal,
-            countHook
+            fatalHandler::onFatal
         );
     }
 
@@ -537,6 +547,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             );
             return;
         }
+        log.atDebug()
+            .setMessage("event=target_permit_delivered request={}")
+            .addArgument(this::requestId)
+            .log();
         startAttempt(permit);
     }
 
@@ -767,6 +781,11 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             permit,
             registration
         );
+        log.atDebug()
+            .setMessage("event=target_attempt_started request={} attempt={}")
+            .addArgument(this::requestId)
+            .addArgument(attemptNumber)
+            .log();
         var currentTargetAttemptContext = replayContext.createTargetRequestContext();
         targetAttemptContext = currentTargetAttemptContext;
         final TargetChannelPort.Attempt<R> attempt;
@@ -984,9 +1003,29 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         closeTargetAttemptContext();
         active.permit().close();
         operations.complete(registration);
+        log.atDebug()
+            .setMessage("event=target_attempt_completed request={} attempt={} outcome={}")
+            .addArgument(this::requestId)
+            .addArgument(attemptNumber)
+            .addArgument(() -> outcome instanceof TargetAttemptOutcome.TargetResponseObtained<?>
+                ? "response"
+                : "no_response")
+            .log();
         switch (outcome) {
-            case TargetAttemptOutcome.NoTargetResponseObtained<R> ignored ->
+            case TargetAttemptOutcome.NoTargetResponseObtained<R> noResponse -> {
+                metrics.targetAttemptWithoutResponse(noResponse.diagnostic().kind());
+                log.atWarn()
+                    .setMessage(
+                        "event=target_response_unavailable request={} kind={} completed_attempts={}"
+                    )
+                    .addArgument(this::requestId)
+                    .addArgument(() ->
+                        noResponse.diagnostic().kind().name().toLowerCase(Locale.ROOT)
+                    )
+                    .addArgument(attemptHistory::size)
+                    .log();
                 scheduleRetry();
+            }
             case TargetAttemptOutcome.TargetResponseObtained<R> obtained ->
                 evaluateTargetResponse(obtained);
         }
@@ -1048,9 +1087,31 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             impossible("retry decision", failure);
             return;
         }
+        log.atDebug()
+            .setMessage(
+                "event=target_retry_decided request={} decision={} response_attempts={} "
+                    + "completed_attempts={}"
+            )
+            .addArgument(this::requestId)
+            .addArgument(() -> decision instanceof RetryDecision.RetryRequired
+                ? "retry"
+                : "finish")
+            .addArgument(this::responseAttemptCount)
+            .addArgument(attemptHistory::size)
+            .log();
         switch (decision) {
             case RetryDecision.RetryRequired ignored -> {
                 if (responseAttemptCount() > maximumResponseRetries) {
+                    metrics.targetRetriesExhausted();
+                    log.atWarn()
+                        .setMessage(
+                            "event=target_retries_exhausted request={} response_attempts={} "
+                                + "maximum_response_retries={}"
+                        )
+                        .addArgument(this::requestId)
+                        .addArgument(this::responseAttemptCount)
+                        .addArgument(maximumResponseRetries)
+                        .log();
                     targetServerState = new TargetServerState.Finished<>(response);
                     emitConnectionTurnFinished(
                         ConnectionTurnCompletion.TARGET_WORK_FINISHED
@@ -1108,17 +1169,26 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             impossible("retry delay", failure);
             return;
         }
+        var retryDueTime = clock.instant().plus(delay);
         var registration = operations.register(
             partitionGenerationId(),
             connectionProcessingId(),
             requestId(),
             OperationType.RETRY_TIMER,
-            nominalTargetTime,
+            retryDueTime,
             WaitReason.WAITING_FOR_RETRY_TIME
         );
+        log.atDebug()
+            .setMessage(
+                "event=target_retry_scheduled request={} delay_ms={} completed_attempts={}"
+            )
+            .addArgument(this::requestId)
+            .addArgument(delay::toMillis)
+            .addArgument(attemptHistory::size)
+            .log();
         try {
             retryTimerContext = replayContext.createScheduledContext(
-                clock.instant().plus(delay)
+                retryDueTime
             );
             var timer = eventLoop.schedule(
                 () -> retryTimerFired(registration),

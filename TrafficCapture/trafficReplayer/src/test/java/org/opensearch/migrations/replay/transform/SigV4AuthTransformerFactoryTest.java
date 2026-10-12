@@ -13,6 +13,7 @@ import org.opensearch.migrations.replay.datahandlers.http.SigningByteBufListProd
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.TestContext;
 
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Assertions;
@@ -25,60 +26,63 @@ class SigningByteBufListProducerOwnershipTest {
         var signatures = new AtomicInteger();
         var serializedAuthorizations = new ArrayList<String>();
         var body = Unpooled.copiedBuffer("body", StandardCharsets.UTF_8);
-        var producer = new SigningByteBufListProducer(
-            template(),
-            new ArrayList<>(List.of(body)),
-            request -> Map.of(
-                "Authorization",
-                List.of("attempt-" + signatures.incrementAndGet())
-            ),
-            List.of(List.of(1), List.of(4)),
-            request -> {
-                var authorization = request.headers()
-                    .insensitiveGet("Authorization")
-                    .getFirst();
-                serializedAuthorizations.add(authorization);
-                var header = Unpooled.copiedBuffer(
-                    authorization + "\r\n",
-                    StandardCharsets.UTF_8
+        try (var testContext = TestContext.noOtelTracking()) {
+            var producer = new SigningByteBufListProducer(
+                template(),
+                new ArrayList<>(List.of(body)),
+                request -> Map.of(
+                    "Authorization",
+                    List.of("attempt-" + signatures.incrementAndGet())
+                ),
+                List.of(List.of(1), List.of(4)),
+                request -> {
+                    var authorization = request.headers()
+                        .insensitiveGet("Authorization")
+                        .getFirst();
+                    serializedAuthorizations.add(authorization);
+                    var header = Unpooled.copiedBuffer(
+                        authorization + "\r\n",
+                        StandardCharsets.UTF_8
+                    );
+                    var packets = new ByteBufList(header, body);
+                    header.release();
+                    return packets;
+                }
+            );
+            producer.trackOwnership(testContext.getResourceOwnershipMetrics());
+
+            var first = producer.newAttempt();
+            var second = producer.newAttempt();
+            try {
+                Assertions.assertEquals(2, signatures.get());
+                Assertions.assertEquals(
+                    List.of("attempt-1", "attempt-2"),
+                    serializedAuthorizations
                 );
-                var packets = new ByteBufList(header, body);
-                header.release();
-                return packets;
+                Assertions.assertNotSame(first.packets(), second.packets());
+
+                first.close();
+                first.close();
+                Assertions.assertTrue(first.packets().isClosed());
+                Assertions.assertFalse(second.packets().isClosed());
+                Assertions.assertEquals(
+                    2,
+                    body.refCnt(),
+                    "the producer and the still-open second attempt retain the reusable body"
+                );
+
+                second.close();
+                Assertions.assertTrue(second.packets().isClosed());
+                Assertions.assertEquals(
+                    1,
+                    body.refCnt(),
+                    "attempt closure releases its signed packet list without closing the producer body"
+                );
+            } finally {
+                first.close();
+                second.close();
+                producer.close();
             }
-        );
-
-        var first = producer.newAttempt();
-        var second = producer.newAttempt();
-        try {
-            Assertions.assertEquals(2, signatures.get());
-            Assertions.assertEquals(
-                List.of("attempt-1", "attempt-2"),
-                serializedAuthorizations
-            );
-            Assertions.assertNotSame(first.packets(), second.packets());
-
-            first.close();
-            first.close();
-            Assertions.assertTrue(first.packets().isClosed());
-            Assertions.assertFalse(second.packets().isClosed());
-            Assertions.assertEquals(
-                2,
-                body.refCnt(),
-                "the producer and the still-open second attempt retain the reusable body"
-            );
-
-            second.close();
-            Assertions.assertTrue(second.packets().isClosed());
-            Assertions.assertEquals(
-                1,
-                body.refCnt(),
-                "attempt closure releases its signed packet list without closing the producer body"
-            );
-        } finally {
-            first.close();
-            second.close();
-            producer.close();
         }
         Assertions.assertEquals(0, body.refCnt());
     }

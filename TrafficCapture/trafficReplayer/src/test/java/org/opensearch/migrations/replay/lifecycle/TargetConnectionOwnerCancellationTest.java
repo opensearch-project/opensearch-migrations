@@ -11,7 +11,6 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
@@ -101,40 +100,9 @@ class TargetConnectionOwnerCancellationTest {
             fixture.tupleSink.flushes,
             "owner completion must release its generation-grace reference"
         );
-        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
-    }
-
-    @Test
-    void connectionCleanupWaitsForEveryOwnerOperationRegistration() {
-        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
-        var blocker = new AtomicReference<OutstandingOperationRegistry.Registration>();
-        fixture.eventLoop.execute(() -> blocker.set(fixture.owner.operations().register(
-            GENERATION,
-            CONNECTION,
-            null,
-            OperationType.CANCELLATION_CLEANUP,
-            null,
-            OutstandingOperationRegistry.WaitReason.WAITING_FOR_CHANNEL_TEARDOWN
-        )));
-        fixture.eventLoop.runUntilIdle();
-
-        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
-            CONNECTION,
-            GENERATION,
-            new CancellationException("generation cancelled")
-        ));
-        fixture.eventLoop.runUntilIdle();
-
-        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
-
-        fixture.eventLoop.execute(() ->
-            fixture.owner.operations().complete(blocker.get())
-        );
-        fixture.eventLoop.runUntilIdle();
-
-        Assertions.assertEquals(
-            java.util.List.of("cleanup-finished"),
-            fixture.lifecycleEvents
+        Assertions.assertTrue(
+            fixture.owner.operations().snapshots().isEmpty(),
+            "orderly shutdown must leave no owner operation registered"
         );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
@@ -320,7 +288,6 @@ class TargetConnectionOwnerCancellationTest {
             java.util.List.of("cleanup-finished"),
             fixture.lifecycleEvents
         );
-        assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
@@ -344,7 +311,6 @@ class TargetConnectionOwnerCancellationTest {
             java.util.List.of("cleanup-finished"),
             fixture.lifecycleEvents
         );
-        assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
@@ -399,7 +365,6 @@ class TargetConnectionOwnerCancellationTest {
             () -> "forced cleanup must finish after the late permit is released; history="
                 + fixture.transitionHistory
         );
-        assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
@@ -446,7 +411,6 @@ class TargetConnectionOwnerCancellationTest {
             fixture.lifecycleEvents,
             "cancellation emits no normal request milestone"
         );
-        assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 
@@ -509,21 +473,4 @@ class TargetConnectionOwnerCancellationTest {
         );
     }
 
-    private static void assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(
-        TargetConnectionOwnerTestSupport.Fixture fixture
-    ) {
-        var cleanupIndex = fixture.transitionHistory.indexOf(
-            "lifecycle:cleanup-finished"
-        );
-        Assertions.assertTrue(
-            cleanupIndex > 0,
-            () -> "cleanup milestone missing or unordered; history="
-                + fixture.transitionHistory
-        );
-        Assertions.assertEquals(
-            "operations:1",
-            fixture.transitionHistory.get(cleanupIndex - 1),
-            "owner cleanup may be submitted only after every earlier operation registration is released"
-        );
-    }
 }

@@ -1,10 +1,16 @@
-package org.opensearch.migrations.replay.util;
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
 
+package org.opensearch.migrations.replay.util;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -13,7 +19,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
+import org.opensearch.migrations.replay.tracing.ReplayActivityMetrics;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -21,117 +31,92 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Periodically reports correctness-relevant asynchronous work that remains registered past the configured
- * threshold. It reads immutable owner-published snapshots and cannot complete or mutate the operations.
+ * Periodically combines context, owner-obligation, and immutable Kafka-domain diagnostics.
  */
 @Slf4j
 public final class ActiveContextMonitor implements Runnable, AutoCloseable {
-    public static final Duration DEFAULT_LONG_RUNNING_THRESHOLD = Duration.ofSeconds(30);
     public static final Duration DEFAULT_REPORT_INTERVAL = Duration.ofSeconds(30);
     static final String ACTIVE_WORK_LOGGER_NAME = "AllActiveWorkMonitor";
 
-    private static final Logger ACTIVE_WORK_LOGGER =
-        LoggerFactory.getLogger(ACTIVE_WORK_LOGGER_NAME);
+    private static final Logger ACTIVE_WORK_LOGGER = LoggerFactory.getLogger(ACTIVE_WORK_LOGGER_NAME);
 
     public record Report(
-        @NonNull OutstandingOperationRegistry.Snapshot snapshot,
-        @NonNull Duration elapsed
+        @NonNull ContextActivityCollector.Snapshot contexts,
+        @NonNull OwnerOperationCollector.Snapshot ownerOperations,
+        @NonNull KafkaDiagnosticCollector.Snapshot kafka,
+        boolean finalSample
     ) {}
 
-    record Status(
-        @NonNull Instant observedAt,
-        int activeCount,
-        int longRunningCount
-    ) {
-        public Status {
-            if (activeCount < 0 || longRunningCount < 0
-                || longRunningCount > activeCount) {
-                throw new IllegalArgumentException(
-                    "activity counts must satisfy 0 <= longRunningCount <= activeCount"
-                );
-            }
-        }
-    }
-
-    private final Clock clock;
-    private final Duration longRunningThreshold;
-    private final Duration reportInterval;
-    private final Supplier<List<OutstandingOperationRegistry.Snapshot>> snapshotSupplier;
+    private final ContextActivityCollector contextCollector;
+    private final OwnerOperationCollector ownerOperationCollector;
+    private final KafkaDiagnosticCollector kafkaDiagnosticCollector;
+    private final ReplayActivityMetrics metrics;
     private final Consumer<Report> reporter;
-    private final Consumer<Status> statusReporter;
+    private final Duration reportInterval;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
-
-    public ActiveContextMonitor(
-        Clock clock,
-        Duration longRunningThreshold,
-        Supplier<List<OutstandingOperationRegistry.Snapshot>> snapshotSupplier,
-        Consumer<Report> reporter
-    ) {
-        this(
-            clock,
-            longRunningThreshold,
-            DEFAULT_REPORT_INTERVAL,
-            snapshotSupplier,
-            reporter,
-            ignored -> {},
-            null
-        );
-    }
+    private final Object collectionLock = new Object();
 
     ActiveContextMonitor(
-        Clock clock,
-        Duration longRunningThreshold,
-        Supplier<List<OutstandingOperationRegistry.Snapshot>> snapshotSupplier,
-        Consumer<Report> reporter,
-        Consumer<Status> statusReporter
+        @NonNull ContextActivityCollector contextCollector,
+        @NonNull OwnerOperationCollector ownerOperationCollector,
+        @NonNull KafkaDiagnosticCollector kafkaDiagnosticCollector,
+        @NonNull ReplayActivityMetrics metrics,
+        @NonNull Consumer<Report> reporter
     ) {
         this(
-            clock,
-            longRunningThreshold,
-            DEFAULT_REPORT_INTERVAL,
-            snapshotSupplier,
+            contextCollector,
+            ownerOperationCollector,
+            kafkaDiagnosticCollector,
+            metrics,
             reporter,
-            statusReporter,
+            DEFAULT_REPORT_INTERVAL,
             null
         );
     }
 
     private ActiveContextMonitor(
-        @NonNull Clock clock,
-        Duration longRunningThreshold,
-        Duration reportInterval,
-        @NonNull Supplier<List<OutstandingOperationRegistry.Snapshot>> snapshotSupplier,
+        @NonNull ContextActivityCollector contextCollector,
+        @NonNull OwnerOperationCollector ownerOperationCollector,
+        @NonNull KafkaDiagnosticCollector kafkaDiagnosticCollector,
+        @NonNull ReplayActivityMetrics metrics,
         @NonNull Consumer<Report> reporter,
-        @NonNull Consumer<Status> statusReporter,
+        @NonNull Duration reportInterval,
         ScheduledExecutorService scheduler
     ) {
-        this.clock = clock;
-        this.longRunningThreshold = requirePositive(longRunningThreshold, "longRunningThreshold");
-        this.reportInterval = requirePositive(reportInterval, "reportInterval");
-        this.snapshotSupplier = snapshotSupplier;
+        if (reportInterval.isZero() || reportInterval.isNegative()) {
+            throw new IllegalArgumentException("reportInterval must be positive");
+        }
+        this.contextCollector = contextCollector;
+        this.ownerOperationCollector = ownerOperationCollector;
+        this.kafkaDiagnosticCollector = kafkaDiagnosticCollector;
+        this.metrics = metrics;
         this.reporter = reporter;
-        this.statusReporter = statusReporter;
+        this.reportInterval = reportInterval;
         this.scheduler = scheduler;
     }
 
     public static ActiveContextMonitor system(
-        Clock clock,
-        Supplier<List<OutstandingOperationRegistry.Snapshot>> snapshotSupplier
+        @NonNull Clock clock,
+        @NonNull ActiveContextTracker globalTracker,
+        @NonNull ActiveContextTrackerByActivityType byActivityTracker,
+        @NonNull Supplier<List<OutstandingOperationRegistry.Snapshot>> ownerSnapshots,
+        @NonNull Supplier<KafkaSourceOwner.DiagnosticSnapshot> kafkaSnapshots,
+        @NonNull ReplayActivityMetrics metrics
     ) {
         var scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            var thread = new Thread(runnable, "replay-long-running-activity-monitor");
+            var thread = new Thread(runnable, "replay-activity-monitor");
             thread.setDaemon(true);
             return thread;
         });
         return new ActiveContextMonitor(
-            clock,
-            DEFAULT_LONG_RUNNING_THRESHOLD,
-            DEFAULT_REPORT_INTERVAL,
-            snapshotSupplier,
+            new ContextActivityCollector(clock, globalTracker, byActivityTracker),
+            new OwnerOperationCollector(clock, ownerSnapshots),
+            new KafkaDiagnosticCollector(kafkaSnapshots),
+            metrics,
             ActiveContextMonitor::logReport,
-            ActiveContextMonitor::logStatus,
+            DEFAULT_REPORT_INTERVAL,
             scheduler
         );
     }
@@ -143,7 +128,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
         if (scheduler != null) {
             scheduler.scheduleAtFixedRate(
                 this,
-                longRunningThreshold.toNanos(),
+                reportInterval.toNanos(),
                 reportInterval.toNanos(),
                 TimeUnit.NANOSECONDS
             );
@@ -152,64 +137,122 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
 
     @Override
     public void run() {
-        if (closed.get()) {
-            return;
-        }
-        try {
-            var now = clock.instant();
-            var snapshots = List.copyOf(snapshotSupplier.get());
-            var longRunningReports = snapshots.stream()
-                .map(snapshot -> new Report(snapshot, Duration.between(snapshot.startTime(), now)))
-                .filter(report -> !report.elapsed().isNegative())
-                .filter(report -> report.elapsed().compareTo(longRunningThreshold) >= 0)
-                .sorted(
-                    Comparator.comparing(Report::elapsed).reversed()
-                        .thenComparing(report -> report.snapshot().ownerIdentity())
-                        .thenComparingLong(report -> report.snapshot().operationId())
-                )
-                .toList();
-            statusReporter.accept(new Status(now, snapshots.size(), longRunningReports.size()));
-            longRunningReports.forEach(reporter);
-        } catch (Throwable failure) {
-            log.error("Long-running replay activity reporting failed", failure);
+        synchronized (collectionLock) {
+            if (closed.get()) {
+                return;
+            }
+            try {
+                collectAndReport(false);
+            } catch (Throwable failure) {
+                log.error("event=replay_activity_monitor_failed", failure);
+            }
         }
     }
 
-    private static void logStatus(Status status) {
-        ACTIVE_WORK_LOGGER.info(
-            "Active replay work: observedAt={} active={} longRunning={}",
-            status.observedAt(),
-            status.activeCount(),
-            status.longRunningCount()
+    private Report collectAndReport(boolean finalSample) {
+        var contexts = contextCollector.collect();
+        var owners = ownerOperationCollector.collect();
+        var kafka = kafkaDiagnosticCollector.collect(
+            contexts.oldestKafkaRecord().map(ContextActivityCollector.OldestKafkaRecord::recordId)
         );
+        var report = new Report(contexts, owners, kafka, finalSample);
+        metrics.record(contexts, owners, kafka);
+        reporter.accept(report);
+        return report;
     }
 
     private static void logReport(Report report) {
-        var snapshot = report.snapshot();
+        var contexts = report.contexts();
+        var owners = report.ownerOperations();
+        var kafka = report.kafka();
+        var activityCounts = new LinkedHashMap<String, Long>();
+        var activityOldestAgeMs = new LinkedHashMap<String, Long>();
+        var activityOverThreshold = new LinkedHashMap<String, Long>();
+        contexts.activities().forEach((name, activity) -> {
+            activityCounts.put(name, activity.activeCount());
+            activityOldestAgeMs.put(name, activity.oldestAge().toMillis());
+            activityOverThreshold.put(name, activity.overThresholdCount());
+        });
+        var oldestRecord = contexts.oldestKafkaRecord();
+        ACTIVE_WORK_LOGGER.info(
+            "event=replay_health observed_at={} active_contexts={} activity_counts={} "
+                + "oldest_context_age_ms={} activity_oldest_age_ms={} activity_over_threshold={} "
+                + "owner_operations={} long_owner_operations={} oldest_kafka_record_age_ms={} "
+                + "kafka_uncertain_partitions={} final_sample={}",
+            contexts.observedAt(),
+            contexts.totalActiveContexts(),
+            activityCounts,
+            contexts.globallyOldestAge().toMillis(),
+            activityOldestAgeMs,
+            activityOverThreshold,
+            owners.activeCount(),
+            owners.longRunningCount(),
+            oldestRecord.map(record -> record.age().toMillis()).orElse(0L),
+            kafka.uncertainPartitionCount(),
+            report.finalSample()
+        );
+
+        oldestRecord.ifPresent(record -> {
+            var generation = record.recordId().generation();
+            ACTIVE_WORK_LOGGER.info(
+                "event=replay_oldest_record topic={} partition={} generation={} offset={} age_ms={} "
+                    + "active_descendants={} kafka_state={}",
+                generation.topicPartition().topic(),
+                generation.topicPartition().partition(),
+                generation.localSequence(),
+                record.recordId().offset(),
+                record.age().toMillis(),
+                record.descendantCount(),
+                kafka.oldestRecord().map(diagnostic -> diagnostic.state().name()).orElse("UNKNOWN")
+            );
+            if (record.age().compareTo(ContextActivityCollector.DEFAULT_AGE_THRESHOLD) >= 0) {
+                ACTIVE_WORK_LOGGER.warn(
+                    "event=replay_stall_detected kind=kafka_record topic={} partition={} generation={} "
+                        + "offset={} age_ms={} descendant_count={} descendants={} kafka_state={}",
+                    generation.topicPartition().topic(),
+                    generation.topicPartition().partition(),
+                    generation.localSequence(),
+                    record.recordId().offset(),
+                    record.age().toMillis(),
+                    record.descendantCount(),
+                    record.descendants(),
+                    kafka.oldestRecord().map(diagnostic -> diagnostic.state().name()).orElse("UNKNOWN")
+                );
+            }
+        });
+
+        contexts.oldContexts().forEach(context -> ACTIVE_WORK_LOGGER.warn(
+            "event=replay_stall_detected kind=context activity={} age_ms={} ancestor_chain={} "
+                + "record={} connection={} request={}",
+            context.activity(),
+            context.age().toMillis(),
+            context.ancestorChain(),
+            context.identity().kafkaRecordId().map(Object::toString).orElse("-"),
+            context.identity().connectionProcessingId().map(Object::toString).orElse("-"),
+            context.identity().replayRequestId().map(Object::toString).orElse("-")
+        ));
+        owners.longRunningOperations().forEach(ActiveContextMonitor::logOwnerOperation);
+    }
+
+    private static void logOwnerOperation(OwnerOperationCollector.Detail detail) {
+        var snapshot = detail.operation();
         var generation = snapshot.partitionGenerationId();
         ACTIVE_WORK_LOGGER.warn(
-            "Long-running replay activity: partition={} generation={} record={} capturedConnection={} "
-                + "connectionProcessing={} request={} owner={} operation={} elapsed={} reason={} "
-                + "scheduledTargetTime={}",
-            generation.topicPartition(),
+            "event=replay_stall_detected kind=owner_operation topic={} partition={} generation={} "
+                + "record={} connection={} request={} owner={} operation={} age_ms={} reason={} "
+                + "scheduled_target_time={}",
+            generation.topicPartition().topic(),
+            generation.topicPartition().partition(),
             generation.localSequence(),
             snapshot.kafkaRecordId(),
-            snapshot.connectionProcessingId().capturedConnectionId(),
             snapshot.connectionProcessingId(),
             snapshot.replayRequestId(),
             snapshot.ownerIdentity(),
             snapshot.operationType(),
-            report.elapsed(),
+            detail.elapsed().toMillis(),
             snapshot.waitReason(),
             snapshot.scheduledTargetTime()
         );
-    }
-
-    private static Duration requirePositive(@NonNull Duration value, String name) {
-        if (value.isZero() || value.isNegative()) {
-            throw new IllegalArgumentException(name + " must be positive");
-        }
-        return value;
     }
 
     @Override
@@ -217,8 +260,62 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        stopScheduler();
+    }
+
+    /**
+     * Stops periodic collection and publishes the real state observed after an orderly drain.
+     */
+    public void closeAfterOrderlyDrain() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        stopScheduler();
+        synchronized (collectionLock) {
+            final Report report;
+            try {
+                report = collectAndReport(true);
+            } catch (Throwable failure) {
+                throw new IllegalStateException(
+                    "failed to collect final replay activity state after orderly drain",
+                    failure
+                );
+            }
+            assertDrained(report);
+        }
+    }
+
+    private void stopScheduler() {
         if (scheduler != null) {
             scheduler.shutdownNow();
+        }
+    }
+
+    private static void assertDrained(Report report) {
+        var contexts = report.contexts();
+        var owners = report.ownerOperations();
+        var activeActivityCount = contexts.activities()
+            .values()
+            .stream()
+            .mapToLong(ContextActivityCollector.ActivitySummary::activeCount)
+            .sum();
+        if (contexts.totalActiveContexts() != 0
+            || activeActivityCount != 0
+            || owners.activeCount() != 0
+            || report.kafka().uncertainPartitionCount() != 0) {
+            ACTIVE_WORK_LOGGER.error(
+                "event=replay_shutdown_activity_not_drained active_contexts={} "
+                    + "active_contexts_by_activity={} owner_operations={} "
+                    + "kafka_uncertain_partitions={}",
+                contexts.totalActiveContexts(),
+                activeActivityCount,
+                owners.activeCount(),
+                report.kafka().uncertainPartitionCount()
+            );
+            throw new IllegalStateException(
+                "orderly replay shutdown retained active contexts, owner operations, "
+                    + "or uncertain Kafka commit state"
+            );
         }
     }
 }

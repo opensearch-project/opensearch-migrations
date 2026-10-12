@@ -13,6 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -27,6 +28,19 @@ import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CaptureProxyOrderlyShutdownTest {
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("CaptureProxy")
+    void shutdownSummaryIncludesBoundedOutcomeAndProcessIdentities() {
+        try (var logs = new CloseableLogSetup(CaptureProxy.class.getName())) {
+            CaptureProxy.logShutdownSummary("completed", "process-1", "activation-1");
+
+            assertTrue(logs.getLogEvents().contains(
+                "event=capture_shutdown_summary outcome=completed "
+                    + "processId=process-1 captureActivationId=activation-1"
+            ));
+        }
+    }
+
     @Test
     void plannedShutdownClosesListenerThenRetiresCaptureBeforeCleanup()
         throws Exception {

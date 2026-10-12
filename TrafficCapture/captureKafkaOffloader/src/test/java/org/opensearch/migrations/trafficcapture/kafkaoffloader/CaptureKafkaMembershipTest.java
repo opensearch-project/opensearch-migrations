@@ -11,6 +11,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
+
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
@@ -25,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CaptureKafkaMembershipTest {
     private static final String TOPIC = "traffic";
     private static final String ACTIVATION_ID = "activation";
+    private static final CapturePublishingMetrics NOOP_METRICS =
+        new CapturePublishingMetrics(io.opentelemetry.api.OpenTelemetry.noop().getMeter("test"));
 
     @Test
     void replacementAssignmentChangesOnlyNewConnectionRouting() {
@@ -57,6 +62,70 @@ class CaptureKafkaMembershipTest {
             List.of(List.of(0, 1), List.of(2)),
             publisher.initializedRoutingGenerations()
         );
+    }
+
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("CaptureKafkaMembership")
+    void assignmentTransitionEmitsMetricAndOperationalEvent() {
+        var messages = new ArrayList<String>();
+        var appender = new org.apache.logging.log4j.core.appender.AbstractAppender(
+            "capture-membership-test",
+            null,
+            org.apache.logging.log4j.core.layout.PatternLayout.createDefaultLayout(),
+            false,
+            org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY
+        ) {
+            @Override
+            public void append(org.apache.logging.log4j.core.LogEvent event) {
+                messages.add(event.getMessage().getFormattedMessage());
+            }
+        };
+        var logger = (org.apache.logging.log4j.core.Logger)
+            org.apache.logging.log4j.LogManager.getLogger(CaptureKafkaMembership.class);
+        appender.start();
+        logger.addAppender(appender);
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var metrics = new CapturePublishingMetrics(
+                telemetry.openTelemetrySdk.getMeter("captureProxy")
+            );
+            var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+            var routingState = new CaptureRoutingState(ACTIVATION_ID, 2);
+            var publisher = new InMemoryRoutingGenerationPublisher(routingState);
+            var membership = new CaptureKafkaMembership(
+                consumer,
+                TOPIC,
+                routingState,
+                publisher,
+                metrics,
+                () -> {},
+                ignored -> {},
+                ignored -> {}
+            );
+            var partitions = List.of(
+                new TopicPartition(TOPIC, 0),
+                new TopicPartition(TOPIC, 1)
+            );
+            consumer.assign(partitions);
+
+            membership.onPartitionsAssigned(partitions);
+
+            assertEquals(
+                1,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    telemetry.getFinishedMetrics(),
+                    CapturePublishingMetrics.MetricNames.ROUTING_TRANSITIONS
+                )
+            );
+            assertTrue(messages.stream().anyMatch(message ->
+                message.startsWith("event=capture_assignment_received ")
+                    && message.contains("topic=traffic")
+                    && message.contains("assignedPartitions=[0, 1]")
+            ));
+            membership.close();
+        } finally {
+            logger.removeAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
@@ -128,6 +197,7 @@ class CaptureKafkaMembershipTest {
             TOPIC,
             routingState,
             publisher,
+            NOOP_METRICS,
             initialRoutingReady::countDown,
             membershipFailure::set,
             ignored -> {}
@@ -163,6 +233,7 @@ class CaptureKafkaMembershipTest {
             TOPIC,
             routingState,
             publisher,
+            NOOP_METRICS,
             initialRoutingReady::countDown,
             membershipFailure::set,
             ignored -> {}
@@ -193,6 +264,7 @@ class CaptureKafkaMembershipTest {
             TOPIC,
             routingState,
             new InMemoryRoutingGenerationPublisher(routingState),
+            NOOP_METRICS,
             () -> {},
             failure -> {
                 membershipFailure.set(failure);
@@ -237,6 +309,7 @@ class CaptureKafkaMembershipTest {
             TOPIC,
             routingState,
             publisher,
+            NOOP_METRICS,
             () -> {},
             ignored -> {},
             ignored -> {}

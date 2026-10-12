@@ -4,10 +4,19 @@ Working review notes for the final PR pass on the capture/replay hardening branc
 Scope is observability only: logs, metrics, traces. Not correctness, not performance.
 
 - **Branch:** `stableAndScalableLiveReplay`
-- **Base:** `upstream/main` (merge-base `dcf88fc9688cd6a8cb257d75873692a4b7839195`)
-- **Size reviewed:** 188 commits, 458 files, ~66.9k insertions / ~26.7k deletions
+- **Historical review base:** `upstream/main` (merge-base
+  `dcf88fc9688cd6a8cb257d75873692a4b7839195`)
+- **Current verification base:** `upstream/main` at
+  `1f39f539041df8fc8628d59540c802c9ca52be73`; branch HEAD
+  `7346ed974dca8e617e438be930bcef1d52380f43` plus the current remediation
+  working tree
+- **Historical size reviewed:** 188 commits, 458 files, ~66.9k insertions /
+  ~26.7k deletions
 - **Reviewed:** 2026-10-05
-- **Status:** audit complete; remediation and gameday plan drafted below.
+- **Reconciled:** 2026-10-06
+- **Status:** findings reconciled against the current tree; implementation and
+  automated verification are complete, with live Kubernetes gameday validation
+  still pending.
 
 ### Assumptions and operational contract
 
@@ -17,11 +26,14 @@ Scope is observability only: logs, metrics, traces. Not correctness, not perform
   detect a problem, identify the affected subsystem and form a useful causal
   hypothesis. DEBUG/TRACE must provide a sufficiently complete event journal for a
   developer to reconstruct the system's decisions without exported spans.
-- **Metrics are the primary aggregate health and alarm channel.** The metric review
+- **Metrics are the primary aggregate health channel.** The metric review
   assumes an OTel collector is configured and healthy. Deployments without a
   collector endpoint, where
   `RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop` yields a no-op SDK,
   are still expected to remain diagnosable through logs.
+- **The repository does not install alerts or notifications.** Suggested thresholds
+  are operator guidance and dashboard coloring only. An owning environment can
+  configure alerts separately after validating thresholds through gameday.
 - Log records do not need trace or span IDs for this milestone. They do need the
   stable domain identities that connect events across the capture/replay pipeline.
 - Span-derived count, duration and exception metrics remain useful even when trace
@@ -32,67 +44,110 @@ Scope is observability only: logs, metrics, traces. Not correctness, not perform
 
 ---
 
-## Verdict
+## Current remediation status
 
-The metrics *design* has strong foundations: subsystem-specific metrics adapters,
-bounded attributes, and conservation counters that can expose accounting drift.
-The correctness tests are also extensive. The weakness is that observability is not
-yet enforced as part of those correctness contracts.
+The original findings are retained below as historical observations from the review
+baseline. They are not statements about the current production object graph. Commit
+`7346ed974` supplied the main remediation; the current working tree adds the
+second-opinion follow-ups for exact context membership, inner S3 retry observability,
+final gauge sampling, owner-operation type visibility, corrected operator surfaces
+and no-alert policy hardening.
 
-Five concerns keep this from being sufficient as-is:
+| Finding | Current status | Production evidence and verification |
+|---|---|---|
+| O-1 | Remediated | `RootReplayerContext` constructs and production paths use `ResourceOwnershipMetrics`. Covered by `ResourceOwnershipMetricsTest` and `TrafficReplayerTopLevelConstructionTest`. |
+| O-2 | Remediated | `CountHook` and its constructor/test plumbing are removed. Registry snapshots, wait reasons, fatal checks and shutdown obligations remain covered by `OutstandingOperationRegistryTest` and `ActiveContextMonitorTest`. |
+| O-3 | Remediated | Activity summaries and old-work detail route to both the main replayer log and the dedicated activity log. Covered by `ActiveContextMonitorTest.dedicatedActivityLoggerRoutesToBothRequiredFiles`. |
+| O-4 | Remediated | Kafka commit instruments use the bounded `kafkaSource...` production names. Covered by `KafkaCommitStateMetricsTest` and deployment surface verification. |
+| O-5 | Remediated | `targetAttemptsWithoutResponse` has bounded `noResponseKind`; `targetRetriesExhausted` is separate. Owner behavior emits structured events. Covered by `TargetExecutionMetricsTest` and `RequestReplayOwnerTest`. |
+| O-6 | Remediated | Capture publishing, routing, heartbeat, write-gate and terminal state have metrics and bounded events. Covered by `CaptureKafkaPublisherTest`, membership tests and `CaptureProcessMetricsTest`. |
+| O-7 | Remediated | Capture connection drops include connection identity and bounded reason metrics/events. Covered by `ConditionallyReliableLoggingHttpHandlerTest`. |
+| O-8 | Remediated | Grafana, CloudWatch, the Kubernetes README and gameday helper expose the production signals. `verifyCaptureReplayObservability` rejects stale names. |
+| O-9 | Remediated | Named global and by-activity trackers feed separate collectors and one reporter; owner and immutable Kafka diagnostics remain supplemental. Exact membership now uses `startTimeNano, contextId`, with thread-local ID blocks. Covered by `ActiveContextMonitorTest`, `ActiveContextTrackerTest` and `ContextIdAllocatorTest`. |
+| O-10 | Remediated; live gameday pending | Production owners emit bounded `event=<name> key=value` narratives and behavior tests assert critical log and metric effects. The gameday helper has an executable self-test; Kubernetes fault-injection validation remains the release exercise. |
+
+Additional second-opinion corrections now reflected in the tree:
+
+- Inner `RotatingGzipS3ObjectWriter` same-key retries remain indefinite and keep the
+  durability future pending. `TupleSinkUploadMetrics` observes retry attempts,
+  retrying-object population and positive recovery without repurposing
+  `tupleDurabilityRetries`; `S3TupleSinkObservabilityTest` covers multiple failures
+  followed by recovery with traces disabled.
+- `ActiveContextMonitor.closeAfterOrderlyDrain()` exports a final real collection
+  and rejects a nonzero orderly-drain state. Abort/fatal shutdown does not overwrite
+  nonzero last values.
+- Owner-operation metrics retain aggregate gauges and add bounded, explicitly
+  zeroed `operationType` series. Wait reason remains in detailed logs.
+- Target dashboard names match production, the nonexistent Prometheus Kafka-lag
+  panel is removed, and broker CLI output remains the authoritative lag source.
+- The chart installs no alerts or notifications. Deployment verification rejects
+  Prometheus/Alertmanager/ACK alarm resources, alert rules and CloudWatch alarm
+  widgets/references across every installed dashboard JSON.
+
+## Historical verdict
+
+This verdict describes the 2026-10-05 review baseline, before the remediation above.
+
+The metrics *design* had strong foundations: subsystem-specific metrics adapters,
+bounded attributes, and conservation counters that could expose accounting drift.
+The correctness tests were also extensive. The weakness was that observability was
+not yet enforced as part of those correctness contracts.
+
+Five concerns kept the baseline from being sufficient as-is:
 
 1. **The activity monitor was narrowed to owner-local operation registries while the
    two context indexes remained populated but unread.** Production therefore lost
    its periodic view of Kafka poll/commit/rebalance, Kafka record lifetime, traffic
    stream and HTTP reconstruction activity. This is a High regression under the
    logs-primary operational contract (`O-9`).
-2. **Production can silently select behavior-less metrics implementations.**
-   `ResourceOwnershipMetrics` is never constructed (`O-1`), and several new
-   production constructors default to a local `Metrics.NOOP`. The older, safer
+2. **Production could silently select behavior-less metrics implementations.**
+   `ResourceOwnershipMetrics` was never constructed (`O-1`), and several new
+   production constructors defaulted to a local `Metrics.NOOP`. The older, safer
    design selected no-op behavior at the OTel SDK/provider boundary while preserving
    the same production object graph. `CountHook.NOOP` is a separate dead-plumbing
    issue, not evidence of a missing required metric (`O-2`).
-3. **The production logging narrative is too sparse when traces are disabled.**
-   Several central lifecycle owners have no logger, critical state transitions have
-   no INFO/WARN event, and most correctness tests do not assert logs. DEBUG/TRACE
-   cannot currently "rebuild the world" (`O-10`).
-4. **Critical behavior tests often do not verify their metric side effects.**
-   Kafka commit accounting and target-attempt permits are strong, but 11 of 30
-   replay-intake metrics have no exact metric assertion; publisher/routing and tuple
-   durability have no metrics to assert; protocol-violation tests assert a callback
+3. **The production logging narrative was too sparse when traces were disabled.**
+   Several central lifecycle owners had no logger, critical state transitions had
+   no INFO/WARN event, and most correctness tests did not assert logs. DEBUG/TRACE
+   could not "rebuild the world" (`O-10`).
+4. **Critical behavior tests often did not verify their metric side effects.**
+   Kafka commit accounting and target-attempt permits were strong, but 11 of 30
+   replay-intake metrics had no exact metric assertion; publisher/routing and tuple
+   durability had no metrics to assert; protocol-violation tests asserted a callback
    rather than the production OTel adapter.
-5. **Capture routing and steady-state publishing remain dark.**
-   `CaptureRoutingState` has no logs, metrics or contexts, and
-   `CaptureKafkaPublisher` has no steady-state instruments (`O-6`).
+5. **Capture routing and steady-state publishing remained dark.**
+   `CaptureRoutingState` had no logs, metrics or contexts, and
+   `CaptureKafkaPublisher` had no steady-state instruments (`O-6`).
 
 Beyond those, several deliberate outcomes — target no-response reason, retry
 exhaustion, connection-limit rejection and tuple durability retry — are bounded and
-operationally important but are neither aggregate metric dimensions nor consistent
+operationally important but were neither aggregate metric dimensions nor consistent
 structured log events (`O-5`, `O-7`).
 
 ---
 
-## Findings
+## Historical findings
 
-Severity is this review's assessment, not a project convention. `Status` is left
-blank for triage.
+Severity is this review's assessment, not a project convention. Each narrative is
+preserved as release-review history; its `Status` and the reconciliation table above
+state the current result.
 
-### O-1 — `ResourceOwnershipMetrics` is dead code
+### O-1 — `ResourceOwnershipMetrics` was dead code at the review baseline
 
 | | |
 |---|---|
 | Severity | High |
 | Area | Replayer / buffer ownership |
-| Status | |
+| Status | Remediated in `7346ed974`; production wiring and tests verified above. |
 
-`ResourceOwnershipMetrics` has zero references anywhere in the tree outside its own
-class declaration and constructor — not even a test. The only way to install a
-non-NOOP implementation is `ByteBufListProducer.trackOwnership()`, which is called
-only from `ByteBufListProducerTest`. Every production construction path passes
-`ResourceOwnership.Metrics.NOOP`.
+At the historical review baseline, `ResourceOwnershipMetrics` had zero references
+outside its own class declaration and constructor — not even a test. The only way to
+install a non-NOOP implementation was `ByteBufListProducer.trackOwnership()`, which
+was called only from `ByteBufListProducerTest`. Every production construction path
+passed `ResourceOwnership.Metrics.NOOP`.
 
 Consequence: `resourceOwnedHandles`, `resourceOwnedBuffers`, `resourceOwnedBytes`,
-`resourceDuplicateCloseAttempts` and `resourceOwnershipInvariantFailures` are never
+`resourceDuplicateCloseAttempts` and `resourceOwnershipInvariantFailures` were not
 emitted. Reference-counted buffer leaks are the dominant failure mode for a
 Netty-based replayer, and the detector for them is built but unplugged.
 
@@ -109,15 +164,16 @@ so `trackOwnership` is called on the real path.
 
 ---
 
-### O-2 — `CountHook` is dead observer plumbing, not a missing metrics system
+### O-2 — `CountHook` was dead observer plumbing, not a missing metrics system
 
 | | |
 |---|---|
 | Severity | Low–Medium — misleading and unnecessary, but no production signal is lost |
 | Area | Replayer / owner-local asynchronous obligations |
-| Status | |
+| Status | Remediated in `7346ed974`; registry behavior preserved and tested. |
 
-`OutstandingOperationRegistry` and `CountHook` should not be judged as one feature.
+At the historical review baseline, `OutstandingOperationRegistry` and `CountHook`
+should not have been judged as one feature.
 The registry is live correctness and diagnostic machinery. It is event-loop
 confined, tracks exact asynchronous obligations for a particular owner, checks
 duplicate/missing/wrong-registry completions, retains identity and changing
@@ -132,7 +188,7 @@ performs all of its required work. It also explains why the seam can be useful i
 unit test without being a valid production metrics design. The defect is the dead
 API and misleading constructor plumbing, not a silently disabled correctness path.
 
-**It has never had a production implementation.** Born `NOOP` in `be74f1169`
+**It had never had a production implementation.** Born `NOOP` in `be74f1169`
 ("G5: implement event-loop core owners") and still `NOOP`; no commit on this branch
 ever supplied a real one. Searched with
 `git log -S CountHook upstream/main..HEAD` across all 8 touching commits. This reads
@@ -208,22 +264,22 @@ boundary; do not patch or replace `CountHook`.
 
 ---
 
-### O-3 — Stall warnings never reach the main log
+### O-3 — Stall warnings did not reach the main log
 
 | | |
 |---|---|
 | Severity | High |
 | Area | Replayer / logging config |
-| Status | |
+| Status | Remediated in `7346ed974`; dual-route test verified above. |
 
-The current registry-backed `ActiveContextMonitor` is the branch's only periodic
-stall detector. Its WARN output goes to the `AllActiveWorkMonitor` logger, which is
+The baseline registry-backed `ActiveContextMonitor` was the branch's only periodic
+stall detector. Its WARN output went to the `AllActiveWorkMonitor` logger, which was
 configured with
 `additivity = false` and a single appender reference to `AllActiveWorkMonitorFile`.
 So "Long-running replay activity: …" lands only in
 `logs/longRunningActivity/longRunningActivity.log` — not stderr, not `replayer.log`.
 
-The 30s status line (`active=` / `longRunning=`) goes to the same file under a
+The 30s status line (`active=` / `longRunning=`) went to the same file under a
 `%msg%n` pattern, so it carries no level and no log timestamp (the `observedAt`
 field in the message is the only time reference).
 
@@ -240,16 +296,16 @@ Suggested fix: send monitor output to both `ReplayerLogFile` and the dedicated
 
 ---
 
-### O-4 — Metric naming convention splits mid-branch
+### O-4 — The metric naming convention split mid-branch
 
 | | |
 |---|---|
 | Severity | Medium — cheap now, breaking later |
 | Area | Replayer / metric names |
-| Status | |
+| Status | Remediated in `7346ed974`; adapter and deployment tests verified above. |
 
-`KafkaCommitStateMetrics` uses unprefixed `snake_case`. Every other new metrics
-class uses prefixed `camelCase`.
+At the historical review baseline, `KafkaCommitStateMetrics` used unprefixed
+`snake_case`. Every other new metrics class used prefixed `camelCase`.
 
 | Class | Convention | Examples |
 |---|---|---|
@@ -263,7 +319,7 @@ class uses prefixed `camelCase`.
 
 All of these register on the same `replayer` meter scope, so a bare `records_read`
 is ambiguous against `replayIntakeRecordsApplied`. Renaming after release breaks
-dashboards and alarms, so this is much cheaper to settle pre-merge.
+dashboards and external consumers, so this is much cheaper to settle pre-merge.
 
 Evidence: `TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/tracing/KafkaCommitStateMetrics.java:33-41`
 
@@ -273,21 +329,21 @@ convention explicitly and migrate the others. Either way, write the convention d
 
 ---
 
-### O-5 — No aggregate dimension for *why* target attempts fail
+### O-5 — There was no aggregate dimension for *why* target attempts failed
 
 | | |
 |---|---|
 | Severity | Medium |
 | Area | Replayer / request outcomes |
-| Status | |
+| Status | Remediated in `7346ed974`; production names corrected in current surfaces. |
 
-`NoTargetResponseKind` — `READ_TIMEOUT`, `TRANSPORT_FAILURE`,
-`MISSING_HTTP_RESPONSE` — is produced in `NettyPacketToHttpConsumer` and *does*
-reach the per-tuple JSON output under the exception key, so single-request
-diagnosis works. It is never a counter attribute.
+At the historical review baseline, `NoTargetResponseKind` — `READ_TIMEOUT`,
+`TRANSPORT_FAILURE`, `MISSING_HTTP_RESPONSE` — was produced in
+`NettyPacketToHttpConsumer` and reached the per-tuple JSON output under the exception
+key, so single-request diagnosis worked. It was not a counter attribute.
 
-Likewise `RetryDecision.TargetServerAttemptsFinished` (retry exhaustion) is never
-counted; `numRetries` counts attempts made, nothing counts giving up.
+Likewise `RetryDecision.TargetServerAttemptsFinished` (retry exhaustion) was not
+counted; `numRetries` counted attempts made, and nothing counted giving up.
 
 The progress-summary line renders a no-response attempt as response size `0` and
 drops the diagnostic entirely.
@@ -309,28 +365,29 @@ attribute on the existing `tupleComparison` counter or on a new
 
 ---
 
-### O-6 — `CaptureRoutingState` is entirely dark; capture side has no steady-state publish metrics
+### O-6 — `CaptureRoutingState` was dark; capture had no steady-state publish metrics
 
 | | |
 |---|---|
 | Severity | **High** for `CaptureRoutingState`, Medium for the rest |
 | Area | Capture proxy / Kafka offloader |
-| Status | |
+| Status | Remediated in `7346ed974`; capture behavior tests verified above. |
 
 Unlike the replayer owners — which get count, duration and exception metrics free
-from span open/close — the capture-side state machines create no contexts, so nothing
-is emitted implicitly. Whatever they do not report explicitly is invisible.
+from span open/close — the capture-side state machines created no contexts at the
+historical baseline, so nothing was emitted implicitly. Whatever they did not report
+explicitly was invisible.
 
-**`CaptureRoutingState` (647 lines): zero logs, zero metrics, zero spans, zero
-contexts.** This is the routing-generation state machine the new scaling model turns
-on. Generation changes, partition-set changes and writer-lane assignment are
-unobservable, so a capture/replay gap cannot be correlated against the routing change
-that caused it. The nearest available signals are two INFO lines elsewhere — the
+**`CaptureRoutingState` (647 lines) then had zero logs, metrics, spans or contexts.**
+This was the routing-generation state machine the new scaling model turned on.
+Generation changes, partition-set changes and writer-lane assignment were
+unobservable, so a capture/replay gap could not be correlated against the routing
+change that caused it. The nearest available signals were two INFO lines elsewhere — the
 publisher's `"Retired proxy writer {} for partition {}"` (`CaptureKafkaPublisher.java:684`)
 and `CaptureKafkaMembership`'s `"Initialized proxy routing writer {} for partitions {}"`
 (`:99`) — which cover initialization and retirement but not the transitions between.
 
-**`CaptureKafkaPublisher` (1063 lines): no steady-state instruments.** No records or
+**`CaptureKafkaPublisher` (1063 lines) then had no steady-state instruments.** No records or
 bytes published, no send failures, no heartbeat acknowledgement-deadline expirations,
 no write-gate rejections, no lane-retirement counts. Its entire logging budget across
 1063 lines is 2 `error`, 1 `warn`, 1 `info`.
@@ -351,18 +408,19 @@ Evidence:
 
 ---
 
-### O-7 — New connection-drop paths aren't countable or attributable
+### O-7 — New connection-drop paths were not countable or attributable
 
 | | |
 |---|---|
 | Severity | Medium |
 | Area | Capture proxy / netty handler |
-| Status | |
+| Status | Remediated in `7346ed974`; bounded reason metrics/events are tested. |
 
-`IncompleteRequestLimits` violations and max-connection-duration closes log at WARN
-and close the channel. There is no counter, no connection id in the message, and no
-MDC anywhere in `LoggingHttpHandler`. So you can learn that drops happened, but not
-how many, at what rate, or to which client.
+At the historical review baseline, `IncompleteRequestLimits` violations and
+max-connection-duration closes logged at WARN and closed the channel. There was no
+counter, no connection id in the message, and no MDC anywhere in
+`LoggingHttpHandler`. An operator could learn that drops happened, but not how many,
+at what rate, or to which client.
 
 These are new limits that silently terminate client connections — exactly the kind
 of change that generates "why did my client get disconnected?" escalations.
@@ -379,17 +437,18 @@ by limit kind (bounded: `assemblyDuration`, `headerBytes`, `totalBytes`,
 
 ---
 
-### O-8 — ~57 new metric names ship with no operator reference
+### O-8 — ~57 new metric names had no operator reference
 
 | | |
 |---|---|
 | Severity | Medium |
 | Area | Docs |
-| Status | |
+| Status | Remediated in `7346ed974` plus current operator-surface corrections. |
 
-No document enumerates the new metrics, their units, their attributes, or which ones
-are expected to return to zero. `docs/captureReplayHardeningChangelog.md` has no
-observability section. The only doc that mentions any new metric name is
+At the historical review baseline, no document enumerated the new metrics, their
+units, their attributes, or which ones were expected to return to zero.
+`docs/captureReplayHardeningChangelog.md` had no observability section. The only doc
+that mentioned any new metric name was
 `docs/captureAndReplay/asyncMessagePassingProgrammingGuide.md`.
 
 Dedicated adapter tests exist for three of six new replayer metrics classes
@@ -427,23 +486,23 @@ See the [metric inventory](#appendix-a--new-metric-inventory) below as raw mater
 |---|---|
 | Severity | High — production lost context-level stall diagnosis |
 | Area | Replayer / context monitoring and logging |
-| Status | |
+| Status | Remediated in `7346ed974`; exact-membership follow-up is in the current working tree. |
 
 Found while answering "why does `CountHook` exist?" (`O-2`).
 
-`RootReplayerContext:47` still installs
+At the historical review baseline, `RootReplayerContext:47` still installed
 `new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())`,
-so **every context create and close** in the replayer pays:
+so **every context create and close** in the replayer paid:
 
 - `ActiveContextTracker` — insert/remove on a `ConcurrentSkipListSet`
 - `ActiveContextTrackerByActivityType` — `ConcurrentHashMap` lookup plus
   insert/remove on a per-type `ConcurrentSkipListSet`
 
-Nothing reads either one. In `upstream/main` they were inputs to context monitoring;
-the rewrite changed `ActiveContextMonitor` to accept only a
+Nothing read either one. In `upstream/main` they were inputs to context monitoring;
+the rewrite had changed `ActiveContextMonitor` to accept only a
 `Supplier<List<OutstandingOperationRegistry.Snapshot>>`. The supplied
-`TrafficReplayerTopLevel.activitySnapshots()` aggregates target-connection,
-request-replay and tuple-writer registries. It does not read the context indexes.
+`TrafficReplayerTopLevel.activitySnapshots()` aggregated target-connection,
+request-replay and tuple-writer registries. It did not read the context indexes.
 
 This is more than wasted hot-path work. It removes production visibility for every
 activity that is represented by a context but not by one of those owner registries:
@@ -529,9 +588,10 @@ and parent-chain view.
 
 If counts are exported as observable gauges, explicitly report zero for every known
 activity type; iterating only `getActiveScopeTypes()` would make an empty series
-disappear rather than return to zero. The current `numScopesFor()` also assumes that
-the type has previously been observed, so add a zero-safe accessor or guard the
-lookup before collecting known empty types.
+disappear rather than return to zero. At the review baseline, `numScopesFor()` also
+assumed that the type had previously been observed. The remediation instead derives
+the count from the same captured context list used for age calculation, and the
+obsolete accessor has been removed.
 
 Use hard-coded initial age thresholds. Tune them from gameday evidence rather than
 adding configuration machinery in the first implementation.
@@ -610,16 +670,17 @@ Worth preserving explicitly so none of it gets refactored away:
 
 ---
 
-### O-10 — Production and developer logs do not form a complete event narrative
+### O-10 — Production and developer logs did not form a complete event narrative
 
 | | |
 |---|---|
 | Severity | High |
 | Area | Capture and replay / logging |
-| Status | |
+| Status | Remediated in `7346ed974` plus current S3 retry events; live gameday pending. |
 
-The drop in log sites is a material finding under the operating assumption that
-production traces may be disabled and logs are the primary diagnostic channel.
+At the historical review baseline, the drop in log sites was a material finding
+under the operating assumption that production traces may be disabled and logs are
+the primary diagnostic channel.
 
 Replayer `src/main` grew from 17,564 to 28,423 lines while log call sites fell from
 231 to 64.
@@ -635,7 +696,7 @@ Replayer `src/main` grew from 17,564 to 28,423 lines while log call sites fell f
 Keeping pure decision functions free of logging is intentional and good.
 `PartitionIntakeState`, for example, should continue returning decisions to
 `ReplayIntakeOwner`; the owner should emit the event after applying the decision.
-The gap is that many owners do not perform that reporting.
+The gap was that many owners did not perform that reporting.
 
 **Reading the table below:** an explicit `metrics.` call count badly understates
 coverage, because every context open/close emits metrics on its own. Creating and
@@ -701,7 +762,8 @@ The observability work is complete when all of the following are true:
    effect. Operator-important transitions also assert their structured log event.
 5. Every up-down counter has a tested conservation equation and returns to zero
    after clean shutdown.
-6. Metric names, units, descriptions, dimensions and alarms are documented.
+6. Metric names, units, descriptions, dimensions and suggested investigation
+   thresholds are documented without installing alerts or notifications.
 7. An operator who did not implement the feature can identify the injected gameday
    fault and the affected identity chain within ten minutes.
 8. INFO-level logging remains bounded during healthy steady state and during a
@@ -754,13 +816,20 @@ Immediately after taking that mainline merge:
 
 1. Render or inspect the actual collector configuration used by each deployment.
 2. Decide which metrics genuinely need per-pod/instance dimensions.
-3. Preserve fleet-aggregate metric series for dashboards and alarms.
+3. Preserve fleet-aggregate metric series for dashboards and operator queries.
 4. Verify existing dashboards against a multi-pod Kubernetes deployment.
 5. Add a short metric-cardinality test or deployment-config assertion so a collector
    change cannot silently multiply every series.
 
 Recommended default: keep the restart-scoped instance ID in logs and the OTel
 resource, but do not make it an implicit CloudWatch dimension on every fleet metric.
+
+Execution checkpoint (2026-10-06): upstream commit `a5705abb8` landed the
+`service.instance.id` metric-resource change and was incorporated through merge
+commit `a3275f79a` before telemetry wiring changed. The EKS application-metric
+pipeline removes `service.instance.id` before `resource_to_telemetry_conversion`;
+`deployment/k8s:verifyCaptureReplayObservability` now enforces that fleet-cardinality
+safeguard and the traces-disabled Kubernetes default.
 
 #### Mainline integration checkpoint
 
@@ -1052,7 +1121,7 @@ Before gameday, make the new signals usable without reading source:
   equations and healthy-state expectations.
 - Create capture, replay-intake, target execution, Kafka commit and tuple durability
   dashboard sections.
-- Add alarms for:
+- Document suggested investigation thresholds for:
   - capture gap active
   - heartbeat deadline violation
   - publisher terminal failure
@@ -1064,6 +1133,9 @@ Before gameday, make the new signals usable without reading source:
   - oldest-work age above threshold
   - tuple durability terminal failure or sustained retrying
   - commit uncertainty or consumer lag
+- Do not install Prometheus alert rules, Alertmanager notification configuration,
+  CloudWatch alarms, or notification targets. Dashboard threshold colors are
+  display-only.
 - Document log queries keyed by event name and each identity field.
 - Add short operator decision trees:
   - capture not reaching Kafka
@@ -1077,7 +1149,7 @@ Before gameday, make the new signals usable without reading source:
 
 Run with production trace export disabled. For each scenario, record:
 
-- expected first metric/alarm
+- expected first metric or threshold breach
 - expected first INFO/WARN/ERROR event
 - exact identity chain used to investigate
 - time to detection and time to causal hypothesis
@@ -1129,9 +1201,9 @@ Run with production trace export disabled. For each scenario, record:
 5. **Replay observability:** missing aggregate metrics, owner-level logs, health
    summary and behavior-test assertions.
 6. **Mainline checkpoint B:** merge mainline again after the capture/replay
-   implementation stabilizes and before dashboards and alarm thresholds are
+   implementation stabilizes and before dashboards and investigation thresholds are
    finalized. Rerun the traces-disabled observability tests.
-7. **Operator readiness:** log routing, dashboards, alarms and runbooks.
+7. **Operator readiness:** log routing, dashboards and runbooks.
 8. **Gameday:** run all scenarios, patch gaps, rerun failed scenarios, and preserve
    outputs as release evidence.
 9. **Release checkpoint:** merge the intended release baseline, rerun the failed
@@ -1139,7 +1211,7 @@ Run with production trace export disabled. For each scenario, record:
    dimensions or missing log events as release blockers.
 
 Each change should be deployable independently and should avoid renaming previously
-merged metric/event contracts unless the same change updates dashboards, alarms and
+merged metric/event contracts unless the same change updates dashboards and
 documentation.
 
 ---
@@ -1148,31 +1220,32 @@ documentation.
 
 Hooks for expanding this review:
 
-- [ ] Is there Kafka consumer **offset lag** anywhere? `records_outstanding` is
-      in-flight, not lag. Consumer JMX metrics are not exported. Decide whether
-      operators are expected to get this from the broker side.
-- [ ] Does `TracingTest` (300 lines changed) assert the full span tree, or only
-      sample it? Traces are optional in production, but trace behavior should still
-      remain covered when enabled.
-- [ ] **Removed contexts: `ITrafficSourceContexts` / `TrafficSourceContexts` (120
-      lines) are deleted.** Deleting a context also deletes its `Count`, `Duration`
-      and `ExceptionCount` metrics. Confirm nothing operators relied upon became
-      dark and whether external dashboards referenced those names.
+- [x] Kafka consumer **offset lag** is obtained from the broker-side consumer-group
+      view. `deployment/k8s/scripts/capture-replay-gameday.sh lag` executes the
+      Strimzi Kafka CLI and reports one group summary. `records_outstanding` remains
+      an in-flight conservation signal, not broker lag.
+- [x] `TracingTest` asserts the complete span tree it constructs, including exact
+      activity counts, both root spans, and every parent relationship. Traces remain
+      optional in production while enabled behavior stays covered.
+- [x] **Removed contexts: `ITrafficSourceContexts` / `TrafficSourceContexts`.**
+      These classes were entirely inside `REBUILD-LIMBO` comments before deletion,
+      so their `Count`, `Duration`, and `ExceptionCount` instruments were not live.
+      No deployment dashboard in this repository references their activity names.
 - [ ] Span-derived metrics are emitted per context *close*. For the highest-frequency
       contexts (`requestSending`, `receivingResponse`, one per attempt per request)
       confirm the resulting metric volume and histogram bucket counts are acceptable
-      at production request rates — the cardinality review covered attributes, not
-      emission frequency.
-- [ ] `sonar-project.properties` lost 22 lines — check whether any of that was
-      coverage or instrumentation-related exclusion.
-- [ ] Verify that metric export can remain enabled when trace export is disabled in
-      each production deployment configuration, and add that mode to an integration
-      test.
-- [ ] Define the immutable Kafka diagnostic snapshot consumed by the context monitor.
-      The existing logging heartbeat already computes most required fields on the
-      owner thread, but the monitor needs a safe published value and a precise rule
-      for correlating a record with staged/in-flight commit positions. Do not expose
-      `ObservedRecordCommitQueue` itself across threads.
+      at production request rates during the live Kubernetes gameday — the
+      cardinality review covered attributes, not emission frequency, and local tests
+      cannot establish production export volume.
+- [x] The removed `sonar-project.properties` lines were only issue suppressions for
+      retired replay classes (`ClientConnectionPool`, `BlockingTrafficSource`,
+      `TrafficReplayerCore`, and `ReplayEngine`). No coverage or
+      instrumentation-related exclusion was removed.
+- [x] Metric export remains enabled while trace export defaults off in Kubernetes.
+      Startup-summary and traces-disabled context-monitor tests cover this mode.
+- [x] `KafkaSourceOwner` publishes immutable diagnostic snapshot copies. The monitor
+      correlates the globally oldest record with those snapshots and never reads
+      owner-thread-confined commit state.
 
 ---
 
@@ -1220,14 +1293,14 @@ monotonic counter.
 
 | Name | Type | Unit | Attributes |
 |---|---|---|---|
-| `records_read` | counter | records | — |
-| `records_committed` | counter | records | — |
-| `records_cancelled` | counter | records | — |
-| `records_abandoned_at_revocation` | counter | records | `cause` |
-| `records_commit_ineligible` | counter | records | — |
-| `records_outstanding` | UD | records | — |
-| `commit_attempts_rejected` | counter | attempts | — |
-| `commit_resolutions` | counter | events | `outcome` |
+| `kafkaSourceRecordsRead` | counter | records | — |
+| `kafkaSourceRecordsCommitted` | counter | records | — |
+| `kafkaSourceRecordsCancelled` | counter | records | — |
+| `kafkaSourceRecordsAbandonedAtRevocation` | counter | records | `cause` |
+| `kafkaSourceRecordsCommitIneligible` | counter | records | — |
+| `kafkaSourceRecordsOutstanding` | UD | records | — |
+| `kafkaSourceCommitAttemptsRejected` | counter | attempts | — |
+| `kafkaSourceCommitResolutions` | counter | events | `outcome` |
 
 ### `TargetAttemptPermitMetrics` — scope `replayer`, 8 instruments
 
@@ -1242,7 +1315,7 @@ monotonic counter.
 | `targetAttemptPermitsReleased` | counter | permits |
 | `targetAttemptPermitHeldDuration` | H | ms |
 
-### `ResourceOwnershipMetrics` — **never instantiated, see `O-1`**, 5 instruments
+### `ResourceOwnershipMetrics` — production-wired, 5 instruments
 
 | Name | Type | Unit | Attributes |
 |---|---|---|---|

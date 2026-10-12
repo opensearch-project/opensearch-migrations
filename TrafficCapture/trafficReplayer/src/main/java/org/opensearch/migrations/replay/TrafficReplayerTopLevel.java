@@ -46,6 +46,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparat
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
 import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
+import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
 import org.opensearch.migrations.replay.lifecycle.TargetChannelPort;
 import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
@@ -57,7 +58,6 @@ import org.opensearch.migrations.replay.sink.TupleWriter.TupleDropped;
 import org.opensearch.migrations.replay.sink.TupleWriter.TupleTransformer;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.tracing.ProtocolViolationMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
@@ -322,6 +322,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     private final Configuration<P, R, T> configuration;
     private final ChannelContextManager contextManager;
     private final TargetAttemptPermitProvider permitProvider;
+    private final RequestReplayOwner.Metrics targetExecutionMetrics;
+    private final TupleWriter.Metrics tupleDurabilityMetrics;
     private final ProcessSupervisor.FailureSink fatalSink;
     private final ProtocolViolationTerminator protocolViolationTerminator;
     private final ActiveContextMonitor activityMonitor;
@@ -385,11 +387,11 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         this.kafkaWakeup = consumer::wakeup;
         this.protocolViolationTerminator = ProtocolViolationTerminator.system(
             protocolViolationTermination,
-            new ProtocolViolationMetrics(
-                rootContext.getMeterProvider().get(RootReplayerContext.SCOPE_NAME)
-            )
+            rootContext.getProtocolViolationMetrics()
         );
         this.contextManager = new ChannelContextManager(rootContext);
+        this.targetExecutionMetrics = rootContext.getTargetExecutionMetrics();
+        this.tupleDurabilityMetrics = rootContext.getTupleDurabilityMetrics();
         var wakeupController = new WakeupController(consumer::wakeup, rootContext);
         this.sourceInputs = new KafkaSourceInputQueue(wakeupController);
         this.intakeInputs = new ReplayIntakeInputQueue();
@@ -409,17 +411,13 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         this.connectionAssemblySink = new ConnectionAssemblySink(
             configuration.replayTimeMapper()
         );
-        this.activityMonitor = ActiveContextMonitor.system(
-            configuration.clock(),
-            this::activitySnapshots
-        );
         this.intakeOwner = new ReplayIntakeOwner(
             intakeInputs,
             sourceInputs,
             connectionAssemblySink,
             unexpectedFailure("replay intake owner", "owner loop")::accept,
             rootContext.getReplayIntakeMetrics(),
-            ReplayIntakeOwner.RecordObserver.NOOP,
+            ReplayIntakeOwner.RecordObserver.NONE,
             configuration.brokerTimeConfiguration(),
             configuration.retryReadyRequestSupplyTarget()
         );
@@ -437,6 +435,14 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 violation.recordId(),
                 violation.diagnostic()
             )
+        );
+        this.activityMonitor = ActiveContextMonitor.system(
+            configuration.clock(),
+            rootContext.getActiveContextTracker(),
+            rootContext.getActiveContextTrackerByActivityType(),
+            this::activitySnapshots,
+            sourceOwner::diagnosticSnapshot,
+            rootContext.getReplayActivityMetrics()
         );
     }
 
@@ -575,6 +581,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     public void stopNewInputForFatal(ProcessSupervisor.FatalSignal ignored) {
         fatalTerminationStarted.set(true);
         firstFatalSignal.complete(ignored);
+        activityMonitor.close();
         sourceInputs.close();
         intakeInputs.closeNow();
         kafkaWakeup.run();
@@ -664,6 +671,10 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             unique.addAll(worker.writer.operations().snapshots())
         );
         return List.copyOf(unique);
+    }
+
+    void runActivityMonitorOnce() {
+        activityMonitor.run();
     }
 
     /**
@@ -858,7 +869,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     > deployedRequestPreparer(
         @NonNull Supplier<IJsonTransformer> transformerSupplier,
         IAuthTransformerFactory authTransformerFactory,
-        @NonNull Duration packetInterval
+        @NonNull Duration packetInterval,
+        @NonNull ResourceOwnership.Metrics ownershipMetrics
     ) {
         if (packetInterval.isNegative()) {
             throw new IllegalArgumentException("packetInterval must not be negative");
@@ -866,7 +878,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         return deployedRequestPreparer(
             transformerSupplier,
             authTransformerFactory,
-            (ignoredSourceRequest, ignoredPreparedRequest) -> packetInterval
+            (ignoredSourceRequest, ignoredPreparedRequest) -> packetInterval,
+            ownershipMetrics
         );
     }
 
@@ -876,7 +889,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     > deployedRequestPreparer(
         @NonNull Supplier<IJsonTransformer> transformerSupplier,
         IAuthTransformerFactory authTransformerFactory,
-        double speedupFactor
+        double speedupFactor,
+        @NonNull ResourceOwnership.Metrics ownershipMetrics
     ) {
         if (!(speedupFactor > 0.0) || !Double.isFinite(speedupFactor)) {
             throw new IllegalArgumentException("speedupFactor must be finite and positive");
@@ -889,7 +903,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                     sourceRequest,
                     preparedRequest,
                     speedupFactor
-                )
+                ),
+            ownershipMetrics
         );
     }
 
@@ -926,7 +941,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             HttpMessageAndTimestamp.Request,
             org.opensearch.migrations.replay.datatypes.OwnedPreparedRequest,
             Duration
-        > packetIntervalFactory
+        > packetIntervalFactory,
+        @NonNull ResourceOwnership.Metrics ownershipMetrics
     ) {
         return (requestId, sourceRequest, replayContext) -> {
             var completion = new CompletableFuture<RequestPreparationResult<
@@ -984,6 +1000,9 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                     }
                     NettyPacketToHttpConsumer.PreparedRequest prepared = null;
                     try {
+                        if (transformed.transformedOutput != null) {
+                            transformed.transformedOutput.trackOwnership(ownershipMetrics);
+                        }
                         prepared = transformed.transformedOutput == null
                             ? null
                             : new NettyPacketToHttpConsumer.PreparedRequest(
@@ -1128,7 +1147,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             intakeInputs.closeNow();
             closeTupleWriterWorkers();
             closeProtocolViolationTerminator();
-            activityMonitor.close();
+            activityMonitor.closeAfterOrderlyDrain();
             return;
         }
         sourceOwner.beginOrderlyShutdown();
@@ -1156,7 +1175,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             return;
         }
         closeProtocolViolationTerminator();
-        activityMonitor.close();
+        activityMonitor.closeAfterOrderlyDrain();
     }
 
     boolean awaitIntakeTerminationOrFatal() {
@@ -1236,7 +1255,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 "target connection owner " + connectionId,
                 "owner transition"
             )::accept,
-            org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP,
+            targetExecutionMetrics,
             configuration.maximumResponseRetries(),
             () -> assemblySink.releaseTerminatedConnection(
                 connectionId,
@@ -1329,7 +1348,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                     "tuple writer worker " + workerIndex,
                     "owner transition"
                 )::accept,
-                org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP
+                tupleDurabilityMetrics
             );
         }
 
@@ -1491,6 +1510,12 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                         request,
                         rejected.cause()
                     );
+                } else {
+                    log.atDebug()
+                        .setMessage("event=request_admitted request={} new_connection={}")
+                        .addArgument(requestId)
+                        .addArgument(newBinding)
+                        .log();
                 }
             });
         }

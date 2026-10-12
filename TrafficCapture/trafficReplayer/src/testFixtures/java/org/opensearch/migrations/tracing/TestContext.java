@@ -20,6 +20,7 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
     private static final TopicPartition TEST_TOPIC_PARTITION = new TopicPartition("test-fixture", 0);
 
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
+    private final BacktracingContextTracker backtracingContextTracker;
     private long nextSyntheticRecordOffset;
 
     public static TestContext withTracking(boolean tracing, boolean metrics) {
@@ -37,10 +38,11 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
     public TestContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle, IContextTracker contextTracker) {
         super(inMemoryInstrumentationBundle.openTelemetrySdk, contextTracker);
         this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
+        this.backtracingContextTracker = (BacktracingContextTracker) contextTracker;
     }
 
     public BacktracingContextTracker getBacktracingContextTracker() {
-        return (BacktracingContextTracker) getContextTracker();
+        return backtracingContextTracker;
     }
 
     @Override

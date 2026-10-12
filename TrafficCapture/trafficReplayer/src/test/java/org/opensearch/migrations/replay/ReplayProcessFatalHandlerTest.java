@@ -37,6 +37,7 @@ import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.lifecycle.TargetChannelPort;
 import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.ReplayActivityMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
@@ -106,6 +107,7 @@ class ReplayProcessFatalHandlerTest {
                 supervisor.failureSink()
             );
             replayerReference.set(replayer);
+            replayer.runActivityMonitorOnce();
 
             eventLoopGroup.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS);
             releaseBlocker.countDown();
@@ -135,6 +137,14 @@ class ReplayProcessFatalHandlerTest {
             Assertions.assertTrue(stderr.toString(StandardCharsets.UTF_8).contains(
                 "target event loop worker 0"
             ));
+            var postFatalContext = rootContext.createPollContext();
+            replayer.runActivityMonitorOnce();
+            assertLongGauge(
+                telemetry,
+                ReplayActivityMetrics.MetricNames.ACTIVE_CONTEXTS,
+                0
+            );
+            postFatalContext.close();
         } finally {
             releaseBlocker.countDown();
             eventLoopGroup.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS)
@@ -151,6 +161,24 @@ class ReplayProcessFatalHandlerTest {
         Assertions.assertEquals(
             89,
             ProcessSupervisor.Reason.UNEXPECTED_FATAL_ERROR.exitCode()
+        );
+    }
+
+    private static void assertLongGauge(
+        InMemoryInstrumentationBundle telemetry,
+        String name,
+        long expected
+    ) {
+        var metric = java.util.stream.StreamSupport.stream(
+            telemetry.getFinishedMetrics().spliterator(),
+            false
+        )
+            .filter(data -> data.getName().equals(name))
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(
+            expected,
+            metric.getLongGaugeData().getPoints().iterator().next().getValue()
         );
     }
 

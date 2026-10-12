@@ -70,15 +70,6 @@ public final class OutstandingOperationRegistry {
         void onFatal(Error failure);
     }
 
-    public interface CountHook {
-        CountHook NOOP = new CountHook() {
-            @Override
-            public void operationCountChanged(OperationType type, int typeCount, int totalCount) {}
-        };
-
-        void operationCountChanged(OperationType type, int typeCount, int totalCount);
-    }
-
     public record Snapshot(
         long operationId,
         @NonNull String ownerIdentity,
@@ -154,7 +145,6 @@ public final class OutstandingOperationRegistry {
     private final EventLoop eventLoop;
     private final Clock clock;
     private final FatalHandler fatalHandler;
-    private final CountHook countHook;
     private final Map<Long, Entry> active = new LinkedHashMap<>();
     private volatile List<Snapshot> publishedSnapshots = List.of();
     private long nextOperationId = 1;
@@ -164,10 +154,9 @@ public final class OutstandingOperationRegistry {
         @NonNull String ownerIdentity,
         @NonNull EventLoop eventLoop,
         @NonNull Clock clock,
-        @NonNull FatalHandler fatalHandler,
-        @NonNull CountHook countHook
+        @NonNull FatalHandler fatalHandler
     ) {
-        this(ownerIdentity, null, eventLoop, clock, fatalHandler, countHook);
+        this(ownerIdentity, null, eventLoop, clock, fatalHandler);
     }
 
     public OutstandingOperationRegistry(
@@ -175,15 +164,13 @@ public final class OutstandingOperationRegistry {
         KafkaRecordId defaultKafkaRecordId,
         @NonNull EventLoop eventLoop,
         @NonNull Clock clock,
-        @NonNull FatalHandler fatalHandler,
-        @NonNull CountHook countHook
+        @NonNull FatalHandler fatalHandler
     ) {
         this.ownerIdentity = ownerIdentity;
         this.defaultKafkaRecordId = defaultKafkaRecordId;
         this.eventLoop = eventLoop;
         this.clock = clock;
         this.fatalHandler = fatalHandler;
-        this.countHook = countHook;
     }
 
     public Registration register(
@@ -236,7 +223,7 @@ public final class OutstandingOperationRegistry {
                 waitReason
             )
         );
-        publish(operationType);
+        publish();
         return new Registration(this, operationId);
     }
 
@@ -250,7 +237,7 @@ public final class OutstandingOperationRegistry {
             return;
         }
         active.put(registration.operationId, entry.withWaitReason(waitReason));
-        publish(null);
+        publish();
     }
 
     public void complete(@NonNull Registration registration) {
@@ -260,7 +247,7 @@ public final class OutstandingOperationRegistry {
             return;
         }
         active.remove(registration.operationId);
-        publish(entry.operationType);
+        publish();
     }
 
     public List<Snapshot> snapshots() {
@@ -294,25 +281,12 @@ public final class OutstandingOperationRegistry {
         return entry;
     }
 
-    private void publish(OperationType changedType) {
+    private void publish() {
         var snapshots = new ArrayList<Snapshot>(active.size());
         active.forEach((operationId, entry) ->
             snapshots.add(entry.snapshot(operationId, ownerIdentity, entry.kafkaRecordId()))
         );
         publishedSnapshots = List.copyOf(snapshots);
-        if (changedType != null) {
-            var typeCount = 0;
-            for (var entry : active.values()) {
-                if (entry.operationType == changedType) {
-                    typeCount++;
-                }
-            }
-            try {
-                countHook.operationCountChanged(changedType, typeCount, active.size());
-            } catch (Throwable failure) {
-                reportFatal("fixed-cardinality operation count hook", failure);
-            }
-        }
     }
 
     private void requireOwnerThread() {

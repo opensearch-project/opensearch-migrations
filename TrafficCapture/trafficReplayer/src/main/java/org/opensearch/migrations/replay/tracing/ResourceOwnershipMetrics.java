@@ -42,18 +42,23 @@ public final class ResourceOwnershipMetrics implements ResourceOwnership.Metrics
 
     public ResourceOwnershipMetrics(@NonNull Meter meter) {
         ownedHandles = meter.upDownCounterBuilder(MetricNames.OWNED_HANDLES)
+            .setDescription("Live reference-counted replay payload handles")
             .setUnit("handles")
             .build();
         ownedBuffers = meter.upDownCounterBuilder(MetricNames.OWNED_BUFFERS)
+            .setDescription("Live Netty buffers retained by replay payload owners")
             .setUnit("buffers")
             .build();
         ownedBytes = meter.upDownCounterBuilder(MetricNames.OWNED_BYTES)
+            .setDescription("Readable bytes retained by replay payload owners")
             .setUnit("By")
             .build();
         duplicateCloseAttempts = meter.counterBuilder(MetricNames.DUPLICATE_CLOSE_ATTEMPTS)
+            .setDescription("Duplicate close attempts against replay payload ownership")
             .setUnit("attempts")
             .build();
         invariantFailures = meter.counterBuilder(MetricNames.INVARIANT_FAILURES)
+            .setDescription("Replay payload ownership invariant failures")
             .setUnit("failures")
             .build();
     }

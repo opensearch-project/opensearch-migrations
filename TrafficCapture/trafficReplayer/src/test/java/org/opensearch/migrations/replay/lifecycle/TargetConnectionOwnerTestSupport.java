@@ -37,6 +37,7 @@ import org.opensearch.migrations.replay.testing.FakeClock;
 import org.opensearch.migrations.replay.testing.TestEventLoop;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.tracing.TargetExecutionMetrics;
 
 import io.opentelemetry.api.OpenTelemetry;
 import org.apache.kafka.common.TopicPartition;
@@ -83,6 +84,17 @@ final class TargetConnectionOwnerTestSupport {
             this(1);
         }
 
+        Fixture(RequestReplayOwner.Metrics requestMetrics) {
+            this(
+                CONNECTION,
+                new FakeClock(),
+                1,
+                false,
+                (replayContext, tuple) -> new TupleWriter.TransformedTuple<>(tuple),
+                requestMetrics
+            );
+        }
+
         Fixture(int permitCapacity) {
             this(permitCapacity, false);
         }
@@ -105,7 +117,8 @@ final class TargetConnectionOwnerTestSupport {
                 new FakeClock(),
                 permitCapacity,
                 separateTupleEventLoop,
-                tupleTransformer
+                tupleTransformer,
+                new TargetExecutionMetrics(OpenTelemetry.noop().getMeter("test"))
             );
         }
 
@@ -120,7 +133,8 @@ final class TargetConnectionOwnerTestSupport {
                 eventLoop,
                 1,
                 false,
-                (replayContext, tuple) -> new TupleWriter.TransformedTuple<>(tuple)
+                (replayContext, tuple) -> new TupleWriter.TransformedTuple<>(tuple),
+                new TargetExecutionMetrics(OpenTelemetry.noop().getMeter("test"))
             );
         }
 
@@ -129,7 +143,8 @@ final class TargetConnectionOwnerTestSupport {
             FakeClock clock,
             int permitCapacity,
             boolean separateTupleEventLoop,
-            TupleWriter.TupleTransformer<String> tupleTransformer
+            TupleWriter.TupleTransformer<String> tupleTransformer,
+            RequestReplayOwner.Metrics requestMetrics
         ) {
             this(
                 connection,
@@ -137,7 +152,8 @@ final class TargetConnectionOwnerTestSupport {
                 new TestEventLoop(clock),
                 permitCapacity,
                 separateTupleEventLoop,
-                tupleTransformer
+                tupleTransformer,
+                requestMetrics
             );
         }
 
@@ -147,7 +163,8 @@ final class TargetConnectionOwnerTestSupport {
             TestEventLoop eventLoop,
             int permitCapacity,
             boolean separateTupleEventLoop,
-            TupleWriter.TupleTransformer<String> tupleTransformer
+            TupleWriter.TupleTransformer<String> tupleTransformer,
+            RequestReplayOwner.Metrics requestMetrics
         ) {
             this.connection = connection;
             this.generation = connection.generation();
@@ -158,7 +175,7 @@ final class TargetConnectionOwnerTestSupport {
             permitProvider = new TargetAttemptPermitProvider(
                 permitCapacity,
                 activePermits,
-                TargetAttemptPermitProvider.Metrics.NOOP,
+                replayContexts.getTargetAttemptPermitMetrics(),
                 fatalFailures::add
             );
             tupleWriter = new TupleWriter<>(
@@ -169,7 +186,7 @@ final class TargetConnectionOwnerTestSupport {
                 tupleSink,
                 ignored -> {},
                 fatalFailures::add,
-                OutstandingOperationRegistry.CountHook.NOOP
+                replayContexts.getTupleDurabilityMetrics()
             );
             owner = new TargetConnectionOwner<>(
                 connection,
@@ -213,8 +230,7 @@ final class TargetConnectionOwnerTestSupport {
                     lifecycleAcceptances
                 ),
                 fatalFailures::add,
-                (type, typeCount, totalCount) ->
-                    transitionHistory.add("operations:" + totalCount)
+                requestMetrics
             );
         }
 

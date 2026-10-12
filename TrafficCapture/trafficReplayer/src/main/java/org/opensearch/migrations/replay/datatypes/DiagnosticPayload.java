@@ -20,10 +20,6 @@ public final class DiagnosticPayload implements AutoCloseable {
     private final ByteBufList packets;
     private final ResourceOwnership.Tracker ownership;
 
-    public DiagnosticPayload(@NonNull ByteBufList packets) {
-        this(packets, ResourceOwnership.Metrics.NOOP);
-    }
-
     public DiagnosticPayload(
         @NonNull ByteBufList packets,
         @NonNull ResourceOwnership.Metrics metrics

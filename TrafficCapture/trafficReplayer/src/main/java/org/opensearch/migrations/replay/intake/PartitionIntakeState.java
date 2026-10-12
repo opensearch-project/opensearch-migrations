@@ -579,6 +579,11 @@ public final class PartitionIntakeState {
         return lifetime;
     }
 
+    public boolean hasActiveSourceConnection(@NonNull CapturedConnectionId capturedConnectionId) {
+        ownerThreadGuard.requireOwnerThread();
+        return activeSourceConnectionsByCapturedConnectionId.containsKey(capturedConnectionId);
+    }
+
     /**
      * Frees a captured connection for fresh reconstruction once its lifetime expired.
      *

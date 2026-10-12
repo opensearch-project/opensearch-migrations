@@ -22,6 +22,7 @@ welcome feedback and contributions to optimize costs.
 | fillLocalRegistry.sh              | Sets up local registry, builds and pushes images to that local registry                         |
 | forwardAllServicePorts.sh         | Port-forwards all services to localhost to make them accessible from the host machine           |
 | generateWorkflowSchemaArtifact.sh | Generates the workflow schema artifact                                                          |
+| scripts/capture-replay-gameday.sh | Captures replay lag, key metrics, and bounded operational events for gameday diagnosis             |
 | installK6Chart.sh                 | Installs or uninstalls the standalone k6 load-test chart (operator + scenarios + RBAC)          |
 | kindCleanup.sh                    | Cleanups the loal kind deployment                                                               |
 | kindTesting.sh                    | (Re)deploys a local kind cluster and installs the migration assistant with a source and target  |
@@ -35,6 +36,16 @@ See the [kind instructions](#install-kind) below for more details about specific
 
 `deployCdcLoadTestConfig.sh` is the one to reach for when you want a running capture proxy and
 replayer locally, with k6 ready to drive traffic through them.
+
+The installed Grafana and optional CloudWatch dashboards provide the capture/replay
+operator views. This repository installs no alerts or notifications. The metric
+catalog, log queries, decision trees, and gameday procedure are documented in
+[Capture and replay observability operations](../../docs/captureAndReplay/observabilityOperations.md).
+Use `scripts/capture-replay-gameday.sh baseline` to collect broker-derived consumer
+lag, key metrics, and bounded operational events. For a tuple-sink outage, inspect
+the pending-write and retrying-object populations together with
+`replayOldestContextAgeByActivity{activity="comparingResults"}`; the latter is the
+age of the oldest tuple whose durability result is still pending.
 
 What it submits is a migration **config** (`configs/cdcLoadTest.yaml`, or your own with `-f`), not a
 workflow: it feeds the config to `workflow configure edit --stdin` + `workflow submit` in the

@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.replay.testing.TestLogAppender;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -64,76 +66,85 @@ class ProcessSupervisorTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("ProcessSupervisorLogger")
     void firstFatalSignalStopsInputFlushesDiagnosticsAndStartsExit80() {
         var events = new ArrayList<String>();
         var watchdogDelay = new AtomicReference<Duration>();
         var watchdogAction = new AtomicReference<Runnable>();
         var stderrBytes = new ByteArrayOutputStream();
-        var supervisor = new ProcessSupervisor(
-            reason -> events.add("metric:" + reason.metricLabel()),
-            signal -> events.add("stop:" + signal.owner() + ":" + signal.operation()),
-            exitCode -> events.add("exit:" + exitCode),
-            exitCode -> events.add("halt:" + exitCode),
-            (delay, action) -> {
-                watchdogDelay.set(delay);
-                watchdogAction.set(action);
-                events.add("watchdog");
-            },
-            stream -> {
-                events.add("thread-dump");
-                stream.println("test thread dump");
-            },
-            () -> events.add("diagnostic-flush"),
-            new PrintStream(stderrBytes, false, StandardCharsets.UTF_8)
-        );
+        try (var logs = new TestLogAppender(ProcessSupervisor.class)) {
+            var supervisor = new ProcessSupervisor(
+                reason -> events.add("metric:" + reason.metricLabel()),
+                signal -> events.add("stop:" + signal.owner() + ":" + signal.operation()),
+                exitCode -> events.add("exit:" + exitCode),
+                exitCode -> events.add("halt:" + exitCode),
+                (delay, action) -> {
+                    watchdogDelay.set(delay);
+                    watchdogAction.set(action);
+                    events.add("watchdog");
+                },
+                stream -> {
+                    events.add("thread-dump");
+                    stream.println("test thread dump");
+                },
+                () -> events.add("diagnostic-flush"),
+                new PrintStream(stderrBytes, false, StandardCharsets.UTF_8)
+            );
 
-        var accepted = new ProcessSupervisor.FatalSignal(
-            ProcessSupervisor.Reason.EVENT_LOOP_TERMINATED,
-            "target event loop worker 3",
-            "termination future",
-            new Error("event loop stopped")
-        );
-        supervisor.onFatal(accepted);
-        supervisor.onFatal(new ProcessSupervisor.FatalSignal(
-            ProcessSupervisor.Reason.UNEXPECTED_FATAL_ERROR,
-            "replay intake owner",
-            "owner loop",
-            new Error("duplicate")
-        ));
+            var accepted = new ProcessSupervisor.FatalSignal(
+                ProcessSupervisor.Reason.EVENT_LOOP_TERMINATED,
+                "target event loop worker 3",
+                "termination future",
+                new Error("event loop stopped")
+            );
+            supervisor.onFatal(accepted);
+            supervisor.onFatal(new ProcessSupervisor.FatalSignal(
+                ProcessSupervisor.Reason.UNEXPECTED_FATAL_ERROR,
+                "replay intake owner",
+                "owner loop",
+                new Error("duplicate")
+            ));
 
-        Assertions.assertEquals(ProcessSupervisor.EXIT_WATCHDOG_LIMIT, watchdogDelay.get());
-        Assertions.assertEquals(
-            List.of(
-                "watchdog",
-                "stop:target event loop worker 3:termination future",
-                "metric:event_loop_terminated",
-                "diagnostic-flush",
-                "exit:80"
-            ),
-            events
-        );
-        Assertions.assertSame(accepted, supervisor.firstFatalSignal().orElseThrow());
-        Assertions.assertTrue(supervisor.fatalTerminationStarted());
+            Assertions.assertEquals(ProcessSupervisor.EXIT_WATCHDOG_LIMIT, watchdogDelay.get());
+            Assertions.assertEquals(
+                List.of(
+                    "watchdog",
+                    "stop:target event loop worker 3:termination future",
+                    "metric:event_loop_terminated",
+                    "diagnostic-flush",
+                    "exit:80"
+                ),
+                events
+            );
+            Assertions.assertSame(accepted, supervisor.firstFatalSignal().orElseThrow());
+            Assertions.assertTrue(supervisor.fatalTerminationStarted());
+            Assertions.assertTrue(logs.contains(
+                "replayer_fatal_failure",
+                "reason=event_loop_terminated",
+                "owner=target event loop worker 3",
+                "operation=termination future"
+            ));
 
-        watchdogAction.get().run();
+            watchdogAction.get().run();
 
-        Assertions.assertEquals(
-            List.of(
-                "watchdog",
-                "stop:target event loop worker 3:termination future",
-                "metric:event_loop_terminated",
-                "diagnostic-flush",
-                "exit:80",
-                "thread-dump",
-                "halt:80"
-            ),
-            events
-        );
-        var stderr = stderrBytes.toString(StandardCharsets.UTF_8);
-        Assertions.assertTrue(stderr.contains("owner=target event loop worker 3"));
-        Assertions.assertTrue(stderr.contains("operation=termination future"));
-        Assertions.assertTrue(stderr.contains("System.exit did not complete within PT10M"));
-        Assertions.assertTrue(stderr.contains("test thread dump"));
+            Assertions.assertEquals(
+                List.of(
+                    "watchdog",
+                    "stop:target event loop worker 3:termination future",
+                    "metric:event_loop_terminated",
+                    "diagnostic-flush",
+                    "exit:80",
+                    "thread-dump",
+                    "halt:80"
+                ),
+                events
+            );
+            var stderr = stderrBytes.toString(StandardCharsets.UTF_8);
+            Assertions.assertTrue(stderr.contains("owner=target event loop worker 3"));
+            Assertions.assertTrue(stderr.contains("operation=termination future"));
+            Assertions.assertTrue(stderr.contains("System.exit did not complete within PT10M"));
+            Assertions.assertTrue(stderr.contains("test thread dump"));
+        }
     }
 
     @Test

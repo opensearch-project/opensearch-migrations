@@ -20,10 +20,14 @@ import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
+import org.opensearch.migrations.tracing.TestContext;
 
 import org.apache.kafka.common.TopicPartition;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 class TargetAttemptPermitProviderTest {
     @Test
@@ -197,47 +201,71 @@ class TargetAttemptPermitProviderTest {
         var counter = new AtomicInteger(2);
         var failures = new ArrayList<Error>();
 
-        var thrown = Assertions.assertThrows(
-            IllegalStateException.class,
-            () -> new TargetAttemptPermitProvider(
-                1,
-                counter,
-                TargetAttemptPermitProvider.Metrics.NOOP,
-                failures::add
-            )
-        );
+        try (var testContext = TestContext.noOtelTracking()) {
+            var thrown = Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> new TargetAttemptPermitProvider(
+                    1,
+                    counter,
+                    testContext.getTargetAttemptPermitMetrics(),
+                    failures::add
+                )
+            );
 
-        Assertions.assertEquals(2, counter.get());
-        Assertions.assertEquals(1, failures.size());
-        Assertions.assertSame(thrown, failures.get(0).getCause());
+            Assertions.assertEquals(2, counter.get());
+            Assertions.assertEquals(1, failures.size());
+            Assertions.assertSame(thrown, failures.get(0).getCause());
+        }
     }
 
     @Test
+    @ResourceLock("TargetAttemptPermitProviderLogger")
     void heldDurationAndPermitConservationAreObserved() {
-        var metrics = new RecordingMetrics();
-        var nanoTime = new AtomicLong(1_000_000);
-        var counter = new AtomicInteger();
-        var failures = new ArrayList<Error>();
-        var provider = new TargetAttemptPermitProvider(
-            1,
-            counter,
-            metrics,
-            failures::add,
-            nanoTime::get
-        );
-        var permit = acquired(provider.acquire(request(0)));
+        try (var logs = new TestLogAppender(TargetAttemptPermitProvider.class)) {
+            var metrics = new RecordingMetrics();
+            var nanoTime = new AtomicLong(1_000_000);
+            var counter = new AtomicInteger();
+            var failures = new ArrayList<Error>();
+            var provider = new TargetAttemptPermitProvider(
+                1,
+                counter,
+                metrics,
+                failures::add,
+                nanoTime::get
+            );
+            var permit = acquired(provider.acquire(request(0)));
 
-        nanoTime.set(6_000_000);
-        permit.close();
+            nanoTime.set(6_000_000);
+            permit.close();
 
-        Assertions.assertEquals(1, metrics.acquisitions);
-        Assertions.assertEquals(0, metrics.acquisitionFailures);
-        Assertions.assertEquals(1, metrics.permitsAcquired);
-        Assertions.assertEquals(1, metrics.permitsReleased);
-        Assertions.assertEquals(0, metrics.activePermits);
-        Assertions.assertEquals(List.of(Duration.ofMillis(5)), metrics.heldDurations);
-        Assertions.assertEquals(0, counter.get());
-        Assertions.assertTrue(failures.isEmpty());
+            Assertions.assertEquals(1, metrics.acquisitions);
+            Assertions.assertEquals(0, metrics.acquisitionFailures);
+            Assertions.assertEquals(1, metrics.permitsAcquired);
+            Assertions.assertEquals(1, metrics.permitsReleased);
+            Assertions.assertEquals(0, metrics.activePermits);
+            Assertions.assertEquals(List.of(Duration.ofMillis(5)), metrics.heldDurations);
+            Assertions.assertEquals(0, counter.get());
+            Assertions.assertTrue(logs.contains(
+                "target_permit_requested",
+                "request=",
+                "capacity=1",
+                "active=0"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "target_permit_acquired",
+                "request=",
+                "active=1",
+                "capacity=1"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "target_permit_released",
+                "request=",
+                "active=0",
+                "held_ms=5"
+            ));
+            Assertions.assertEquals(1, logs.count("target_permit_released", Level.DEBUG));
+            Assertions.assertTrue(failures.isEmpty());
+        }
     }
 
     private static TargetAttemptPermitProvider.Permit acquired(

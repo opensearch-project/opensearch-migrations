@@ -4,6 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.FailureReason;
+
 import lombok.NonNull;
 
 /**
@@ -17,11 +20,16 @@ import lombok.NonNull;
  * decisions about whether the process may still claim authoritative capture.
  */
 final class CaptureKafkaWriteGate {
+    private final CapturePublishingMetrics metrics;
     private Throwable terminalFailure;
     private final List<Consumer<Throwable>> terminalFailureListeners = new ArrayList<>();
 
-    static CaptureKafkaWriteGate unrestricted() {
-        return new CaptureKafkaWriteGate();
+    CaptureKafkaWriteGate(@NonNull CapturePublishingMetrics metrics) {
+        this.metrics = metrics;
+    }
+
+    static CaptureKafkaWriteGate unrestricted(@NonNull CapturePublishingMetrics metrics) {
+        return new CaptureKafkaWriteGate(metrics);
     }
 
     void addTerminalFailureListener(@NonNull Consumer<Throwable> listener) {
@@ -39,6 +47,7 @@ final class CaptureKafkaWriteGate {
     Throwable submitIfWritable(Runnable submission) {
         synchronized (this) {
             if (terminalFailure != null) {
+                metrics.writeRejected();
                 return terminalFailure;
             }
         }
@@ -47,18 +56,25 @@ final class CaptureKafkaWriteGate {
     }
 
     Throwable failureIfNotWritable() {
-        return submitIfWritable(() -> {});
+        synchronized (this) {
+            return terminalFailure;
+        }
     }
 
-    Throwable trip(@NonNull Throwable failure) {
+    Throwable trip(@NonNull Throwable failure, @NonNull FailureReason reason) {
         List<Consumer<Throwable>> listeners = List.of();
         Throwable canonicalFailure;
+        boolean transitioned = false;
         synchronized (this) {
             if (terminalFailure == null) {
                 terminalFailure = failure;
                 listeners = List.copyOf(terminalFailureListeners);
+                transitioned = true;
             }
             canonicalFailure = terminalFailure;
+        }
+        if (transitioned) {
+            metrics.writeGateTripped(reason);
         }
         notifyListeners(listeners, canonicalFailure);
         return canonicalFailure;

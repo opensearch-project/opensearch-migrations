@@ -88,7 +88,7 @@ class KafkaSourceOwnerTest {
             var owner = ownerFor(
                 port,
                 GRACE,
-                KafkaSourceOwner.RecordContextFactory.NONE,
+                rootContext::createKafkaRecordContext,
                 violation -> {
                     throw new KafkaSourceOwner.CaptureProtocolViolation(violation);
                 },
@@ -119,6 +119,19 @@ class KafkaSourceOwnerTest {
             owner.runOnce();
 
             Assertions.assertEquals(1, logs.getLogEvents().size());
+            var diagnostic = owner.diagnosticSnapshot();
+            Assertions.assertEquals(
+                KafkaSourceOwner.RecordDiagnosticState.PROCESSING,
+                diagnostic.records().get(new KafkaRecordId(generation0, 10)).state()
+            );
+            Assertions.assertEquals(
+                KafkaSourceOwner.RecordDiagnosticState.PROCESSING,
+                diagnostic.records().get(new KafkaRecordId(generation1, 20)).state()
+            );
+            Assertions.assertThrows(
+                UnsupportedOperationException.class,
+                () -> diagnostic.records().clear()
+            );
             var firstHeartbeat = logs.getLogEvents().get(0);
             Assertions.assertAll(
                 () -> Assertions.assertTrue(firstHeartbeat.contains("generation={")),
@@ -1130,19 +1143,37 @@ class KafkaSourceOwnerTest {
     private static void assertRetirementLog(
         CloseableLogSetup logs,
         PartitionGenerationId generation,
+        long recordsCommitted,
+        long recordsRead,
         PartitionSourceState.CommitUncertainty uncertainty
     ) {
-        var generationPrefix = "Retiring generation " + generation + ":";
-        var uncertaintySuffix = "commitUncertainty=" + uncertainty;
+        assertEvent(
+            logs,
+            "kafka_generation_retiring",
+            "topic=" + generation.topicPartition().topic(),
+            "partition=" + generation.topicPartition().partition(),
+            "generation=" + generation.localSequence(),
+            "records_committed=" + recordsCommitted,
+            "records_read=" + recordsRead,
+            "commit_uncertainty=" + uncertainty
+        );
+    }
+
+    private static void assertEvent(CloseableLogSetup logs, String eventName, String... requiredFields) {
+        var prefix = "event=" + eventName;
         Assertions.assertTrue(
-            logs.getLogEvents().stream()
-                .anyMatch(message -> message.startsWith(generationPrefix) && message.endsWith(uncertaintySuffix)),
-            () -> "expected retirement log for "
-                + generation
-                + " with "
-                + uncertainty
-                + "; logs="
-                + logs.getLogEvents()
+            logs.getLogEvents().stream().anyMatch(message -> {
+                if (!message.startsWith(prefix)) {
+                    return false;
+                }
+                for (var field : requiredFields) {
+                    if (!message.contains(field)) {
+                        return false;
+                    }
+                }
+                return true;
+            }),
+            () -> "expected " + prefix + " with " + List.of(requiredFields) + "; logs=" + logs.getLogEvents()
         );
     }
 
@@ -1186,7 +1217,7 @@ class KafkaSourceOwnerTest {
                 0,
                 counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
             );
-            assertRetirementLog(logs, generation, PartitionSourceState.CommitUncertainty.NONE_OBSERVED);
+            assertRetirementLog(logs, generation, 0, 0, PartitionSourceState.CommitUncertainty.NONE_OBSERVED);
         }
     }
 
@@ -1283,7 +1314,11 @@ class KafkaSourceOwnerTest {
                 counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
             );
             assertRetirementLog(
-                logs, generation, PartitionSourceState.CommitUncertainty.ASYNC_UNRESOLVED_AT_RETIREMENT
+                logs,
+                generation,
+                0,
+                1,
+                PartitionSourceState.CommitUncertainty.ASYNC_UNRESOLVED_AT_RETIREMENT
             );
         }
     }
@@ -1337,7 +1372,71 @@ class KafkaSourceOwnerTest {
                 0,
                 counterValue(IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED)
             );
-            assertRetirementLog(logs, generation, PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN);
+            assertEvent(
+                logs,
+                "kafka_assignment_changed",
+                "action=assigned",
+                "changed_count=1",
+                "assignment_count=1",
+                "partitions=[traffic-0]"
+            );
+            assertEvent(
+                logs,
+                "kafka_assignment_changed",
+                "action=revoked",
+                "changed_count=1",
+                "partitions=[traffic-0]"
+            );
+            assertEvent(
+                logs,
+                "kafka_commit_uncertain",
+                "outcome=OUTCOME_UNKNOWN",
+                "partition_count=1",
+                "partitions=[traffic-0]"
+            );
+            assertEvent(
+                logs,
+                "kafka_batch_polled",
+                "partition_count=1",
+                "record_count=1"
+            );
+            assertEvent(
+                logs,
+                "kafka_input_offered",
+                "topic=traffic",
+                "partition=0",
+                "generation=0",
+                "record_count=1",
+                "first_offset=10",
+                "last_offset=10"
+            );
+            assertEvent(
+                logs,
+                "kafka_commit_staged",
+                "topic=traffic",
+                "partition=0",
+                "next_position=11"
+            );
+            assertEvent(
+                logs,
+                "kafka_commit_submitted",
+                "mode=sync",
+                "partition_count=1",
+                "partitions=[traffic-0]"
+            );
+            assertEvent(
+                logs,
+                "kafka_commit_resolved",
+                "outcome=OUTCOME_UNKNOWN",
+                "partition_count=1"
+            );
+            assertRetirementLog(
+                logs,
+                generation,
+                0,
+                1,
+                PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN
+            );
         }
     }
 
@@ -1446,7 +1545,7 @@ class KafkaSourceOwnerTest {
 
             port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_1)));
             owner.runOnce();
-            assertRetirementLog(logs, generation1, PartitionSourceState.CommitUncertainty.NONE_OBSERVED);
+            assertRetirementLog(logs, generation1, 1, 1, PartitionSourceState.CommitUncertainty.NONE_OBSERVED);
         }
     }
 

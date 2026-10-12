@@ -6,6 +6,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.FailureReason;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,9 +18,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CaptureKafkaWriteGateTest {
+    private static final CapturePublishingMetrics NOOP_METRICS =
+        new CapturePublishingMetrics(io.opentelemetry.api.OpenTelemetry.noop().getMeter("test"));
+
     @Test
     void tripDoesNotWaitForAnAcceptedSubmissionAndRejectsEveryLaterSubmission() throws Exception {
-        var gate = new CaptureKafkaWriteGate();
+        var gate = new CaptureKafkaWriteGate(NOOP_METRICS);
         var submissionStarted = new CountDownLatch(1);
         var releaseSubmission = new CountDownLatch(1);
         var terminalFailure = new IllegalStateException("evicted");
@@ -29,7 +35,7 @@ class CaptureKafkaWriteGateTest {
                 await(releaseSubmission);
             }));
             assertTrue(submissionStarted.await(1, TimeUnit.SECONDS));
-            var trip = executor.submit(() -> gate.trip(terminalFailure));
+            var trip = executor.submit(() -> gate.trip(terminalFailure, FailureReason.OTHER));
 
             assertSame(terminalFailure, trip.get(1, TimeUnit.SECONDS));
             assertSame(
@@ -44,13 +50,16 @@ class CaptureKafkaWriteGateTest {
 
     @Test
     void terminalListenerReceivesOnlyTheFirstCause() {
-        var gate = CaptureKafkaWriteGate.unrestricted();
+        var gate = CaptureKafkaWriteGate.unrestricted(NOOP_METRICS);
         var observedFailure = new AtomicReference<Throwable>();
         gate.addTerminalFailureListener(observedFailure::set);
         var first = new IllegalStateException("first");
 
-        assertSame(first, gate.trip(first));
-        assertSame(first, gate.trip(new IllegalStateException("second")));
+        assertSame(first, gate.trip(first, FailureReason.OTHER));
+        assertSame(
+            first,
+            gate.trip(new IllegalStateException("second"), FailureReason.CORRUPTED_STATE)
+        );
         assertEquals("first", observedFailure.get().getMessage());
     }
 

@@ -22,14 +22,19 @@ import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry;
 import org.opensearch.migrations.replay.testing.FakeClock;
 import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.tracing.TupleDurabilityMetrics;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -74,91 +79,160 @@ class TupleWriterTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("TupleWriterLogger")
     void oneLogicalWriteOwnsPhysicalRetriesUntilDurable() {
-        var contexts = new ContextFixture();
-        var clock = new FakeClock();
-        var eventLoop = new TestEventLoop(clock);
-        var sink = new ScriptedSink();
-        var fatalFailures = new ArrayList<Error>();
-        var releases = new AtomicInteger();
-        var writer = new TupleWriter<>(
-            eventLoop,
-            clock,
-            Duration.ofSeconds(1),
-            sink,
-            ignored -> releases.incrementAndGet(),
-            fatalFailures::add,
-            OutstandingOperationRegistry.CountHook.NOOP
-        );
+        try (
+            var telemetry = new InMemoryInstrumentationBundle(false, true);
+            var logs = new TestLogAppender(TupleWriter.class)
+        ) {
+            var contexts = new ContextFixture();
+            var clock = new FakeClock();
+            var eventLoop = new TestEventLoop(clock);
+            var sink = new ScriptedSink();
+            var fatalFailures = new ArrayList<Error>();
+            var releases = new AtomicInteger();
+            var writer = new TupleWriter<>(
+                eventLoop,
+                clock,
+                Duration.ofSeconds(1),
+                sink,
+                ignored -> releases.incrementAndGet(),
+                fatalFailures::add,
+                new TupleDurabilityMetrics(
+                    telemetry.openTelemetrySdk.getMeter("tuple-writer-behavior-test")
+                )
+            );
 
-        var write = writer.write(
-            new TupleWriter.WriteTuple<>(contexts.tuple, "tuple")
-        );
-        eventLoop.runUntilIdle();
-        Assertions.assertEquals(1, sink.writes.get());
+            var write = writer.write(
+                new TupleWriter.WriteTuple<>(contexts.tuple, "tuple")
+            );
+            eventLoop.runUntilIdle();
+            Assertions.assertEquals(1, sink.writes.get());
 
-        sink.failNext();
-        eventLoop.runUntilIdle();
-        Assertions.assertFalse(write.completion().toCompletableFuture().isDone());
+            sink.failNext();
+            eventLoop.runUntilIdle();
+            Assertions.assertFalse(write.completion().toCompletableFuture().isDone());
 
-        eventLoop.advance(Duration.ofSeconds(1));
-        Assertions.assertEquals(2, sink.writes.get());
-        sink.durableNext();
-        eventLoop.runUntilIdle();
+            eventLoop.advance(Duration.ofSeconds(1));
+            Assertions.assertEquals(2, sink.writes.get());
+            sink.failNext();
+            eventLoop.runUntilIdle();
+            Assertions.assertFalse(write.completion().toCompletableFuture().isDone());
 
-        Assertions.assertInstanceOf(
-            TupleWriter.TupleDurable.class,
-            write.completion().toCompletableFuture().join()
-        );
-        Assertions.assertEquals(1, releases.get());
-        Assertions.assertEquals(0, writer.operations().activeCount());
-        Assertions.assertTrue(fatalFailures.isEmpty());
-        contexts.close();
+            eventLoop.advance(Duration.ofSeconds(1));
+            Assertions.assertEquals(3, sink.writes.get());
+            sink.durableNext();
+            eventLoop.runUntilIdle();
+
+            Assertions.assertInstanceOf(
+                TupleWriter.TupleDurable.class,
+                write.completion().toCompletableFuture().join()
+            );
+            Assertions.assertEquals(1, releases.get());
+            Assertions.assertEquals(0, writer.operations().activeCount());
+            Assertions.assertTrue(fatalFailures.isEmpty());
+
+            var recorded = telemetry.getFinishedMetrics();
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_ACCEPTED, 1);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_PENDING, 0);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.RETRIES, 2);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.TERMINAL_FAILURES, 0);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_DURABLE, 1);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_CANCELLED, 0);
+            assertHistogram(
+                recorded,
+                TupleDurabilityMetrics.MetricNames.WRITE_LATENCY,
+                1,
+                2_000.0
+            );
+            Assertions.assertTrue(logs.contains(
+                "tuple_durability_degraded",
+                "request=",
+                "state=retrying",
+                "failed_attempts=1",
+                "retry_delay_ms=1000"
+            ));
+            Assertions.assertEquals(
+                1,
+                logs.count("tuple_durability_degraded", Level.WARN),
+                "one logical outage emits one WARN even when physical retries continue"
+            );
+            Assertions.assertTrue(logs.contains(
+                "tuple_write_retried",
+                "request=",
+                "failed_attempts=2",
+                "retry_delay_ms=1000"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "tuple_write_durable",
+                "request=",
+                "retries=2",
+                "latency_ms=2000"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "tuple_durability_recovered",
+                "request=",
+                "retries=2",
+                "latency_ms=2000"
+            ));
+            contexts.close();
+        }
     }
 
     @Test
     void cancellationIsTypedAndLatePhysicalCompletionCannotBecomeDurability() {
-        var contexts = new ContextFixture();
-        var clock = new FakeClock();
-        var eventLoop = new TestEventLoop(clock);
-        var sink = new ScriptedSink();
-        var fatalFailures = new ArrayList<Error>();
-        var releases = new AtomicInteger();
-        var writer = new TupleWriter<>(
-            eventLoop,
-            clock,
-            Duration.ofSeconds(1),
-            sink,
-            ignored -> releases.incrementAndGet(),
-            fatalFailures::add,
-            OutstandingOperationRegistry.CountHook.NOOP
-        );
-        var write = writer.write(
-            new TupleWriter.WriteTuple<>(contexts.tuple, "tuple")
-        );
-        eventLoop.runUntilIdle();
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var contexts = new ContextFixture();
+            var clock = new FakeClock();
+            var eventLoop = new TestEventLoop(clock);
+            var sink = new ScriptedSink();
+            var fatalFailures = new ArrayList<Error>();
+            var releases = new AtomicInteger();
+            var writer = new TupleWriter<>(
+                eventLoop,
+                clock,
+                Duration.ofSeconds(1),
+                sink,
+                ignored -> releases.incrementAndGet(),
+                fatalFailures::add,
+                new TupleDurabilityMetrics(
+                    telemetry.openTelemetrySdk.getMeter("tuple-cancellation-test")
+                )
+            );
+            var write = writer.write(
+                new TupleWriter.WriteTuple<>(contexts.tuple, "tuple")
+            );
+            eventLoop.runUntilIdle();
 
-        var cancellation = new CancellationException("cancelled");
-        write.cancel(cancellation);
-        eventLoop.runUntilIdle();
+            var cancellation = new CancellationException("cancelled");
+            write.cancel(cancellation);
+            eventLoop.runUntilIdle();
 
-        var cancelled = Assertions.assertInstanceOf(
-            TupleWriter.TupleWriteCancelled.class,
-            write.completion().toCompletableFuture().join()
-        );
-        Assertions.assertSame(cancellation, cancelled.cause());
-        Assertions.assertEquals(1, releases.get());
+            var cancelled = Assertions.assertInstanceOf(
+                TupleWriter.TupleWriteCancelled.class,
+                write.completion().toCompletableFuture().join()
+            );
+            Assertions.assertSame(cancellation, cancelled.cause());
+            Assertions.assertEquals(1, releases.get());
 
-        sink.durableNext();
-        eventLoop.runUntilIdle();
+            sink.durableNext();
+            eventLoop.runUntilIdle();
 
-        Assertions.assertInstanceOf(
-            TupleWriter.TupleWriteCancelled.class,
-            write.completion().toCompletableFuture().join()
-        );
-        Assertions.assertEquals(1, releases.get());
-        Assertions.assertTrue(fatalFailures.isEmpty());
-        contexts.close();
+            Assertions.assertInstanceOf(
+                TupleWriter.TupleWriteCancelled.class,
+                write.completion().toCompletableFuture().join()
+            );
+            Assertions.assertEquals(1, releases.get());
+            Assertions.assertTrue(fatalFailures.isEmpty());
+
+            var recorded = telemetry.getFinishedMetrics();
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_ACCEPTED, 1);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_PENDING, 0);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_CANCELLED, 1);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_DURABLE, 0);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.TERMINAL_FAILURES, 0);
+            contexts.close();
+        }
     }
 
     @Test
@@ -180,7 +254,7 @@ class TupleWriterTest {
             sink,
             ignored -> releases.incrementAndGet(),
             failure -> Assertions.fail(failure),
-            OutstandingOperationRegistry.CountHook.NOOP
+            contexts.root.getTupleDurabilityMetrics()
         );
 
         var write = writer.write(
@@ -222,7 +296,7 @@ class TupleWriterTest {
             sink,
             ignored -> {},
             fatalFailures::add,
-            OutstandingOperationRegistry.CountHook.NOOP
+            contexts.root.getTupleDurabilityMetrics()
         );
 
         var generation = REQUEST_ID.connectionProcessingId().generation();
@@ -299,6 +373,156 @@ class TupleWriterTest {
         Assertions.assertTrue(fatalFailures.isEmpty());
         otherContexts.close();
         contexts.close();
+    }
+
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("TupleWriterLogger")
+    void transformationFailureIsTerminalAndMetricObservable() {
+        try (
+            var telemetry = new InMemoryInstrumentationBundle(false, true);
+            var logs = new TestLogAppender(TupleWriter.class)
+        ) {
+            var contexts = new ContextFixture();
+            var clock = new FakeClock();
+            var eventLoop = new TestEventLoop(clock);
+            var fatalFailures = new ArrayList<Error>();
+            var writer = new TupleWriter<String>(
+                eventLoop,
+                clock,
+                Duration.ZERO,
+                (replayContext, tuple) -> {
+                    throw new IllegalStateException("transform failed");
+                },
+                new ScriptedSink(),
+                ignored -> {},
+                fatalFailures::add,
+                new TupleDurabilityMetrics(
+                    telemetry.openTelemetrySdk.getMeter("tuple-transformation-failure-test")
+                )
+            );
+
+            var write = writer.write(
+                new TupleWriter.WriteTuple<>(contexts.tuple, "tuple")
+            );
+            eventLoop.runUntilIdle();
+
+            Assertions.assertTrue(write.completion().toCompletableFuture().isCompletedExceptionally());
+            Assertions.assertEquals(1, fatalFailures.size());
+            var recorded = telemetry.getFinishedMetrics();
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_ACCEPTED, 1);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_PENDING, 0);
+            assertMetric(
+                recorded,
+                TupleDurabilityMetrics.MetricNames.TERMINAL_FAILURES,
+                Attributes.of(TupleDurabilityMetrics.FAILURE_REASON_ATTRIBUTE, "transformation"),
+                1
+            );
+            Assertions.assertTrue(logs.contains(
+                "tuple_durability_degraded",
+                "request=",
+                "state=terminal",
+                "reason=transformation"
+            ));
+            contexts.close();
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("TupleWriterLogger")
+    void rejectedOwnerSubmissionIsTerminalAndMetricObservable() {
+        try (
+            var telemetry = new InMemoryInstrumentationBundle(false, true);
+            var logs = new TestLogAppender(TupleWriter.class)
+        ) {
+            var contexts = new ContextFixture();
+            var clock = new FakeClock();
+            var eventLoop = new TestEventLoop(clock);
+            eventLoop.rejectNewTasks();
+            var fatalFailures = new ArrayList<Error>();
+            var writer = new TupleWriter<>(
+                eventLoop,
+                clock,
+                Duration.ZERO,
+                new ScriptedSink(),
+                ignored -> {},
+                fatalFailures::add,
+                new TupleDurabilityMetrics(
+                    telemetry.openTelemetrySdk.getMeter("tuple-owner-rejection-test")
+                )
+            );
+
+            var write = writer.write(
+                new TupleWriter.WriteTuple<>(contexts.tuple, "tuple")
+            );
+
+            Assertions.assertTrue(write.completion().toCompletableFuture().isCompletedExceptionally());
+            Assertions.assertEquals(1, fatalFailures.size());
+            var recorded = telemetry.getFinishedMetrics();
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_ACCEPTED, 1);
+            assertMetric(recorded, TupleDurabilityMetrics.MetricNames.WRITES_PENDING, 0);
+            assertMetric(
+                recorded,
+                TupleDurabilityMetrics.MetricNames.TERMINAL_FAILURES,
+                Attributes.of(
+                    TupleDurabilityMetrics.FAILURE_REASON_ATTRIBUTE,
+                    "owner_submission_rejected"
+                ),
+                1
+            );
+            Assertions.assertTrue(logs.contains(
+                "tuple_durability_degraded",
+                "request=",
+                "state=terminal",
+                "reason=owner_submission_rejected"
+            ));
+            contexts.close();
+        }
+    }
+
+    private static void assertMetric(
+        Iterable<MetricData> metrics,
+        String name,
+        long expectedValue
+    ) {
+        assertMetric(metrics, name, Attributes.empty(), expectedValue);
+    }
+
+    private static void assertMetric(
+        Iterable<MetricData> metrics,
+        String name,
+        Attributes attributes,
+        long expectedValue
+    ) {
+        for (var metric : metrics) {
+            if (metric.getName().equals(name)) {
+                var value = metric.getLongSumData().getPoints().stream()
+                    .filter(point -> point.getAttributes().equals(attributes))
+                    .mapToLong(io.opentelemetry.sdk.metrics.data.LongPointData::getValue)
+                    .sum();
+                Assertions.assertEquals(expectedValue, value);
+                return;
+            }
+        }
+        Assertions.assertEquals(0, expectedValue, "Missing metric " + name);
+    }
+
+    private static void assertHistogram(
+        Iterable<MetricData> metrics,
+        String name,
+        long expectedCount,
+        double expectedSum
+    ) {
+        for (var metric : metrics) {
+            if (metric.getName().equals(name)) {
+                var point = metric.getHistogramData().getPoints().stream()
+                    .findFirst()
+                    .orElseThrow();
+                Assertions.assertEquals(expectedCount, point.getCount());
+                Assertions.assertEquals(expectedSum, point.getSum());
+                return;
+            }
+        }
+        throw new AssertionError("Missing metric " + name);
     }
 
     private static final class ScriptedSink

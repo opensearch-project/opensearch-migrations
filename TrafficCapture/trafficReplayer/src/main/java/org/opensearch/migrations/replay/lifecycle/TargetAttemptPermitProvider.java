@@ -21,6 +21,7 @@ import java.util.function.LongSupplier;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Enforces the application-wide target-attempt concurrency limit without blocking connection event loops.
@@ -35,6 +36,7 @@ import lombok.NonNull;
  * invariant violation because any of those would make the configured concurrency bound untrustworthy.
  * Queue ordering is intentionally not promised—the contract is bounded progress, not fairness.</p>
  */
+@Slf4j
 public final class TargetAttemptPermitProvider {
     @FunctionalInterface
     public interface FatalHandler {
@@ -42,32 +44,6 @@ public final class TargetAttemptPermitProvider {
     }
 
     public interface Metrics {
-        Metrics NOOP = new Metrics() {
-            @Override
-            public void acquisitionRequested() {}
-
-            @Override
-            public void acquisitionPendingChanged(int delta) {}
-
-            @Override
-            public void acquisitionCancelled() {}
-
-            @Override
-            public void acquisitionFailed() {}
-
-            @Override
-            public void permitAcquired() {}
-
-            @Override
-            public void activePermitsChanged(int delta) {}
-
-            @Override
-            public void permitReleased() {}
-
-            @Override
-            public void permitHeld(Duration duration) {}
-        };
-
         void acquisitionRequested();
 
         void acquisitionPendingChanged(int delta);
@@ -176,6 +152,12 @@ public final class TargetAttemptPermitProvider {
     public Acquisition acquire(@NonNull ReplayRequestId requestId) {
         var acquisition = new PendingAcquisition(requestId);
         recordMetric(metrics::acquisitionRequested, "recording a requested target-attempt permit");
+        log.atDebug()
+            .setMessage("event=target_permit_requested request={} capacity={} active={}")
+            .addArgument(requestId)
+            .addArgument(capacity)
+            .addArgument(activeTargetAttempts::get)
+            .log();
         var existingFatalFailure = fatalFailure.get();
         if (existingFatalFailure != null) {
             acquisition.fail(existingFatalFailure);
@@ -188,6 +170,12 @@ public final class TargetAttemptPermitProvider {
         } else if (reservation == Reservation.FULL) {
             acquisition.markPending();
             pendingAcquisitions.add(acquisition);
+            log.atDebug()
+                .setMessage("event=target_permit_pending request={} active={} capacity={}")
+                .addArgument(requestId)
+                .addArgument(activeTargetAttempts::get)
+                .addArgument(capacity)
+                .log();
             drainPendingAcquisitions();
         } else {
             acquisition.fail(requireFatalFailure());
@@ -229,6 +217,12 @@ public final class TargetAttemptPermitProvider {
             () -> metrics.activePermitsChanged(1),
             "recording an active target-attempt permit"
         );
+        log.atDebug()
+            .setMessage("event=target_permit_acquired request={} active={} capacity={}")
+            .addArgument(acquisition.requestId)
+            .addArgument(activeTargetAttempts::get)
+            .addArgument(capacity)
+            .log();
         if (!acquisition.completion.complete(new PermitAcquired(permit))) {
             reportInvariantFailure(
                 "acquisition completed more than once for " + acquisition.requestId
@@ -331,12 +325,18 @@ public final class TargetAttemptPermitProvider {
             "recording a released active target-attempt permit"
         );
         recordMetric(metrics::permitReleased, "recording a released target-attempt permit");
+        var heldDuration =
+            Duration.ofNanos(Math.max(0, nanoTime.getAsLong() - permit.acquiredNanos));
         recordMetric(
-            () -> metrics.permitHeld(
-                Duration.ofNanos(Math.max(0, nanoTime.getAsLong() - permit.acquiredNanos))
-            ),
+            () -> metrics.permitHeld(heldDuration),
             "recording target-attempt permit held duration"
         );
+        log.atDebug()
+            .setMessage("event=target_permit_released request={} active={} held_ms={}")
+            .addArgument(permit.requestId)
+            .addArgument(activeTargetAttempts::get)
+            .addArgument(heldDuration::toMillis)
+            .log();
         drainPendingAcquisitions();
     }
 
@@ -407,6 +407,10 @@ public final class TargetAttemptPermitProvider {
                 metrics::acquisitionCancelled,
                 "recording a cancelled target-attempt permit acquisition"
             );
+            log.atDebug()
+                .setMessage("event=target_permit_cancelled request={}")
+                .addArgument(requestId)
+                .log();
             if (!completion.complete(new AcquisitionCancelled(cause))) {
                 reportInvariantFailure(
                     "cancelled acquisition completed more than once for " + requestId

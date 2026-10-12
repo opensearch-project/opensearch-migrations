@@ -341,7 +341,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private final TargetAttemptPermitProvider permitProvider;
     private final LifecycleSink lifecycleSink;
     private final FatalHandler fatalHandler;
-    private final OutstandingOperationRegistry.CountHook countHook;
+    private final RequestReplayOwner.Metrics requestMetrics;
     private final Runnable ownerTerminated;
     private final OutstandingOperationRegistry operations;
     private final Deque<AdmissionEntry> admissionQueue = new ArrayDeque<>();
@@ -379,7 +379,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull TargetAttemptPermitProvider permitProvider,
         @NonNull LifecycleSink lifecycleSink,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook
+        @NonNull RequestReplayOwner.Metrics requestMetrics
     ) {
         this(
             connectionProcessingId,
@@ -396,7 +396,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             permitProvider,
             lifecycleSink,
             fatalHandler,
-            countHook,
+            requestMetrics,
             4,
             () -> {}
         );
@@ -417,7 +417,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull TargetAttemptPermitProvider permitProvider,
         @NonNull LifecycleSink lifecycleSink,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook,
+        @NonNull RequestReplayOwner.Metrics requestMetrics,
         @NonNull Runnable ownerTerminated
     ) {
         this(
@@ -435,7 +435,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             permitProvider,
             lifecycleSink,
             fatalHandler,
-            countHook,
+            requestMetrics,
             4,
             ownerTerminated
         );
@@ -456,7 +456,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull TargetAttemptPermitProvider permitProvider,
         @NonNull LifecycleSink lifecycleSink,
         @NonNull FatalHandler fatalHandler,
-        @NonNull OutstandingOperationRegistry.CountHook countHook,
+        @NonNull RequestReplayOwner.Metrics requestMetrics,
         int maximumResponseRetries,
         @NonNull Runnable ownerTerminated
     ) {
@@ -479,19 +479,13 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         this.permitProvider = permitProvider;
         this.lifecycleSink = lifecycleSink;
         this.fatalHandler = fatalHandler;
-        this.countHook = countHook;
+        this.requestMetrics = requestMetrics;
         this.ownerTerminated = ownerTerminated;
         this.operations = new OutstandingOperationRegistry(
             "connection " + connectionProcessingId,
             eventLoop,
             clock,
-            fatalHandler::onFatal,
-            (operationType, typeCount, totalCount) -> {
-                countHook.operationCountChanged(operationType, typeCount, totalCount);
-                if (totalCount == 0) {
-                    tryFinishOwner();
-                }
-            }
+            fatalHandler::onFatal
         );
     }
 
@@ -737,7 +731,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             resourceReleaser,
             new RequestCallbacks(),
             fatalHandler::onFatal,
-            countHook,
+            requestMetrics,
             maximumResponseRetries
         );
         var entry = new RequestEntry<S, P, R, F, T>(
@@ -1024,7 +1018,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         }
         switch (result) {
             case TargetAttemptPermitProvider.PermitAcquired acquired -> {
-                operations.complete(expected.registration());
+                completeOperation(expected.registration());
                 if (sourceLifetime == SourceLifetime.CANCELLING
                     && !expected.request.finalTargetWriteSubmitted) {
                     acquired.permit().close();
@@ -1037,7 +1031,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 }
             }
             case TargetAttemptPermitProvider.AcquisitionCancelled cancelled -> {
-                operations.complete(expected.registration());
+                completeOperation(expected.registration());
                 if (expected.retryDelivery() != null) {
                     expected.retryDelivery().complete(null);
                 }
@@ -1092,7 +1086,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                         || sourceLifetime == SourceLifetime.EXPIRED) {
                         sourceLifetime = SourceLifetime.CLOSED;
                     }
-                    operations.complete(registration);
+                    completeOperation(registration);
                     evaluateExecutionHead();
                     tryFinishOwner();
                 }
@@ -1223,6 +1217,13 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 ),
             this::finishOwnerTermination
         );
+    }
+
+    private void completeOperation(OutstandingOperationRegistry.Registration registration) {
+        operations.complete(registration);
+        if (operations.activeCount() == 0) {
+            tryFinishOwner();
+        }
     }
 
     private void finishOwnerTermination() {
@@ -1559,7 +1560,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                         impossible(operation + " acceptance", cause);
                         return;
                     }
-                    operations.complete(registration);
+                    completeOperation(registration);
                     afterAcceptance.run();
                     tryFinishOwner();
                     completion.complete(null);

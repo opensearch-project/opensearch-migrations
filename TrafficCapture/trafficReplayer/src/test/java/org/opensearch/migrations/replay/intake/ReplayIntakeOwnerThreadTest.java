@@ -164,6 +164,18 @@ class ReplayIntakeOwnerThreadTest {
                 3,
                 sumMetricPoints(metrics, ReplayIntakeMetrics.MetricNames.DEMAND_EVALUATIONS)
             );
+            Assertions.assertEquals(
+                4,
+                sumMetricPoints(metrics, ReplayIntakeMetrics.MetricNames.WRITER_TIME_TRANSITIONS)
+            );
+            Assertions.assertEquals(
+                Set.of("EXACT_HEARTBEAT_STARTED", "TIMELY_HEARTBEAT_ACCEPTED"),
+                metricAttributeValues(
+                    metrics,
+                    ReplayIntakeMetrics.MetricNames.WRITER_TIME_TRANSITIONS,
+                    ReplayIntakeMetrics.WRITER_TIME_TRANSITION_ATTRIBUTE
+                )
+            );
         }
     }
 
@@ -178,7 +190,7 @@ class ReplayIntakeOwnerThreadTest {
                 new RecordingSink(() -> true, new CountDownLatch(0), new CountDownLatch(0)),
                 failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
                 rootContext.replayIntakeMetrics,
-                ReplayIntakeOwner.RecordObserver.NOOP,
+                ReplayIntakeOwner.RecordObserver.NONE,
                 new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
                 2
             );
@@ -343,7 +355,7 @@ class ReplayIntakeOwnerThreadTest {
                 sourceInputs,
                 new RecordingSink(() -> true, new CountDownLatch(0), new CountDownLatch(0)),
                 failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
-                ReplayIntakeOwner.Metrics.NOOP,
+                rootContext.getReplayIntakeMetrics(),
                 record -> observedOffsets.add(record.recordId().offset()),
                 new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
                 2
@@ -419,6 +431,13 @@ class ReplayIntakeOwnerThreadTest {
                 InMemoryInstrumentationBundle.getMetricValueOrZero(
                     telemetry.getFinishedMetrics(),
                     IKafkaConsumerContexts.MetricNames.POLLS_WOKEN_BY_QUEUED_INPUT
+                )
+            );
+            Assertions.assertEquals(
+                1,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    telemetry.getFinishedMetrics(),
+                    ReplayIntakeMetrics.MetricNames.CAPTURE_PROTOCOL_VIOLATIONS
                 )
             );
         }

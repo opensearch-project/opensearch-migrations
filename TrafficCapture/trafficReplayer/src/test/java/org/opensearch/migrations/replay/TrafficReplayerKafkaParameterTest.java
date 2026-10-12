@@ -8,6 +8,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+import org.opensearch.migrations.replay.tracing.TupleSinkUploadMetrics;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -338,7 +340,12 @@ public class TrafficReplayerKafkaParameterTest {
         parameters.tupleMaxBufferSeconds = 60;
         parameters.tupleMaxPerFile = 1;
 
-        try (var resources = TrafficReplayer.createS3TupleSinkResources(parameters, s3Client);
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true);
+             var resources = TrafficReplayer.createS3TupleSinkResources(
+                 parameters,
+                 s3Client,
+                 new TupleSinkUploadMetrics(telemetry.openTelemetrySdk.getMeter("test"))
+             );
              var sink = resources.factory().create(7)) {
             sink.write(null, Map.of("connectionId", "connection-1")).toCompletableFuture().join();
         }

@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
@@ -38,6 +39,17 @@ public final class CaptureRoutingState {
         RETIRING,
         RETIRED
     }
+
+    record DiagnosticSnapshot(
+        int initializingWriters,
+        int activeWriters,
+        int drainingWriters,
+        int retiringWriters,
+        int retiredWriters,
+        int activeConnections,
+        List<Integer> activePartitions,
+        OptionalLong lastHeartbeatBrokerTime
+    ) {}
 
     static final class WriterPartition {
         private final String writerNodeId;
@@ -599,6 +611,40 @@ public final class CaptureRoutingState {
 
     synchronized boolean hasConnections(WriterPartition writerPartition) {
         return !requireWriterPartition(writerPartition).connectionIds.isEmpty();
+    }
+
+    synchronized DiagnosticSnapshot diagnosticSnapshot() {
+        var initializing = 0;
+        var active = 0;
+        var draining = 0;
+        var retiring = 0;
+        var retired = 0;
+        var lastHeartbeatBrokerTime = OptionalLong.empty();
+        for (var state : writerPartitions.values()) {
+            switch (state.status) {
+                case INITIALIZING -> initializing++;
+                case CURRENT -> active++;
+                case DRAINING -> draining++;
+                case RETIRING -> retiring++;
+                case RETIRED -> retired++;
+            }
+            if (state.lastAcceptedHeartbeatLogAppendTime != null) {
+                lastHeartbeatBrokerTime = OptionalLong.of(Math.max(
+                    lastHeartbeatBrokerTime.orElse(Long.MIN_VALUE),
+                    state.lastAcceptedHeartbeatLogAppendTime
+                ));
+            }
+        }
+        return new DiagnosticSnapshot(
+            initializing,
+            active,
+            draining,
+            retiring,
+            retired,
+            connectionRoutes.size(),
+            activeRoutingPartitions(),
+            lastHeartbeatBrokerTime
+        );
     }
 
     private WriterPartitionState requireWriterPartition(WriterPartition writerPartition) {

@@ -30,15 +30,17 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
     public static final class MetricNames {
         private MetricNames() {}
 
-        public static final String RECORDS_READ = "records_read";
-        public static final String RECORDS_COMMITTED = "records_committed";
-        public static final String RECORDS_CANCELLED = "records_cancelled";
+        public static final String RECORDS_READ = "kafkaSourceRecordsRead";
+        public static final String RECORDS_COMMITTED = "kafkaSourceRecordsCommitted";
+        public static final String RECORDS_CANCELLED = "kafkaSourceRecordsCancelled";
         public static final String RECORDS_ABANDONED_AT_REVOCATION =
-            "records_abandoned_at_revocation";
-        public static final String RECORDS_COMMIT_INELIGIBLE = "records_commit_ineligible";
-        public static final String RECORDS_OUTSTANDING = "records_outstanding";
-        public static final String COMMIT_ATTEMPTS_REJECTED = "commit_attempts_rejected";
-        public static final String COMMIT_RESOLUTIONS = "commit_resolutions";
+            "kafkaSourceRecordsAbandonedAtRevocation";
+        public static final String RECORDS_COMMIT_INELIGIBLE =
+            "kafkaSourceRecordsCommitIneligible";
+        public static final String RECORDS_OUTSTANDING = "kafkaSourceRecordsOutstanding";
+        public static final String COMMIT_ATTEMPTS_REJECTED =
+            "kafkaSourceCommitAttemptsRejected";
+        public static final String COMMIT_RESOLUTIONS = "kafkaSourceCommitResolutions";
     }
 
     private final LongCounter recordsRead;
@@ -52,28 +54,36 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
 
     public KafkaCommitStateMetrics(@NonNull Meter meter) {
         recordsRead = meter.counterBuilder(MetricNames.RECORDS_READ)
+            .setDescription("Kafka records admitted into replay source processing")
             .setUnit(RECORDS_UNIT)
             .build();
         recordsCommitted = meter.counterBuilder(MetricNames.RECORDS_COMMITTED)
+            .setDescription("Kafka records covered by an acknowledged committed position")
             .setUnit(RECORDS_UNIT)
             .build();
         recordsCancelled = meter.counterBuilder(MetricNames.RECORDS_CANCELLED)
+            .setDescription("Kafka records cancelled during generation cleanup")
             .setUnit(RECORDS_UNIT)
             .build();
         recordsAbandonedAtRevocation =
             meter.counterBuilder(MetricNames.RECORDS_ABANDONED_AT_REVOCATION)
+                .setDescription("Kafka records abandoned when partition ownership ended")
                 .setUnit(RECORDS_UNIT)
                 .build();
         recordsCommitIneligible = meter.counterBuilder(MetricNames.RECORDS_COMMIT_INELIGIBLE)
+            .setDescription("Kafka records intentionally excluded from commit after a protocol violation")
             .setUnit(RECORDS_UNIT)
             .build();
         recordsOutstanding = meter.upDownCounterBuilder(MetricNames.RECORDS_OUTSTANDING)
+            .setDescription("Read Kafka records without a terminal commit-accounting outcome")
             .setUnit(RECORDS_UNIT)
             .build();
         commitAttemptsRejected = meter.counterBuilder(MetricNames.COMMIT_ATTEMPTS_REJECTED)
+            .setDescription("Kafka commit submissions rejected before broker movement was possible")
             .setUnit("attempts")
             .build();
         commitResolutions = meter.counterBuilder(MetricNames.COMMIT_RESOLUTIONS)
+            .setDescription("Kafka commit operation resolutions by bounded outcome")
             .setUnit("events")
             .build();
     }

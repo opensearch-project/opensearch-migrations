@@ -54,6 +54,7 @@ import org.slf4j.LoggerFactory;
 public final class KafkaSourceOwner {
     public static final Duration DEFAULT_REVOCATION_GRACE = Duration.ofSeconds(1);
     public static final Duration DEFAULT_HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
+    private static final int MAX_LOGGED_PARTITIONS = 16;
     private static final Logger HEARTBEAT_LOGGER = LoggerFactory.getLogger("KafkaHeartbeat");
 
     public enum AbandonmentCause {
@@ -72,17 +73,68 @@ public final class KafkaSourceOwner {
         DUPLICATE_IGNORED
     }
 
-    public interface Metrics {
-        Metrics NOOP = new Metrics() {};
+    public enum RecordDiagnosticState {
+        PROCESSING,
+        PROCESSING_COMPLETE_WAITING_FOR_COMMIT_HEAD,
+        READY_TO_COMMIT,
+        COMMIT_IN_FLIGHT,
+        COMMIT_UNCERTAIN,
+        COMMIT_INELIGIBLE,
+        UNKNOWN
+    }
 
-        default void recordsRead(long count) {}
-        default void recordsCommitted(long count) {}
-        default void recordsCancelled(long count) {}
-        default void recordsAbandonedAtRevocation(AbandonmentCause cause, long count) {}
-        default void recordsCommitIneligible(long count) {}
-        default void recordsOutstandingChanged(long delta) {}
-        default void commitAttemptRejected() {}
-        default void commitResolved(CommitResolution resolution) {}
+    public record RecordDiagnostic(
+        @NonNull KafkaRecordId recordId,
+        @NonNull RecordDiagnosticState state
+    ) {}
+
+    public record PartitionDiagnostic(
+        @NonNull PartitionGenerationId generation,
+        boolean kafkaPaused,
+        boolean readable,
+        boolean assignmentBootstrapPending,
+        boolean requestOutstanding,
+        boolean priorGenerationCleanupPending,
+        boolean lifecycleAllowsIntake,
+        int observedQueueSize,
+        int unfinishedRecordCount,
+        @NonNull Optional<KafkaRecordId> commitHead,
+        long greatestObservedOffset,
+        long recordsAwaitingCommit,
+        @NonNull PartitionSourceState.CommitUncertainty commitUncertainty,
+        @NonNull Optional<Long> stagedCommitPosition,
+        @NonNull Optional<Long> inFlightCommitPosition
+    ) {}
+
+    public record DiagnosticSnapshot(
+        @NonNull Map<PartitionGenerationId, PartitionDiagnostic> partitions,
+        @NonNull Map<KafkaRecordId, RecordDiagnostic> records
+    ) {
+        public static final DiagnosticSnapshot EMPTY = new DiagnosticSnapshot(Map.of(), Map.of());
+
+        public DiagnosticSnapshot {
+            partitions = Map.copyOf(partitions);
+            records = Map.copyOf(records);
+        }
+
+        public long uncertainPartitionCount() {
+            return partitions.values().stream()
+                .filter(partition ->
+                    partition.commitUncertainty() != PartitionSourceState.CommitUncertainty.NONE_OBSERVED
+                )
+                .count();
+        }
+    }
+
+    public interface Metrics {
+        void recordsRead(long count);
+        void recordsCommitted(long count);
+        void recordsCancelled(long count);
+        void recordsAbandonedAtRevocation(AbandonmentCause cause, long count);
+        void recordsCommitIneligible(long count);
+        void recordsOutstandingChanged(long delta);
+        void commitAttemptRejected();
+        void commitResolved(CommitResolution resolution);
     }
 
     @FunctionalInterface
@@ -149,31 +201,7 @@ public final class KafkaSourceOwner {
     private long recordsRead;
     private long recordsCommitted;
     private long recordsOutstanding;
-
-    public KafkaSourceOwner(
-        KafkaSourcePort port,
-        KafkaSourceInputQueue sourceInputs,
-        ReplayIntakeInputQueue intakeInputs,
-        WakeupController wakeupController,
-        Duration cancellationGrace,
-        LongSupplier monotonicNanos,
-        GraceIntervalWait graceWait
-    ) {
-        this(
-            port,
-            sourceInputs,
-            intakeInputs,
-            wakeupController,
-            cancellationGrace,
-            monotonicNanos,
-            graceWait,
-            Metrics.NOOP,
-            RecordContextFactory.NONE,
-            violation -> {
-                throw new CaptureProtocolViolation(violation);
-            }
-        );
-    }
+    private volatile DiagnosticSnapshot diagnosticSnapshot = DiagnosticSnapshot.EMPTY;
 
     public KafkaSourceOwner(
         KafkaSourcePort port,
@@ -429,8 +457,15 @@ public final class KafkaSourceOwner {
         var topicPartition = cleanup.generation().topicPartition();
         var outstanding = cleanupOutstanding.get(topicPartition);
         if (outstanding == null || !outstanding.remove(cleanup.generation())) {
-            log.atDebug().setMessage("Cleanup completion for {} matched no generation awaiting cleanup")
-                .addArgument(cleanup::generation).log();
+            log.atDebug()
+                .setMessage(
+                    "event=kafka_generation_cleanup_decided topic={} partition={} generation={} "
+                        + "matched=false remaining_generations=0"
+                )
+                .addArgument(topicPartition::topic)
+                .addArgument(topicPartition::partition)
+                .addArgument(() -> cleanup.generation().localSequence())
+                .log();
             return;
         }
         if (outstanding.isEmpty()) {
@@ -440,6 +475,16 @@ public final class KafkaSourceOwner {
                 successor.setPriorGenerationCleanupPending(false);
             }
         }
+        log.atDebug()
+            .setMessage(
+                "event=kafka_generation_cleanup_decided topic={} partition={} generation={} "
+                    + "matched=true remaining_generations={}"
+            )
+            .addArgument(topicPartition::topic)
+            .addArgument(topicPartition::partition)
+            .addArgument(() -> cleanup.generation().localSequence())
+            .addArgument(outstanding::size)
+            .log();
     }
 
     private void applyProtocolViolation(KafkaSourceInput.CaptureProtocolViolationDetected violation) {
@@ -467,7 +512,13 @@ public final class KafkaSourceOwner {
     }
 
     private void stageCommitPosition(TopicPartition topicPartition, long nextPosition) {
-        stagedCommitPositions.merge(topicPartition, nextPosition, Math::max);
+        var stagedPosition = stagedCommitPositions.merge(topicPartition, nextPosition, Math::max);
+        log.atDebug()
+            .setMessage("event=kafka_commit_staged topic={} partition={} next_position={}")
+            .addArgument(topicPartition::topic)
+            .addArgument(topicPartition::partition)
+            .addArgument(stagedPosition)
+            .log();
     }
 
     // ---------------------------------------------------------------- commit
@@ -491,6 +542,14 @@ public final class KafkaSourceOwner {
         var submitted = detachForSubmission();
         var operation = new CommitOperation(nextCommitOperationId++, submitted);
         inFlightCommitOperation = operation;
+        log.atDebug()
+            .setMessage(
+                "event=kafka_commit_submitted mode=async operation={} partition_count={} partitions={}"
+            )
+            .addArgument(() -> operation.operationId)
+            .addArgument(submitted::size)
+            .addArgument(() -> summarizePartitions(submitted.keySet()))
+            .log();
         wakeupController.enterProtectedOperation();
         try {
             var submission = port.commitAsync(
@@ -615,6 +674,29 @@ public final class KafkaSourceOwner {
                 commitsSinceLastHeartbeat++;
             }
         }
+        log.atDebug()
+            .setMessage(
+                "event=kafka_commit_resolved operation={} outcome={} rejected_before_acceptance={} "
+                    + "partition_count={}"
+            )
+            .addArgument(() -> operation.operationId)
+            .addArgument(outcome)
+            .addArgument(rejectedWithoutBrokerMovement)
+            .addArgument(() -> operation.submitted.size())
+            .log();
+        if (!rejectedWithoutBrokerMovement
+            && outcome != KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
+            log.atWarn()
+                .setMessage(
+                    "event=kafka_commit_uncertain operation={} outcome={} partition_count={} "
+                        + "partitions={}"
+                )
+                .addArgument(() -> operation.operationId)
+                .addArgument(outcome)
+                .addArgument(() -> operation.submitted.size())
+                .addArgument(() -> summarizePartitions(operation.submitted.keySet()))
+                .log();
+        }
         operation.submitted.forEach((topicPartition, detail) -> {
             var state = partitions.get(topicPartition);
             var currentGeneration = state != null && state.generation().equals(detail.generation());
@@ -633,6 +715,8 @@ public final class KafkaSourceOwner {
             }
 
             if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
+                var recoveredFromUncertainty =
+                    state.commitUncertainty() != PartitionSourceState.CommitUncertainty.NONE_OBSERVED;
                 state.creditRecordsCommitted(detail.recordsCovered());
                 completeCommittedRecordContexts(detail.generation(), detail.nextPosition());
                 metrics.recordsCommitted(detail.recordsCovered().total());
@@ -642,6 +726,18 @@ public final class KafkaSourceOwner {
                 // re-offered position covers those restored records, so the earlier uncertainty no longer
                 // explains its retirement count.
                 state.clearCommitUncertainty();
+                if (recoveredFromUncertainty) {
+                    log.atInfo()
+                        .setMessage(
+                            "event=kafka_commit_recovered topic={} partition={} generation={} "
+                                + "next_position={}"
+                        )
+                        .addArgument(topicPartition::topic)
+                        .addArgument(topicPartition::partition)
+                        .addArgument(() -> detail.generation().localSequence())
+                        .addArgument(detail::nextPosition)
+                        .log();
+                }
                 return;
             }
 
@@ -730,6 +826,14 @@ public final class KafkaSourceOwner {
         if (polled.values().stream().allMatch(List::isEmpty)) {
             emptyPollsSinceLastHeartbeat++;
         }
+        var recordCount = polled.values().stream().mapToInt(List::size).sum();
+        if (recordCount > 0) {
+            log.atDebug()
+                .setMessage("event=kafka_batch_polled partition_count={} record_count={}")
+                .addArgument(() -> polled.values().stream().filter(records -> !records.isEmpty()).count())
+                .addArgument(recordCount)
+                .log();
+        }
         polled.forEach(this::deliver);
     }
 
@@ -776,6 +880,19 @@ public final class KafkaSourceOwner {
         recordsRead = Math.addExact(recordsRead, stamped.size());
         changeRecordsOutstanding(stamped.size());
         submitRequired(new ReplayIntakeInput.PartitionRecordBatch(requestId, stamped));
+        log.atDebug()
+            .setMessage(
+                "event=kafka_input_offered topic={} partition={} generation={} batch={} "
+                    + "record_count={} first_offset={} last_offset={}"
+            )
+            .addArgument(topicPartition::topic)
+            .addArgument(topicPartition::partition)
+            .addArgument(() -> state.generation().localSequence())
+            .addArgument(requestId::localSequence)
+            .addArgument(stamped::size)
+            .addArgument(() -> stamped.getFirst().recordId().offset())
+            .addArgument(() -> stamped.getLast().recordId().offset())
+            .log();
     }
 
     // ---------------------------------------------------------------- rebalance callbacks
@@ -805,6 +922,15 @@ public final class KafkaSourceOwner {
                 }
                 beginGeneration(topicPartition);
             }
+            log.atInfo()
+                .setMessage(
+                    "event=kafka_assignment_changed action=assigned changed_count={} "
+                        + "assignment_count={} partitions={}"
+                )
+                .addArgument(assigned::size)
+                .addArgument(() -> port.assignment().size())
+                .addArgument(() -> summarizePartitions(assigned))
+                .log();
         } finally {
             wakeupController.leaveRebalanceCallback();
         }
@@ -855,6 +981,13 @@ public final class KafkaSourceOwner {
         }
         wakeupController.enterRebalanceCallback();
         try {
+            log.atInfo()
+                .setMessage(
+                    "event=kafka_assignment_changed action=revoked changed_count={} partitions={}"
+                )
+                .addArgument(revoked::size)
+                .addArgument(() -> summarizePartitions(revoked))
+                .log();
             if (orderlyShutdownStarted) {
                 revoked.forEach(this::retireGeneration);
                 return;
@@ -950,8 +1083,13 @@ public final class KafkaSourceOwner {
             recordId -> recordId.generation().equals(state.generation())
         );
         log.atInfo()
-            .setMessage("Retiring generation {}: committed {} of {} records read, commitUncertainty={}")
-            .addArgument(state::generation)
+            .setMessage(
+                "event=kafka_generation_retiring topic={} partition={} generation={} "
+                    + "records_committed={} records_read={} commit_uncertainty={}"
+            )
+            .addArgument(() -> state.topicPartition().topic())
+            .addArgument(() -> state.topicPartition().partition())
+            .addArgument(() -> state.generation().localSequence())
             .addArgument(state::recordsCommitted)
             .addArgument(state::recordsRead)
             .addArgument(state::commitUncertainty)
@@ -1032,6 +1170,7 @@ public final class KafkaSourceOwner {
             return;
         }
         nextHeartbeatNanos = nowNanos + heartbeatIntervalNanos;
+        publishDiagnosticSnapshot();
 
         var generations = new LinkedHashMap<Integer, Long>();
         var commitHeads = new LinkedHashMap<Integer, String>();
@@ -1271,6 +1410,16 @@ public final class KafkaSourceOwner {
         }
         var submitted = detachForSubmission();
         var operation = new CommitOperation(nextCommitOperationId++, submitted);
+        log.atDebug()
+            .setMessage(
+                "event=kafka_commit_submitted mode=sync operation={} partition_count={} "
+                    + "remaining_grace_ms={} partitions={}"
+            )
+            .addArgument(() -> operation.operationId)
+            .addArgument(submitted::size)
+            .addArgument(() -> Duration.ofNanos(remainingNanos).toMillis())
+            .addArgument(() -> summarizePartitions(submitted.keySet()))
+            .log();
         wakeupController.enterProtectedOperation();
         KafkaSourcePort.CommitOutcome outcome;
         try {
@@ -1300,6 +1449,13 @@ public final class KafkaSourceOwner {
         }
         wakeupController.enterRebalanceCallback();
         try {
+            log.atWarn()
+                .setMessage(
+                    "event=kafka_assignment_changed action=lost changed_count={} partitions={}"
+                )
+                .addArgument(lost::size)
+                .addArgument(() -> summarizePartitions(lost))
+                .log();
             if (orderlyShutdownStarted) {
                 lost.forEach(this::retireGeneration);
                 return;
@@ -1335,9 +1491,103 @@ public final class KafkaSourceOwner {
         return Optional.ofNullable(stagedCommitPositions.get(topicPartition));
     }
 
+    /**
+     * Returns the last immutable owner-thread publication. The monitor thread must use this copy rather than
+     * reading the owner-confined maps, queues, or commit operation directly.
+     */
+    public DiagnosticSnapshot diagnosticSnapshot() {
+        return diagnosticSnapshot;
+    }
+
+    private void publishDiagnosticSnapshot() {
+        var partitionCopies = new LinkedHashMap<PartitionGenerationId, PartitionDiagnostic>();
+        var recordCopies = new LinkedHashMap<KafkaRecordId, RecordDiagnostic>();
+        for (var state : partitions.values()) {
+            var generation = state.generation();
+            var topicPartition = state.topicPartition();
+            var queue = state.commitQueue().snapshot();
+            var stagedPosition = Optional.ofNullable(stagedCommitPositions.get(topicPartition));
+            var inFlightPosition = inFlightCommitOperation == null
+                ? Optional.<Long>empty()
+                : Optional.ofNullable(inFlightCommitOperation.submitted.get(topicPartition))
+                    .filter(submitted -> submitted.generation().equals(generation))
+                    .map(SubmittedPosition::nextPosition);
+            partitionCopies.put(
+                generation,
+                new PartitionDiagnostic(
+                    generation,
+                    state.isKafkaPaused(),
+                    state.isReadable(),
+                    state.isAssignmentBootstrapPending(),
+                    state.outstandingRequest().isPresent(),
+                    state.isPriorGenerationCleanupPending(),
+                    state.lifecycleAllowsIntake(),
+                    queue.size(),
+                    queue.unfinishedCount(),
+                    queue.headRecord(),
+                    queue.greatestObservedOffset(),
+                    state.recordsAwaitingCommit().total(),
+                    state.commitUncertainty(),
+                    stagedPosition,
+                    inFlightPosition
+                )
+            );
+
+            recordContexts.keySet().stream()
+                .filter(recordId -> recordId.generation().equals(generation))
+                .forEach(recordId -> recordCopies.put(
+                    recordId,
+                    new RecordDiagnostic(
+                        recordId,
+                        diagnosticState(recordId, queue, state, stagedPosition, inFlightPosition)
+                    )
+                ));
+        }
+        diagnosticSnapshot = new DiagnosticSnapshot(partitionCopies, recordCopies);
+    }
+
+    private static RecordDiagnosticState diagnosticState(
+        KafkaRecordId recordId,
+        ObservedRecordCommitQueue.Snapshot queue,
+        PartitionSourceState state,
+        Optional<Long> stagedPosition,
+        Optional<Long> inFlightPosition
+    ) {
+        var queueState = queue.recordStates().get(recordId);
+        if (queueState != null) {
+            return switch (queueState) {
+                case PROCESSING -> RecordDiagnosticState.PROCESSING;
+                case PROCESSING_COMPLETE ->
+                    RecordDiagnosticState.PROCESSING_COMPLETE_WAITING_FOR_COMMIT_HEAD;
+                case COMMIT_INELIGIBLE -> RecordDiagnosticState.COMMIT_INELIGIBLE;
+            };
+        }
+        if (inFlightPosition.filter(position -> position > recordId.offset()).isPresent()) {
+            return RecordDiagnosticState.COMMIT_IN_FLIGHT;
+        }
+        if (stagedPosition.filter(position -> position > recordId.offset()).isPresent()) {
+            return state.commitUncertainty() == PartitionSourceState.CommitUncertainty.NONE_OBSERVED
+                ? RecordDiagnosticState.READY_TO_COMMIT
+                : RecordDiagnosticState.COMMIT_UNCERTAIN;
+        }
+        if (state.commitUncertainty() != PartitionSourceState.CommitUncertainty.NONE_OBSERVED) {
+            return RecordDiagnosticState.COMMIT_UNCERTAIN;
+        }
+        return RecordDiagnosticState.UNKNOWN;
+    }
+
     private Optional<PartitionSourceState> currentStateFor(PartitionGenerationId generation) {
         var state = partitions.get(generation.topicPartition());
         return state != null && state.generation().equals(generation) ? Optional.of(state) : Optional.empty();
+    }
+
+    private static String summarizePartitions(Collection<TopicPartition> partitions) {
+        var listed = partitions.stream()
+            .limit(MAX_LOGGED_PARTITIONS)
+            .map(TopicPartition::toString)
+            .toList();
+        var omitted = Math.max(0, partitions.size() - listed.size());
+        return omitted == 0 ? listed.toString() : listed + " omitted=" + omitted;
     }
 
     /**

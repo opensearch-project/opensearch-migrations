@@ -29,10 +29,6 @@ public final class AttemptPayload implements AutoCloseable {
         );
     }
 
-    public static AttemptPayload owned(@NonNull ByteBufList packets) {
-        return owned(packets, ResourceOwnership.Metrics.NOOP);
-    }
-
     public static AttemptPayload owned(
         @NonNull ByteBufList packets,
         @NonNull ResourceOwnership.Metrics metrics

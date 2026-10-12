@@ -44,10 +44,8 @@ public final class ProtocolViolationTerminator implements AutoCloseable {
     }
 
     public interface Metrics {
-        Metrics NOOP = new Metrics() {};
-
-        default void drainStarted() {}
-        default void terminationTriggered() {}
+        void drainStarted();
+        void terminationTriggered();
     }
 
     private final Duration drainLimit;
@@ -82,11 +80,6 @@ public final class ProtocolViolationTerminator implements AutoCloseable {
         this.schedulerResource = schedulerResource;
     }
 
-    /** Creates the fixed production timer. G9 may replace only the process-supervisor termination sink. */
-    public static ProtocolViolationTerminator system(IntConsumer termination) {
-        return system(termination, Metrics.NOOP);
-    }
-
     /** Creates the fixed production timer with process-wide observability. */
     public static ProtocolViolationTerminator system(IntConsumer termination, Metrics metrics) {
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -107,10 +100,17 @@ public final class ProtocolViolationTerminator implements AutoCloseable {
         if (!started.compareAndSet(false, true)) {
             return;
         }
+        var generation = recordId.generation();
         log.atError()
-            .setMessage("Capture protocol violation at {}; draining admitted side effects for {}: {}")
-            .addArgument(recordId)
-            .addArgument(drainLimit)
+            .setMessage(
+                "event=capture_protocol_violation topic={} partition={} generation={} offset={} "
+                    + "drain_limit_ms={} diagnostic={}"
+            )
+            .addArgument(() -> generation.topicPartition().topic())
+            .addArgument(() -> generation.topicPartition().partition())
+            .addArgument(generation::localSequence)
+            .addArgument(recordId::offset)
+            .addArgument(drainLimit::toMillis)
             .addArgument(diagnostic)
             .log();
         metrics.drainStarted();

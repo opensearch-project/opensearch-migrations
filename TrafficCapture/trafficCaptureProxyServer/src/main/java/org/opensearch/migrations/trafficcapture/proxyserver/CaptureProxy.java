@@ -558,9 +558,9 @@ public class CaptureProxy {
         System.err.println("Got args: " + String.join("; ", args));
         var processId = ProcessHelpers.getNodeInstanceName();
         var captureActivationId = newCaptureActivationId();
-        log.info("Starting Capture Proxy on " + processId);
 
         var params = parseArgs(args);
+        logStartupSummary(params, processId, captureActivationId);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
         var ctx = new RootCaptureContext(
@@ -639,6 +639,7 @@ public class CaptureProxy {
             });
             ScheduledFuture<?> watchdog = watchdogExecutor.schedule(
                 () -> {
+                    logShutdownSummary("hard_stop", processId, captureActivationId);
                     System.err.println(
                         "Orderly proxy shutdown exceeded its hard-stop deadline; halting now"
                     );
@@ -661,11 +662,31 @@ public class CaptureProxy {
                 );
                 System.err.println("Done stopping the proxy.");
             } catch (InterruptedException e) {
+                log.atError()
+                    .setCause(e)
+                    .setMessage(
+                        "event=capture_shutdown_interrupted processId={} captureActivationId={}"
+                    )
+                    .addArgument(processId)
+                    .addArgument(captureActivationId)
+                    .log();
                 System.err.println("Caught InterruptedException while shutting down, resetting interrupt status: " + e);
                 Thread.currentThread().interrupt();
             } catch (RuntimeException e) {
-                log.atError().setCause(e).setMessage("Orderly proxy shutdown failed").log();
+                log.atError()
+                    .setCause(e)
+                    .setMessage(
+                        "event=capture_shutdown_failed processId={} captureActivationId={}"
+                    )
+                    .addArgument(processId)
+                    .addArgument(captureActivationId)
+                    .log();
             } finally {
+                logShutdownSummary(
+                    shutdownCompleted ? "completed" : "incomplete",
+                    processId,
+                    captureActivationId
+                );
                 if (shutdownCompleted) {
                     watchdog.cancel(false);
                     watchdogExecutor.shutdownNow();
@@ -687,6 +708,46 @@ public class CaptureProxy {
                 // JVM shutdown has already started and owns execution of the registered hook.
             }
         }
+    }
+
+    static void logStartupSummary(
+        @NonNull Parameters params,
+        @NonNull String processId,
+        @NonNull String captureActivationId
+    ) {
+        log.atInfo()
+            .setMessage(
+                "event=capture_startup_summary processId={} captureActivationId={} listenPort={} "
+                    + "captureMode={} kafkaTopic={} failurePolicy={} traceExportEnabled={} metricExportEnabled={}"
+            )
+            .addArgument(processId)
+            .addArgument(captureActivationId)
+            .addArgument(params.frontsidePort)
+            .addArgument(params.noCapture ? "disabled" : "kafka")
+            .addArgument(params.noCapture ? "none" : params.kafakTopicName)
+            .addArgument(params.captureFailurePolicy.name().toLowerCase(java.util.Locale.ROOT))
+            .addArgument(isConfigured(params.otelTraceCollectorEndpoint))
+            .addArgument(isConfigured(params.otelMetricsCollectorEndpoint))
+            .log();
+    }
+
+    static void logShutdownSummary(
+        @NonNull String outcome,
+        @NonNull String processId,
+        @NonNull String captureActivationId
+    ) {
+        log.atInfo()
+            .setMessage(
+                "event=capture_shutdown_summary outcome={} processId={} captureActivationId={}"
+            )
+            .addArgument(outcome)
+            .addArgument(processId)
+            .addArgument(captureActivationId)
+            .log();
+    }
+
+    private static boolean isConfigured(String endpoint) {
+        return endpoint != null && !endpoint.isBlank();
     }
 
     private static void stopInterruptedInProcessRun(

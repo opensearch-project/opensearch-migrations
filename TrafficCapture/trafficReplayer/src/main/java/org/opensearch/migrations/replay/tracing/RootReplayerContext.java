@@ -16,6 +16,37 @@ import lombok.NonNull;
 public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {
     public static final String SCOPE_NAME = "replayer";
 
+    private record ContextTrackers(
+        ActiveContextTracker global,
+        ActiveContextTrackerByActivityType byActivity,
+        CompositeContextTracker composite
+    ) {
+        private ContextTrackers() {
+            this(new ActiveContextTracker(), new ActiveContextTrackerByActivityType());
+        }
+
+        private ContextTrackers(
+            ActiveContextTracker global,
+            ActiveContextTrackerByActivityType byActivity
+        ) {
+            this(global, byActivity, new CompositeContextTracker(global, byActivity));
+        }
+
+        private ContextTrackers(@NonNull IContextTracker additionalTracker) {
+            this(new ActiveContextTracker(), new ActiveContextTrackerByActivityType(), additionalTracker);
+        }
+
+        private ContextTrackers(
+            ActiveContextTracker global,
+            ActiveContextTrackerByActivityType byActivity,
+            IContextTracker additionalTracker
+        ) {
+            this(global, byActivity, new CompositeContextTracker(global, byActivity, additionalTracker));
+        }
+    }
+
+    public final ActiveContextTracker activeContextTracker;
+    public final ActiveContextTrackerByActivityType activeContextTrackerByActivityType;
     public final KafkaConsumerContexts.PollScopeContext.MetricInstruments pollInstruments;
     public final KafkaConsumerContexts.CommitScopeContext.MetricInstruments commitInstruments;
     public final KafkaConsumerContexts.KafkaCommitScopeContext.MetricInstruments kafkaCommitInstruments;
@@ -23,8 +54,14 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         rebalanceCallbackInstruments;
     public final ReplayIntakeMetrics replayIntakeMetrics;
     public final TargetAttemptPermitMetrics targetAttemptPermitMetrics;
+    public final TargetExecutionMetrics targetExecutionMetrics;
+    public final TupleDurabilityMetrics tupleDurabilityMetrics;
+    public final TupleSinkUploadMetrics tupleSinkUploadMetrics;
     public final KafkaCommitStateMetrics kafkaCommitStateMetrics;
     public final ReplayProcessFatalMetrics replayProcessFatalMetrics;
+    public final ProtocolViolationMetrics protocolViolationMetrics;
+    public final ResourceOwnershipMetrics resourceOwnershipMetrics;
+    public final ReplayActivityMetrics replayActivityMetrics;
     public final ReplayContexts.ConnectionContext.MetricInstruments channelKeyInstruments;
     public final ReplayContexts.KafkaRecordContext.MetricInstruments kafkaRecordInstruments;
     public final ReplayContexts.TrafficStreamLifecycleContext.MetricInstruments trafficStreamLifecycleInstruments;
@@ -42,14 +79,17 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final ReplayContexts.SocketContext.MetricInstruments socketInstruments;
 
     public RootReplayerContext(@NonNull OpenTelemetry sdk) {
-        this(
-            sdk,
-            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
-        );
+        this(sdk, new ContextTrackers());
     }
 
-    public RootReplayerContext(@NonNull OpenTelemetry sdk, @NonNull IContextTracker contextTracker) {
-        super(SCOPE_NAME, contextTracker, sdk);
+    protected RootReplayerContext(@NonNull OpenTelemetry sdk, @NonNull IContextTracker additionalTracker) {
+        this(sdk, new ContextTrackers(additionalTracker));
+    }
+
+    private RootReplayerContext(@NonNull OpenTelemetry sdk, @NonNull ContextTrackers trackers) {
+        super(SCOPE_NAME, trackers.composite(), sdk);
+        activeContextTracker = trackers.global();
+        activeContextTrackerByActivityType = trackers.byActivity();
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
         pollInstruments = KafkaConsumerContexts.PollScopeContext.makeMetrics(meter);
@@ -59,8 +99,14 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
             KafkaConsumerContexts.RebalanceCallbackScopeContext.makeMetrics(meter);
         replayIntakeMetrics = new ReplayIntakeMetrics(meter);
         targetAttemptPermitMetrics = new TargetAttemptPermitMetrics(meter);
+        targetExecutionMetrics = new TargetExecutionMetrics(meter);
+        tupleDurabilityMetrics = new TupleDurabilityMetrics(meter);
+        tupleSinkUploadMetrics = new TupleSinkUploadMetrics(meter);
         kafkaCommitStateMetrics = new KafkaCommitStateMetrics(meter);
         replayProcessFatalMetrics = new ReplayProcessFatalMetrics(meter);
+        protocolViolationMetrics = new ProtocolViolationMetrics(meter);
+        resourceOwnershipMetrics = new ResourceOwnershipMetrics(meter);
+        replayActivityMetrics = new ReplayActivityMetrics(meter);
         channelKeyInstruments = ReplayContexts.ConnectionContext.makeMetrics(meter);
         socketInstruments = ReplayContexts.SocketContext.makeMetrics(meter);
         kafkaRecordInstruments = ReplayContexts.KafkaRecordContext.makeMetrics(meter);

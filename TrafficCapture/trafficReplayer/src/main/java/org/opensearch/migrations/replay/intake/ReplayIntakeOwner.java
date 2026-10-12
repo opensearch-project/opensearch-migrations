@@ -65,40 +65,38 @@ public final class ReplayIntakeOwner {
     }
 
     public interface Metrics {
-        Metrics NOOP = new Metrics() {};
-
-        default void ownerStarted() {}
-        default void ownerStoppedAfterDraining() {}
-        default void inputApplied(InputKind inputKind) {}
-        default void recordApplied() {}
-        default void activeRecordTrackersChanged(int delta) {}
-        default void recordTrackerRetired() {}
-        default void requestReconstituted() {}
-        default void interimResponseObserved() {}
-        default void responseCompleted(boolean keptAlive) {}
-        default void responseIncomplete(SourceAssemblySink.IncompleteReason reason) {}
-        default void retrySourceResponseCompleted() {}
-        default void retrySourceResponseUnavailable() {}
-        default void writerTimeTransition(PartitionIntakeState.WriterTimeTransition transition) {}
-        default void sourceConnectionsExpired(int count) {}
-        default void targetConnectionExpirationSent() {}
-        default void brokerTimeViolation() {}
-        default void batchRequested() {}
-        default void batchEntitlementResolved(PartitionIntakeState.BatchEntitlement entitlement) {}
-        default void retryReadySupplyChanged(int delta) {}
-        default void demandEvaluated(boolean open) {}
-        default void capturedCloseAccepted() {}
-        default void captureProtocolViolation() {}
-        default void recordBatchRejectedAfterProtocolViolation() {}
-        default void generationGraceStarted(CancellationGrace grace) {}
-        default void generationForceStarted() {}
-        default void generationCleanupFinished() {}
-        default void staleGenerationInputIgnored(InputKind inputKind) {}
+        void ownerStarted();
+        void ownerStoppedAfterDraining();
+        void inputApplied(InputKind inputKind);
+        void recordApplied();
+        void activeRecordTrackersChanged(int delta);
+        void recordTrackerRetired();
+        void requestReconstituted();
+        void interimResponseObserved();
+        void responseCompleted(boolean keptAlive);
+        void responseIncomplete(SourceAssemblySink.IncompleteReason reason);
+        void retrySourceResponseCompleted();
+        void retrySourceResponseUnavailable();
+        void writerTimeTransition(PartitionIntakeState.WriterTimeTransition transition);
+        void sourceConnectionsExpired(int count);
+        void targetConnectionExpirationSent();
+        void brokerTimeViolation();
+        void batchRequested();
+        void batchEntitlementResolved(PartitionIntakeState.BatchEntitlement entitlement);
+        void retryReadySupplyChanged(int delta);
+        void demandEvaluated(boolean open);
+        void capturedCloseAccepted();
+        void captureProtocolViolation();
+        void recordBatchRejectedAfterProtocolViolation();
+        void generationGraceStarted(CancellationGrace grace);
+        void generationForceStarted();
+        void generationCleanupFinished();
+        void staleGenerationInputIgnored(InputKind inputKind);
     }
 
     @FunctionalInterface
     public interface RecordObserver {
-        RecordObserver NOOP = record -> {};
+        RecordObserver NONE = record -> {};
 
         void beforeRecordApplied(ApplicationKafkaRecord record);
     }
@@ -129,22 +127,10 @@ public final class ReplayIntakeOwner {
         @NonNull ReplayIntakeInputQueue inputQueue,
         @NonNull KafkaSourceInputQueue sourceInputs,
         @NonNull SourceAssemblySink assemblySink,
-        @NonNull FatalHandler fatalHandler
-    ) {
-        this(inputQueue, sourceInputs, assemblySink, fatalHandler, Metrics.NOOP, RecordObserver.NOOP,
-            new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
-            2,
-            runnable -> new Thread(runnable, "replay-intake-owner"));
-    }
-
-    public ReplayIntakeOwner(
-        @NonNull ReplayIntakeInputQueue inputQueue,
-        @NonNull KafkaSourceInputQueue sourceInputs,
-        @NonNull SourceAssemblySink assemblySink,
         @NonNull FatalHandler fatalHandler,
         @NonNull Metrics metrics
     ) {
-        this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, RecordObserver.NOOP,
+        this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, RecordObserver.NONE,
             new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000),
             2,
             runnable -> new Thread(runnable, "replay-intake-owner"));
@@ -330,6 +316,10 @@ public final class ReplayIntakeOwner {
                 applyConnectionOwnerFinished(finished);
         }
         metrics.inputApplied(inputKind(input));
+        log.atDebug()
+            .setMessage("event=replay_intake_input_applied kind={}")
+            .addArgument(() -> inputKind(input))
+            .log();
         recomputeDemandAfterInput();
     }
 
@@ -470,6 +460,18 @@ public final class ReplayIntakeOwner {
         var plan = state.beginGracefulCancellation(graceful.grace());
         if (previousState == PartitionIntakeState.GenerationCancellationState.ACTIVE) {
             metrics.generationGraceStarted(graceful.grace());
+            var generation = graceful.generation();
+            log.atInfo()
+                .setMessage(
+                    "event=replay_generation_grace_started topic={} partition={} generation={} mode={}"
+                )
+                .addArgument(() -> generation.topicPartition().topic())
+                .addArgument(() -> generation.topicPartition().partition())
+                .addArgument(generation::localSequence)
+                .addArgument(() -> graceful.grace() instanceof CancellationGrace.Revocation
+                    ? "revocation"
+                    : "shutdown")
+                .log();
         }
         plan.connectionOwners().forEach(connectionProcessingId ->
             assemblySink.onGracefulGenerationCancellation(connectionProcessingId, graceful.grace())
@@ -491,6 +493,15 @@ public final class ReplayIntakeOwner {
         var plan = state.beginForceCancellation();
         if (previousState != PartitionIntakeState.GenerationCancellationState.REVOCATION_FORCED) {
             metrics.generationForceStarted();
+            var generation = forced.generation();
+            log.atWarn()
+                .setMessage(
+                    "event=replay_generation_force_started topic={} partition={} generation={}"
+                )
+                .addArgument(() -> generation.topicPartition().topic())
+                .addArgument(() -> generation.topicPartition().partition())
+                .addArgument(generation::localSequence)
+                .log();
         }
         plan.connectionOwners().forEach(assemblySink::onForceGenerationCancellation);
         if (plan.cleanupComplete()) {
@@ -508,6 +519,11 @@ public final class ReplayIntakeOwner {
         });
         var expiration = state.expireAllOpenConnections();
         metrics.sourceConnectionsExpired(expiration.expiredSourceConnections());
+        logSourceConnectionExpiration(
+            state.generation(),
+            "archive_end",
+            expiration
+        );
         expiration.targetOwnersToExpire().forEach(connectionProcessingId -> {
             assemblySink.onCapturedConnectionExpired(connectionProcessingId);
             metrics.targetConnectionExpirationSent();
@@ -585,6 +601,14 @@ public final class ReplayIntakeOwner {
         }
         submitRequired(new KafkaSourceInput.GenerationCleanupFinished(generation));
         metrics.generationCleanupFinished();
+        log.atInfo()
+            .setMessage(
+                "event=replay_generation_cleanup_finished topic={} partition={} generation={}"
+            )
+            .addArgument(() -> generation.topicPartition().topic())
+            .addArgument(() -> generation.topicPartition().partition())
+            .addArgument(generation::localSequence)
+            .log();
     }
 
     /**
@@ -624,6 +648,7 @@ public final class ReplayIntakeOwner {
         }
         // 2. Create its RecordWorkTracker.
         state.registerRecord(record.recordId());
+        logRecordTrackerStarted(record.recordId());
         // 3. Validate partition LogAppendTime movement before using the record as time evidence.
         try {
             state.observeLogAppendTime(record.logAppendTimeMillis());
@@ -640,6 +665,7 @@ public final class ReplayIntakeOwner {
         state.writersExpiredAt(record.logAppendTimeMillis()).forEach(writerNodeId -> {
             var expiration = state.expireConnectionsForWriter(writerNodeId);
             metrics.sourceConnectionsExpired(expiration.expiredSourceConnections());
+            logSourceConnectionExpiration(state.generation(), writerNodeId, expiration);
             expiration.targetOwnersToExpire().forEach(connectionProcessingId -> {
                 assemblySink.onCapturedConnectionExpired(connectionProcessingId);
                 metrics.targetConnectionExpirationSent();
@@ -719,12 +745,16 @@ public final class ReplayIntakeOwner {
         );
         var capturedConnectionId =
             new CapturedConnectionId(trafficStream.getNodeId(), trafficStream.getConnectionId());
+        var sourceConnectionAlreadyActive = state.hasActiveSourceConnection(capturedConnectionId);
         SourceConnectionState connection;
         try {
             connection = state.connectionFor(capturedConnectionId, trafficStream, assemblySink);
         } catch (SourceConnectionState.CaptureProtocolViolation violation) {
             submitProtocolViolation(record.recordId(), violation.getMessage());
             return false;
+        }
+        if (!sourceConnectionAlreadyActive) {
+            logSourceConnectionCreated(connection.connectionProcessingId());
         }
         var recordContext = record.replayContext();
         try (var trafficContext = recordContext == null
@@ -754,6 +784,7 @@ public final class ReplayIntakeOwner {
                     .forEach(relabel -> state.relabelAll(relabel.from(), relabel.to()));
                 outcome.associationsFinished().forEach(state::associationFinished);
                 if (outcome.lifetimeEnded()) {
+                    logSourceConnectionCompleted(connection.connectionProcessingId());
                     state.retireLifetime(connection);
                 }
             }
@@ -766,6 +797,7 @@ public final class ReplayIntakeOwner {
     /** {@code §7} step 9, and the only input that may advance a commit position ({@code §4.2}). */
     private void submitRecordProcessingFinished(KafkaRecordId recordId) {
         submitRequired(new KafkaSourceInput.RecordProcessingFinished(recordId));
+        logRecordTrackerRetired(recordId);
     }
 
     private void submitProtocolViolation(KafkaRecordId recordId, String diagnostic) {
@@ -775,6 +807,90 @@ public final class ReplayIntakeOwner {
         captureProtocolViolationRecord = recordId;
         metrics.captureProtocolViolation();
         submitRequired(new KafkaSourceInput.CaptureProtocolViolationDetected(recordId, diagnostic));
+    }
+
+    private static void logSourceConnectionExpiration(
+        PartitionGenerationId generation,
+        String cause,
+        PartitionIntakeState.WriterExpirationResult expiration
+    ) {
+        if (expiration.expiredSourceConnections() == 0) {
+            return;
+        }
+        log.atWarn()
+            .setMessage(
+                "event=source_connection_expired topic={} partition={} generation={} cause={} "
+                    + "connection_count={} target_owner_count={}"
+            )
+            .addArgument(() -> generation.topicPartition().topic())
+            .addArgument(() -> generation.topicPartition().partition())
+            .addArgument(generation::localSequence)
+            .addArgument(cause)
+            .addArgument(expiration::expiredSourceConnections)
+            .addArgument(() -> expiration.targetOwnersToExpire().size())
+            .log();
+    }
+
+    private static void logRecordTrackerStarted(KafkaRecordId recordId) {
+        log.atDebug()
+            .setMessage(
+                "event=record_tracker_started topic={} partition={} generation={} offset={}"
+            )
+            .addArgument(() -> recordId.generation().topicPartition().topic())
+            .addArgument(() -> recordId.generation().topicPartition().partition())
+            .addArgument(() -> recordId.generation().localSequence())
+            .addArgument(recordId::offset)
+            .log();
+    }
+
+    private static void logRecordTrackerRetired(KafkaRecordId recordId) {
+        log.atDebug()
+            .setMessage(
+                "event=record_tracker_retired topic={} partition={} generation={} offset={}"
+            )
+            .addArgument(() -> recordId.generation().topicPartition().topic())
+            .addArgument(() -> recordId.generation().topicPartition().partition())
+            .addArgument(() -> recordId.generation().localSequence())
+            .addArgument(recordId::offset)
+            .log();
+    }
+
+    private static void logSourceConnectionCreated(
+        ConnectionProcessingId connectionProcessingId
+    ) {
+        var generation = connectionProcessingId.generation();
+        var captured = connectionProcessingId.capturedConnectionId();
+        log.atDebug()
+            .setMessage(
+                "event=source_connection_created topic={} partition={} generation={} "
+                    + "writer={} connection={} lifetime={}"
+            )
+            .addArgument(() -> generation.topicPartition().topic())
+            .addArgument(() -> generation.topicPartition().partition())
+            .addArgument(generation::localSequence)
+            .addArgument(captured::writerNodeId)
+            .addArgument(captured::connectionId)
+            .addArgument(connectionProcessingId::localSequence)
+            .log();
+    }
+
+    private static void logSourceConnectionCompleted(
+        ConnectionProcessingId connectionProcessingId
+    ) {
+        var generation = connectionProcessingId.generation();
+        var captured = connectionProcessingId.capturedConnectionId();
+        log.atDebug()
+            .setMessage(
+                "event=source_connection_completed topic={} partition={} generation={} "
+                    + "writer={} connection={} lifetime={}"
+            )
+            .addArgument(() -> generation.topicPartition().topic())
+            .addArgument(() -> generation.topicPartition().partition())
+            .addArgument(generation::localSequence)
+            .addArgument(captured::writerNodeId)
+            .addArgument(captured::connectionId)
+            .addArgument(connectionProcessingId::localSequence)
+            .log();
     }
 
     private final class ObservedSourceAssemblySink implements SourceAssemblySink {
@@ -796,6 +912,11 @@ public final class ReplayIntakeOwner {
             requireGeneration(replayRequestId.connectionProcessingId().generation())
                 .registerRequest(replayRequestId, requestCompletingLogAppendTime);
             metrics.requestReconstituted();
+            log.atDebug()
+                .setMessage("event=request_reconstituted request={} captured_ordinal={}")
+                .addArgument(replayRequestId)
+                .addArgument(capturedRequestOrdinal)
+                .log();
             delegate.onRequestReconstituted(
                 replayRequestId,
                 capturedRequestOrdinal,
@@ -816,6 +937,11 @@ public final class ReplayIntakeOwner {
             var requestId = replayContext.getRequestId();
             requireGeneration(requestId.connectionProcessingId().generation())
                 .registerRequest(requestId, requestCompletingLogAppendTime);
+            log.atDebug()
+                .setMessage("event=request_reconstituted request={} captured_ordinal={}")
+                .addArgument(requestId)
+                .addArgument(requestId::capturedRequestOrdinal)
+                .log();
             delegate.onRequestReconstituted(
                 request,
                 requestEndOfMessageSourceTime,

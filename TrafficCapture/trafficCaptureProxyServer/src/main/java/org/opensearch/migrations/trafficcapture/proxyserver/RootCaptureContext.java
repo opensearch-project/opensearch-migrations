@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import org.opensearch.migrations.tracing.IContextTracker;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.KafkaRecordContext;
 import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
@@ -13,6 +14,8 @@ public class RootCaptureContext extends RootWireLoggingContext implements IRootK
     public static final String SCOPE_NAME = "captureProxy";
     @Getter
     public final KafkaRecordContext.MetricInstruments kafkaOffloadingInstruments;
+    @Getter
+    public final CapturePublishingMetrics capturePublishingMetrics;
     final CaptureProcessMetrics captureProcessMetrics;
 
     public RootCaptureContext(OpenTelemetry openTelemetry, IContextTracker contextTracker) {
@@ -33,6 +36,7 @@ public class RootCaptureContext extends RootWireLoggingContext implements IRootK
         super(openTelemetry, contextTracker, scopeName);
         var meter = this.getMeterProvider().get(scopeName);
         kafkaOffloadingInstruments = KafkaRecordContext.makeMetrics(meter);
+        capturePublishingMetrics = new CapturePublishingMetrics(meter);
         captureProcessMetrics = new CaptureProcessMetrics(
             meter,
             processId,

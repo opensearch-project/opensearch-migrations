@@ -1,136 +1,452 @@
+{{- if .Values.metrics.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: prometheus-metrics-dashboard
+  name: capture-replay-observability-dashboard
   labels:
-    grafana_dashboard: "1" # Required label for Grafana to pick-up dashboard
+    grafana_dashboard: "1"
 data:
-  prometheus-metrics-dashboard.json: |
+  capture-replay-observability.json: |
     {
       "id": null,
-      "title": "Prometheus Metrics Dashboard",
-      "tags": [],
+      "uid": "capture-replay-observability",
+      "title": "Capture and Replay Observability",
+      "tags": ["capture", "replay", "kubernetes"],
       "timezone": "browser",
-      "schemaVersion": 30,
-      "version": 1,
-      "refresh": "5s",
+      "schemaVersion": 39,
+      "version": 2,
+      "refresh": "15s",
+      "time": {"from": "now-6h", "to": "now"},
       "panels": [
         {
-          "type": "graph",
-          "title": "CPU Usage",
-          "datasource": "Prometheus",
-          "targets": [
-            {
-              "expr": "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[5m])) by (instance)",
-              "legendFormat": "thing",
-              "refId": "A"
-            }
-          ],
-          "xaxis": {
-            "mode": "time"
-          },
-          "yaxes": [
-            {
-              "format": "percent",
-              "label": "CPU Usage"
-            }
-          ],
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 0
-          }
+          "type": "row",
+          "title": "Traffic load and throughput",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "panels": []
         },
         {
-          "type": "graph",
-          "title": "Memory Usage",
-          "datasource": "Prometheus",
+          "type": "timeseries",
+          "title": "Capture request load",
+          "description": "Fully parsed HTTP requests observed by the capture proxy, per second. This uses the request counter rather than connection or capture-record lifecycle counts.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
-            {
-              "expr": "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
-              "legendFormat": "Memory Usage",
-              "refId": "A"
-            }
+            {"refId": "A", "expr": "sum(rate(fullRequest_count_total[$__rate_interval]))", "legendFormat": "requests/s"}
           ],
-          "xaxis": {
-            "mode": "time"
-          },
-          "yaxes": [
-            {
-              "format": "percent",
-              "label": "Memory Usage"
-            }
-          ],
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 0
-          }
+          "fieldConfig": {"defaults": {"unit": "reqps", "min": 0}},
+          "gridPos": {"h": 7, "w": 8, "x": 0, "y": 1}
         },
         {
-          "type": "graph",
-          "title": "Disk I/O",
-          "datasource": "Prometheus",
+          "type": "timeseries",
+          "title": "Capture proxy throughput",
+          "description": "Application-observed request and response bytes at the capture proxy. This replaces cloud load-balancer ProcessedBytes with metrics available through Prometheus.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
-            {
-              "expr": "rate(node_disk_io_time_seconds_total[5m])",
-              "legendFormat": "thing - thing2",
-              "refId": "A"
-            }
+            {"refId": "A", "expr": "sum(rate(bytesRead_bytes_total[$__rate_interval])) / 1048576", "legendFormat": "request MiB/s"},
+            {"refId": "B", "expr": "sum(rate(bytesWritten_bytes_total[$__rate_interval])) / 1048576", "legendFormat": "response MiB/s"},
+            {"refId": "C", "expr": "(sum(rate(bytesRead_bytes_total[$__rate_interval])) + sum(rate(bytesWritten_bytes_total[$__rate_interval]))) / 1048576", "legendFormat": "total MiB/s"}
           ],
-          "xaxis": {
-            "mode": "time"
-          },
-          "yaxes": [
-            {
-              "format": "s",
-              "label": "I/O Time"
-            }
-          ],
-          "gridPos": {
-            "h": 8,
-            "w": 24,
-            "x": 0,
-            "y": 8
-          }
+          "fieldConfig": {"defaults": {"unit": "suffix: MiB/s", "min": 0}},
+          "gridPos": {"h": 7, "w": 16, "x": 8, "y": 1}
         },
         {
-          "type": "singlestat",
-          "title": "Total Requests",
-          "datasource": "Prometheus",
+          "type": "timeseries",
+          "title": "Replayer target throughput",
+          "description": "Application bytes written to and read from the replay target, per second.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
-            {
-              "expr": "sum(rate(http_requests_total[5m]))",
-              "refId": "A"
-            }
+            {"refId": "A", "expr": "sum(rate(bytesWrittenToTarget_bytes_total[$__rate_interval])) / 1048576", "legendFormat": "request MiB/s"},
+            {"refId": "B", "expr": "sum(rate(bytesReadFromTarget_bytes_total[$__rate_interval])) / 1048576", "legendFormat": "response MiB/s"},
+            {"refId": "C", "expr": "(sum(rate(bytesWrittenToTarget_bytes_total[$__rate_interval])) + sum(rate(bytesReadFromTarget_bytes_total[$__rate_interval]))) / 1048576", "legendFormat": "total MiB/s"}
           ],
-          "gridPos": {
-            "h": 4,
-            "w": 6,
-            "x": 0,
-            "y": 16
-          },
-          "format": "none"
+          "fieldConfig": {"defaults": {"unit": "suffix: MiB/s", "min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
         },
         {
-          "type": "singlestat",
-          "title": "Up Time",
-          "datasource": "Prometheus",
+          "type": "timeseries",
+          "title": "Capture and replay throughput",
+          "description": "Compares total application-observed capture-proxy traffic with total replay-target traffic. These stages need not be byte-identical because transformations and protocol behavior can change payload sizes.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "(sum(rate(bytesRead_bytes_total[$__rate_interval])) + sum(rate(bytesWritten_bytes_total[$__rate_interval]))) / 1048576", "legendFormat": "capture MiB/s"},
+            {"refId": "B", "expr": "(sum(rate(bytesWrittenToTarget_bytes_total[$__rate_interval])) + sum(rate(bytesReadFromTarget_bytes_total[$__rate_interval]))) / 1048576", "legendFormat": "replay MiB/s"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "suffix: MiB/s", "min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+        },
+        {
+          "type": "row",
+          "title": "Replay fidelity",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+          "panels": []
+        },
+        {
+          "type": "stat",
+          "title": "Status-code matches",
+          "description": "Comparisons with matching source and target status-code classes over the selected dashboard interval. No value means there were no exported comparisons in the interval.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(increase(tupleComparison_total{statusCodesMatch=\"true\"}[$__range]))", "legendFormat": "matches", "instant": true}
+          ],
+          "fieldConfig": {"defaults": {"unit": "short", "min": 0}},
+          "gridPos": {"h": 5, "w": 8, "x": 0, "y": 17}
+        },
+        {
+          "type": "stat",
+          "title": "Status-code mismatches",
+          "description": "Comparisons with different source and target status-code classes over the selected dashboard interval. No value means there were no exported comparisons in the interval.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(increase(tupleComparison_total{statusCodesMatch=\"false\"}[$__range]))", "legendFormat": "mismatches", "instant": true}
+          ],
+          "fieldConfig": {"defaults": {"unit": "short", "min": 0}},
+          "gridPos": {"h": 5, "w": 8, "x": 8, "y": 17}
+        },
+        {
+          "type": "stat",
+          "title": "Status-code match percentage",
+          "description": "Matching comparisons divided by all comparisons over the selected interval. The panel intentionally has no value when no comparisons occurred, rather than reporting a misleading zero or 100 percent.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "100 * sum(increase(tupleComparison_total{statusCodesMatch=\"true\"}[$__range])) / sum(increase(tupleComparison_total[$__range]))", "legendFormat": "match percentage", "instant": true}
+          ],
+          "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}},
+          "gridPos": {"h": 5, "w": 8, "x": 16, "y": 17}
+        },
+        {
+          "type": "timeseries",
+          "title": "Status-code comparison breakdown",
+          "description": "Comparison rate by the bounded method, source status-code class, target status-code class, and match-result dimensions exported by tupleComparison.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
           "targets": [
             {
-              "expr": "time() - node_boot_time_seconds",
-              "refId": "A"
+              "refId": "A",
+              "expr": "sum by (method, sourceStatusCode, targetStatusCode, statusCodesMatch) (rate(tupleComparison_total[$__rate_interval]))",
+              "legendFormat": "\u007b\u007bmethod\u007d\u007d source=\u007b\u007bsourceStatusCode\u007d\u007d target=\u007b\u007btargetStatusCode\u007d\u007d match=\u007b\u007bstatusCodesMatch\u007d\u007d"
             }
           ],
-          "gridPos": {
-            "h": 4,
-            "w": 6,
-            "x": 6,
-            "y": 16
-          },
-          "format": "s"
+          "fieldConfig": {"defaults": {"unit": "reqps", "min": 0}},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 22}
+        },
+        {
+          "type": "row",
+          "title": "Replay progress (application metrics)",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 30},
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka commit activity",
+          "description": "Completed Kafka commit instrumentation scopes per second. Broker consumer-group lag is not exported to Prometheus; use kafka-consumer-groups.sh or the gameday helper for that separate signal.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(rate(kafkaCommitCount_total[$__rate_interval]))", "legendFormat": "commits/s"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "ops", "min": 0}},
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 31}
+        },
+        {
+          "type": "timeseries",
+          "title": "Source-to-target replay lag",
+          "description": "Windowed mean age, in seconds, when a source request is sent to the replay target. It uses rates of the histogram sum and count, not a lifetime cumulative average.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "lag seconds"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "s", "min": 0}},
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 31}
+        },
+        {
+          "type": "timeseries",
+          "title": "Actual replay speedup",
+          "description": "Approximate effective speedup: 1 minus the 15-minute derivative of windowed mean lag in seconds. Above 1 means replay is gaining on real time; 1 is real time; below 1 means lag is flat or growing. Changes in traffic mix can affect the mean.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "1 - deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m])",
+              "legendFormat": "effective speedup"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "short"}},
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 31}
+        },
+        {
+          "type": "stat",
+          "title": "Estimated catch-up time",
+          "description": "Estimated hours to eliminate current source-to-target lag at the recent 15-minute lag-reduction rate. The panel intentionally has no value when lag is flat or growing, when the reduction rate is zero, or when no lag samples exist.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000 / 3600) / (-deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]))) and on() (deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]) < 0)",
+              "legendFormat": "catch-up hours",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "h", "min": 0}},
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 39}
+        },
+        {
+          "type": "timeseries",
+          "title": "Historical catch-up estimate",
+          "description": "Historical version of the catch-up estimate. Gaps are intentional whenever effective speedup is at or below real time or lag samples are unavailable.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000 / 3600) / (-deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]))) and on() (deriv(((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval]))) / 1000)[15m:1m]) < 0)",
+              "legendFormat": "catch-up hours"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "h", "min": 0}},
+          "gridPos": {"h": 8, "w": 16, "x": 8, "y": 39}
+        },
+        {
+          "type": "row",
+          "title": "Runtime resources",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 47},
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer CPU utilization by pod",
+          "description": "CPU cores used by each replayer pod from deployed cAdvisor container metrics. Synthetic POD containers and empty-image series are excluded.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container=\"replayer\",container!=\"POD\",image!=\"\"}[$__rate_interval]))",
+              "legendFormat": "\u007b\u007bpod\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "cores", "min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 48}
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer working-set memory by pod",
+          "description": "Current working-set bytes for each replayer pod from deployed cAdvisor container metrics. Synthetic POD containers and empty-image series are excluded.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",container=\"replayer\",container!=\"POD\",image!=\"\"})",
+              "legendFormat": "\u007b\u007bpod\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 48}
+        },
+        {
+          "type": "row",
+          "title": "Capture publishing and routing",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 56},
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Capture publishing throughput",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(rate(capturePublishingRecordsAccepted_records_total[$__rate_interval]))", "legendFormat": "records/s"},
+            {"refId": "B", "expr": "sum(rate(capturePublishingBytesAccepted_bytes_total[$__rate_interval]))", "legendFormat": "bytes/s"}
+          ],
+          "fieldConfig": {"defaults": {"min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 57}
+        },
+        {
+          "type": "timeseries",
+          "title": "Capture backlog and writers",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(capturePublishingRecordsAwaitingAcknowledgement_records)", "legendFormat": "records awaiting ack"},
+            {"refId": "B", "expr": "sum(captureWritersActive_writers)", "legendFormat": "active writers"},
+            {"refId": "C", "expr": "sum(captureWritersDraining_writers)", "legendFormat": "draining writers"},
+            {"refId": "D", "expr": "sum(captureConnectionsActive_connections)", "legendFormat": "active connections"}
+          ],
+          "fieldConfig": {"defaults": {"min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 57}
+        },
+        {
+          "type": "stat",
+          "title": "Capture critical signals (5m)",
+          "description": "Counter increases plus the current fail-open capture-gap population. Threshold colors are investigation guidance only; no alert is installed.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(increase(captureHeartbeatDeadlineViolations_violations_total[5m]))", "legendFormat": "heartbeat deadlines"},
+            {"refId": "B", "expr": "sum(increase(capturePublisherFailures_failures_total[5m]))", "legendFormat": "publisher failures"},
+            {"refId": "C", "expr": "sum(increase(captureWritesRejected_writes_total[5m]))", "legendFormat": "write rejections"},
+            {"refId": "D", "expr": "sum(captureGapActive_processes)", "legendFormat": "capture gap active"}
+          ],
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}},
+          "gridPos": {"h": 5, "w": 24, "x": 0, "y": 65}
+        },
+        {
+          "type": "row",
+          "title": "Replay intake and oldest work",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 70},
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Replay populations",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(replayActiveContexts_contexts)", "legendFormat": "active contexts"},
+            {"refId": "B", "expr": "sum(replayActiveOwnerOperations_operations)", "legendFormat": "owner operations"},
+            {"refId": "C", "expr": "sum(replayIntakeActiveRecordTrackers_records)", "legendFormat": "record trackers"},
+            {"refId": "D", "expr": "sum(replayIntakeRetryReadyRequestSupply_requests)", "legendFormat": "retry-ready supply"}
+          ],
+          "fieldConfig": {"defaults": {"min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 71}
+        },
+        {
+          "type": "timeseries",
+          "title": "Oldest work age",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "max(replayOldestContextAge_milliseconds)", "legendFormat": "oldest context ms"},
+            {"refId": "B", "expr": "max(replayOldestKafkaRecordAge_milliseconds)", "legendFormat": "oldest Kafka record ms"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "ms", "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 60000}, {"color": "red", "value": 120000}]}}},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 71}
+        },
+        {
+          "type": "timeseries",
+          "title": "Contexts and owner operations by type",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum by (activity) (replayActiveContextsByActivity_contexts)", "legendFormat": "\u007b\u007bactivity\u007d\u007d active"},
+            {"refId": "B", "expr": "sum by (activity) (replayOverThresholdContextsByActivity_contexts)", "legendFormat": "\u007b\u007bactivity\u007d\u007d old"},
+            {"refId": "C", "expr": "sum by (operationType) (replayActiveOwnerOperationsByType_operations)", "legendFormat": "\u007b\u007boperationType\u007d\u007d owner active"},
+            {"refId": "D", "expr": "sum by (operationType) (replayLongRunningOwnerOperationsByType_operations)", "legendFormat": "\u007b\u007boperationType\u007d\u007d owner old"}
+          ],
+          "fieldConfig": {"defaults": {"min": 0}},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 79}
+        },
+        {
+          "type": "row",
+          "title": "Kafka commit state (broker lag is CLI-derived)",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 87},
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka record conservation",
+          "description": "Application record lifecycle and commit uncertainty. Broker consumer-group lag is obtained with kafka-consumer-groups.sh, not a Prometheus series.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(rate(kafkaSourceRecordsRead_records_total[$__rate_interval]))", "legendFormat": "read/s"},
+            {"refId": "B", "expr": "sum(rate(kafkaSourceRecordsCommitted_records_total[$__rate_interval]))", "legendFormat": "committed/s"},
+            {"refId": "C", "expr": "sum(kafkaSourceRecordsOutstanding_records)", "legendFormat": "outstanding"},
+            {"refId": "D", "expr": "sum(replayKafkaCommitUncertainPartitions_partitions)", "legendFormat": "uncertain partitions"}
+          ],
+          "fieldConfig": {"defaults": {"min": 0}},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 88}
+        },
+        {
+          "type": "row",
+          "title": "Target execution and tuple durability",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 96},
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Target permits and failures",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(targetAttemptPermitsActive_permits)", "legendFormat": "active permits"},
+            {"refId": "B", "expr": "sum(targetAttemptPermitAcquisitionsPending_requests)", "legendFormat": "pending permits"},
+            {"refId": "C", "expr": "sum(rate(targetAttemptsWithoutResponse_attempts_total[$__rate_interval]))", "legendFormat": "no response/s"},
+            {"refId": "D", "expr": "sum(increase(targetRetriesExhausted_requests_total[5m]))", "legendFormat": "retries exhausted"}
+          ],
+          "fieldConfig": {"defaults": {"min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 97}
+        },
+        {
+          "type": "timeseries",
+          "title": "Tuple durability and S3 upload retries",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(tupleDurabilityWritesPending_writes)", "legendFormat": "pending"},
+            {"refId": "B", "expr": "sum(rate(tupleDurabilityRetries_retries_total[$__rate_interval]))", "legendFormat": "outer retries/s"},
+            {"refId": "C", "expr": "sum(increase(tupleDurabilityTerminalFailures_writes_total[5m]))", "legendFormat": "terminal failures"},
+            {"refId": "D", "expr": "histogram_quantile(0.95, sum by (le) (rate(tupleDurabilityWriteLatency_milliseconds_bucket[$__rate_interval])))", "legendFormat": "p95 latency ms"},
+            {"refId": "E", "expr": "sum(rate(tupleSinkUploadRetryAttempts_retries_total[$__rate_interval]))", "legendFormat": "S3 retry attempts/s"},
+            {"refId": "F", "expr": "sum(tupleSinkUploadsRetrying_objects)", "legendFormat": "S3 objects retrying"},
+            {"refId": "G", "expr": "sum(increase(tupleSinkUploadRecoveries_objects_total[5m]))", "legendFormat": "S3 recoveries"},
+            {"refId": "H", "expr": "max(replayOldestContextAgeByActivity_milliseconds{activity=\"comparingResults\"})", "legendFormat": "oldest pending tuple ms"}
+          ],
+          "fieldConfig": {"defaults": {"min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 97}
+        },
+        {
+          "type": "row",
+          "title": "Process safety and clean shutdown",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 105},
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Owned replay resources",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum by (resourceType) (resourceOwnedHandles_handles)", "legendFormat": "\u007b\u007bresourceType\u007d\u007d handles"},
+            {"refId": "B", "expr": "sum by (resourceType) (resourceOwnedBuffers_buffers)", "legendFormat": "\u007b\u007bresourceType\u007d\u007d buffers"},
+            {"refId": "C", "expr": "sum by (resourceType) (resourceOwnedBytes_bytes)", "legendFormat": "\u007b\u007bresourceType\u007d\u007d bytes"}
+          ],
+          "fieldConfig": {"defaults": {"min": 0}},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 106}
+        },
+        {
+          "type": "stat",
+          "title": "Replay terminal safety events (15m)",
+          "description": "Bounded fatal, protocol-safety, tuple terminal-failure, and ownership-invariant counter increases. Threshold colors are investigation guidance only; no alert is installed.",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "targets": [
+            {"refId": "A", "expr": "sum(increase({__name__=~\"replayFatalFailures_failures_total|replayIntakeCaptureProtocolViolations_violations_total|tupleDurabilityTerminalFailures_writes_total|resourceOwnershipInvariantFailures_failures_total\"}[15m]))", "legendFormat": "terminal events"}
+          ],
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 106}
         }
-      ]
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "DS_PROMETHEUS",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {}
+          },
+          {
+            "name": "namespace",
+            "type": "query",
+            "label": "Namespace",
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "definition": "label_values(container_cpu_usage_seconds_total{container=\"replayer\"}, namespace)",
+            "query": {
+              "query": "label_values(container_cpu_usage_seconds_total{container=\"replayer\"}, namespace)",
+              "refId": "PrometheusVariableQueryEditor-VariableQuery"
+            },
+            "current": {"selected": true, "text": "ma", "value": "ma"},
+            "includeAll": false,
+            "multi": false,
+            "refresh": 1
+          }
+        ]
+      }
     }
+{{- end }}

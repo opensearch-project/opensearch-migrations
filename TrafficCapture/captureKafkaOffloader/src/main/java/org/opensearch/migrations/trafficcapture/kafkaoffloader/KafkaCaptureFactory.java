@@ -23,6 +23,8 @@ import org.opensearch.migrations.trafficcapture.IConnectionCaptureReadiness;
 import org.opensearch.migrations.trafficcapture.IOrderlyRetirableCaptureFactory;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics.FailureReason;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -56,6 +58,7 @@ public class KafkaCaptureFactory implements
     // general Kafka message overhead
     public static final int KAFKA_MESSAGE_OVERHEAD_BYTES = 500;
     private final IRootKafkaOffloaderContext rootScope;
+    private final CapturePublishingMetrics capturePublishingMetrics;
     private final String captureActivationId;
     private final String topicNameForTraffic;
     private final int bufferSize;
@@ -227,6 +230,7 @@ public class KafkaCaptureFactory implements
         @NonNull java.util.function.Consumer<Throwable> unstableProcessFailureCallback
     ) {
         this.rootScope = rootScope;
+        this.capturePublishingMetrics = rootScope.getCapturePublishingMetrics();
         this.captureActivationId = captureActivationId;
         this.producer = producer;
         this.membershipConsumer = membershipConsumer;
@@ -308,7 +312,7 @@ public class KafkaCaptureFactory implements
                 );
             } else {
                 try {
-                    route = readyPublisher.getRoutingState().routeNewConnection(connectionId);
+                    route = readyPublisher.routeNewConnection(connectionId);
                 } catch (CorruptedCaptureStateException e) {
                     failUnstable(e);
                     throw e;
@@ -704,7 +708,7 @@ public class KafkaCaptureFactory implements
                 captureActivationId,
                 topicMetadata.getTopicPartitionCount()
             );
-            var createdWriteGate = new CaptureKafkaWriteGate();
+            var createdWriteGate = new CaptureKafkaWriteGate(capturePublishingMetrics);
             var createdPublisher = new CaptureKafkaPublisher(
                 producer,
                 topicNameForTraffic,
@@ -713,6 +717,7 @@ public class KafkaCaptureFactory implements
                 heartbeatInterval,
                 heartbeatExpirationInterval,
                 java.time.Clock.systemUTC(),
+                capturePublishingMetrics,
                 createdWriteGate,
                 this::failUnstable
             );
@@ -725,6 +730,7 @@ public class KafkaCaptureFactory implements
                 topicNameForTraffic,
                 routingState,
                 createdPublisher,
+                capturePublishingMetrics,
                 this::finishMembershipInitialization,
                 this::failCapture,
                 this::failUnstable
@@ -916,15 +922,24 @@ public class KafkaCaptureFactory implements
         }
         if (publisherToFail != null) {
             publisherToFail.stopAfterFailure(failure);
+        } else {
+            var reason = failure instanceof org.apache.kafka.common.KafkaException
+                ? FailureReason.KAFKA_SEND
+                : FailureReason.OTHER;
+            capturePublishingMetrics.publisherFailed(reason);
+            log.atError()
+                .setCause(failure)
+                .setMessage(
+                    "event=capture_publisher_failed reason={} stage=initialization "
+                        + "message=Capture_Kafka_publisher_never_became_available"
+                )
+                .addArgument(reason.name().toLowerCase(java.util.Locale.ROOT))
+                .log();
         }
         publisherFuture.completeExceptionally(failure);
         if (initializer != null) {
             initializer.shutdownNow();
         }
-        log.atError()
-            .setCause(failure)
-            .setMessage("Kafka capture is permanently unavailable in this process")
-            .log();
         if (notifyCaptureFailurePolicy) {
             captureFailureCallback.accept(failure);
         }
@@ -972,14 +987,14 @@ public class KafkaCaptureFactory implements
     }
 
     private static TopicPartitionProvisioner provisioner(
-        @NonNull Properties kafkaAdminProperties,
+        Properties kafkaAdminProperties,
         int minimumTopicPartitionCount
     ) {
         if (minimumTopicPartitionCount == 0) {
             return TopicPartitionProvisioner.disabled();
         }
         return new KafkaAdminTopicPartitionProvisioner(
-            Admin.create(kafkaAdminProperties)
+            Admin.create(Objects.requireNonNull(kafkaAdminProperties))
         );
     }
 

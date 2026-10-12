@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.identity.CancellationGrace;
@@ -21,6 +22,7 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
 import org.opensearch.migrations.replay.tracing.ReplayIntakeMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
@@ -42,6 +44,7 @@ import com.google.protobuf.Timestamp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 /** Covers the source-reconstruction cases in {@code kafkaLLD §17.2}. */
 class SourceReconstructionTest {
@@ -63,7 +66,7 @@ class SourceReconstructionTest {
         sink,
         failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
         rootContext.replayIntakeMetrics,
-        ReplayIntakeOwner.RecordObserver.NOOP,
+        ReplayIntakeOwner.RecordObserver.NONE,
         new PartitionIntakeState.BrokerTimeConfiguration(30_000, 10_000, 5_000)
     );
 
@@ -124,6 +127,10 @@ class SourceReconstructionTest {
 
         Assertions.assertEquals(1, sink.responses.size(), "one response, however many records carried it");
         Assertions.assertEquals(responseBytes, bytesOf(sink.responses.get(0)));
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.RETRY_SOURCE_RESPONSES_COMPLETE)
+        );
     }
 
     /**
@@ -199,6 +206,10 @@ class SourceReconstructionTest {
             violations.get(0).diagnostic().contains("expected 43"),
             () -> "the diagnostic must name the gap: " + violations.get(0).diagnostic()
         );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.CAPTURE_PROTOCOL_VIOLATIONS)
+        );
     }
 
     /**
@@ -210,7 +221,9 @@ class SourceReconstructionTest {
      * two could not coexist — the fresh lifetime's messages would route to the expiring one's owner.
      */
     @Test
+    @ResourceLock("ReplayIntakeOwnerLogger")
     void anExpiredLifetimeAndAFreshOneForTheSameConnectionShareNoIdentity() {
+        try (var logs = new TestLogAppender(ReplayIntakeOwner.class)) {
         var first = new RecordScript(TOPIC).addTraffic(
             0, 0, Instant.ofEpochMilli(1_000), WRITER,
             stream(0, read(1, REQUEST_BYTES), endOfMessage(2))
@@ -259,6 +272,14 @@ class SourceReconstructionTest {
             sink.expiredConnections,
             "the first expiration routes only to the old process-local owner"
         );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.SOURCE_CONNECTIONS_EXPIRED)
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.TARGET_CONNECTION_EXPIRATIONS_SENT)
+        );
 
         var nextProof = new RecordScript(TOPIC, first.generation(0).localSequence()).addProbe(
             0, 3, Instant.ofEpochMilli(51_002), "other-writer", "retained-baseline-proof"
@@ -277,6 +298,38 @@ class SourceReconstructionTest {
             owner.partitionState(first.generation(0)).orElseThrow()
                 .lifetimeOf(fresh).orElseThrow().lifetime()
         );
+        Assertions.assertEquals(
+            2,
+            metricValue(ReplayIntakeMetrics.MetricNames.SOURCE_CONNECTIONS_EXPIRED)
+        );
+        Assertions.assertEquals(
+            2,
+            metricValue(ReplayIntakeMetrics.MetricNames.TARGET_CONNECTION_EXPIRATIONS_SENT)
+        );
+        Assertions.assertTrue(logs.contains(
+            "source_connection_expired",
+            "topic=traffic",
+            "partition=0",
+            "generation=0",
+            "cause=writer",
+            "connection_count=1",
+            "target_owner_count=1"
+        ));
+        Assertions.assertTrue(logs.contains(
+            "source_connection_created",
+            "topic=traffic",
+            "partition=0",
+            "generation=0",
+            "writer=writer",
+            "connection=connection",
+            "lifetime=0"
+        ));
+        Assertions.assertTrue(logs.contains(
+            "request_reconstituted",
+            "request=",
+            "captured_ordinal=0"
+        ));
+        }
     }
 
     @Test
@@ -308,6 +361,10 @@ class SourceReconstructionTest {
         Assertions.assertTrue(
             sink.completeRetryResponses.isEmpty(),
             "the later final response cannot reverse the boundary"
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.RETRY_SOURCE_RESPONSES_UNAVAILABLE)
         );
     }
 
@@ -347,6 +404,10 @@ class SourceReconstructionTest {
             List.of(0L),
             appliedOffsets,
             "the invalid higher-offset record must fail before its payload observer"
+        );
+        Assertions.assertEquals(
+            1,
+            metricValue(ReplayIntakeMetrics.MetricNames.BROKER_TIME_VIOLATIONS)
         );
         Assertions.assertTrue(
             localSink.requests.isEmpty(),
@@ -1090,6 +1151,25 @@ class SourceReconstructionTest {
 
     private List<KafkaSourceInput> drainSource() {
         return sourceInputs.drain();
+    }
+
+    private long metricValue(String metricName) {
+        return InMemoryInstrumentationBundle.getMetricValueOrZero(
+            telemetry.getFinishedMetrics(),
+            metricName
+        );
+    }
+
+    private Set<String> metricAttributeValues(
+        String metricName,
+        io.opentelemetry.api.common.AttributeKey<String> attributeKey
+    ) {
+        return telemetry.getFinishedMetrics()
+            .stream()
+            .filter(metric -> metric.getName().equals(metricName))
+            .flatMap(metric -> metric.getLongSumData().getPoints().stream())
+            .map(point -> point.getAttributes().get(attributeKey))
+            .collect(java.util.stream.Collectors.toSet());
     }
 
     private void assertFinalResponseMetricsBalance() {

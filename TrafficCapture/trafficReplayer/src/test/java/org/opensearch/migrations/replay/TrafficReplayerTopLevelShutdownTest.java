@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -13,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.Test;
 class TrafficReplayerTopLevelShutdownTest {
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("TrafficReplayerLogger")
     void normalShutdownUsesTheOrderlyDrainBeforeClosingTargetOwners() throws Exception {
         var events = new CopyOnWriteArrayList<String>();
         var sourcePollEntered = new CountDownLatch(1);
@@ -58,27 +61,36 @@ class TrafficReplayerTopLevelShutdownTest {
             lifecycle,
             supervisor
         );
-        var running = CompletableFuture.runAsync(application::run);
-        Assertions.assertTrue(sourcePollEntered.await(10, TimeUnit.SECONDS));
+        try (var logs = new TestLogAppender(TrafficReplayer.class)) {
+            var running = CompletableFuture.runAsync(application::run);
+            Assertions.assertTrue(sourcePollEntered.await(10, TimeUnit.SECONDS));
 
-        application.requestAndAwaitOrderlyShutdown();
-        running.get(10, TimeUnit.SECONDS);
+            application.requestAndAwaitOrderlyShutdown();
+            running.get(10, TimeUnit.SECONDS);
 
-        Assertions.assertEquals(
-            List.of(
-                "start",
-                "source-poll",
-                "source-wakeup",
-                "g8-orderly-drain",
-                "close-target-owners"
-            ),
-            events
-        );
-        Assertions.assertTrue(application.orderlyShutdownRequested());
-        Assertions.assertTrue(application.orderlyShutdownFinished().isDone());
+            Assertions.assertEquals(
+                List.of(
+                    "start",
+                    "source-poll",
+                    "source-wakeup",
+                    "g8-orderly-drain",
+                    "close-target-owners"
+                ),
+                events
+            );
+            Assertions.assertTrue(application.orderlyShutdownRequested());
+            Assertions.assertTrue(application.orderlyShutdownFinished().isDone());
+            Assertions.assertTrue(logs.contains(
+                "replayer_shutdown_summary",
+                "outcome=orderly",
+                "orderly_requested=true",
+                "fatal_started=false"
+            ));
+        }
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("TrafficReplayerLogger")
     void fatalSourceOwnerFailureSkipsTheOrderlyDrainAndTargetJoin() {
         var events = new CopyOnWriteArrayList<String>();
         var lifecycle = new TrafficReplayer.ReplayLifecycle() {
@@ -114,26 +126,57 @@ class TrafficReplayerTopLevelShutdownTest {
             supervisor
         );
 
-        application.run();
-        application.requestAndAwaitOrderlyShutdown();
+        try (var logs = new TestLogAppender(TrafficReplayer.class)) {
+            application.run();
+            application.requestAndAwaitOrderlyShutdown();
 
-        Assertions.assertTrue(supervisor.fatalTerminationStarted());
-        var signal = supervisor.firstFatalSignal().orElseThrow();
-        Assertions.assertEquals(ProcessSupervisor.Reason.UNEXPECTED_FATAL_ERROR, signal.reason());
-        Assertions.assertEquals("replay application", signal.owner());
-        Assertions.assertEquals("startup or source loop", signal.operation());
-        Assertions.assertEquals(
-            List.of(
-                "start",
-                "source-poll",
-                "watchdog",
-                "stop-input",
-                "diagnostic-flush",
-                "exit:89"
-            ),
-            events
-        );
-        Assertions.assertTrue(application.orderlyShutdownFinished().isCompletedExceptionally());
+            Assertions.assertTrue(supervisor.fatalTerminationStarted());
+            var signal = supervisor.firstFatalSignal().orElseThrow();
+            Assertions.assertEquals(ProcessSupervisor.Reason.UNEXPECTED_FATAL_ERROR, signal.reason());
+            Assertions.assertEquals("replay application", signal.owner());
+            Assertions.assertEquals("startup or source loop", signal.operation());
+            Assertions.assertEquals(
+                List.of(
+                    "start",
+                    "source-poll",
+                    "watchdog",
+                    "stop-input",
+                    "diagnostic-flush",
+                    "exit:89"
+                ),
+                events
+            );
+            Assertions.assertTrue(application.orderlyShutdownFinished().isCompletedExceptionally());
+            Assertions.assertTrue(logs.contains(
+                "replayer_shutdown_summary",
+                "outcome=fatal",
+                "fatal_started=true"
+            ));
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("TrafficReplayerLogger")
+    void startupSummaryStatesMetricAndTraceExportIndependently() {
+        var parameters = new TrafficReplayer.Parameters();
+        parameters.otelMetricsCollectorEndpoint = "";
+        parameters.otelTraceCollectorEndpoint = "http://collector:4317";
+        parameters.numClientThreads = 3;
+        try (var logs = new TestLogAppender(TrafficReplayer.class)) {
+            TrafficReplayer.logStartupSummary(
+                parameters,
+                URI.create("https://target.example:443")
+            );
+
+            Assertions.assertTrue(logs.contains(
+                "replayer_startup_summary",
+                "mode=replay",
+                "metric_export_enabled=false",
+                "trace_export_enabled=true",
+                "target_uri=https://target.example:443",
+                "client_threads=3"
+            ));
+        }
     }
 
     @Test

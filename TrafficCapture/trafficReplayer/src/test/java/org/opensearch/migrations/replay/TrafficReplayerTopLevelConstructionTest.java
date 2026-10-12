@@ -57,9 +57,16 @@ import org.opensearch.migrations.replay.lifecycle.TargetChannelPort;
 import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.testing.FakeClock;
 import org.opensearch.migrations.replay.testing.TestEventLoop;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.KafkaCommitStateMetrics;
+import org.opensearch.migrations.replay.tracing.ReplayActivityMetrics;
+import org.opensearch.migrations.replay.tracing.ReplayIntakeMetrics;
+import org.opensearch.migrations.replay.tracing.ResourceOwnershipMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.tracing.TargetAttemptPermitMetrics;
+import org.opensearch.migrations.replay.tracing.TupleDurabilityMetrics;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -521,6 +528,7 @@ class TrafficReplayerTopLevelConstructionTest {
                     () -> Assertions.assertNotNull(rootContext.channelKeyInstruments),
                     () -> Assertions.assertNotNull(rootContext.socketInstruments),
                     () -> Assertions.assertNotNull(rootContext.tupleHandlingInstruments),
+                    () -> Assertions.assertNotNull(rootContext.getTupleSinkUploadMetrics()),
                     () -> Assertions.assertEquals(33, preservedReplayPipelineMetricNames().size())
                 );
 
@@ -658,6 +666,7 @@ class TrafficReplayerTopLevelConstructionTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("TrafficReplayerTopLevelLogger")
     void realOwnerQueuesCarrySourceAdmissionAndCompletionUsingOneOperationRegistry() throws Exception {
         var clock = new FakeClock();
         var eventLoop = new TestEventLoop(clock);
@@ -673,7 +682,10 @@ class TrafficReplayerTopLevelConstructionTest {
         var closedTransformerIndices = new ArrayList<Integer>();
         var closedSinkIndices = new ArrayList<Integer>();
 
-        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+        try (
+            var telemetry = new InMemoryInstrumentationBundle(false, true);
+            var logs = new TestLogAppender(TrafficReplayerTopLevel.class)
+        ) {
             var configuration = new TrafficReplayerTopLevel.Configuration<
                 NettyPacketToHttpConsumer.PreparedRequest,
                 AggregatedRawResponse,
@@ -844,6 +856,11 @@ class TrafficReplayerTopLevelConstructionTest {
                 Assertions.assertEquals(0, targetAttempts.get());
                 Assertions.assertEquals(1, tupleTransformations.get());
                 Assertions.assertEquals(1, tupleWrites.get());
+                Assertions.assertTrue(logs.contains(
+                    "request_admitted",
+                    "request=",
+                    "new_connection=true"
+                ));
                 Assertions.assertEquals(List.of(0, 1, 2), transformerWorkerIndices);
                 Assertions.assertEquals(List.of(0, 1, 2), sinkWorkerIndices);
                 var connectionId = new ConnectionProcessingId(
@@ -877,6 +894,28 @@ class TrafficReplayerTopLevelConstructionTest {
                         + " fatal=" + fatalFailures
                 );
                 Assertions.assertTrue(fatalFailures.isEmpty());
+                var recordedMetrics = telemetry.getFinishedMetrics();
+                Assertions.assertEquals(
+                    1,
+                    InMemoryInstrumentationBundle.getMetricValueOrZero(
+                        recordedMetrics,
+                        TupleDurabilityMetrics.MetricNames.WRITES_ACCEPTED
+                    )
+                );
+                Assertions.assertEquals(
+                    1,
+                    InMemoryInstrumentationBundle.getMetricValueOrZero(
+                        recordedMetrics,
+                        TupleDurabilityMetrics.MetricNames.WRITES_DURABLE
+                    )
+                );
+                Assertions.assertEquals(
+                    0,
+                    InMemoryInstrumentationBundle.getMetricValueOrZero(
+                        recordedMetrics,
+                        TupleDurabilityMetrics.MetricNames.WRITES_PENDING
+                    )
+                );
             } finally {
                 replayer.close();
             }
@@ -1064,6 +1103,7 @@ class TrafficReplayerTopLevelConstructionTest {
                 "the captured connection owner must remain after its first durable tuple"
             );
             await(harness.allTuplesDurable, "both tuples to become durable");
+            harness.replayer.runActivityMonitorOnce();
 
             var connectionId = new ConnectionProcessingId(
                 generation,
@@ -1079,6 +1119,33 @@ class TrafficReplayerTopLevelConstructionTest {
                     2,
                     harness.metric(IReplayContexts.MetricNames.CONNECTIONS_OPENED),
                     "the target idle timeout must force the later request onto a second socket"
+                ),
+                () -> Assertions.assertTrue(
+                    harness.metric(ReplayIntakeMetrics.MetricNames.RECORDS_APPLIED) > 0
+                ),
+                () -> Assertions.assertTrue(
+                    harness.metric(KafkaCommitStateMetrics.MetricNames.RECORDS_READ) > 0
+                ),
+                () -> Assertions.assertTrue(
+                    harness.metric(TargetAttemptPermitMetrics.MetricNames.PERMITS_ACQUIRED) > 0
+                ),
+                () -> Assertions.assertTrue(
+                    harness.hasMetric(ResourceOwnershipMetrics.MetricNames.OWNED_HANDLES)
+                ),
+                () -> Assertions.assertTrue(
+                    harness.hasMetric(ReplayActivityMetrics.MetricNames.ACTIVE_CONTEXTS)
+                ),
+                () -> Assertions.assertEquals(
+                    2,
+                    harness.metric(TupleDurabilityMetrics.MetricNames.WRITES_ACCEPTED)
+                ),
+                () -> Assertions.assertEquals(
+                    2,
+                    harness.metric(TupleDurabilityMetrics.MetricNames.WRITES_DURABLE)
+                ),
+                () -> Assertions.assertEquals(
+                    0,
+                    harness.metric(TupleDurabilityMetrics.MetricNames.WRITES_PENDING)
                 ),
                 () -> Assertions.assertTrue(harness.fatalFailures.isEmpty()),
                 () -> Assertions.assertTrue(harness.asynchronousFailures.isEmpty())
@@ -1252,6 +1319,7 @@ class TrafficReplayerTopLevelConstructionTest {
             rawPacket.release();
         }
         var prepared = ByteBufListProducer.of(packets);
+        prepared.trackOwnership(rootContext.getResourceOwnershipMetrics());
         var firstWrites = new AtomicInteger();
         var finalWrites = new AtomicInteger();
         try {
@@ -1349,7 +1417,8 @@ class TrafficReplayerTopLevelConstructionTest {
                     () -> new TransformationLoader()
                         .getTransformerFactoryLoader(transformerConfig),
                     null,
-                    Duration.ZERO
+                    Duration.ZERO,
+                    root.getResourceOwnershipMetrics()
                 );
                 var result = preparer.begin(
                     requestId,
@@ -1465,7 +1534,8 @@ class TrafficReplayerTopLevelConstructionTest {
             (ignoredSourceRequest, output) -> {
                 transformedOutput.set(output);
                 throw expectedFailure;
-            }
+            },
+            new ResourceOwnershipMetrics(OpenTelemetry.noop().getMeter("test"))
         );
         var root = new RootReplayerContext(OpenTelemetry.noop());
         var record = root.createKafkaRecordContext(new KafkaRecordId(generation, 4), 0);
@@ -1516,7 +1586,8 @@ class TrafficReplayerTopLevelConstructionTest {
         var preparer = TrafficReplayerTopLevel.deployedRequestPreparer(
             () -> input -> input,
             null,
-            Duration.ZERO
+            Duration.ZERO,
+            new ResourceOwnershipMetrics(OpenTelemetry.noop().getMeter("test"))
         );
         var root = new RootReplayerContext(OpenTelemetry.noop());
         var record = root.createKafkaRecordContext(new KafkaRecordId(generation, 5), 0);
@@ -1580,8 +1651,12 @@ class TrafficReplayerTopLevelConstructionTest {
         var targetRequestBuffer = Unpooled.wrappedBuffer(targetRequestBytes);
         var targetRequestPackets = new ByteBufList(targetRequestBuffer);
         targetRequestBuffer.release();
+        var targetRequestProducer = ByteBufListProducer.of(targetRequestPackets);
+        targetRequestProducer.trackOwnership(
+            new ResourceOwnershipMetrics(OpenTelemetry.noop().getMeter("test"))
+        );
         var prepared = new NettyPacketToHttpConsumer.PreparedRequest(
-            ByteBufListProducer.of(targetRequestPackets),
+            targetRequestProducer,
             Duration.ZERO
         );
         var targetResponse = new AggregatedRawResponse(
@@ -2024,7 +2099,8 @@ class TrafficReplayerTopLevelConstructionTest {
                     TrafficReplayerTopLevel.deployedRequestPreparer(
                         () -> input -> input,
                         null,
-                        Duration.ZERO
+                        Duration.ZERO,
+                        rootContext.getResourceOwnershipMetrics()
                     ),
                 terminalRetryPolicy(),
                 (connectionId, eventLoop, connectionContext) -> {
@@ -2194,6 +2270,11 @@ class TrafficReplayerTopLevelConstructionTest {
                 telemetry.getFinishedMetrics(),
                 metricName
             );
+        }
+
+        private boolean hasMetric(String metricName) {
+            return telemetry.getFinishedMetrics().stream()
+                .anyMatch(metric -> metric.getName().equals(metricName));
         }
 
         @Override

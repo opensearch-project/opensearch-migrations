@@ -14,6 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.tracing.CaptureConnectionMetrics;
+import org.opensearch.migrations.trafficcapture.netty.tracing.CaptureConnectionMetrics.CloseReason;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IWireCaptureContexts;
 
@@ -220,11 +222,14 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     private final IncompleteRequestLimits incompleteRequestLimits;
     protected final CaptureProcessState captureProcessState;
     private final Duration maximumConnectionDuration;
+    private final CaptureConnectionMetrics connectionMetrics;
+    private final String connectionId;
     private CompletableFuture<T> captureCloseFuture;
     private ScheduledFuture<?> connectionDeadline;
     private ScheduledFuture<?> requestAssemblyDeadline;
     private final ByteArrayOutputStream pendingSourceResponseBytes = new ByteArrayOutputStream();
     private boolean contextsClosed;
+    private CloseReason closeReason = CloseReason.NORMAL;
     private int bytesWrittenAwaitingResponseContext;
 
     private record ClassifiedResponseBytes(boolean interim, byte[] data) {}
@@ -247,6 +252,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
         this.maximumConnectionDuration = maximumConnectionDuration;
         this.captureProcessState = captureProcessState;
+        this.connectionMetrics = rootContext.getCaptureConnectionMetrics();
+        this.connectionId = channelKey;
 
         this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext);
         var captureState = new CaptureState();
@@ -258,6 +265,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             ),
             new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate, captureState)
         );
+        connectionMetrics.connectionOpened();
     }
 
     @Override
@@ -268,9 +276,16 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         );
         connectionDeadline = ctx.executor().schedule(
             () -> {
-                log.atWarn()
-                    .setMessage("Closing connection because it exceeded the maximum connection duration")
-                    .log();
+                if (markCloseReason(CloseReason.CONNECTION_DURATION)) {
+                    log.atWarn()
+                        .setMessage(
+                            "event=capture_connection_dropped reason=connection_duration "
+                                + "connectionId={} limitMillis={}"
+                        )
+                        .addArgument(connectionId)
+                        .addArgument(maximumConnectionDuration.toMillis())
+                        .log();
+                }
                 ctx.close();
             },
             maximumConnectionDuration.toNanos(),
@@ -321,6 +336,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
         cancelConnectionDeadline();
         cancelRequestAssemblyDeadline();
+        connectionMetrics.connectionClosed(closeReason);
         try {
             reportRemainingBytesWrittenToClientWhileClosing();
             if (!captureProcessState.shouldCapture()) {
@@ -564,10 +580,21 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         if (requestDecoder.getLimitViolation() == null) {
             return false;
         }
-        log.atWarn()
-            .setMessage("Closing connection because an incomplete request exceeded its {} limit")
-            .addArgument(requestDecoder.getLimitViolation())
-            .log();
+        var reason = requestDecoder.getLimitViolation() == SimpleHttpRequestDecoder.LimitViolation.HEADER_BYTES
+            ? CloseReason.HEADER_BYTES
+            : CloseReason.TOTAL_BYTES;
+        if (markCloseReason(reason)) {
+            log.atWarn()
+                .setMessage(
+                    "event=capture_connection_dropped reason={} connectionId={} "
+                        + "maximumHeaderBytes={} maximumTotalBytes={}"
+                )
+                .addArgument(reason.name().toLowerCase(java.util.Locale.ROOT))
+                .addArgument(connectionId)
+                .addArgument(incompleteRequestLimits.maximumHeaderBytes())
+                .addArgument(incompleteRequestLimits.maximumTotalBytes())
+                .log();
+        }
         ReferenceCountUtil.release(msg);
         ctx.close();
         return true;
@@ -631,6 +658,14 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     }
 
     private void rejectSourceTraffic(ChannelHandlerContext ctx, Object msg) {
+        if (markCloseReason(CloseReason.CAPTURE_FAILURE)) {
+            log.atWarn()
+                .setMessage(
+                    "event=capture_connection_dropped reason=capture_failure connectionId={}"
+                )
+                .addArgument(connectionId)
+                .log();
+        }
         ReferenceCountUtil.release(msg);
         ctx.close();
     }
@@ -661,9 +696,16 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
         requestAssemblyDeadline = ctx.executor().schedule(
             () -> {
-                log.atWarn()
-                    .setMessage("Closing connection because an incomplete request exceeded its assembly duration")
-                    .log();
+                if (markCloseReason(CloseReason.ASSEMBLY_DURATION)) {
+                    log.atWarn()
+                        .setMessage(
+                            "event=capture_connection_dropped reason=assembly_duration "
+                                + "connectionId={} limitMillis={}"
+                        )
+                        .addArgument(connectionId)
+                        .addArgument(incompleteRequestLimits.maximumAssemblyDuration().toMillis())
+                        .log();
+                }
                 ctx.close();
             },
             incompleteRequestLimits.maximumAssemblyDuration().toNanos(),
@@ -676,6 +718,14 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             requestAssemblyDeadline.cancel(false);
             requestAssemblyDeadline = null;
         }
+    }
+
+    private synchronized boolean markCloseReason(CloseReason reason) {
+        if (closeReason != CloseReason.NORMAL) {
+            return false;
+        }
+        closeReason = reason;
+        return true;
     }
 
     @Override

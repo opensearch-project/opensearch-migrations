@@ -14,6 +14,9 @@ import java.util.List;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RetryDecision;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
+import org.opensearch.migrations.replay.tracing.TargetExecutionMetrics;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -111,52 +114,73 @@ class TargetConnectionOwnerFirstWriteTest {
     }
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("RequestReplayOwnerLogger")
     void noResponseIsTypedAtChannelBoundaryAndRetriesWithoutExceptionalControlFlow() {
-        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
-        fixture.admit(2, Instant.EPOCH);
-        fixture.eventLoop.runUntilIdle();
-        fixture.preparer.ready(2);
-        fixture.eventLoop.runUntilIdle();
-
-        var firstAttempt = fixture.targetChannel.attempt(0);
-        firstAttempt.noResponse();
-        fixture.eventLoop.runUntilIdle();
-
-        Assertions.assertInstanceOf(
-            TargetAttemptOutcome.NoTargetResponseObtained.class,
-            firstAttempt.outcome.toCompletableFuture().join()
-        );
-        Assertions.assertEquals(0, fixture.activePermits.get());
-        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
-
-        fixture.eventLoop.advance(Duration.ofSeconds(1));
-        for (int attempt = 1; attempt < 5; attempt++) {
-            fixture.targetChannel.attempt(attempt).noResponse();
+        try (
+            var telemetry = new InMemoryInstrumentationBundle(false, true);
+            var logs = new TestLogAppender(RequestReplayOwner.class)
+        ) {
+            var fixture = new TargetConnectionOwnerTestSupport.Fixture(
+                new TargetExecutionMetrics(telemetry.openTelemetrySdk.getMeter("test"))
+            );
+            fixture.admit(2, Instant.EPOCH);
             fixture.eventLoop.runUntilIdle();
+            fixture.preparer.ready(2);
+            fixture.eventLoop.runUntilIdle();
+
+            var firstAttempt = fixture.targetChannel.attempt(0);
+            firstAttempt.noResponse();
+            fixture.eventLoop.runUntilIdle();
+
+            Assertions.assertInstanceOf(
+                TargetAttemptOutcome.NoTargetResponseObtained.class,
+                firstAttempt.outcome.toCompletableFuture().join()
+            );
+            Assertions.assertEquals(0, fixture.activePermits.get());
+            Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
+
             fixture.eventLoop.advance(Duration.ofSeconds(1));
+            for (int attempt = 1; attempt < 5; attempt++) {
+                fixture.targetChannel.attempt(attempt).noResponse();
+                fixture.eventLoop.runUntilIdle();
+                fixture.eventLoop.advance(Duration.ofSeconds(1));
+            }
+
+            Assertions.assertEquals(
+                6,
+                fixture.targetChannel.attempts.size(),
+                "the response-only cap must not limit the no-response retry path"
+            );
+            Assertions.assertEquals(1, fixture.activePermits.get());
+            Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
+            Assertions.assertEquals(
+                5,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    telemetry.getFinishedMetrics(),
+                    TargetExecutionMetrics.MetricNames.ATTEMPTS_WITHOUT_RESPONSE
+                )
+            );
+            Assertions.assertTrue(logs.contains(
+                "target_response_unavailable",
+                "request=",
+                "kind=transport_failure",
+                "completed_attempts=1"
+            ));
+
+            var cancellation = new java.util.concurrent.CancellationException("cancel retry loop");
+            fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
+                TargetConnectionOwnerTestSupport.CONNECTION,
+                TargetConnectionOwnerTestSupport.GENERATION,
+                cancellation
+            ));
+            fixture.eventLoop.runUntilIdle();
+            fixture.targetChannel.attempt(5).abort.complete(null);
+            fixture.eventLoop.runUntilIdle();
+            fixture.eventLoop.advance(Duration.ofSeconds(10));
+
+            Assertions.assertEquals(6, fixture.targetChannel.attempts.size());
+            Assertions.assertEquals(0, fixture.activePermits.get());
+            Assertions.assertTrue(fixture.fatalFailures.isEmpty());
         }
-
-        Assertions.assertEquals(
-            6,
-            fixture.targetChannel.attempts.size(),
-            "the response-only cap must not limit the no-response retry path"
-        );
-        Assertions.assertEquals(1, fixture.activePermits.get());
-        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
-
-        var cancellation = new java.util.concurrent.CancellationException("cancel retry loop");
-        fixture.owner.submit(new TargetConnectionOwner.ForceConnectionCancellation<>(
-            TargetConnectionOwnerTestSupport.CONNECTION,
-            TargetConnectionOwnerTestSupport.GENERATION,
-            cancellation
-        ));
-        fixture.eventLoop.runUntilIdle();
-        fixture.targetChannel.attempt(5).abort.complete(null);
-        fixture.eventLoop.runUntilIdle();
-        fixture.eventLoop.advance(Duration.ofSeconds(10));
-
-        Assertions.assertEquals(6, fixture.targetChannel.attempts.size());
-        Assertions.assertEquals(0, fixture.activePermits.get());
-        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
     }
 }
