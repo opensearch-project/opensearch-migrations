@@ -18,10 +18,14 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Replayed traffic opens roughly one target connection per source connection, and a target whose
  * front end is failing handshakes is not helped by more handshakes. The limiter is additive-increase,
- * multiplicative-decrease over one-second windows: it halves the allowed connection rate when a
- * window's connect and handshake failures exceed {@link #FAILURE_FRACTION}, and while connects are
- * succeeding and demand fills the allowance it grows the rate, quickly until the first decrease and
+ * multiplicative-decrease over one-second windows: it halves the allowed connection rate when more than
+ * {@link #FAILURE_FRACTION} of a window's completed connects and TLS handshakes failed, and while connects
+ * are succeeding and demand fills the allowance it grows the rate, quickly until the first decrease and
  * gently after. When the target is healthy and the allowance exceeds demand, connects are not delayed.
+ *
+ * <p>Each decrease starts a new epoch, and only connects reserved in the current epoch are judged. A
+ * connect that was started at the old rate and fails afterwards is evidence about the old rate, so it
+ * cannot halve the new one.
  *
  * <p>Thread-safe; target event loops share one instance.
  */
@@ -34,13 +38,16 @@ public final class TargetConnectionLimiter {
     static final double MAXIMUM_RATE = MAXIMUM_INITIAL_RATE;
     static final double FAILURE_FRACTION = 0.05;
     static final long MINIMUM_FAILURES_TO_DECREASE = 5;
+    static final long MINIMUM_COMPLETIONS_TO_DECREASE = 20;
     static final double SLOW_START_GROWTH = 1.5;
     static final double STEADY_GROWTH = 1.1;
-    static final int DECREASE_COOLDOWN_WINDOWS = 2;
 
     private static final long NANOS_PER_SECOND = 1_000_000_000L;
     private static final long WINDOW_NANOS = NANOS_PER_SECOND;
     private static final double BURST_SECONDS = 0.1;
+
+    /** Identifies one reserved connect so its outcome is credited to the epoch it was started in. */
+    public record Reservation(long delayNanos, long epoch) {}
 
     /** Admits every connect immediately and records nothing. */
     public static final TargetConnectionLimiter UNLIMITED = new TargetConnectionLimiter();
@@ -49,7 +56,7 @@ public final class TargetConnectionLimiter {
     private final LongSupplier nanoTime;
     private double ratePerSecond;
     private boolean decreasedOnce;
-    private int cooldownWindows;
+    private long epoch;
     private long windowStartNanos;
     private long windowReservations;
     private long windowDelayedReservations;
@@ -57,7 +64,9 @@ public final class TargetConnectionLimiter {
     private long windowFailures;
     private long nextSlotNanos;
     private long totalDelayedReservations;
+    private long totalDelayNanos;
     private long totalRateDecreases;
+    private long totalFailures;
 
     private TargetConnectionLimiter() {
         this.limiting = false;
@@ -77,10 +86,10 @@ public final class TargetConnectionLimiter {
         this.nextSlotNanos = Long.MIN_VALUE;
     }
 
-    /** Reserves the next connect and returns how long the caller must wait before starting it. */
-    public long reserveConnectDelayNanos() {
+    /** Reserves the next connect; the caller waits {@link Reservation#delayNanos()} before starting it. */
+    public Reservation reserveConnect() {
         if (!limiting) {
-            return 0;
+            return new Reservation(0, 0);
         }
         synchronized (this) {
             var now = nanoTime.getAsLong();
@@ -92,31 +101,37 @@ public final class TargetConnectionLimiter {
             if (slot > now) {
                 windowDelayedReservations++;
                 totalDelayedReservations++;
-                return slot - now;
+                totalDelayNanos += slot - now;
+                return new Reservation(slot - now, epoch);
             }
-            return 0;
+            return new Reservation(0, epoch);
         }
     }
 
     /** Records a connect that produced a usable channel, including any TLS handshake. */
-    public void connectSucceeded() {
+    public void connectSucceeded(@NonNull Reservation reservation) {
         if (!limiting) {
             return;
         }
         synchronized (this) {
             rollWindows(nanoTime.getAsLong());
-            windowSuccesses++;
+            if (reservation.epoch() == epoch) {
+                windowSuccesses++;
+            }
         }
     }
 
     /** Records a TCP connect or TLS handshake that failed. */
-    public void connectFailed() {
+    public void connectFailed(@NonNull Reservation reservation) {
         if (!limiting) {
             return;
         }
         synchronized (this) {
             rollWindows(nanoTime.getAsLong());
-            windowFailures++;
+            totalFailures++;
+            if (reservation.epoch() == epoch) {
+                windowFailures++;
+            }
         }
     }
 
@@ -128,8 +143,20 @@ public final class TargetConnectionLimiter {
         return totalDelayedReservations;
     }
 
+    public synchronized long totalDelayMillis() {
+        return totalDelayNanos / 1_000_000;
+    }
+
     public synchronized long totalRateDecreases() {
         return totalRateDecreases;
+    }
+
+    public synchronized long totalFailures() {
+        return totalFailures;
+    }
+
+    public boolean isLimiting() {
+        return limiting;
     }
 
     private void rollWindows(long now) {
@@ -146,17 +173,14 @@ public final class TargetConnectionLimiter {
 
     private void adjustRate() {
         var completed = windowSuccesses + windowFailures;
-        var failing = windowFailures >= MINIMUM_FAILURES_TO_DECREASE
+        var failing = completed >= MINIMUM_COMPLETIONS_TO_DECREASE
+            && windowFailures >= MINIMUM_FAILURES_TO_DECREASE
             && windowFailures > FAILURE_FRACTION * completed;
-        if (cooldownWindows > 0) {
-            cooldownWindows--;
-            return;
-        }
         if (failing) {
             var previous = ratePerSecond;
             ratePerSecond = Math.max(MINIMUM_RATE, ratePerSecond / 2);
             decreasedOnce = true;
-            cooldownWindows = DECREASE_COOLDOWN_WINDOWS;
+            epoch++;
             totalRateDecreases++;
             log.atInfo()
                 .setMessage(

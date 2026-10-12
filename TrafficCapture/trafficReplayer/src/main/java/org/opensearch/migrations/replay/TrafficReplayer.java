@@ -39,6 +39,7 @@ import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.sink.S3TupleSink;
 import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.tracing.TargetPacingMetrics;
 import org.opensearch.migrations.replay.tracing.TupleSinkUploadMetrics;
 import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
@@ -1264,6 +1265,16 @@ public class TrafficReplayer {
         var connectionLimiter = params.targetConnectionInitialRate == 0
             ? TargetConnectionLimiter.UNLIMITED
             : new TargetConnectionLimiter(params.targetConnectionInitialRate, nanoTime);
+        var retryPacing = TargetRetryPacing.deployed(
+            Duration.ofMillis(params.targetRetryMaxDelayMs),
+            params.targetRetryBudgetRatio,
+            params.targetRetryBudgetFloorPerSecond
+        );
+        TargetPacingMetrics.register(
+            rootContext.getMeterProvider().get(RootReplayerContext.SCOPE_NAME),
+            connectionLimiter,
+            retryPacing
+        );
         var catchUpPacer = params.catchUpFactor == 0
             ? ReplayCatchUpPacer.unbounded()
             : ReplayCatchUpPacer.bounded(params.catchUpFactor, clock);
@@ -1334,14 +1345,7 @@ public class TrafficReplayer {
                     params.speedupFactor,
                     rootContext.getResourceOwnershipMetrics()
                 ),
-            new OpenSearchDefaultRetry(
-                errorClassifier,
-                TargetRetryPacing.deployed(
-                    Duration.ofMillis(params.targetRetryMaxDelayMs),
-                    params.targetRetryBudgetRatio,
-                    params.targetRetryBudgetFloorPerSecond
-                )
-            ),
+            new OpenSearchDefaultRetry(errorClassifier, retryPacing),
             (connectionId, eventLoop, connectionContext) ->
                 NettyPacketToHttpConsumer.create(
                     connectionId,

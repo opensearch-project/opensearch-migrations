@@ -52,6 +52,7 @@ public final class TargetRetryPacing {
     private boolean rateObserved;
     private long nextRetrySlotNanos;
     private final LongAdder budgetDeferredRetries = new LongAdder();
+    private final LongAdder throttledResponses = new LongAdder();
 
     private TargetRetryPacing(
         @NonNull Duration initialDelay,
@@ -139,6 +140,15 @@ public final class TargetRetryPacing {
     /** Retries whose start was pushed past their backoff because the process budget was spent. */
     public long budgetDeferredRetries() {
         return budgetDeferredRetries.sum();
+    }
+
+    public void throttledResponseObserved() {
+        throttledResponses.increment();
+    }
+
+    /** Target responses classified as load shedding, which retry without spending the response-retry limit. */
+    public long throttledResponses() {
+        return throttledResponses.sum();
     }
 
     public Duration delayBeforeRetry(int completedAttemptCount) {

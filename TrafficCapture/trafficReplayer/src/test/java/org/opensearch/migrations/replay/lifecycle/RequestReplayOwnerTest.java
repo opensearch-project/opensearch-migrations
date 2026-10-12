@@ -188,6 +188,34 @@ class RequestReplayOwnerTest {
     }
 
     @Test
+    void throttledResponsesRetryWithoutSpendingTheFourResponseRetries() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        for (int i = 0; i < 3; i++) {
+            fixture.retryPolicy.decisions.add(new ReplayOutcomes.RetryDecision.ThrottledRetryRequired());
+        }
+        for (int i = 0; i < 5; i++) {
+            fixture.retryPolicy.decisions.add(new ReplayOutcomes.RetryDecision.RetryRequired());
+        }
+        fixture.admit(6, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(6);
+        fixture.completeSource(6, "source");
+        fixture.eventLoop.runUntilIdle();
+
+        for (int attempt = 0; attempt < 8; attempt++) {
+            fixture.targetChannel.attempt(attempt).targetResponse("target-" + attempt);
+            fixture.eventLoop.runUntilIdle();
+            if (attempt < 7) {
+                fixture.eventLoop.advance(java.time.Duration.ofSeconds(1));
+            }
+        }
+
+        Assertions.assertEquals(8, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(List.of("turn:6"), fixture.lifecycleEvents);
+        Assertions.assertEquals(List.of("source-6|target-7|source"), fixture.tupleSink.writes);
+    }
+
+    @Test
     @org.junit.jupiter.api.parallel.ResourceLock("RequestReplayOwnerLogger")
     void responsePathStopsAfterTheConfiguredFourRetries() {
         try (

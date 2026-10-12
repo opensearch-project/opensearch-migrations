@@ -46,8 +46,8 @@ class DelayedTargetConnectReplayTest extends FullTrafficReplayerTest {
         // A frozen limiter clock keeps the spent allowance from refilling during test setup.
         var limiter = new TargetConnectionLimiter(10, () -> 0L);
         // At 10 per second the allowance holds one connect plus the current slot; spend both.
-        Assertions.assertEquals(0, limiter.reserveConnectDelayNanos());
-        Assertions.assertEquals(0, limiter.reserveConnectDelayNanos());
+        Assertions.assertEquals(0, limiter.reserveConnect().delayNanos());
+        Assertions.assertEquals(0, limiter.reserveConnect().delayNanos());
         var records = List.of(
             stream(0, List.of(read(0, 0, BULK), endOfMessage(1, 1), write(2, 2, OK), close(3, 3)))
         );

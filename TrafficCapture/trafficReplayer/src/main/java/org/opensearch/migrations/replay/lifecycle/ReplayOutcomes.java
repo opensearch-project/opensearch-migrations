@@ -59,9 +59,16 @@ public final class ReplayOutcomes {
 
     public sealed interface RetryDecision
         permits RetryDecision.RetryRequired,
+            RetryDecision.ThrottledRetryRequired,
             RetryDecision.TargetServerAttemptsFinished {
 
         record RetryRequired() implements RetryDecision {}
+
+        /**
+         * The target refused the attempt to shed load rather than judging the request, so retrying does
+         * not spend the bounded response-retry allowance. Backoff and the retry budget still pace it.
+         */
+        record ThrottledRetryRequired() implements RetryDecision {}
 
         record TargetServerAttemptsFinished() implements RetryDecision {}
     }

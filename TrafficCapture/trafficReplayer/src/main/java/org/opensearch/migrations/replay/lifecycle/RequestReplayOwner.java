@@ -385,6 +385,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private OutstandingOperationRegistry.Registration finalSourceWaitRegistration;
     private IReplayContexts.IScheduledContext retryTimerContext;
     private int nextAttemptNumber = 1;
+    private long throttledResponseCount;
     private int firstWriteAttempt;
     private int finalWriteAttempt;
     private boolean resourcesReleased;
@@ -1105,15 +1106,21 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
                     + "completed_attempts={}"
             )
             .addArgument(this::requestId)
-            .addArgument(() -> decision instanceof RetryDecision.RetryRequired
-                ? "retry"
-                : "finish")
+            .addArgument(() -> switch (decision) {
+                case RetryDecision.RetryRequired ignored -> "retry";
+                case RetryDecision.ThrottledRetryRequired ignored -> "throttled_retry";
+                case RetryDecision.TargetServerAttemptsFinished ignored -> "finish";
+            })
             .addArgument(this::responseAttemptCount)
             .addArgument(attemptHistory::size)
             .log();
         switch (decision) {
+            case RetryDecision.ThrottledRetryRequired ignored -> {
+                throttledResponseCount++;
+                scheduleRetry();
+            }
             case RetryDecision.RetryRequired ignored -> {
-                if (responseAttemptCount() > maximumResponseRetries) {
+                if (responseAttemptCount() - throttledResponseCount > maximumResponseRetries) {
                     metrics.targetRetriesExhausted();
                     log.atDebug()
                         .setMessage(

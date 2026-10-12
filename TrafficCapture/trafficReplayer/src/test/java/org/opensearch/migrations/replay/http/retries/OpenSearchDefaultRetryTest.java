@@ -46,7 +46,7 @@ class OpenSearchDefaultRetryTest {
             new StatusCase(200, 200, false, RetryDecision.TargetServerAttemptsFinished.class),
             new StatusCase(200, 404, true, RetryDecision.RetryRequired.class),
             new StatusCase(200, 500, true, RetryDecision.RetryRequired.class),
-            new StatusCase(200, 429, true, RetryDecision.RetryRequired.class),
+            new StatusCase(200, 429, false, RetryDecision.ThrottledRetryRequired.class),
             new StatusCase(404, 200, false, RetryDecision.TargetServerAttemptsFinished.class),
             new StatusCase(404, 404, true, RetryDecision.TargetServerAttemptsFinished.class),
             new StatusCase(200, 401, false, RetryDecision.TargetServerAttemptsFinished.class),
@@ -223,16 +223,59 @@ class OpenSearchDefaultRetryTest {
                     policy.requiresSourceResponse(prepared, target),
                     "status " + status
                 );
-                Assertions.assertInstanceOf(
-                    RetryDecision.RetryRequired.class,
+                Class<?> expected = status == 429
+                    ? RetryDecision.ThrottledRetryRequired.class
+                    : RetryDecision.RetryRequired.class;
+                Assertions.assertEquals(
+                    expected,
                     policy.decide(
                         prepared,
                         target,
                         new RequestReplayOwner.SourceResponseUnavailableForRetry<>()
-                    ),
+                    ).getClass(),
                     "status " + status
                 );
             }
+        }
+    }
+
+    @Test
+    void theIamConcurrencyThrottleIsRetriedAsLoadSheddingWithoutWaitingForTheSource() {
+        var pacing = TargetRetryPacing.deterministic(Duration.ofMillis(100), Duration.ofSeconds(1));
+        var policy = new OpenSearchDefaultRetry(new BulkItemErrorClassifier(), pacing);
+        var body = "{\"Message\":\"You have exceeded the number of permissible concurrent requests with "
+            + "unique IAM Identities. Please retry.\"}";
+        for (var request : List.of(
+            "POST /_bulk HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\n\r\n",
+            "GET /document HTTP/1.1\r\nHost: target\r\n\r\n"
+        )) {
+            try (var prepared = prepared(request)) {
+                var target = response(400, rawResponse(400, body));
+                Assertions.assertFalse(policy.requiresSourceResponse(prepared, target), request);
+                Assertions.assertInstanceOf(
+                    RetryDecision.ThrottledRetryRequired.class,
+                    policy.decide(prepared, target, new RequestReplayOwner.SourceResponseUnavailableForRetry<>()),
+                    request
+                );
+            }
+        }
+        Assertions.assertEquals(2, pacing.throttledResponses());
+    }
+
+    @Test
+    void anOrdinary400IsNotTreatedAsAThrottle() {
+        var policy = new OpenSearchDefaultRetry();
+        try (var prepared = prepared("GET /document HTTP/1.1\r\nHost: target\r\n\r\n")) {
+            var target = response(400, rawResponse(400, "{\"error\":\"bad request\"}"));
+            Assertions.assertTrue(policy.requiresSourceResponse(prepared, target));
+            Assertions.assertInstanceOf(
+                RetryDecision.RetryRequired.class,
+                policy.decide(prepared, target, completeSourceResponse(200))
+            );
+            Assertions.assertInstanceOf(
+                RetryDecision.TargetServerAttemptsFinished.class,
+                policy.decide(prepared, target, completeSourceResponse(400))
+            );
         }
     }
 

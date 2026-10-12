@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.http.retries;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashSet;
 import java.util.OptionalInt;
@@ -257,6 +258,8 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
         return new BulkResponseInspection(analyzer.getAnalysis(), analyzer.getErrorTypes());
     }
 
+    static final String AOS_IAM_CONCURRENCY_THROTTLE_MESSAGE =
+        "exceeded the number of permissible concurrent requests with unique IAM Identities";
     private static final Duration INITIAL_RETRY_DELAY = Duration.ofMillis(100);
     private static final Duration MAXIMUM_RETRY_DELAY = Duration.ofSeconds(300);
 
@@ -288,6 +291,9 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
         if (status.isEmpty()) {
             return false;
         }
+        if (isTargetThrottle(status.getAsInt(), targetResponse)) {
+            return false;
+        }
         if (preparedRequest.retryRequestKind()
             == NettyPacketToHttpConsumer.PreparedRequest.RetryRequestKind.BULK) {
             var code = status.getAsInt();
@@ -300,6 +306,22 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
 
     @Override
     public RetryDecision decide(
+        NettyPacketToHttpConsumer.PreparedRequest preparedRequest,
+        AggregatedRawResponse targetResponse,
+        RequestReplayOwner.RetrySourceResponse<HttpMessageAndTimestamp.Response> sourceResponse
+    ) {
+        var decision = decideIgnoringThrottles(preparedRequest, targetResponse, sourceResponse);
+        var status = targetStatus(targetResponse);
+        if (decision instanceof RetryDecision.RetryRequired
+            && status.isPresent()
+            && isTargetThrottle(status.getAsInt(), targetResponse)) {
+            pacing.throttledResponseObserved();
+            return new RetryDecision.ThrottledRetryRequired();
+        }
+        return decision;
+    }
+
+    private RetryDecision decideIgnoringThrottles(
         NettyPacketToHttpConsumer.PreparedRequest preparedRequest,
         AggregatedRawResponse targetResponse,
         RequestReplayOwner.RetrySourceResponse<HttpMessageAndTimestamp.Response> sourceResponse
@@ -355,6 +377,27 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
         var responseBytes = response.getResponseAsByteBuf();
         try {
             return inspectBulkResponse(responseBytes, errorClassifier);
+        } finally {
+            if (responseBytes.refCnt() > 0) {
+                responseBytes.release();
+            }
+        }
+    }
+
+    /**
+     * 429, and the 400 that Amazon OpenSearch Service returns when too many IAM identities have requests in
+     * flight, are load shedding rather than a verdict on the request.
+     */
+    static boolean isTargetThrottle(int statusCode, AggregatedRawResponse response) {
+        if (statusCode == 429) {
+            return true;
+        }
+        if (statusCode != 400) {
+            return false;
+        }
+        var responseBytes = response.getResponseAsByteBuf();
+        try {
+            return responseBytes.toString(StandardCharsets.UTF_8).contains(AOS_IAM_CONCURRENCY_THROTTLE_MESSAGE);
         } finally {
             if (responseBytes.refCnt() > 0) {
                 responseBytes.release();
