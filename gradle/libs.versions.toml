@@ -35,6 +35,7 @@ lucene9 = "9.12.1"
 lucene10 = "10.4.0"
 mockito = "5.24.0"
 netty = "4.1.128.Final"
+netty-tcnative = "2.0.74.Final"
 opensearch-testcontainers = "2.0.1"
 opentelemetry = "1.66.0"
 opentelemetry-semconv = "1.43.0"
@@ -144,6 +145,7 @@ netty-all = { module = "io.netty:netty-all", version.ref = "netty" }
 netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
 netty-codec-http = { module = "io.netty:netty-codec-http", version.ref = "netty" }
 netty-handler = { module = "io.netty:netty-handler", version.ref = "netty" }
+netty-tcnative-boringssl-static = { module = "io.netty:netty-tcnative-boringssl-static", version.ref = "netty-tcnative" }
 
 opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api", version.ref = "opentelemetry" }
 opentelemetry-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp", version.ref = "opentelemetry" }

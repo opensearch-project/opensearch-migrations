@@ -60,8 +60,10 @@ import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
 import io.netty.channel.EventLoop;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.SslProvider;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
@@ -1482,14 +1484,20 @@ public class TrafficReplayer {
         );
     }
 
-    private static SslContext loadTargetSslContext(
+    public static SslContext loadTargetSslContext(
         URI targetUri,
         boolean allowInsecureConnections
     ) throws Exception {
         if (!"https".equalsIgnoreCase(targetUri.getScheme())) {
             return null;
         }
-        var builder = SslContextBuilder.forClient();
+        var provider = OpenSsl.isAvailable() ? SslProvider.OPENSSL : SslProvider.JDK;
+        log.atInfo()
+            .setMessage("event=target_tls_provider provider={} openssl_unavailable_cause={}")
+            .addArgument(provider)
+            .addArgument(() -> OpenSsl.isAvailable() ? "none" : String.valueOf(OpenSsl.unavailabilityCause()))
+            .log();
+        var builder = SslContextBuilder.forClient().sslProvider(provider);
         if (allowInsecureConnections) {
             builder.trustManager(InsecureTrustManagerFactory.INSTANCE);
         }

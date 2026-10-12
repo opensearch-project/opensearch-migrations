@@ -194,6 +194,28 @@ public class FullTrafficReplayerTest {
         int expectedTupleCount,
         TargetConnectionLimiter connectionLimiter
     ) throws Exception {
+        return replay(
+            targetUri,
+            records,
+            requestTransformerSupplier,
+            responsePostProcessorSupplier,
+            rootContext,
+            expectedTupleCount,
+            connectionLimiter,
+            null
+        );
+    }
+
+    protected static ReplayResult replay(
+        URI targetUri,
+        List<CaptureRecord> records,
+        Supplier<IJsonTransformer> requestTransformerSupplier,
+        Supplier<IJsonTransformer> responsePostProcessorSupplier,
+        RootReplayerContext rootContext,
+        int expectedTupleCount,
+        TargetConnectionLimiter connectionLimiter,
+        io.netty.handler.ssl.SslContext targetSslContext
+    ) throws Exception {
         if (records.isEmpty()) {
             throw new IllegalArgumentException("records must not be empty");
         }
@@ -251,7 +273,7 @@ public class FullTrafficReplayerTest {
                         clock,
                         connectionContext,
                         targetUri,
-                        null,
+                        targetSslContext,
                         Duration.ofSeconds(5),
                         connectionLimiter
                     );

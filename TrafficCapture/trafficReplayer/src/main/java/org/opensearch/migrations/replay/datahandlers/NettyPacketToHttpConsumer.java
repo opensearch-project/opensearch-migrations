@@ -503,7 +503,9 @@ public final class NettyPacketToHttpConsumer
             }
             final SslHandler sslHandler;
             try {
-                var sslEngine = sslContext.newEngine(connected.alloc());
+                // Naming the peer lets the JDK resume a cached TLS session instead of repeating the full
+                // handshake and certificate validation for every replayed connection.
+                var sslEngine = sslContext.newEngine(connected.alloc(), serverUri.getHost(), tlsPeerPort());
                 sslEngine.setUseClientMode(true);
                 sslHandler = new SslHandler(sslEngine);
                 addLoggingHandlerLast(connected.pipeline(), "connect");
@@ -532,6 +534,10 @@ public final class NettyPacketToHttpConsumer
                     );
                 }
             });
+        }
+
+        private int tlsPeerPort() {
+            return serverUri.getPort() == -1 ? 443 : serverUri.getPort();
         }
 
         private void publishConnectedChannel(

@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
+import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.datahandlers.TargetConnectionLimiter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -74,6 +75,47 @@ class DelayedTargetConnectReplayTest extends FullTrafficReplayerTest {
             Assertions.assertEquals(1, limiter.totalDelayedReservations());
             Assertions.assertEquals(0, limiter.totalRateDecreases());
         }
+    }
+
+    @Test
+    void requestsReplayOverTlsWithTheDeployedTargetSslContext() throws Exception {
+        var records = List.of(
+            stream("first", 0, List.of(read(0, 0, BULK), endOfMessage(1, 1), write(2, 2, OK), close(3, 3))),
+            stream("second", 0, List.of(read(0, 4, BULK), endOfMessage(1, 5), write(2, 6, OK), close(3, 7)))
+        );
+        try (var server = SimpleNettyHttpServer.makeServer(
+            true,
+            request -> new SimpleHttpResponse(
+                Map.of(HttpHeaderNames.CONTENT_LENGTH.toString(), "2"),
+                "OK".getBytes(StandardCharsets.UTF_8),
+                "OK",
+                200
+            )
+        )) {
+            var target = server.localhostEndpoint();
+            var result = replay(
+                target,
+                records,
+                () -> new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost"),
+                null,
+                new RootReplayerContext(io.opentelemetry.api.OpenTelemetry.noop()),
+                2,
+                TargetConnectionLimiter.UNLIMITED,
+                TrafficReplayer.loadTargetSslContext(target, true)
+            );
+            Assertions.assertEquals(2, result.tuples().size());
+            Assertions.assertTrue(result.fatalFailures().isEmpty(), () -> "fatal: " + result.fatalFailures());
+        }
+    }
+
+    private static CaptureRecord stream(String connectionId, int number, List<TrafficObservation> observations) {
+        return CaptureRecord.newBuilder().setTrafficStream(
+            TrafficStream.newBuilder()
+                .setNodeId("writer")
+                .setConnectionId(connectionId)
+                .setNumber(number)
+                .addAllSubStream(observations)
+        ).build();
     }
 
     private static CaptureRecord stream(int number, List<TrafficObservation> observations) {

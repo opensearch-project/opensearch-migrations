@@ -27,6 +27,10 @@ dependencies {
     implementation libs.jcommander
     implementation libs.protobuf.java
     implementation libs.netty.all
+    // BoringSSL for target TLS; the JDK provider's pure-Java P-256 handshakes dominated replayer CPU.
+    runtimeOnly(libs.netty.tcnative.boringssl.static)
+    runtimeOnly(variantOf(libs.netty.tcnative.boringssl.static) { classifier('linux-x86_64') })
+    runtimeOnly(variantOf(libs.netty.tcnative.boringssl.static) { classifier('linux-aarch_64') })
     implementation libs.kafka.clients
     implementation libs.jackson.core
     implementation libs.jackson.databind
