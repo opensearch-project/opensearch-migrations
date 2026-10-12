@@ -1724,11 +1724,11 @@ class TrafficReplayerTopLevelConstructionTest {
                 Attributes.builder()
                     .put(
                         IReplayContexts.ITupleHandlingContext.SOURCE_STATUS_CODE_KEY,
-                        200L
+                        "200"
                     )
                     .put(
                         IReplayContexts.ITupleHandlingContext.TARGET_STATUS_CODE_KEY,
-                        500L
+                        "500"
                     )
                     .put(IReplayContexts.ITupleHandlingContext.METHOD_KEY, "POST")
                     .put(

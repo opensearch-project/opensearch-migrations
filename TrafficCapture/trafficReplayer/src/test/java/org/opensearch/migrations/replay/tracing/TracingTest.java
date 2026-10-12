@@ -164,8 +164,8 @@ class TracingTest {
                 recorded,
                 IReplayContexts.MetricNames.TUPLE_COMPARISON,
                 Attributes.builder()
-                    .put(IReplayContexts.ITupleHandlingContext.SOURCE_STATUS_CODE_KEY, 200L)
-                    .put(IReplayContexts.ITupleHandlingContext.TARGET_STATUS_CODE_KEY, 500L)
+                    .put(IReplayContexts.ITupleHandlingContext.SOURCE_STATUS_CODE_KEY, "200")
+                    .put(IReplayContexts.ITupleHandlingContext.TARGET_STATUS_CODE_KEY, "500")
                     .put(IReplayContexts.ITupleHandlingContext.METHOD_KEY, "POST")
                     .put(IReplayContexts.ITupleHandlingContext.STATUS_CODE_MATCH_KEY, false)
                     .build(),

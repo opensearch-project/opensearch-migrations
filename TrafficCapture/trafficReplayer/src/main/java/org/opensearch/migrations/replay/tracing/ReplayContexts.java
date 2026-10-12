@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -13,7 +14,6 @@ import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
-import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.DoubleHistogram;
@@ -878,8 +878,6 @@ public interface ReplayContexts extends IReplayContexts {
             return getRootInstrumentationScope().tupleHandlingInstruments;
         }
 
-        static final AttributeKey<Long> TARGET_STATUS_CODE_ATTR = AttributeKey.longKey("targetStatusCode");
-
         public AttributesBuilder getSharedAttributes(AttributesBuilder attributesBuilder) {
             final var sourceOp = Optional.ofNullable(sourceStatus);
             final var targetOp = Optional.ofNullable(targetStatus);
@@ -909,13 +907,25 @@ public interface ReplayContexts extends IReplayContexts {
         }
 
         /**
-         * Convert everything in the 2xx range to 200; 300-399 to 300
-         *
-         * @param status
-         * @return
+         * The 4xx codes that each mean something different to an operator, kept exact so that an auth failure or
+         * a throttle is identifiable from metrics alone. Bounded, so the attribute stays low-cardinality.
          */
-        public static long categorizeStatus(int status) {
-            return (status / 100L) * 100L;
+        static final Set<Integer> DISTINGUISHED_CLIENT_ERRORS = Set.of(401, 403, 404, 409, 429);
+        static final String UNCLASSIFIED_CLIENT_ERROR = "unclassified_4xx";
+
+        /**
+         * Buckets a status for metric attributes: each class is reported as its hundred ("200", "300", "500"),
+         * except that the distinguished 4xx codes are reported exactly and every other 4xx is
+         * {@value #UNCLASSIFIED_CLIENT_ERROR}, so that a bucket can never be mistaken for a literal 400.
+         */
+        public static String categorizeStatus(int status) {
+            if (DISTINGUISHED_CLIENT_ERRORS.contains(status)) {
+                return Integer.toString(status);
+            }
+            if (status / 100 == 4) {
+                return UNCLASSIFIED_CLIENT_ERROR;
+            }
+            return Long.toString((status / 100L) * 100L);
         }
 
         /**

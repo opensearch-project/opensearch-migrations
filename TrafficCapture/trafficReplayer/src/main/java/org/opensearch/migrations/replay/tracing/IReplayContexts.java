@@ -379,8 +379,8 @@ public interface IReplayContexts {
     interface ITupleHandlingContext
         extends IAccumulationScope, IWithTypedEnclosingScope<IRequestContext> {
         String ACTIVITY_NAME = ActivityNames.TUPLE_COMPARISON;
-        AttributeKey<Long> SOURCE_STATUS_CODE_KEY = AttributeKey.longKey("sourceStatusCode");
-        AttributeKey<Long> TARGET_STATUS_CODE_KEY = AttributeKey.longKey("targetStatusCode");
+        AttributeKey<String> SOURCE_STATUS_CODE_KEY = AttributeKey.stringKey("sourceStatusCode");
+        AttributeKey<String> TARGET_STATUS_CODE_KEY = AttributeKey.stringKey("targetStatusCode");
         AttributeKey<Boolean> STATUS_CODE_MATCH_KEY = AttributeKey.booleanKey("statusCodesMatch");
         AttributeKey<String> METHOD_KEY = AttributeKey.stringKey("method");
         AttributeKey<String> HTTP_VERSION_KEY = AttributeKey.stringKey("version");
