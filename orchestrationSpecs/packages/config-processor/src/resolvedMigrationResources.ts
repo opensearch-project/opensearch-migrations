@@ -122,11 +122,12 @@ function stableEqual(left: unknown, right: unknown): boolean {
 // (via expr.dig(..., "")), but which are absent from the resolved config when the user omits them.
 // Fill them here so the resolved-resource parameters (MigrationRun history + dry-run preview) match
 // the spec actually applied to the live CR. Keep in sync with the "" defaults in resourceManagement.ts.
-const CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS = ["otelTraceCollectorEndpoint"] as const;
+const CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS =
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint"] as const;
 const METADATA_EMPTY_STRING_DEFAULT_FIELDS =
-    ["otelTraceCollectorEndpoint", "transformerConfig", "transformerConfigFile"] as const;
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "transformerConfig", "transformerConfigFile"] as const;
 const DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS =
-    ["otelTraceCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile"] as const;
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile"] as const;
 
 function withEmptyStringDefaults(
     value: Record<string, unknown> | undefined,

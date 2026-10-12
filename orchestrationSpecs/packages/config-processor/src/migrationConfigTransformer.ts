@@ -34,6 +34,8 @@ type SolrBackupNormalizedConfig = {
     externalBackupName?: string;
     collectionAllowlist: string[];
     topology?: "cloud" | "standalone";
+    otelTraceExportEnabled?: boolean;
+    otelMetricsExportEnabled?: boolean;
     otelTraceCollectorEndpoint?: string;
     otelMetricsCollectorEndpoint?: string;
     jvmArgs?: string;

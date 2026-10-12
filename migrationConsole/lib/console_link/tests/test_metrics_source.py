@@ -198,3 +198,38 @@ def test_prometheus_get_metric_for_nonexistent_component(prometheus_ms):
             Component(3), "kafkaCommitCount",
             MetricStatistic.Average, start_time=datetime.datetime.now()
         )
+
+
+def test_prometheus_get_metric_data_queries_without_worker_identity_labels(prometheus_ms):
+    start_time = datetime.datetime.fromtimestamp(100, tz=datetime.timezone.utc)
+    end_time = datetime.datetime.fromtimestamp(200, tz=datetime.timezone.utc)
+    with requests_mock.Mocker() as rm:
+        rm.get(
+            f"{prometheus_ms.endpoint}/api/v1/query_range",
+            status_code=200,
+            json={
+                "data": {
+                    "result": [{
+                        "metric": {},
+                        "values": [[100, "3.0"], [160, "7.0"]],
+                    }],
+                },
+            },
+        )
+
+        metrics = prometheus_ms.get_metric_data(
+            Component.CAPTUREPROXY,
+            "kafkaCommitCount",
+            MetricStatistic.Sum,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+    assert rm.last_request.qs["query"][0].lower() == (
+        "sum without (exported_instance, service_instance_id, instance, pod)"
+        '(kafkacommitcount{exported_job="capture"})'
+    )
+    assert metrics == [
+        (datetime.datetime.fromtimestamp(100).isoformat(), 3.0),
+        (datetime.datetime.fromtimestamp(160).isoformat(), 7.0),
+    ]
