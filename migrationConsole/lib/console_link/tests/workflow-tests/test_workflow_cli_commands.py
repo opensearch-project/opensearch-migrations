@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from kubernetes.client.rest import ApiException
 
 from console_link.workflow.cli import workflow_cli
+from console_link.workflow.commands.log import MIGRATION_RESOURCE_UID_LABEL
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
 
@@ -495,6 +496,65 @@ class TestWorkflowCLICommands:
         assert args[:3] == ('ma', 'migration-workflow', 'step')
         assert kwargs == {'pre_approve': True, 'include_completed': True}
 
+    @patch('console_link.workflow.commands.approve._gather_gates')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_step_list_json(self, mock_k8s, mock_gather):
+        runner = CliRunner()
+        mock_gather.return_value = [
+            self._make_gate('gate-one', status='waiting', k='v')
+        ]
+
+        result = runner.invoke(workflow_cli, ['approve', 'step', '--list', '--output', 'json'])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload == [{
+            'category': 'step',
+            'displayName': 'gate-one',
+            'labels': {'k': 'v'},
+            'name': 'gate-one',
+            'prerequisite': None,
+            'reason': None,
+            'resourceKind': None,
+            'resourceName': None,
+            'status': 'waiting',
+        }]
+
+    @patch('console_link.workflow.commands.approve._gather_gates')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_retry_list_json_includes_prerequisite(self, mock_k8s, mock_gather):
+        runner = CliRunner()
+        labels = {
+            'migrations.opensearch.org/resource-kind': 'CaptureProxy',
+            'migrations.opensearch.org/resource-name': 'capture-proxy',
+        }
+        mock_gather.return_value = [
+            self._make_gate(
+                'captureproxy.capture-proxy.vapretry',
+                category='retry',
+                **labels,
+            )
+        ]
+
+        result = runner.invoke(workflow_cli, ['approve', 'retry', '--list', '--output', 'json'])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload == [{
+            'category': 'retry',
+            'displayName': 'captureproxy.capture-proxy',
+            'labels': labels,
+            'name': 'captureproxy.capture-proxy.vapretry',
+            'prerequisite': {
+                'command': 'workflow reset capture-proxy',
+                'description': 'Reset the CaptureProxy so the workflow can recreate it',
+            },
+            'reason': None,
+            'resourceKind': 'CaptureProxy',
+            'resourceName': 'capture-proxy',
+            'status': 'waiting',
+        }]
+
     @patch('console_link.workflow.commands.approve._waiting_gates_from_workflow')
     @patch('console_link.workflow.commands.approve._list_all_gates')
     def test_gather_gates_excludes_completed_by_default(
@@ -606,6 +666,23 @@ class TestWorkflowCLICommands:
             ('done-step', 'approved')
         ]
         assert completion_gates == []
+
+    @patch('console_link.workflow.commands.approve._waiting_gates_from_workflow')
+    def test_waiting_gates_categorizes_step_and_runtime(self, mock_waiting_gates):
+        """Both kinds block until approved, so both are reported, tagged by kind."""
+        from console_link.workflow.commands.approve import waiting_gates
+
+        mock_waiting_gates.return_value = [
+            ('migratemetadata.snapshot-migration-0', None),
+            ('captureproxy.capture-proxy.vapretry', 'Gated field change on captureproxy: spec.replicas'),
+            ('datasnapshot.source1-snapshot.vapretry', 'Impossible field change on datasnapshot: spec.snapshotName'),
+        ]
+
+        assert [(name, category) for name, _, category in waiting_gates('ma', 'migration-workflow')] == [
+            ('migratemetadata.snapshot-migration-0', 'step'),
+            ('captureproxy.capture-proxy.vapretry', 'change'),
+            ('datasnapshot.source1-snapshot.vapretry', 'retry'),
+        ]
 
     @patch('console_link.workflow.commands.approve._list_all_gates')
     def test_find_already_approved_is_workflow_scoped(self, mock_list_gates):
@@ -809,6 +886,31 @@ class TestWorkflowCLICommands:
         assert args[4] == []
 
     @patch('console_link.workflow.commands.log._run_history_mode')
+    def test_output_show_pods_attributes_historical_logs_to_pods(self, mock_history):
+        runner = CliRunner()
+
+        result = runner.invoke(workflow_cli, ['log', 'all', '--show-pods'])
+
+        assert result.exit_code == 0
+        args, _ = mock_history.call_args
+        assert args[5] is True
+
+    def test_stream_merged_logs_prefixes_lines_with_pod_name(self, capsys):
+        from console_link.workflow.commands.log import _stream_merged_logs
+
+        merged_logs = [
+            ('2026-08-23T12:00:00.000000000Z snapshot started\n', 'snapshot-pod'),
+            ('2026-08-23T12:00:01.000000000Z migration started\n', 'migration-pod'),
+        ]
+
+        _stream_merged_logs(merged_logs, show_ts=False, show_pods=True)
+
+        assert capsys.readouterr().out.splitlines() == [
+            '[pod/snapshot-pod] snapshot started',
+            '[pod/migration-pod] migration started',
+        ]
+
+    @patch('console_link.workflow.commands.log._run_history_mode')
     def test_output_filter_combines_filter_options(self, mock_history):
         runner = CliRunner()
 
@@ -829,12 +931,13 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_uses_resource_labels(self, mock_history, mock_client, _mock_k8s):
+    def test_output_resource_uses_resource_uid(self, mock_history, mock_client, _mock_k8s):
         runner = CliRunner()
         mock_custom = Mock()
         mock_client.CustomObjectsApi.return_value = mock_custom
         mock_custom.get_namespaced_custom_object.return_value = {
             'metadata': {
+                'uid': 'a9cc8399-1286-4d47-8bd0-d72c24acc1d3',
                 'labels': {
                     'migrations.opensearch.org/source': 'source1',
                     'migrations.opensearch.org/target': 'target1',
@@ -856,15 +959,14 @@ class TestWorkflowCLICommands:
         )
         args, _ = mock_history.call_args
         assert args[2] == (
-            'migrations.opensearch.org/source=source1,'
-            'migrations.opensearch.org/target=target1,'
-            'strimzi.io/cluster=default'
+            f'{MIGRATION_RESOURCE_UID_LABEL}='
+            'a9cc8399-1286-4d47-8bd0-d72c24acc1d3'
         )
 
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_excludes_cr_only_labels(self, mock_history, mock_client, _mock_k8s):
+    def test_output_resource_requires_uid(self, mock_history, mock_client, _mock_k8s):
         runner = CliRunner()
         mock_custom = Mock()
         mock_client.CustomObjectsApi.return_value = mock_custom
@@ -881,18 +983,14 @@ class TestWorkflowCLICommands:
 
         result = runner.invoke(workflow_cli, ['log', 'resource', 'datasnapshot.source-backfill-snapshot'])
 
-        assert result.exit_code == 0
-        args, _ = mock_history.call_args
-        assert args[2] == (
-            'migrations.opensearch.org/snapshot=backfill-snapshot,'
-            'migrations.opensearch.org/source=source,'
-            'workflows.argoproj.io/workflow=migration-workflow'
-        )
+        assert result.exit_code == 1
+        assert 'has no Kubernetes UID' in result.output
+        mock_history.assert_not_called()
 
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_keeps_workflow_selector_for_workflow_pods(
+    def test_output_resource_does_not_add_workflow_selector(
         self, mock_history, mock_client, _mock_k8s
     ):
         runner = CliRunner()
@@ -900,6 +998,7 @@ class TestWorkflowCLICommands:
         mock_client.CustomObjectsApi.return_value = mock_custom
         mock_custom.get_namespaced_custom_object.return_value = {
             'metadata': {
+                'uid': 'e4834eed-2f91-477c-a0dd-9e10479c1370',
                 'labels': {
                     'migrations.opensearch.org/source': 'source1',
                     'migrations.opensearch.org/task': 'captureProxy',
@@ -912,9 +1011,8 @@ class TestWorkflowCLICommands:
         assert result.exit_code == 0
         args, _ = mock_history.call_args
         assert args[2] == (
-            'migrations.opensearch.org/source=source1,'
-            'migrations.opensearch.org/task=captureProxy,'
-            'workflows.argoproj.io/workflow=migration-workflow'
+            f'{MIGRATION_RESOURCE_UID_LABEL}='
+            'e4834eed-2f91-477c-a0dd-9e10479c1370'
         )
 
     @patch('console_link.workflow.commands.log._run_history_mode')

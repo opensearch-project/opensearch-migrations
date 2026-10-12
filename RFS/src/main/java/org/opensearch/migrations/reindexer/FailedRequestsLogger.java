@@ -44,7 +44,7 @@ public class FailedRequestsLogger {
         log.atError()
             .setCause(error)
             .setMessage("Bulk request failed for {} index on {} items. Response body: {}." +
-                    "Request body logged to DLQ (FailedRequests logger) for manual investigation and retry." +
+                    "Request body logged to failed document stream (FailedRequests logger) for manual investigation and retry." +
                     "With root cause {}")
             .addArgument(indexName)
             .addArgument(failedItemCount)
@@ -59,7 +59,7 @@ public class FailedRequestsLogger {
             .addKeyValue(FailedRequestsLoggerKeys.ROOT_CAUSE, rootCause)
             .addKeyValue(FailedRequestsLoggerKeys.REQUEST_BODY, bulkRequestBodySupplier.get())
             .addKeyValue(FailedRequestsLoggerKeys.RESPONSE_BODY, responseBody)
-            .log("Bulk failure logged to DLQ");
+            .log("Bulk failure logged to failed document stream");
     }
 
     @UtilityClass

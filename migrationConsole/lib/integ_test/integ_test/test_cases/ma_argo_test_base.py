@@ -1,6 +1,6 @@
 from enum import Enum
 import logging
-import subprocess
+import time
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -10,6 +10,31 @@ from console_link.middleware.clusters import cat_indices, connection_check, clea
 from ..integration_test_argo_service import IntegrationTestArgoService
 
 logger = logging.getLogger(__name__)
+
+_CLUSTER_CONNECT_RETRIES = 10
+_CLUSTER_CONNECT_WAIT_S = 30
+
+
+def _wait_for_connection(cluster, retries: int = _CLUSTER_CONNECT_RETRIES,
+                         wait_s: int = _CLUSTER_CONNECT_WAIT_S) -> ConnectionResult:
+    """Retry connection_check to tolerate transient AOS domain unavailability.
+
+    connection_check catches all network exceptions internally (including the AOSS
+    serverless path) and always returns a ConnectionResult — it never raises. A
+    truly unexpected exception should therefore propagate immediately rather than
+    be absorbed into the retry loop.
+    """
+    assert retries >= 1, "retries must be at least 1"
+    for attempt in range(1, retries + 1):
+        result = connection_check(cluster)
+        if result.connection_established:
+            return result
+        logger.warning("Connection attempt %d/%d failed for %s: %s",
+                       attempt, retries, cluster, result.connection_message)
+        if attempt < retries:
+            time.sleep(wait_s)
+    return result
+
 
 # Maps wildcard ClusterVersion (e.g. ES_7.x) to the concrete template name that exists in clusterWorkflows.yaml.
 # When minor_version is 'x', we pick the canonical representative minor version for that major.
@@ -23,6 +48,10 @@ _WILDCARD_TEMPLATE_MAP = {
     ("opensearch", 1): 3,
     ("opensearch", 2): 19,
     ("opensearch", 3): 1,
+    ("solr", 6): 6,
+    ("solr", 7): 7,
+    ("solr", 8): 11,
+    ("solr", 9): 8,
 }
 
 CLUSTER_SETUP_TIMEOUT_SECONDS = 1000
@@ -166,10 +195,12 @@ class MATestBase:
                 self.imported_clusters = True
                 self.source_cluster = source_cluster
                 self.target_cluster = target_cluster
-                source_con_result: ConnectionResult = connection_check(source_cluster)
-                assert source_con_result.connection_established is True
-                target_con_result: ConnectionResult = connection_check(target_cluster)
-                assert target_con_result.connection_established is True
+                source_con_result: ConnectionResult = _wait_for_connection(source_cluster)
+                assert source_con_result.connection_established is True, \
+                    f"Source cluster unreachable: {source_con_result.connection_message}"
+                target_con_result: ConnectionResult = _wait_for_connection(target_cluster)
+                assert target_con_result.connection_established is True, \
+                    f"Target cluster unreachable: {target_con_result.connection_message}"
                 clear_indices(source_cluster)
                 clear_indices(target_cluster)
                 self.target_operations.clear_index_templates(cluster=target_cluster)
@@ -228,26 +259,7 @@ class MATestBase:
             if self.image_registry_prefix:
                 self.parameters["image-registry-prefix"] = self.image_registry_prefix
 
-    def _ensure_approval_configmap(self):
-        """Ensure the approval configmap exists for Argo v4.0+ (requires configmap-type label).
-        In production, the config-processor creates this. In tests, we create a default."""
-        kubectl_cmd = [
-            "kubectl", "apply", "-n", self.argo_service.namespace, "-f", "-"
-        ]
-        configmap_yaml = (
-            'apiVersion: v1\n'
-            'kind: ConfigMap\n'
-            'metadata:\n'
-            '  name: approval-config\n'
-            '  labels:\n'
-            '    workflows.argoproj.io/configmap-type: Parameter\n'
-            'data:\n'
-            '  autoApprove: "{}"\n'
-        )
-        subprocess.run(kubectl_cmd, input=configmap_yaml, text=True, check=True)
-
     def workflow_start(self):
-        self._ensure_approval_configmap()
         start_result = self.argo_service.start_workflow(workflow_template_name=self.workflow_template,
                                                         parameters=self.parameters)
         assert start_result.success is True

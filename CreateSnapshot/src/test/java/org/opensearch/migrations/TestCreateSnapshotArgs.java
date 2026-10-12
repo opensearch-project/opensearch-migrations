@@ -1,9 +1,14 @@
 package org.opensearch.migrations;
 
+import org.opensearch.migrations.bulkload.solr.SolrContextPath;
+
 import com.beust.jcommander.ParameterException;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.instanceOf;
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -74,6 +79,21 @@ public class TestCreateSnapshotArgs {
     }
 
     @Test
+    void gcsRepoWithoutRegion_passesArgValidation() {
+        var ex = assertThrows(Exception.class, () ->
+            CreateSnapshot.main(new String[]{
+                "--snapshot-name", "snap",
+                "--snapshot-repo-name", "repo",
+                "--source-host", "http://localhost:9200",
+                "--repo-uri", "gs://bucket/path"
+            })
+        );
+        // gs:// requires no --s3-region, so arg validation must pass and the run
+        // must get far enough to fail on the (absent) source cluster instead.
+        assertThat(ex, not(instanceOf(ParameterException.class)));
+    }
+
+    @Test
     void solrSourceWithGcsRepo_throwsParameterException() {
         var args = new CreateSnapshot.Args();
         args.sourceArgs.host = "http://localhost:8983";
@@ -83,10 +103,28 @@ public class TestCreateSnapshotArgs {
         args.snapshotRepoName = "repo";
         args.repoUri = "gs://bucket/path";
 
-        var strategy = new SolrBackupStrategy(args);
         // Guard must fire before any Solr network call, so this fails fast rather
         // than discovering collections against a (non-existent) Solr at localhost.
-        var ex = assertThrows(ParameterException.class, strategy::run);
+        var ex = assertThrows(ParameterException.class, () -> new SolrBackupStrategy(args));
         assertThat(ex.getMessage(), containsString("gs://"));
+    }
+
+    @Test
+    void solrContextPathDefaultsToStockSolr() {
+        assertThat(new CreateSnapshot.Args().solrContextPath, is(SolrContextPath.DEFAULT));
+    }
+
+    @Test
+    void solrContextPathAsUrl_throwsParameterException() {
+        var ex = assertThrows(ParameterException.class, () ->
+            CreateSnapshot.main(new String[]{
+                "--snapshot-name", "snap",
+                "--snapshot-repo-name", "repo",
+                "--source-host", "http://localhost:8983",
+                "--repo-uri", "file:///tmp/repo",
+                "--solr-context-path", "http://localhost:8983/solr"
+            })
+        );
+        assertThat(ex.getMessage(), containsString("solr-context-path"));
     }
 }

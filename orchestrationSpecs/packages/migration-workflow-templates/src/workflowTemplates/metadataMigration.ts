@@ -1,20 +1,22 @@
 import {z} from "zod";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
-    DEFAULT_RESOURCES,
     ARGO_METADATA_OPTIONS,
     ARGO_METADATA_WORKFLOW_OPTION_KEYS,
-    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
     REPO_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
-    BaseExpression, configMapKey,
+    BaseExpression,
     ContainerBuilder,
     defineParam,
     defineRequiredParam,
-    expr, FunctionExpression, InputParamDef, InputParameterSource, InputParamsToExpressions,
+    expr,
+    InputParameterSource,
+    InputParamDef,
+    InputParamsToExpressions,
     INTERNAL,
+    PodSpecPatchOverlay,
     selectInputsForRegister,
     Serialized,
     typeToken,
@@ -25,13 +27,10 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
-import {
-    getApprovalMap,
-    getSourceTargetPathAndSnapshotAndMigrationIndex
-} from "./commonUtils/configContextPathConstructors";
 import {ResourceManagement} from "./resourceManagement";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 const METADATA_OUTPUT_PATH = "/tmp/outputs/metadata-output.log";
 const METADATA_TEST_CREDS_VOLUME_NAME = "test-creds";
@@ -166,35 +165,12 @@ function makeParamsDict(
     return base;
 }
 
-function makeApprovalCheck<
-    IPR extends InputParamsToExpressions<typeof COMMON_METADATA_PARAMETERS, InputParameterSource>
->(
-    inputs: IPR,
-    skipApprovalMap: BaseExpression<any>,
-    ...innerSkipFlags: string[]
-) {
-    return new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
-        ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceLabel,
-            inputs.targetConfig,
-            expr.jsonPathStrict(inputs.snapshotConfig, "label"),
-            inputs.migrationLabel
-        ),
-        ...(innerSkipFlags !== undefined ? innerSkipFlags.map(f => expr.literal(f)) : []),
-        expr.literal(false),
-        expr.deserializeRecord(skipApprovalMap)
-    ]);
-}
-
 const runMetadataInputs = {
     commandMode: defineRequiredParam<"evaluate" | "migrate">(),
     sourceVersion: defineRequiredParam<string>(),
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
     metadataMigrationConfig: defineRequiredParam<z.infer<typeof ARGO_METADATA_OPTIONS>>(),
-    sourceEndpoint: defineParam<string>({expression: expr.literal("")}),
-    sourceConfig: defineParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>({
-        expression: expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>()
-    }),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"]),
     sourceK8sLabel: defineRequiredParam<string>(),
     targetK8sLabel: defineRequiredParam<string>(),
@@ -226,21 +202,23 @@ type RunMetadataTemplateInputDefs = typeof runMetadataInputs & {
     taskK8sLabel: InputParamDef<string, false>;
 };
 
-function makeMetadataPodSpecPatch(inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>) {
+function makeMetadataPodSpecPatch(
+    inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>
+) {
     const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
-    return expr.asString(expr.serialize(expr.makeDict({
+    return {
         volumes: expr.concatArrays(
             expr.templateValue(METADATA_STATIC_VOLUMES),
             expr.dig(metadataConfig, ["fileSourceVolumes"], [])
         ),
-        containers: expr.toArray(expr.makeDict({
-            name: "main",
+        mainContainer: {
             volumeMounts: expr.concatArrays(
                 expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
                 expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
             ),
-        }))
-    })));
+            resources: expr.get(metadataConfig, "resources"),
+        },
+    } satisfies PodSpecPatchOverlay;
 }
 
 function buildMetadataContainer<
@@ -262,8 +240,6 @@ function buildMetadataContainer<
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
-        .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(inputs.sourceConfig)))
-        .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
         .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
         .addArgs([
             inputs.commandMode,
@@ -288,7 +264,8 @@ function buildMetadataContainer<
                 'migrations.opensearch.org/target': inputs.targetK8sLabel,
                 'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
                 'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
-                'migrations.opensearch.org/task': inputs.taskK8sLabel
+                'migrations.opensearch.org/task': inputs.taskK8sLabel,
+                [MIGRATION_RESOURCE_UID_LABEL]: inputs.crdUid,
             }
         }));
 }
@@ -320,18 +297,13 @@ export const MetadataMigration = metadataMigrationBaseBuilder
 
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
-        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
-        .addOptionalInput("sourceConfig", c =>
-            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
-        .addInputsFromRecord(
-            getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
         .addOptionalInput("workflowCreationTimestamp", c => expr.getWorkflowValue("creationTimestamp"))
         .addOptionalInput("workflowUid", c => expr.getWorkflowValue("uid"))
         .addOptionalInput("skipEvaluateApproval", c =>
-            makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "evaluateMetadata"))
+            expr.dig(expr.deserializeRecord(c.inputParameters.metadataMigrationConfig), ["skipEvaluateApproval"], false))
         .addOptionalInput("skipMigrateApproval", c =>
-            makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "migrateMetadata"))
+            expr.dig(expr.deserializeRecord(c.inputParameters.metadataMigrationConfig), ["skipMigrateApproval"], false))
         .addOptionalInput("approvalNameSuffix", c =>
             expr.concat(
                 expr.literal("."),
@@ -346,7 +318,6 @@ export const MetadataMigration = metadataMigrationBaseBuilder
             .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: b.inputs.sourceConfig,
                     commandMode: "evaluate",
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
@@ -384,7 +355,6 @@ export const MetadataMigration = metadataMigrationBaseBuilder
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: b.inputs.sourceConfig,
                     commandMode: "migrate",
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),

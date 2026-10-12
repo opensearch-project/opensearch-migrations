@@ -4,6 +4,11 @@
  * This settings file is used to specify which projects to include in your build-logic build.
  */
 
+pluginManagement {
+    settings.apply from: new File(settingsDir, '../gradle/repositories.gradle')
+    settings.ext.configureMavenRepositories(repositories, true)
+}
+
 plugins {
     id 'org.gradle.toolchains.foojay-resolver-convention'
 }

@@ -11,7 +11,6 @@ import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
 import {CaptureProxyStack} from "./service-stacks/capture-proxy-stack";
 import {ElasticsearchStack} from "./service-stacks/elasticsearch-stack";
 import {KafkaStack} from "./service-stacks/kafka-stack";
-import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {
     MAX_STAGE_NAME_LENGTH,
@@ -32,19 +31,11 @@ export interface StackPropsExt extends StackProps {
 
 export interface StackComposerProps extends StackProps {
     readonly migrationsSolutionVersion: string,
-    readonly migrationsAppRegistryARN?: string,
     readonly migrationsUserAgent?: string
 }
 
 export class StackComposer {
     public stacks: Stack[] = [];
-
-    private addStacksToAppRegistry(appRegistryAppARN: string, allStacks: Stack[]) {
-        for (const stack of allStacks) {
-            const appRegistryApp = Application.fromApplicationArn(stack, 'AppRegistryApplicationImport', appRegistryAppARN)
-            appRegistryApp.associateApplicationWithStack(stack)
-        }
-    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private getContextForType(optionName: string, expectedType: string, defaultValues: Record<string, any>, contextJSON: Record<string, any>): any {
@@ -631,8 +622,5 @@ export class StackComposer {
             this.stacks.push(migrationConsoleStack)
         }
 
-        if (props.migrationsAppRegistryARN) {
-            this.addStacksToAppRegistry(props.migrationsAppRegistryARN, this.stacks)
-        }
     }
 }

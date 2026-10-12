@@ -302,4 +302,49 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         // MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);
     }
 
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 32)
+    public void testMessageForwardedDownstreamEvenWhenOffloadFails() throws IOException {
+        byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
+
+        try (var rootContext = new TestRootContext()) {
+            var failingStreamManager = new FailingStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "c", failingStreamManager);
+
+            EmbeddedChannel channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "n",
+                    "c",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    x -> true
+                )
+            );
+
+            var bb = Unpooled.wrappedBuffer(fullTrafficBytes);
+            channel.writeInbound(bb);
+
+            // The offload failed, but the message must still flow downstream
+            var outputDataStream = new SequenceInputStream(
+                Collections.enumeration(
+                    channel.inboundMessages()
+                        .stream()
+                        .map(m -> new ByteBufInputStream((ByteBuf) m, false))
+                        .collect(Collectors.toList())
+                )
+            );
+            var outputData = outputDataStream.readAllBytes();
+            outputDataStream.close();
+
+            Assertions.assertArrayEquals(fullTrafficBytes, outputData,
+                "ByteBuf must be forwarded downstream even when Kafka offload fails");
+            Assertions.assertEquals(1, failingStreamManager.flushCount.get(),
+                "Offloader should have attempted one flush");
+
+            channel.finishAndReleaseAll();
+            channel.close();
+        }
+    }
+
 }

@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 
@@ -63,6 +64,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
     @Override
     public IChannelConnectionCaptureSerializer<RecordMetadata> createOffloader(IConnectionContext ctx) {
+        Objects.requireNonNull(
+            ctx.getConnectionId(),
+            "connectionId must not be null — partition locality requires a stable key"
+        );
         return new StreamChannelConnectionCaptureSerializer<>(
             nodeId,
             ctx.getConnectionId(),
@@ -117,17 +122,15 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 );
             }
             var osh = (CodedOutputStreamWrapper) outputStreamHolder;
-
             final var connectionId = telemetryContext.getConnectionId();
 
             String recordId = String.format("%s.%d", connectionId, index);
             var byteBuffer = osh.byteBuffer;
             ProducerRecord<String, byte[]> kafkaRecord = new ProducerRecord<>(
                 topicNameForTraffic,
-                recordId,
+                connectionId,
                 Arrays.copyOfRange(byteBuffer.array(), 0, byteBuffer.position())
             );
-            log.debug("Sending Kafka producer record: {} for topic: {}", recordId, topicNameForTraffic);
 
             var flushContext = rootScope.createKafkaRecordContext(
                 telemetryContext,

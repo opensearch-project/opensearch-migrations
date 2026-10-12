@@ -164,7 +164,7 @@ mod tests {
 
     // A sanitized real-world stack payload: the single MigrationsExportString
     // output whose value is a blob of `export VAR=...` clauses.
-    const REAL_EXPORT: &str = "export MIGRATIONS_APP_REGISTRY_ARN=arn:aws:servicecatalog:us-east-1:629003556176:/applications/0152ij6laz8tjhttvf5rg0jrql; export MIGRATIONS_USER_AGENT=AwsSolution/SO0290/Unknown; export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-default-us-east-1; export MIGRATIONS_ECR_REGISTRY=629003556176.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1; export AWS_ACCOUNT=629003556176; export AWS_CFN_REGION=us-east-1; export VPC_ID=vpc-0bc345db0dee70e9e; export EKS_CLUSTER_SECURITY_GROUP=sg-07cc74efd34551fb1; export SNAPSHOT_ROLE=arn:aws:iam::629003556176:role/migration-eks-cluster-default-us-east-1-snapshot-role; export STAGE=default";
+    const REAL_EXPORT: &str = "export MIGRATIONS_USER_AGENT=AwsSolution/SO0290/Unknown; export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-default-us-east-1; export MIGRATIONS_ECR_REGISTRY=629003556176.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1; export AWS_ACCOUNT=629003556176; export AWS_CFN_REGION=us-east-1; export VPC_ID=vpc-0bc345db0dee70e9e; export EKS_CLUSTER_SECURITY_GROUP=sg-07cc74efd34551fb1; export SNAPSHOT_ROLE=arn:aws:iam::629003556176:role/migration-eks-cluster-default-us-east-1-snapshot-role; export STAGE=default";
 
     fn real_payload_row() -> String {
         format!("MigrationsExportString\t{REAL_EXPORT}")

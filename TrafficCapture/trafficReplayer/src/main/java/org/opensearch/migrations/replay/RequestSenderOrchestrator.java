@@ -6,6 +6,7 @@ import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -120,13 +121,26 @@ public class RequestSenderOrchestrator {
         //
         // Making them more independent means that the work item being enqueued is lighter-weight and
         // less likely to cause a connection timeout.
-        return bindNettyScheduleToCompletableFuture(connectionSession.eventLoop, timestamp)
+        var timerFuture = bindNettyScheduleToCompletableFuture(
+            connectionSession.eventLoop, timestamp);
+        connectionSession.addPendingTransformationTimer(timerFuture.future);
+        timerFuture.future.whenComplete((v, t) -> {
+            if (t == null) {
+                connectionSession.removePendingTransformationTimer(timerFuture.future);
+            }
+        });
+        return timerFuture
             .getDeferredFutureThroughHandle((nullValue, scheduleFailure) -> {
                 scheduledContext.close();
-                if (scheduleFailure == null) {
-                    return task.get();
-                } else {
+                if (scheduleFailure != null) {
                     return TextTrackedFuture.failedFuture(scheduleFailure, () -> "netty scheduling failure");
+                } else if (connectionSession.isCancelled()) {
+                    return TextTrackedFuture.failedFuture(
+                        new java.util.concurrent.CancellationException(
+                            "Session cancelled before transformation work could start"),
+                        () -> "session cancelled for " + ctx);
+                } else {
+                    return task.get();
                 }
             }, () -> "The scheduled callback is running work for " + ctx);
     }
@@ -279,7 +293,16 @@ public class RequestSenderOrchestrator {
                 return replaySession.scheduleSequencer.addFutureForWork(
                     channelInteractionNumber,
                     f -> f.thenCompose(
-                        voidValue -> onSessionCallback.apply(replaySession),
+                        voidValue -> {
+                            if (replaySession.isCancelled()) {
+                                return TextTrackedFuture.failedFuture(
+                                    new java.util.concurrent.CancellationException(
+                                        "Session cancelled — not scheduling work"
+                                            + " for slot " + channelInteractionNumber),
+                                    () -> "cancelled session for " + ctx);
+                            }
+                            return onSessionCallback.apply(replaySession);
+                        },
                         () -> "Work callback on replay session"
                     )
                 );
@@ -302,11 +325,13 @@ public class RequestSenderOrchestrator {
             channelInterationNum
         );
         packetProducer.retain();
+        var scheduledContextClosed = new AtomicBoolean(false);
         return scheduleOnConnectionReplaySession(
             diagnosticCtx,
             connectionReplaySession,
             startTime,
             new ChannelTask<>(ChannelTaskType.TRANSMIT, trigger -> trigger.thenCompose(voidVal -> {
+                scheduledContextClosed.set(true);
                 scheduledContext.close();
                 final Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier =
                     () -> packetConsumerFactory.apply(connectionReplaySession, ctx);
@@ -314,7 +339,10 @@ public class RequestSenderOrchestrator {
                     interval, visitor);
             }, () -> "sending packets for request"))
         )
-            .whenComplete((v,t) -> packetProducer.release(), () -> "waiting for request to be sent to release ByteBufListProducer");
+            .whenComplete((v,t) -> {
+                if (t != null && !scheduledContextClosed.get()) { scheduledContext.close(); }
+                packetProducer.release();
+            }, () -> "releasing resources after request completes or is cancelled");
     }
 
     private TrackedFuture<String, Void> scheduleCloseOnConnectionReplaySession(
@@ -368,6 +396,10 @@ public class RequestSenderOrchestrator {
 
         workFuture.map(f -> f.whenComplete((v, t) -> {
             var itemStartTimeOfPopped = schedule.removeFirstItem();
+            if (itemStartTimeOfPopped == null) {
+                // Already drained by drainWithCancellation — nothing to reschedule.
+                return;
+            }
             assert atTime.equals(itemStartTimeOfPopped)
                 : "Expected to have popped the item to match the start time for the responseFuture that finished";
             log.atDebug().setMessage("{} responseFuture completed - checking {} for the next item to schedule")

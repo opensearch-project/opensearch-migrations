@@ -10,13 +10,14 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
-import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {awsResourceTagsResolvedInput, cloudProviderResolvedInput, CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {
     ARGO_PROXY_WORKFLOW_OPTION_KEYS,
     ARGO_FILE_SOURCE_VOLUME,
     ARGO_FILE_SOURCE_VOLUME_MOUNT,
     DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
+    DENORMALIZED_PROXY_SETUP_CONFIG,
     PROXY_TLS_CONFIG,
     ResourceRequirementsType,
 } from "@opensearch-migrations/schemas";
@@ -39,6 +40,7 @@ import {
     SCALABLE_WORKLOAD_INPUTS,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -59,12 +61,76 @@ function makeOwnerReferences(
     }];
 }
 
+// Build the cloud-specific Service annotations that control the load balancer's
+// public/private scheme. cloudProvider is resolved at runtime (from the
+// provider-config ConfigMap), so the annotation set must be selected with a
+// runtime expression rather than a build-time conditional: each cloud honors
+// only its own annotation keys, so we emit exactly the active cloud's keys.
+//   - aws:   NLB in IP mode; scheme internet-facing|internal per internetFacing.
+//   - gcp:   internal ILB via networking.gke.io/load-balancer-type=Internal
+//            (omitted when internetFacing, since external is GKE's default).
+//   - azure: internal ILB via azure-load-balancer-internal=true
+//            (omitted when internetFacing, since external is Azure's default).
+function makeProxyServiceAnnotations(
+    internetFacing: BaseExpression<boolean>,
+    cloudProvider: BaseExpression<string>,
+    awsResourceTags: BaseExpression<string>,
+) {
+    const isGcp = expr.equals(cloudProvider, expr.literal("gcp"));
+    const isAzure = expr.equals(cloudProvider, expr.literal("azure"));
+
+    // Deployer tags for the NLB and the target group, listeners and security group behind it. One
+    // comma-separated "Key=Value,Key2=Value2" string covers any number of tags, which is the format
+    // the annotation takes. This annotation is the only lever available: Auto Mode's load balancing
+    // controller is EKS-managed so its --default-tags flag is unreachable, and Services -- unlike
+    // Ingresses, which have IngressClassParams.spec.tags -- have no cluster-wide params object.
+    //
+    // Merged in rather than declared inline so that an unset tag string yields no annotation at all
+    // instead of an empty one, whose behaviour is not documented.
+    const tagAnnotations = expr.ternary(
+        expr.equals(awsResourceTags, expr.literal("")),
+        expr.makeDict({}),
+        expr.makeDict({
+            "service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags": awsResourceTags,
+        }),
+    );
+
+    const awsAnnotations = expr.mergeDicts(expr.makeDict({
+        "service.beta.kubernetes.io/aws-load-balancer-type": expr.literal("external"),
+        "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": expr.literal("ip"),
+        "service.beta.kubernetes.io/aws-load-balancer-scheme":
+            expr.ternary(internetFacing, expr.literal("internet-facing"), expr.literal("internal")),
+    }), tagAnnotations);
+    const gcpAnnotations = expr.ternary(
+        internetFacing,
+        expr.makeDict({}),
+        expr.makeDict({"networking.gke.io/load-balancer-type": expr.literal("Internal")})
+    );
+    const azureAnnotations = expr.ternary(
+        internetFacing,
+        expr.makeDict({}),
+        expr.makeDict({"service.beta.kubernetes.io/azure-load-balancer-internal": expr.literal("true")})
+    );
+
+    return makeDirectTypeProxy(
+        expr.ternary(isGcp,
+            expr.cast(gcpAnnotations).to<Record<string, string>>(),
+            expr.ternary(isAzure,
+                expr.cast(azureAnnotations).to<Record<string, string>>(),
+                expr.cast(awsAnnotations).to<Record<string, string>>()
+            )
+        )
+    );
+}
+
 function makeProxyServiceManifest(
     proxyName: BaseExpression<string>,
     listenPort: BaseExpression<Serialized<number>>,
     serviceType: BaseExpression<string>,
     internetFacing: BaseExpression<boolean>,
     ownerUid: BaseExpression<string>,
+    cloudProvider: BaseExpression<string>,
+    awsResourceTags: BaseExpression<string>,
 ) {
     return {
         apiVersion: "v1",
@@ -72,14 +138,7 @@ function makeProxyServiceManifest(
         metadata: {
             name: proxyName,
             ownerReferences: makeOwnerReferences(proxyName, ownerUid),
-            annotations: {
-                // NLB IP mode for EKS Auto Mode — ignored on non-EKS and non-LoadBalancer Services.
-                "service.beta.kubernetes.io/aws-load-balancer-type": "external",
-                "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",
-                "service.beta.kubernetes.io/aws-load-balancer-scheme": makeStringTypeProxy(
-                    expr.ternary(internetFacing, expr.literal("internet-facing"), expr.literal("internal"))
-                )
-            }
+            annotations: makeProxyServiceAnnotations(internetFacing, cloudProvider, awsResourceTags)
         },
         spec: {
             type: makeStringTypeProxy(serviceType),
@@ -94,7 +153,7 @@ function makeProxyServiceManifest(
 }
 
 function makeProxyParamsDict(
-    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>,
+    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>>,
     resolvedKafkaConnection: BaseExpression<string>,
     resolvedKafkaListenerName: BaseExpression<string>,
     resolvedKafkaAuthType: BaseExpression<string>,
@@ -277,6 +336,7 @@ function makeProxyDeploymentManifest(args: {
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
             },
         },
         spec: {
@@ -292,6 +352,7 @@ function makeProxyDeploymentManifest(args: {
                     "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                     "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                     "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                    [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
                 }},
                 spec: {
                     containers: [podConfig.container],
@@ -357,6 +418,14 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("ownerUid", typeToken<string>())
         .addOptionalInput("serviceType", c => "LoadBalancer")
         .addOptionalInput("internetFacing", c => false)
+        // cloudProvider is resolved HERE, at the single point of use, directly from the
+        // provider-config ConfigMap (configMapKeyRef resolves on template inputs, unlike
+        // global workflow arguments). Defined once — not threaded through the workflow —
+        // so there is no scattered "aws" default to drift out of sync.
+        .addInputsFromRecord(cloudProviderResolvedInput())
+        // Same story for the deployer's AWS tags: resolved here, at the only place that creates a
+        // load balancer, straight from the provider-config ConfigMap.
+        .addInputsFromRecord(awsResourceTagsResolvedInput())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -367,6 +436,8 @@ export const SetupCapture = WorkflowBuilder.create({
                     b.inputs.serviceType,
                     expr.deserializeRecord(b.inputs.internetFacing),
                     b.inputs.ownerUid,
+                    b.inputs.cloudProvider,
+                    b.inputs.awsResourceTags,
                 )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -580,11 +651,12 @@ export const SetupCapture = WorkflowBuilder.create({
 
 
     .addTemplate("setupProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("skipApproval", c => expr.literal(false))
         .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
@@ -598,7 +670,10 @@ export const SetupCapture = WorkflowBuilder.create({
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
             const proxyOpts = expr.get(config, "proxyConfig");
-            // Argo evaluates step parameters before `when` guards, so tls fields must be null-safe.
+            const skipProxyApproval = b.inputs.skipApproval;
+            // Use dig for ALL tls field accesses so expressions are null-safe.
+            // Argo evaluates step parameter expressions BEFORE checking `when` conditions,
+            // so expr.get() on a nil tls block crashes even when the step is guarded.
             const tlsMode = expr.dig(proxyOpts, ["tls", "mode"], expr.literal(""));
             const hasCertManagerTls = expr.equals(tlsMode, "certManager");
             const hasExistingSecretTls = expr.equals(tlsMode, "existingSecret");
@@ -637,6 +712,8 @@ export const SetupCapture = WorkflowBuilder.create({
                             serviceType,
                             internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
                             ownerUid: b.inputs.ownerUid,
+                            // cloudProvider is NOT passed here — deployProxyService resolves it
+                            // itself from the provider-config ConfigMap (see its input def).
                         })
                     )
                     .addStep("provisionCert", INTERNAL, "provisionProxyCert", c =>
@@ -761,6 +838,16 @@ export const SetupCapture = WorkflowBuilder.create({
                         serviceType,
                     })
                 )
+                // Gate here, after the proxy is deployed and its endpoint is serving, so the
+                // operator can swing client traffic through the proxy and verify capture before
+                // approving. Only once approved do we patch the CaptureProxy to Ready below, which
+                // publishes checksumForSnapshot and releases the downstream snapshot/backfill flow.
+                .addStep("approveProxySetup", ResourceManagement, "waitForUserApproval", c =>
+                    c.register({
+                        resourceName: expr.concat(expr.literal("captureproxysetup."), b.inputs.proxyName)
+                    }),
+                    {when: expr.not(skipProxyApproval)}
+                )
                 .addStep("patchCaptureProxyReady", ResourceManagement, "patchCaptureProxyReady", c =>
                     c.register({
                         resourceName: b.inputs.proxyName,
@@ -778,7 +865,7 @@ export const SetupCapture = WorkflowBuilder.create({
     )
 
     .addTemplate("reconcileCaptureTopicAndProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
@@ -789,6 +876,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("checksumForSnapshot", typeToken<string>())
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("skipApproval", c => expr.literal(false))
         .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
@@ -809,6 +897,7 @@ export const SetupCapture = WorkflowBuilder.create({
                 c.register({
                     topicCrName: b.inputs.topicCrName,
                     kafkaClusterName: b.inputs.kafkaClusterName,
+                    kafkaConfig: expr.serialize(expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "kafkaConfig")),
                     kafkaTopicName: b.inputs.kafkaTopicName,
                     sourceLabel: b.inputs.sourceK8sLabel,
                     partitions: b.inputs.topicPartitions,
@@ -904,6 +993,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     proxyName: b.inputs.proxyName,
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
+                    skipApproval: b.inputs.skipApproval,
                     podReplicas: b.inputs.podReplicas,
                     minPodReplicas: b.inputs.minPodReplicas,
                     configChecksum: b.inputs.configChecksum,
@@ -929,6 +1019,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     proxyName: b.inputs.proxyName,
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
+                    skipApproval: b.inputs.skipApproval,
                     podReplicas: b.inputs.podReplicas,
                     minPodReplicas: b.inputs.minPodReplicas,
                     configChecksum: b.inputs.configChecksum,

@@ -1535,6 +1535,125 @@ class SourceReconstructorTest {
         }
     }
 
+    @Test
+    void reverseDerive_skipsFanInTarget_doesNotFabricateAbsentSiblings() throws IOException {
+        // Regression: a FAN-IN copy_to target (multiple source fields copy into it) holds the
+        // UNION of its contributors with no record of who contributed what. Attributing that
+        // union back to a single source field invents data.
+        //
+        // A mapping where several sibling fields share one search target is the common shape:
+        // a document populating only some of the siblings comes back with the rest filled in
+        // from the union -> exact, term-queryable values for fields the document never had
+        // (`term bcc=<from value>`: 0 hits on the source cluster, 1 on the target).
+        //
+        // Here: `from` and `to` are populated (own doc_values); `bcc` and `cc` are absent in this
+        // document. All four are indexed keywords with doc_values, so tiers 1-4 failing for
+        // bcc/cc proves the document genuinely had no value there -> reverse-derivation from the
+        // shared target must NOT fire.
+        var reader = mock(LuceneLeafReader.class);
+        var fromInfo = new DocValueFieldInfo.Simple(
+                "from", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        var toInfo = new DocValueFieldInfo.Simple(
+                "to", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        // The fan-in target carries both contributors' values.
+        var allInfo = new DocValueFieldInfo.Simple(
+                "search_targets.all", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(fromInfo, toInfo, allInfo));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(fromInfo)))
+            .thenReturn(List.of("alice@example.com"));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(toInfo)))
+            .thenReturn(List.of("bob@example.com"));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(allInfo)))
+            .thenReturn(List.of("alice@example.com", "bob@example.com"));
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"search_targets.all\"]},"
+            + "\"to\":{\"type\":\"keyword\",\"copy_to\":[\"search_targets.all\"]},"
+            + "\"cc\":{\"type\":\"keyword\",\"copy_to\":[\"search_targets.all\"]},"
+            + "\"bcc\":{\"type\":\"keyword\",\"copy_to\":[\"search_targets.all\"]},"
+            + "\"search_targets\":{\"properties\":{\"all\":{\"type\":\"keyword\"}}}}"
+        );
+
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertNotNull(json, "reconstruction produced null output");
+        try {
+            JsonNode tree = MAPPER.readTree(json);
+            // Populated fields recovered from their own doc_values.
+            assertEquals("alice@example.com", firstText(tree.path("from")),
+                "populated `from` must be recovered from its own doc_values: " + json);
+            assertEquals("bob@example.com", firstText(tree.path("to")),
+                "populated `to` must be recovered from its own doc_values: " + json);
+            // Absent siblings must stay absent — this is the fabrication guard.
+            assertTrue(tree.path("bcc").isMissingNode(),
+                "absent `bcc` must NOT be reverse-derived from the fan-in target "
+                + "search_targets.all (union of from+to): " + json);
+            assertTrue(tree.path("cc").isMissingNode(),
+                "absent `cc` must NOT be reverse-derived from the fan-in target "
+                + "search_targets.all (union of from+to): " + json);
+            // The fan-in target itself is a copy_to target and never belongs in _source.
+            assertTrue(tree.path("search_targets").isMissingNode(),
+                "copy_to target search_targets.all must be stripped from reconstructed _source: "
+                + json);
+        } catch (IOException e) { throw new RuntimeException(e); }
+    }
+
+    @Test
+    void reverseDerive_stillUsesFanInTarget_whenSourceHasNoLuceneFootprint() throws IOException {
+        // Counterpart to the guard above: when the source field has NO footprint of its own
+        // (index:false, doc_values:false) the absence of tier 1-4 data says nothing about
+        // whether the document had a value, so best-effort recovery from a shared target is
+        // still the right call (the existing "probe anything, accept tokenized-garbage" stance).
+        // The guard must not over-tighten and drop these.
+        //
+        // Both raw_a and raw_b copy into shared_body (fan-in, in-degree 2) and both are
+        // _source-excluded — so they reach pass 5 rather than being dropped by the earlier
+        // no-Lucene-footprint skip.
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("shared_body"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTerm("alpha beta gamma")));
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.argThat(s -> !"shared_body".equals(s)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextFromJsonWithSourceFilter(
+            "{\"raw_a\":{\"type\":\"text\",\"index\":false,\"doc_values\":false,\"copy_to\":\"shared_body\"},"
+            + "\"raw_b\":{\"type\":\"text\",\"index\":false,\"doc_values\":false,\"copy_to\":\"shared_body\"},"
+            + "\"shared_body\":{\"type\":\"text\"},"
+            + "\"gcid\":{\"type\":\"keyword\"}}",
+            "{\"excludes\":[\"raw_a\",\"raw_b\"]}"
+        );
+
+        String merged = SourceReconstructor.mergeWithDocValues(
+            "{\"gcid\":\"abc123\"}", reader, 0, document(), ctx);
+        JsonNode tree = MAPPER.readTree(merged);
+        assertEquals("alpha beta gamma", tree.path("raw_a").asText(),
+            "footprint-less source-excluded field must still be reverse-derived from its "
+            + "shared (fan-in) target — the guard must not over-tighten: " + merged);
+        assertTrue(tree.path("shared_body").isMissingNode(),
+            "copy_to target shared_body must be stripped from output: " + merged);
+    }
+
+    /** First value of a node that may be a scalar or an array (doc_values shape varies). */
+    private static String firstText(JsonNode node) {
+        return node.isArray() ? node.get(0).asText() : node.asText();
+    }
+
     // ==========================================================================================
     // 11. OBJECT-ARRAY SUBFIELD DISTRIBUTION (mergeWithDocValues into seeded List<Map>)
     // ==========================================================================================

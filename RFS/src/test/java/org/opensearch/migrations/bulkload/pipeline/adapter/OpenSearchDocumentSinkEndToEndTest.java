@@ -4,17 +4,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer.ContainerVersion;
+import org.opensearch.migrations.testfixtures.SupportedClusters;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;

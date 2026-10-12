@@ -7,12 +7,14 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.TestRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
@@ -82,8 +84,8 @@ public class KafkaCaptureFactoryTest {
         for (ProducerRecord<String, byte[]> record : producer.history()) {
             int recordSize = calculateRecordSize(record, null);
             Assertions.assertTrue(recordSize <= maxAllowableMessageSize);
-            int largeIdRecordSize = calculateRecordSize(record, connectionId + ".9999999999");
-            Assertions.assertTrue(largeIdRecordSize <= maxAllowableMessageSize);
+            int worstCaseKeyRecordSize = calculateRecordSize(record, connectionId);
+            Assertions.assertTrue(worstCaseKeyRecordSize <= maxAllowableMessageSize);
         }
         bb.release();
         producer.close();
@@ -261,5 +263,235 @@ public class KafkaCaptureFactoryTest {
     private void awaitLatchWithTestFailOnTimeout(CountDownLatch latch) {
         boolean successful = latch.await(1, TimeUnit.SECONDS);
         Assertions.assertTrue(successful);
+    }
+
+    @Test
+    public void testAllFragmentsUseSameKafkaKeyForPartitionLocality() throws IOException, ExecutionException,
+        InterruptedException {
+        final var referenceTimestamp = Instant.now(Clock.systemUTC());
+
+        int maxAllowableMessageSize = 1024 * 1024;
+        MockProducer<String, byte[]> producer = new MockProducer<>(
+            true, null, new StringSerializer(), new ByteArraySerializer()
+        );
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            maxAllowableMessageSize
+        );
+        var serializer = kafkaCaptureFactory.createOffloader(createCtx());
+
+        // Create a payload that will fragment into multiple records (~2MB with 1MB buffer)
+        var testStr = "x".repeat(2 * 1024 * 1024);
+        var fakeDataBytes = testStr.getBytes(StandardCharsets.UTF_8);
+        var bb = Unpooled.wrappedBuffer(fakeDataBytes);
+        serializer.addReadEvent(referenceTimestamp, bb);
+        var future = serializer.flushCommitAndResetStream(true);
+        future.get();
+
+        // Should produce multiple records (fragments)
+        Assertions.assertTrue(producer.history().size() > 1,
+            "Expected multiple fragments but got " + producer.history().size());
+
+        // All fragments must have the same key (connectionId without index)
+        Set<String> uniqueKeys = producer.history().stream()
+            .map(ProducerRecord::key)
+            .collect(Collectors.toSet());
+        Assertions.assertEquals(1, uniqueKeys.size(),
+            "All fragments should use the same Kafka key for partition locality, but got: " + uniqueKeys);
+
+        // The key should be exactly the connectionId (not connectionId.index)
+        String recordKey = uniqueKeys.iterator().next();
+        Assertions.assertEquals("test", recordKey,
+            "Kafka key should be exactly the connectionId");
+
+        bb.release();
+        producer.close();
+    }
+
+    @Test
+    public void testLargerBufferSizeReducesFragmentation() throws IOException, ExecutionException,
+        InterruptedException {
+        final var referenceTimestamp = Instant.now(Clock.systemUTC());
+
+        // 5MB payload
+        var testStr = "x".repeat(5 * 1024 * 1024);
+        var fakeDataBytes = testStr.getBytes(StandardCharsets.UTF_8);
+
+        // With 1MB buffer -> many fragments
+        MockProducer<String, byte[]> producer1MB = new MockProducer<>(
+            true, null, new StringSerializer(), new ByteArraySerializer()
+        );
+        KafkaCaptureFactory factory1MB = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer1MB,
+            1024 * 1024
+        );
+        var serializer1MB = factory1MB.createOffloader(createCtx());
+        var bb1 = Unpooled.wrappedBuffer(fakeDataBytes);
+        serializer1MB.addReadEvent(referenceTimestamp, bb1);
+        serializer1MB.flushCommitAndResetStream(true).get();
+        int fragments1MB = producer1MB.history().size();
+        bb1.release();
+        producer1MB.close();
+
+        // With 8MB buffer -> single record (payload fits in one buffer)
+        MockProducer<String, byte[]> producer8MB = new MockProducer<>(
+            true, null, new StringSerializer(), new ByteArraySerializer()
+        );
+        KafkaCaptureFactory factory8MB = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer8MB,
+            8 * 1024 * 1024
+        );
+        var serializer8MB = factory8MB.createOffloader(createCtx());
+        var bb8 = Unpooled.wrappedBuffer(fakeDataBytes);
+        serializer8MB.addReadEvent(referenceTimestamp, bb8);
+        serializer8MB.flushCommitAndResetStream(true).get();
+        int fragments8MB = producer8MB.history().size();
+        bb8.release();
+        producer8MB.close();
+
+        // 1MB buffer should produce many more fragments than 8MB buffer
+        Assertions.assertTrue(fragments1MB > 4,
+            "Expected >4 fragments with 1MB buffer for 5MB payload, got " + fragments1MB);
+        Assertions.assertEquals(1, fragments8MB,
+            "Expected 1 record with 8MB buffer for 5MB payload, got " + fragments8MB);
+    }
+
+    @Test
+    public void testMaxRequestSizeWithLargeBufferProducesValidRecords() throws IOException, ExecutionException,
+        InterruptedException {
+        final var referenceTimestamp = Instant.now(Clock.systemUTC());
+
+        int maxMessageSize = 8 * 1024 * 1024; // 8MB
+        MockProducer<String, byte[]> producer = new MockProducer<>(
+            true, null, new StringSerializer(), new ByteArraySerializer()
+        );
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            maxMessageSize
+        );
+        var serializer = kafkaCaptureFactory.createOffloader(createCtx());
+
+        // 7MB payload - should fit in a single 8MB buffer
+        var testStr = "x".repeat(7 * 1024 * 1024);
+        var fakeDataBytes = testStr.getBytes(StandardCharsets.UTF_8);
+        var bb = Unpooled.wrappedBuffer(fakeDataBytes);
+        serializer.addReadEvent(referenceTimestamp, bb);
+        var future = serializer.flushCommitAndResetStream(true);
+        future.get();
+
+        // Should produce exactly 1 record
+        Assertions.assertEquals(1, producer.history().size(),
+            "7MB payload with 8MB buffer should produce 1 record");
+
+        // Verify record size is within max.request.size=8MB
+        ProducerRecord<String, byte[]> record = producer.history().get(0);
+        int recordSize = calculateRecordSize(record, null);
+        Assertions.assertTrue(recordSize <= maxMessageSize,
+            "Record size " + recordSize + " exceeds max message size " + maxMessageSize);
+
+        bb.release();
+        producer.close();
+    }
+
+    @Test
+    public void testDifferentConnectionsProduceDifferentKeys() throws IOException, ExecutionException,
+        InterruptedException {
+        final var referenceTimestamp = Instant.now(Clock.systemUTC());
+
+        MockProducer<String, byte[]> producer = new MockProducer<>(
+            true, null, new StringSerializer(), new ByteArraySerializer()
+        );
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            1024 * 1024
+        );
+
+        var ctx1 = new ConnectionContext(new TestRootKafkaOffloaderContext(), "conn-alpha", "node1");
+        var ctx2 = new ConnectionContext(new TestRootKafkaOffloaderContext(), "conn-beta", "node1");
+
+        var offloader1 = kafkaCaptureFactory.createOffloader(ctx1);
+        var offloader2 = kafkaCaptureFactory.createOffloader(ctx2);
+
+        byte[] payload = "small-payload".getBytes(StandardCharsets.UTF_8);
+        var bb1 = Unpooled.wrappedBuffer(payload);
+        offloader1.addReadEvent(referenceTimestamp, bb1);
+        offloader1.flushCommitAndResetStream(true).get();
+        bb1.release();
+
+        var bb2 = Unpooled.wrappedBuffer(payload);
+        offloader2.addReadEvent(referenceTimestamp, bb2);
+        offloader2.flushCommitAndResetStream(true).get();
+        bb2.release();
+
+        Assertions.assertEquals(2, producer.history().size());
+        String key1 = producer.history().get(0).key();
+        String key2 = producer.history().get(1).key();
+        Assertions.assertEquals("conn-alpha", key1);
+        Assertions.assertEquals("conn-beta", key2);
+        Assertions.assertNotEquals(key1, key2,
+            "Different connections must produce different Kafka keys");
+
+        producer.close();
+    }
+
+    @Test
+    public void testSingleFragmentUsesConnectionIdAsKey() throws IOException, ExecutionException,
+        InterruptedException {
+        final var referenceTimestamp = Instant.now(Clock.systemUTC());
+
+        MockProducer<String, byte[]> producer = new MockProducer<>(
+            true, null, new StringSerializer(), new ByteArraySerializer()
+        );
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            1024 * 1024
+        );
+        var serializer = kafkaCaptureFactory.createOffloader(createCtx());
+
+        // Small payload that fits in a single buffer — no fragmentation
+        byte[] payload = "tiny".getBytes(StandardCharsets.UTF_8);
+        var bb = Unpooled.wrappedBuffer(payload);
+        serializer.addReadEvent(referenceTimestamp, bb);
+        serializer.flushCommitAndResetStream(true).get();
+
+        Assertions.assertEquals(1, producer.history().size(),
+            "Small payload should produce exactly 1 record");
+        Assertions.assertEquals("test", producer.history().get(0).key(),
+            "Single-fragment record key should be the connectionId");
+
+        bb.release();
+        producer.close();
+    }
+
+    @Test
+    public void testNullConnectionIdFailsFastAtCreation() {
+        MockProducer<String, byte[]> producer = new MockProducer<>(
+            true, null, new StringSerializer(), new ByteArraySerializer()
+        );
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            1024 * 1024
+        );
+        var nullCtx = new ConnectionContext(new TestRootKafkaOffloaderContext(), null, "test");
+
+        var exception = Assertions.assertThrows(NullPointerException.class,
+            () -> kafkaCaptureFactory.createOffloader(nullCtx));
+        Assertions.assertTrue(exception.getMessage().contains("partition locality"));
+
+        producer.close();
     }
 }

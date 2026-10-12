@@ -193,7 +193,8 @@ status_message="$(printf '%s' "$status_json" | jq -r '
 ')"
 patch_backfill_status "$status" "$status_message" "$status_json"
 
-if [ "$status" != "Completed" ]; then
+# CompletedWithErrors is terminal too — treating it as in-progress would loop forever.
+if [ "$status" != "Completed" ] && [ "$status" != "CompletedWithErrors" ]; then
     progress="$(printf '%s' "$status_json" | jq -r '"complete: \(.percentage_completed // 0)%, shards: \(.shard_complete // 0)/\(.shard_total // 0)"')"
     echo "phase 3: still working ($progress)"
     exit 0

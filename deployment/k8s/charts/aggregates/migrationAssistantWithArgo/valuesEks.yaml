@@ -14,14 +14,10 @@ aws:
 
 cluster:
   dedicatedKarpenterNodePoolForMigrationConsole: true
-  # When true, deploys a custom Karpenter NodePool (general-work-pool) with conservative
-  # settings (WhenEmpty consolidation, 30m cooldown, 4xlarge max) instead of using the
-  # EKS Auto Mode general-purpose pool. Recommended for production stability.
+  # When true, deploys a custom Karpenter NodePool (general-work-pool), configured by
+  # workloadsNodePool in values.yaml (WhenEmpty consolidation), instead
+  # of using the EKS Auto Mode general-purpose pool. Recommended for production stability.
   useCustomKarpenterNodePool: true
-
-# Enable multi-arch for EKS
-workloadsNodePool:
-  architectures: ["amd64", "arm64"]
 
 tracing:
   backend: xray
@@ -111,6 +107,16 @@ metrics:
             action: delete
           - key: service.name
             action: delete
+          - key: service.instance.id
+            action: delete
+      resource/remove_telemetry_sdk_attributes:
+        attributes:
+          - key: telemetry.sdk.name
+            action: delete
+          - key: telemetry.sdk.version
+            action: delete
+          - key: telemetry.sdk.language
+            action: delete
     extensions:
       health_check:
         endpoint: :13133
@@ -143,11 +149,19 @@ metrics:
         metrics/app:
           receivers: [otlp]
           processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
-          exporters: [awsemf/app, prometheus]
+          exporters: [awsemf/app]
+        metrics/app-prometheus:
+          receivers: [otlp]
+          processors: [batch, resource/remove_telemetry_sdk_attributes, resource/metrics]
+          exporters: [prometheus]
         metrics/cadvisor:
           receivers: [prometheus]
           processors: [batch]
           exporters: [awsemf/cadvisor, prometheus]
+
+logs:
+  sharedLogsVolume:
+    enabled: false
 
 charts:
   kube-prometheus-stack:

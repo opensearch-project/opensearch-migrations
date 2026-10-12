@@ -28,6 +28,7 @@ from .crd_utils import (
     CRD_VERSION,
     match_names,
 )
+from .hints import hint_after_approve_step, hint_after_approve_change, hint_after_approve_retry
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,25 @@ def _classify_runtime_gate(denial_msg):
     if not denial_msg:
         return 'change'
     return 'retry' if 'Impossible' in denial_msg else 'change'
+
+
+def waiting_gates(namespace, workflow_name):
+    """Public accessor for every gate a workflow is actively blocked on.
+
+    Returns a list of (gate_name, denial_reason, category) where category is
+    'step' for a user-defined approval point, or 'change'/'retry' for a runtime
+    VAP-denial gate. Anything blocking here will block until someone approves
+    it, whatever its category.
+
+    Exposed for callers outside this module (notably the integration test
+    harness, which needs to tell a blocked workflow from a slow one) so they
+    don't have to reach for the private helpers or reimplement the node walk.
+    """
+    return [
+        (name, reason,
+         _classify_runtime_gate(reason) if _gate_category_from_name(name) == 'runtime' else 'step')
+        for name, reason in _waiting_gates_from_workflow(namespace, workflow_name)
+    ]
 
 
 def _waiting_gates_from_workflow(namespace, workflow_name):
@@ -472,6 +492,17 @@ def _retry_prerequisite(gate):
             f"workflow reset {name}")
 
 
+def _prerequisite_to_json(gate):
+    prereq = _retry_prerequisite(gate) if gate.category == 'retry' else None
+    if prereq is None:
+        return None
+    description, command = prereq
+    return {
+        "description": description,
+        "command": command,
+    }
+
+
 def _resource_still_exists(namespace, kind, name):
     """Check if a migration CRD still exists."""
     plural = _KIND_TO_PLURAL.get(kind)
@@ -623,6 +654,24 @@ def _run_list(gates, show_prereq=False):
         click.echo(line)
 
 
+def _gate_to_json(gate):
+    return {
+        "name": gate.name,
+        "displayName": _display_name(gate),
+        "category": gate.category,
+        "status": gate.status,
+        "resourceKind": gate.resource_kind,
+        "resourceName": gate.resource_name,
+        "labels": gate.labels,
+        "reason": gate.reason,
+        "prerequisite": _prerequisite_to_json(gate),
+    }
+
+
+def _run_json_list(gates):
+    click.echo(json.dumps([_gate_to_json(gate) for gate in gates], sort_keys=True))
+
+
 def _list_all_categories(namespace, workflow_name):
     """Print gates across all three categories, grouped by category.
 
@@ -749,7 +798,8 @@ def _apply_approvals(ctx, namespace, targets):
 
 
 def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
-                    workflow_name, namespace, enforce_retry_prereqs=False):
+                    workflow_name, namespace, output_format='text',
+                    enforce_retry_prereqs=False):
     """Core logic shared by all three subcommands."""
     _require_single_action(ctx, names, list_flag, all_flag)
 
@@ -767,7 +817,10 @@ def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
     )
 
     if list_flag:
-        _run_list(gates, show_prereq=(category == 'retry'))
+        if output_format == 'json':
+            _run_json_list(gates)
+        else:
+            _run_list(gates, show_prereq=(category == 'retry'))
         return
 
     if not gates:
@@ -815,6 +868,13 @@ def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
 
     _apply_approvals(ctx, namespace, targets)
 
+    if category == 'step':
+        hint_after_approve_step()
+    elif category == 'change':
+        hint_after_approve_change()
+    elif category == 'retry':
+        hint_after_approve_retry()
+
 
 # ─────────────────────────────────────────────────────────────
 # Click group + subcommands
@@ -857,13 +917,16 @@ def approve_group(ctx, list_flag, workflow_name, argo_server, namespace, insecur
                 shell_complete=_complete_names('step'))
 @click.option('--list', 'list_flag', is_flag=True, default=False,
               help='List available step gates and exit')
+@click.option('--output', 'output_format',
+              type=click.Choice(['text', 'json']), default='text',
+              help='Output format for --list')
 @click.option('--all', 'all_flag', is_flag=True, default=False,
               help='Approve every matching step gate')
 @click.option('--pre-approve', is_flag=True, default=False,
               help='Include step gates the workflow has not reached yet')
 @_shared_options
 @click.pass_context
-def approve_step(ctx, names, list_flag, all_flag, pre_approve,
+def approve_step(ctx, names, list_flag, output_format, all_flag, pre_approve,
                  workflow_name, argo_server, namespace, insecure, token):
     """Approve user-defined migration checkpoints.
 
@@ -874,7 +937,7 @@ def approve_step(ctx, names, list_flag, all_flag, pre_approve,
         workflow approve step --pre-approve --all
     """
     _run_subcommand(ctx, 'step', names, list_flag, all_flag, pre_approve,
-                    workflow_name, namespace)
+                    workflow_name, namespace, output_format=output_format)
 
 
 @approve_group.command("change")
@@ -882,13 +945,16 @@ def approve_step(ctx, names, list_flag, all_flag, pre_approve,
                 shell_complete=_complete_names('change'))
 @click.option('--list', 'list_flag', is_flag=True, default=False,
               help='List change gates the workflow is stuck on')
+@click.option('--output', 'output_format',
+              type=click.Choice(['text', 'json']), default='text',
+              help='Output format for --list')
 @click.option('--all', 'all_flag', is_flag=True, default=False,
               help='Approve every matching change gate')
 @click.option('--pre-approve', is_flag=True, default=False,
               help='Include change gates whose resource has not been updated yet')
 @_shared_options
 @click.pass_context
-def approve_change(ctx, names, list_flag, all_flag, pre_approve,
+def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,
                    workflow_name, argo_server, namespace, insecure, token):
     """Acknowledge gated configuration field changes.
 
@@ -902,7 +968,7 @@ def approve_change(ctx, names, list_flag, all_flag, pre_approve,
         workflow approve change --pre-approve --all
     """
     _run_subcommand(ctx, 'change', names, list_flag, all_flag, pre_approve,
-                    workflow_name, namespace)
+                    workflow_name, namespace, output_format=output_format)
 
 
 @approve_group.command("retry")
@@ -910,11 +976,14 @@ def approve_change(ctx, names, list_flag, all_flag, pre_approve,
                 shell_complete=_complete_names('retry'))
 @click.option('--list', 'list_flag', is_flag=True, default=False,
               help='List retry gates the workflow is stuck on')
+@click.option('--output', 'output_format',
+              type=click.Choice(['text', 'json']), default='text',
+              help='Output format for --list')
 @click.option('--all', 'all_flag', is_flag=True, default=False,
               help='Approve every matching retry gate (blocked if prereqs unmet)')
 @_shared_options
 @click.pass_context
-def approve_retry(ctx, names, list_flag, all_flag,
+def approve_retry(ctx, names, list_flag, output_format, all_flag,
                   workflow_name, argo_server, namespace, insecure, token):
     """Confirm recovery is complete after an impossible change.
 
@@ -929,4 +998,5 @@ def approve_retry(ctx, names, list_flag, all_flag,
         workflow approve retry --all
     """
     _run_subcommand(ctx, 'retry', names, list_flag, all_flag, False,
-                    workflow_name, namespace, enforce_retry_prereqs=True)
+                    workflow_name, namespace, output_format=output_format,
+                    enforce_retry_prereqs=True)

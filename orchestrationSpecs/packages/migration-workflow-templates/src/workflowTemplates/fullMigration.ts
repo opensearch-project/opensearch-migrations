@@ -4,10 +4,12 @@ import {
     ARGO_MIGRATION_CONFIG,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
+    CLUSTER_CONNECTION_IDENTITY,
     COMPLETE_SNAPSHOT_CONFIG,
     DEFAULT_RESOURCES,
     DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
     DENORMALIZED_PROXY_CONFIG,
+    DENORMALIZED_PROXY_SETUP_CONFIG,
     DENORMALIZED_REPLAY_CONFIG,
     DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG,
     ENRICHED_SNAPSHOT_MIGRATION_FILTER,
@@ -186,7 +188,7 @@ export const FullMigration = WorkflowBuilder.create({
     // ── Section 2: Proxies ───────────────────────────────────────────────
 
     .addTemplate("setupSingleProxy", t => t
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_SETUP_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
@@ -194,6 +196,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("skipApproval", c => expr.literal(false))
         .addInputsFromRecord(SCALABLE_WORKLOAD_INPUTS)
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())
@@ -219,6 +222,7 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumForSnapshot: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForSnapshot"], ""),
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
+                    skipApproval: b.inputs.skipApproval,
                     podReplicas: b.inputs.podReplicas,
                     minPodReplicas: b.inputs.minPodReplicas,
                     topicPartitions: b.inputs.topicPartitions,
@@ -296,6 +300,7 @@ export const FullMigration = WorkflowBuilder.create({
                     snapshotItemConfig: b.inputs.snapshotItemConfig,
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
                     configChecksum: b.inputs.configChecksum,
+                    retryGateName: expr.concat(expr.literal("datasnapshot."), b.inputs.resourceName, expr.literal(".vapretry")),
                 }),
             )
             .addStep("readSnapshotPhase", ResourceManagement, "readResourcePhase", c =>
@@ -362,6 +367,10 @@ export const FullMigration = WorkflowBuilder.create({
                     configChecksum: b.inputs.configChecksum,
                     dataSnapshotName: b.inputs.resourceName,
                     dataSnapshotUid: expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "resourceUid"),
+                    // Solr import-prepare: empty for the normal create path. When set, createOrGetSnapshot
+                    // runs the import workflow (schema upload, no backup) against this external backup.
+                    solrExternalBackupName: expr.dig(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), ["solrExternalBackupName"], ""),
                 }),
                 {when: c => ({templateExp: expr.and(
                     expr.not(expr.equals(c.readSnapshotPhase.outputs.phase, "Completed")),
@@ -390,6 +399,7 @@ export const FullMigration = WorkflowBuilder.create({
                     snapshotItemConfig: expr.serialize(expr.makeDict({
                         label: expr.get(c.item, "label"),
                         snapshotPrefix: expr.get(c.item, "snapshotPrefix"),
+                        sourceConnectionIdentity: expr.deserializeRecord(expr.get(c.item, "sourceConnectionIdentity")),
                         config: expr.deserializeRecord(expr.get(c.item, "config")),
                         repo: expr.deserializeRecord(expr.get(c.item, "repo")),
                         semaphoreConfigMapName: expr.get(c.item, "semaphoreConfigMapName"),
@@ -398,8 +408,12 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.deserializeRecord(expr.recordToString(c.item)),
                             "dependsOnProxySetups"
                         ),
+                        // Resolved dependency-graph edge names written to the DataSnapshot CR spec.dependsOn.
+                        dependsOn: expr.get(c.item, "dependsOn"),
                         configChecksum: expr.get(c.item, "configChecksum"),
-                        resourceUid: expr.get(c.item, "resourceUid")
+                        resourceUid: expr.get(c.item, "resourceUid"),
+                        // Carried through for the Solr import-prepare path (absent for create items).
+                        solrExternalBackupName: expr.dig(c.item, ["solrExternalBackupName"], ""),
                     })),
 //                    snapshotItemConfig: expr.cast(c.item).to<Serialized<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>>(),
                     sourceConfig: expr.serialize(
@@ -430,8 +444,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceVersion", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addOptionalInput("sourceConfig", c =>
-            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
@@ -441,7 +453,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("workloadIdentityChecksum", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
-        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c =>
@@ -473,6 +484,18 @@ export const FullMigration = WorkflowBuilder.create({
                         checksumForReplayer: b.inputs.checksumForReplayer
                     }),
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig))}}
+            )
+            .addStep("approveBackfill", DocumentBulkLoad, "approveBackfill", c =>
+                    c.register({
+                        name: expr.concat(expr.literal("documentbackfill."), b.inputs.crdName)
+                    }),
+                {when: {templateExp: expr.and(
+                    expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
+                    expr.not(expr.get(
+                        expr.deserializeRecord(b.inputs.documentBackfillConfig),
+                        "skipApproval"
+                    ))
+                )}}
             )
         )
     )
@@ -561,29 +584,26 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
                         sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
                         targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
-                        sourceConfig: expr.serialize(expr.makeDict({
-                            label: expr.get(snapshotMigrationConfig, "sourceLabel"),
-                            version: expr.get(snapshotMigrationConfig, "sourceVersion"),
-                            endpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
-                            allowInsecure: expr.dig(snapshotMigrationConfig, ["sourceAllowInsecure"], false),
-                            authConfig: expr.dig(snapshotMigrationConfig, ["sourceAuth"], expr.makeDict({}))
-                        })),
                         snapshotConfig: expr.serialize(expr.makeDict({
                             snapshotName: resolvedSnapshotName,
                             label: expr.get(snapshotRepoConfig, "label"),
                             repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
                         })),
                         migrationLabel: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        metadataMigrationConfig: expr.serialize(expr.dig(
-                            snapshotMigrationConfig,
-                            ["metadataMigrationConfig"],
-                            expr.makeDict({}) as any
-                        )),
-                        documentBackfillConfig: expr.serialize(expr.dig(
-                            snapshotMigrationConfig,
-                            ["documentBackfillConfig"],
-                            expr.makeDict({}) as any
-                        )),
+                        metadataMigrationConfig: expr.ternary(
+                            expr.hasKey(snapshotMigrationConfig, "metadataMigrationConfig"),
+                            expr.cast(expr.serialize(
+                                expr.getLoose(snapshotMigrationConfig, "metadataMigrationConfig")
+                            )).to<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>(),
+                            expr.empty<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>()
+                        ),
+                        documentBackfillConfig: expr.ternary(
+                            expr.hasKey(snapshotMigrationConfig, "documentBackfillConfig"),
+                            expr.cast(expr.serialize(
+                                expr.getLoose(snapshotMigrationConfig, "documentBackfillConfig")
+                            )).to<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>(),
+                            expr.empty<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>()
+                        ),
                         crdName: b.inputs.resourceName,
                         // Use the apiserver-assigned UID emitted by reconcileSnapshotMigrationResource
                         // (rather than b.inputs.resourceUid, which may be a placeholder like "imported"
@@ -593,7 +613,6 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
                         checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
                         workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
                     });
@@ -624,6 +643,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("fromCapturedTrafficSourceKind", typeToken<"proxy" | "s3">())
         .addRequiredInput("fromCapturedTrafficConfigChecksum", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("targetConnectionIdentity", typeToken<z.infer<typeof CLUSTER_CONNECTION_IDENTITY>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("useLocalStack", typeToken<boolean>())
         .addRequiredInput("name", typeToken<string>())
@@ -643,9 +663,12 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     name: b.inputs.name,
                     dependsOn: b.inputs.dependsOn,
+                    fromCapturedTraffic: b.inputs.fromCapturedTraffic,
+                    fromCapturedTrafficSourceKind: b.inputs.fromCapturedTrafficSourceKind,
                     replayerOptions: b.inputs.replayerOptions,
                     sourceLabel: b.inputs.sourceLabel,
                     targetLabel: expr.dig(expr.deserializeRecord(b.inputs.targetConfig), ["label"], ""),
+                    targetConnectionIdentity: b.inputs.targetConnectionIdentity,
                     configChecksum: b.inputs.configChecksum,
                     retryGateName: expr.concat(expr.literal("trafficreplay."), b.inputs.name, expr.literal(".vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("TrafficReplay: "), b.inputs.name),
@@ -741,10 +764,15 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("uniqueRunNonce", typeToken<string>())
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
-        .addSteps(b => b.addStepGroup(g => g
-            .addStep("initializeRunMetadata", INTERNAL, "initializeRunMetadata", c =>
-                c.register({})
+        .addSteps(b => b
+            .addStep("approveBegin", ResourceManagement, "waitForUserApproval", c =>
+                    c.register({resourceName: expr.literal("begin")}),
+                {when: {templateExp: expr.get(expr.deserializeRecord(b.inputs.config), "requireBeginApproval")}}
             )
+            .addStepGroup(g => g
+                .addStep("initializeRunMetadata", INTERNAL, "initializeRunMetadata", c =>
+                    c.register({})
+                )
             .addStep("createKafka", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -781,6 +809,7 @@ export const FullMigration = WorkflowBuilder.create({
                     proxyConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
                         sourceConfig: expr.deserializeRecord(expr.get(c.item, "sourceConfig")),
+                        sourceConnectionIdentity: expr.deserializeRecord(expr.get(c.item, "sourceConnectionIdentity")),
                         kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
                         proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
                         configChecksum: expr.dig(c.item, ["configChecksum"], ""),
@@ -789,6 +818,7 @@ export const FullMigration = WorkflowBuilder.create({
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
                         resourceUid: expr.get(c.item, "resourceUid"),
                     })),
+                    skipApproval: expr.dig(c.item, ["skipApproval"], expr.literal(false)),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
                     kafkaClusterName: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),

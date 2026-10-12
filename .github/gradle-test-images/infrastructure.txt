@@ -1,0 +1,15 @@
+# Service and helper images used by Gradle integration tests.
+# Format: canonical image|optional preferred pull source
+localstack/localstack:4.3.0|mirror.gcr.io/localstack/localstack:4.3.0
+localstack/localstack:3.4|mirror.gcr.io/localstack/localstack:3.4
+solr:6.6.0|mirror.gcr.io/library/solr:6.6.0
+solr:7.7.3|mirror.gcr.io/library/solr:7.7.3
+solr:8.10.1|mirror.gcr.io/library/solr:8.10.1
+solr:8.11.4|mirror.gcr.io/library/solr:8.11.4
+solr:9.8.1|mirror.gcr.io/library/solr:9.8.1
+confluentinc/cp-kafka:7.5.0|mirror.gcr.io/confluentinc/cp-kafka:7.5.0
+httpd:2.4.66-alpine|mirror.gcr.io/library/httpd:2.4.66-alpine
+testcontainers/ryuk:0.14.0|mirror.gcr.io/testcontainers/ryuk:0.14.0
+testcontainers/sshd:1.3.0|mirror.gcr.io/testcontainers/sshd:1.3.0
+alpine:3.17|mirror.gcr.io/library/alpine:3.17
+ghcr.io/shopify/toxiproxy:2.9.0|

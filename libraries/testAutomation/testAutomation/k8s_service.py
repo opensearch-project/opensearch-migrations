@@ -71,12 +71,13 @@ class K8sService:
         ignoring completed pods, and fails after the specified timeout in seconds.
         """
         logger.info("Waiting for pods to become ready...")
-        start_time = time.time()
+        start_time = time.monotonic()
+        unhealthy_pods = []
 
         # Exclude Argo workflow pods by label (pods without the label only)
         argo_exclude_selector = '!workflows.argoproj.io/workflow'
 
-        while time.time() - start_time < timeout:
+        while time.monotonic() - start_time < timeout:
             pods = self.k8s_client.list_namespaced_pod(
                 namespace=self.namespace,
                 label_selector=argo_exclude_selector
@@ -84,19 +85,21 @@ class K8sService:
 
             # Exclude pods that are in the "Succeeded" phase (Completed jobs)
             unhealthy_pods = [
-                pod.metadata.name
+                pod
                 for pod in pods
                 if pod.status.phase != "Succeeded" and not self._is_pod_ready(pod)
             ]
             if not unhealthy_pods:
                 logger.info("All non-workflow pods are healthy.")
                 return True
-            logger.info(f"The following pods are not healthy yet: [{', '.join(unhealthy_pods)}]")
+            unhealthy_pod_names = [pod.metadata.name for pod in unhealthy_pods]
+            logger.info(f"The following pods are not healthy yet: [{', '.join(unhealthy_pod_names)}]")
             time.sleep(3)
 
+        self._log_unhealthy_pod_diagnostics(unhealthy_pods)
         raise TimeoutError(
             f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
-            f"Unhealthy pods: {', '.join(unhealthy_pods)}"
+            f"Unhealthy pods: {', '.join(pod.metadata.name for pod in unhealthy_pods)}"
         )
 
     def _is_pod_ready(self, pod: V1Pod) -> bool:
@@ -112,6 +115,76 @@ class K8sService:
             if not status.ready:
                 return False
         return True
+
+    @staticmethod
+    def _format_container_state(state) -> str:
+        if not state:
+            return "unknown"
+        if state.waiting:
+            details = [f"waiting={state.waiting.reason or 'unknown'}"]
+            if state.waiting.message:
+                details.append(f"message={state.waiting.message}")
+            return ", ".join(details)
+        if state.terminated:
+            details = [
+                f"terminated={state.terminated.reason or 'unknown'}",
+                f"exitCode={state.terminated.exit_code}",
+            ]
+            if state.terminated.message:
+                details.append(f"message={state.terminated.message}")
+            return ", ".join(details)
+        if state.running:
+            return "running"
+        return "unknown"
+
+    def _log_unhealthy_pod_diagnostics(self, pods: List[V1Pod]) -> None:
+        """Log pod state, events, and container output without masking the timeout."""
+        logger.error("Pod readiness timed out; collecting diagnostics before cleanup.")
+        for pod in pods:
+            pod_name = pod.metadata.name
+            try:
+                logger.error(
+                    f"Pod {pod_name}: phase={pod.status.phase}, "
+                    f"reason={pod.status.reason or 'none'}, message={pod.status.message or 'none'}"
+                )
+                statuses = list(pod.status.init_container_statuses or [])
+                statuses += list(pod.status.container_statuses or [])
+                for status in statuses:
+                    logger.error(
+                        f"Container {pod_name}/{status.name}: ready={status.ready}, "
+                        f"restarts={status.restart_count}, state=({self._format_container_state(status.state)}), "
+                        f"lastState=({self._format_container_state(status.last_state)})"
+                    )
+                    self._log_container_output(pod_name, status.name, previous=False)
+                    if status.restart_count:
+                        self._log_container_output(pod_name, status.name, previous=True)
+
+                events = self.k8s_client.list_namespaced_event(
+                    namespace=self.namespace,
+                    field_selector=f"involvedObject.uid={pod.metadata.uid}",
+                ).items
+                for event in events:
+                    logger.error(
+                        f"Event for {pod_name}: type={event.type or 'unknown'}, "
+                        f"reason={event.reason or 'unknown'}, message={event.message or 'none'}"
+                    )
+            except Exception as e:
+                logger.error(f"Unable to collect complete diagnostics for pod {pod_name}: {e}")
+
+    def _log_container_output(self, pod_name: str, container_name: str, previous: bool) -> None:
+        log_kind = "previous logs" if previous else "logs"
+        try:
+            output = self.k8s_client.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=self.namespace,
+                container=container_name,
+                previous=previous,
+                tail_lines=100,
+                timestamps=True,
+            )
+            logger.error(f"{pod_name}/{container_name} {log_kind}:\n{output or '<empty>'}")
+        except Exception as e:
+            logger.error(f"Unable to read {log_kind} for {pod_name}/{container_name}: {e}")
 
     def _get_migration_console_pod(self) -> V1Pod:
         logger.debug("Retrieving the latest migration console pod...")
@@ -574,12 +647,12 @@ class K8sService:
             except Exception as e:
                 logger.error(f"--- {label} --- FAILED: {e}")
 
-        # Dump installer job logs if present
+        # Dump installer job logs if present. Select by the release instance label the
+        # Job stamps on its pods -- same selector the job/finalizer queries above use.
         try:
-            chart_name = release_name.replace('ma', 'migrationAssistantWithArgo')
             pod_result = subprocess.run(
                 self._kubectl_base() + ["get", "pods", "-n", self.namespace,
-                                        "-l", f"app.kubernetes.io/name={chart_name}",
+                                        "-l", f"app.kubernetes.io/instance={release_name}",
                                         "-o", "jsonpath={.items[*].metadata.name}"],
                 capture_output=True, text=True, timeout=10)
             for pod_name in pod_result.stdout.split():

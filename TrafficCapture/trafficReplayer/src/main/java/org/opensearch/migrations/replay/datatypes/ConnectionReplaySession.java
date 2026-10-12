@@ -1,5 +1,10 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
@@ -48,8 +53,40 @@ public class ConnectionReplaySession {
      * {@link #getChannelFutureInActiveState} will return a failed future rather than reconnecting,
      * preventing self-healing reconnects after a partition reassignment cancel.
      */
+    @Getter
     @Setter
     private volatile boolean cancelled = false;
+
+    /**
+     * Tracks standalone transformation-phase timer futures created by
+     * {@code RequestSenderOrchestrator.scheduleWork}. These timers are NOT part of
+     * {@link #schedule} (intentionally, for out-of-order transformation), so
+     * {@link TimeToResponseFulfillmentFutureMap#drainWithCancellation} does not reach them.
+     * Entries are self-cleaning: each future removes itself on completion.
+     */
+    private final Set<CompletableFuture<Void>> pendingTransformationTimers =
+        Collections.newSetFromMap(new ConcurrentHashMap<>());
+
+    public void addPendingTransformationTimer(CompletableFuture<Void> future) {
+        pendingTransformationTimers.add(future);
+    }
+
+    public void removePendingTransformationTimer(CompletableFuture<Void> future) {
+        pendingTransformationTimers.remove(future);
+    }
+
+    public boolean hasPendingTransformationTimers() {
+        return !pendingTransformationTimers.isEmpty();
+    }
+
+    public void drainTransformationTimers(CancellationException cause) {
+        var iterator = pendingTransformationTimers.iterator();
+        while (iterator.hasNext()) {
+            var f = iterator.next();
+            iterator.remove();
+            f.completeExceptionally(cause);
+        }
+    }
 
     @SneakyThrows
     public ConnectionReplaySession(

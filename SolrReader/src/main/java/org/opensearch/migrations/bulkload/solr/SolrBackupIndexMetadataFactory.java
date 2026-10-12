@@ -25,6 +25,7 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
     private final Path backupDir;
     private final Map<String, JsonNode> schemas;
     private final Consumer<String> collectionPreparer;
+    private final Map<String, String> dataDirByCollection;
 
     /**
      * @param collectionPreparer called once per collection before counting shards.
@@ -35,9 +36,22 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
         Path backupDir, Map<String, JsonNode> schemas,
         Consumer<String> collectionPreparer
     ) {
+        this(backupDir, schemas, collectionPreparer, Map.of());
+    }
+
+    /**
+     * @param dataDirByCollection maps a collection name to its backup data directory relative to
+     *                            {@code backupDir} (for bare SolrCloud/standalone layouts whose data
+     *                            is not under a like-named subdirectory). Falls back to the name.
+     */
+    public SolrBackupIndexMetadataFactory(
+        Path backupDir, Map<String, JsonNode> schemas,
+        Consumer<String> collectionPreparer, Map<String, String> dataDirByCollection
+    ) {
         this.backupDir = backupDir;
         this.schemas = schemas;
         this.collectionPreparer = collectionPreparer;
+        this.dataDirByCollection = dataDirByCollection;
     }
 
     @Override
@@ -52,7 +66,8 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
         var schema = schemas.get(indexName);
         var schemaNode = schema != null ? schema.path("schema") : MAPPER.createObjectNode();
 
-        var collectionDir = SolrBackupLayout.resolveCollectionDataDir(backupDir.resolve(indexName));
+        var dataDir = dataDirByCollection.getOrDefault(indexName, indexName);
+        var collectionDir = SolrBackupLayout.resolveCollectionDataDir(backupDir.resolve(dataDir));
         int shardCount = SolrBackupLayout.countShards(collectionDir);
         log.info("Solr collection {} has {} shard(s)", indexName, shardCount);
 

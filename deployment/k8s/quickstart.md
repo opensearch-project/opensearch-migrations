@@ -1,16 +1,17 @@
 # 🚀 Quickstart Guide - Migration Assistant
 
-Get started quickly by testing out the Migration Assistant solution in a local Kubernetes cluster while utilizing test Elasticsearch and OpenSearch clusters and the same Helm charts that can be deployed to the cloud
-
-
+Get started quickly by testing out the Migration Assistant solution in a local Kubernetes cluster while utilizing test
+Elasticsearch and OpenSearch clusters and the same Helm charts that can be deployed to the cloud
 
 ## What you'll need
 
 ### 🔹 Install kubectl (Kubernetes CLI)
 
-`kubectl` is the primary command-line tool for managing and interacting with your Kubernetes cluster. Follow the official installation guide [here](https://kubernetes.io/docs/tasks/tools/).
+`kubectl` is the primary command-line tool for managing and interacting with your Kubernetes cluster. Follow the
+official installation guide [here](https://kubernetes.io/docs/tasks/tools/).
 
-Kubectl autocompletion is also recommended [here](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_completion/)
+Kubectl autocompletion is also
+recommended [here](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_completion/)
 
 ✅ Verify install
 
@@ -18,10 +19,10 @@ Kubectl autocompletion is also recommended [here](https://kubernetes.io/docs/ref
 kubectl version
 ```
 
-
 ### 🔹 Install Helm (Kubernetes Package Manager)
 
-Helm simplifies application deployment on Kubernetes by managing charts which are essentially pre-configured application definitions. Install Helm by following the instructions [here](https://helm.sh/docs/intro/install/).
+Helm simplifies application deployment on Kubernetes by managing charts which are essentially pre-configured application
+definitions. Install Helm by following the instructions [here](https://helm.sh/docs/intro/install/).
 
 Helm autocompletion is also recommended [here](https://helm.sh/docs/helm/helm_completion_bash/)
 
@@ -31,10 +32,10 @@ Helm autocompletion is also recommended [here](https://helm.sh/docs/helm/helm_co
 helm version
 ```
 
-
 ### 🔹 Install Docker
 
-Docker is essential for building container images and running a local Kubernetes cluster in this setup. Follow the setup guide [here](https://docs.docker.com/engine/install/).
+Docker is essential for building container images and running a local Kubernetes cluster in this setup. Follow the setup
+guide [here](https://docs.docker.com/engine/install/).
 
 ✅ Verify install
 
@@ -42,50 +43,31 @@ Docker is essential for building container images and running a local Kubernetes
 docker version
 ```
 
+### 🔹 Install kind
 
-### 🔹 Install Minikube
-
-Minikube will be used as the local Kubernetes cluster for this deployment, follow the official installation instructions [here](https://minikube.sigs.k8s.io/docs/start/?arch=%2Fmacos%2Farm64%2Fstable%2Fbinary+download).
+kind will be used as the local Kubernetes cluster for this deployment, follow the official installation
+instructions [here](https://kind.sigs.k8s.io/docs/user/quick-start/).
 
 ✅ Verify install
 
 ```shell
-minikube version
+kind --version
 ```
-
-
-## Start your local Kubernetes cluster
-
-To get started we will utilize Minikube as our local Kubernetes environment. It will function very similarly to other Kubernetes environments like EKS in AWS.  We should first move to the K8s directory for the remainder of the commands
-
-```shell
-cd deployment/k8s
-```
-
-The following wrapper script command will start Minikube, which will create a minikube container in Docker within which the Kubernetes environment will live.
-
-```shell
-./minikubeLocal.sh --start
-```
-
 
 ## Build the Docker images
 
-Since we are building from source here, we will need to build the necessary Docker images for the Migration Assistant that our K8s containers will utilize. The `localTesting.sh` script handles minikube setup, image builds (via BuildKit), and deployment all-in-one. See the [Local Testing](#local-testing) section or run:
+Since we are building from source here, we will need to build the necessary Docker images for the Migration Assistant
+that our K8s containers will utilize. The `kindTesting.sh` script handles kind setup, image builds (via BuildKit),
+and deployment all-in-one:
 
 ```shell
-./localTesting.sh
-```
-
-If you are ever curious what images are in your Minikube environment the following command will list the images:
-
-```shell
-minikube image ls
+./kindTesting.sh
 ```
 
 ## Deploy the Migration Assistant Helm chart
 
-This will deploy our main Migration Assistant Helm chart which will create the needed resources to perform the Migration Assistant suite of migration tooling
+This will deploy our main Migration Assistant Helm chart which will create the needed resources to perform the Migration
+Assistant suite of migration tooling
 
 ```shell
 helm install ma -n ma charts/aggregates/migrationAssistantWithArgo \
@@ -121,15 +103,16 @@ After exiting the Migration Console
 migration-console (~) -> exit
 ```
 
-To remove the Migration Assistant Helm deployment (and its installed chart dependencies), as well as any created volumes:
+To remove the Migration Assistant Helm deployment (and its installed chart dependencies), as well as any created
+volumes:
 
 ```shell
 helm uninstall -n ma ma
 kubectl -n ma delete pvc --all
 ```
 
-To remove the Minikube container (only necessary if no longer using Minikube):
+To remove the kind containers (only necessary if no longer using kind):
 
 ```shell
-./minikubeLocal.sh --delete
+./kindCleanup.sh
 ```

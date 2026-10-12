@@ -33,7 +33,6 @@ import {CfnDocument} from "aws-cdk-lib/aws-ssm";
 import { InstanceProfile, ManagedPolicy, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import {
     addParameterLabel,
-    applyAppRegistry,
     generateExportString,
     getVpcEndpointForEFS,
     ParameterLabel,
@@ -96,7 +95,6 @@ export class SolutionsInfrastructureStack extends Stack {
         additionalParameters.push(stageParameter.logicalId)
 
         const stackMarker = `${stageParameter.valueAsString}-${Aws.REGION}`;
-        const appRegistryAppARN = applyAppRegistry(this, stackMarker, props)
 
         new CfnDocument(this, "BootstrapShellDoc", {
             name: `BootstrapShellDoc-${stackMarker}`,
@@ -200,7 +198,6 @@ export class SolutionsInfrastructureStack extends Stack {
         }
 
         const exportString = generateExportString({
-            "MIGRATIONS_APP_REGISTRY_ARN": appRegistryAppARN,
             "MIGRATIONS_USER_AGENT": solutionsUserAgent,
             "VPC_ID": vpc.vpcId,
             "STAGE": stageParameter.valueAsString,

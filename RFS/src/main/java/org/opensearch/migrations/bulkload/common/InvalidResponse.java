@@ -19,6 +19,7 @@ public class InvalidResponse extends RfsException {
     private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[([a-zA-Z0-9_.-]+)\\].+");
     private static final Pattern PRIVATE_SETTING = Pattern.compile(".*private index setting \\[([a-zA-Z0-9_.-]+)\\] can not be set explicitly.*");
     private static final Pattern VERSION_MASK_ERROR = Pattern.compile("Version id \\d+ must contain OpenSearch mask");
+    private static final Pattern VERSION_PARSE_ERROR = Pattern.compile("Failed to parse value \\[\\d+\\] for setting \\[index\\.version\\.created\\]");
     private static final Pattern UNSUPPORTED_MAPPING_PARAM = Pattern.compile("unsupported parameters:\\s+(.+)");
     private static final Pattern MAPPING_PARAM_NAME = Pattern.compile("\\[([a-zA-Z0-9_.]+)\\s*:");
     private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
@@ -193,6 +194,12 @@ public class InvalidResponse extends RfsException {
             // Try matching "Version id N must contain OpenSearch mask" — caused by ES 8.x
             // IndexVersion IDs in index.version.created that lack the OpenSearch MASK bit
             matcher = VERSION_MASK_ERROR.matcher(reason);
+            if (matcher.matches()) {
+                return Map.entry(type, "index.version.created");
+            }
+
+            // since OS 3.6.0 the error message is different
+            matcher = VERSION_PARSE_ERROR.matcher(reason);
             if (matcher.matches()) {
                 return Map.entry(type, "index.version.created");
             }

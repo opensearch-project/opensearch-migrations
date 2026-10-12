@@ -5,13 +5,11 @@ process.argv.splice(2, 1);
 
 (async () => {
     const commands = new Map<string, () => Promise<void>>([
-        ['constrainSchema', async () => require('./constrainUserSchema').main()],
         ['initialize', async () => require('./runMigrationInitializer').main()],
         ['resolveMigrationResources', async () => require('./resolveMigrationResources').main()],
         ['resolveConsoleResources', async () => require('./resolveConsoleResources').main()],
         ['findSecrets', async () => require('./findSecrets').main()],
         ['validate', async () => require('./validateConfig').main()],
-        ['formatApprovals', async () => require('./formatApprovals').main()],
 
         ['buildUnifiedSchema', async () => require('@opensearch-migrations/schemas/buildUnifiedSchema').main()],
         ['makeSample', async () => require('@opensearch-migrations/schemas/makeSample').main()],

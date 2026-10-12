@@ -96,8 +96,9 @@ def _solr_cat_indices(cluster: Cluster, as_json=False):
 
 def _solr_list_collections_or_cores(cluster: Cluster) -> list:
     """List collections (SolrCloud) or cores (standalone). Tries both APIs."""
+    context_path = cluster.solr_context_path
     try:
-        r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+        r = cluster.call_api(f"{context_path}/admin/collections?action=LIST&wt=json")
         if r.status_code == 200:
             collections = r.json().get("collections", [])
             if collections:
@@ -105,7 +106,7 @@ def _solr_list_collections_or_cores(cluster: Cluster) -> list:
     except Exception:
         pass
     try:
-        r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+        r = cluster.call_api(f"{context_path}/admin/cores?action=STATUS&wt=json")
         return list(r.json().get("status", {}).keys())
     except Exception:
         return []
@@ -114,7 +115,7 @@ def _solr_list_collections_or_cores(cluster: Cluster) -> list:
 def _solr_collection_doc_count(cluster: Cluster, collection: str) -> int:
     """Get doc count for a Solr collection via select query."""
     try:
-        r = cluster.call_api(f"/solr/{collection}/select?q=*:*&rows=0&wt=json")
+        r = cluster.call_api(f"{cluster.solr_context_path}/{collection}/select?q=*:*&rows=0&wt=json")
         return r.json().get("response", {}).get("numFound", 0)
     except Exception:
         return 0
@@ -157,7 +158,7 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
     r = None
     try:
         if _is_solr(cluster):
-            r = cluster.call_api("/solr/admin/info/system", timeout=3)
+            r = cluster.call_api(f"{cluster.solr_context_path}/admin/info/system", timeout=3)
         else:
             r = cluster.call_api("/", raise_error=False, timeout=5)
     except Exception as e:
@@ -268,10 +269,42 @@ def clear_indices(cluster: Cluster):
 
     clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state*"
     try:
-        r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
+        # raise_error is the Cluster.call_api default, but stated explicitly here: the
+        # module-level call_api in this file defaults the other way, and the hint below
+        # only runs if a non-2xx raises.
+        r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE,
+                             params={"ignore_unavailable": "true"}, raise_error=True)
         return r.content
     except Exception as e:
+        hint = _destructive_guard_hint(e)
+        if hint:
+            return hint
         return f"Error encountered when clearing indices: {e}"
+
+
+# Clusters with action.destructive_requires_name enabled reject wildcard and _all deletes
+# with this reason, whatever the caller passed for --acknowledge-risk.
+DESTRUCTIVE_GUARD_REASON = "wildcard expressions or all indices are not allowed"
+
+
+def _destructive_guard_hint(error: Exception) -> Optional[str]:
+    """Turns the destructive-guard rejection into an actionable message; None for any other error."""
+    response = getattr(error, "response", None)
+    if response is None or response.status_code != 400:
+        return None
+    try:
+        reason = response.json().get("error", {}).get("reason", "")
+    except ValueError:
+        reason = response.text or ""
+    if DESTRUCTIVE_GUARD_REASON not in reason.lower():
+        return None
+    return (
+        "Error encountered when clearing indices: the cluster has "
+        "action.destructive_requires_name enabled, which forbids deleting by wildcard "
+        "regardless of --acknowledge-risk. Delete the indices by name instead — list them with "
+        "'console clusters cat-indices', then "
+        "'console clusters curl <cluster> -X DELETE \"/<index1>,<index2>\"'."
+    )
 
 
 def clear_cluster(cluster: Cluster, snapshot: Snapshot = None):

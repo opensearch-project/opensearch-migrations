@@ -7,9 +7,11 @@ import {
     KAFKA_CLUSTER_CREATION_CONFIG,
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
-    NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
+    OTEL_EXPORT_CONTROL_FIELD_MASK,
     REPO_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
+    SOLR_COLLECTIONS_OPTION,
+    SOLR_TOPOLOGY_OPTION,
     SOURCE_CLUSTER_CONFIG,
     TARGET_CLUSTER_CONFIG,
     USER_CREATE_SNAPSHOT_OPTIONS,
@@ -154,53 +156,105 @@ export const DENORMALIZED_REPO_CONFIG =
         repoName: z.string(),
     }));
 
+export const CLUSTER_CONNECTION_IDENTITY = z.object({
+    label: z.string(),
+    version: z.string(),
+    endpoint: z.string(),
+    allowInsecure: z.boolean(),
+    // Solr sources only; "" elsewhere.
+    solrContextPath: z.string(),
+    authType: z.string(),
+    authBasicSecretName: z.string(),
+    authSigv4Region: z.string(),
+    authSigv4Service: z.string(),
+    authMtlsClientSecretName: z.string(),
+    authMtlsCaCertHash: z.string(),
+});
+
 export const COMPLETE_SNAPSHOT_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.safeExtend({
         label: z.string(),
         repoConfig: DENORMALIZED_REPO_CONFIG  // Replace string reference with actual config
     }));
 
-export const DYNAMIC_SNAPSHOT_CONFIG =
-    makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
-        .omit({repoName: true})
-        .safeExtend({
-            repoConfig: DENORMALIZED_REPO_CONFIG,  // Replace string reference with actual config
-            label: z.string()
-    }));
-
-export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    dropRefinements(USER_METADATA_OPTIONS).omit({
-        skipEvaluateApproval: true,
-        skipMigrateApproval: true,
-        metadataTransforms: true,
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
-);
-export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
-    "jvmArgs",
-    "loggingConfigurationOverrideConfigMap",
-    "fileSourceVolumes",
-    "fileSourceVolumeMounts",
-] as const satisfies readonly (keyof z.infer<typeof ARGO_METADATA_OPTIONS>)[];
-
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true})
+    dropRefinements(USER_CREATE_SNAPSHOT_OPTIONS).omit({
+        snapshotPrefix: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
+    }).extend({
+        mode: z.enum(["create", "import"]).default("create").optional()
+            .describe("Workflow-internal snapshot/backup mode. 'create' (default) produces a new snapshot or " +
+                "backup of the source. 'import' is used only for Solr external-backup prepare: it runs " +
+                "CreateSnapshot --mode import to upload the source schema into an externally-managed backup's " +
+                "repository without creating a new backup. Not user-configurable; set by the config transformer."),
+        // Solr-only, glue-layer field. The config transformer folds the user-facing Solr
+        // `collectionAllowlist` into this on the shared create-snapshot config. It lives here rather
+        // than in USER_CREATE_SNAPSHOT_OPTIONS so the user-facing ES/OS snapshot schema does not
+        // expose a Solr-only field (ES/OS users use indexAllowlist; Solr users use collectionAllowlist).
+        solrCollections: SOLR_COLLECTIONS_OPTION.changeRestriction('impossible'),
+        // Solr-only, folded in by the config transformer from the user-facing `topology`.
+        solrTopology: SOLR_TOPOLOGY_OPTION.changeRestriction('impossible'),
+    })
 );
 export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
 ] as const satisfies readonly (keyof z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>)[];
 
+export const WORKFLOW_SNAPSHOT_NAME_CONFIG = z.union([
+    z.object({
+        externallyManagedSnapshotName: z.string()
+            .describe("Name of a pre-existing snapshot or backup in the configured repository."),
+    }),
+    z.object({
+        createSnapshotConfig: ARGO_CREATE_SNAPSHOT_OPTIONS
+            .describe("Workflow-internal configuration for creating a snapshot or Solr backup."),
+    }),
+]).describe("Workflow-internal snapshot or backup name source.");
+
+export const DENORMALIZED_WORKFLOW_SNAPSHOT_CONFIG =
+    makeOptionalDefaultedFieldsRequired(z.object({
+        config: WORKFLOW_SNAPSHOT_NAME_CONFIG,
+        repoConfig: DENORMALIZED_REPO_CONFIG,
+        label: z.string()
+    }));
+
+export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
+    dropRefinements(USER_METADATA_OPTIONS).omit({
+        metadataTransforms: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
+    }).extend({
+        ...FILE_SOURCE_RESOLVED_FIELDS,
+        skipEvaluateApproval: z.boolean(),
+        skipMigrateApproval: z.boolean(),
+    })
+);
+
+export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
+    "jvmArgs",
+    "loggingConfigurationOverrideConfigMap",
+    "resources",
+    "skipEvaluateApproval",
+    "skipMigrateApproval",
+    "fileSourceVolumes",
+    "fileSourceVolumeMounts",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_METADATA_OPTIONS>)[];
+
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
-        skipApproval: true,
         documentTransforms: true,
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
+    }).extend({
+        ...FILE_SOURCE_RESOLVED_FIELDS,
+        skipApproval: z.boolean(),
+    })
 );
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "podReplicas",
     "minPodReplicas",
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "skipApproval",
     "useTargetClusterForWorkCoordination",
     "resources",
     "fileSourceVolumes",
@@ -223,7 +277,9 @@ const PROXY_RESOLVED_FIELDS = {
 } as const;
 
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.safeExtend(PROXY_RESOLVED_FIELDS)
+    dropRefinements(USER_PROXY_OPTIONS)
+        .omit(OTEL_EXPORT_CONTROL_FIELD_MASK)
+        .extend(PROXY_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
     "loggingConfigurationOverrideConfigMap",
@@ -240,9 +296,9 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
 
 // Resolved-only keys are the fields PROXY_RESOLVED_FIELDS adds over the user
 // schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). The CaptureProxy
-// CRD is projected from USER_PROXY_OPTIONS, so these are the top-level keys the CRD
-// does not define and that must be stripped from the CR. Derived from the shape so
-// the set stays in sync as PROXY_RESOLVED_FIELDS changes.
+// CRD is projected from the user proxy fields after dropping user-only OTEL controls,
+// so these are the additional top-level keys that must be stripped from the CR.
+// Derived from the shape so the set stays in sync as PROXY_RESOLVED_FIELDS changes.
 export const ARGO_PROXY_RESOLVED_ONLY_KEYS =
     Object.keys(PROXY_RESOLVED_FIELDS) as (keyof typeof PROXY_RESOLVED_FIELDS)[];
 
@@ -258,6 +314,7 @@ export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_REPLAYER_OPTIONS).omit({
         requestTransforms: true,
         tupleTransforms: true,
+        ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = [
@@ -283,8 +340,17 @@ export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     {message: "At least one of metadataMigrationConfig or documentBackfillConfig must be provided"});
 
 export const SNAPSHOT_NAME_RESOLUTION = z.union([
-    z.object({ externalSnapshotName: z.string() }),
-    z.object({ dataSnapshotResourceName: z.string() })
+    // Solr import-prepare: an externally-managed backup that still needs the schema uploaded by
+    // CreateSnapshot --mode import. A DataSnapshot CR (dataSnapshotResourceName) is created so the
+    // migration waits for the import step to finish, but the resolved name used downstream is the
+    // external backup name (externalSnapshotName), not a CR-resolved generated name.
+    z.object({ dataSnapshotResourceName: z.string(), externalSnapshotName: z.string() }).strict(),
+    // External snapshot with no workflow-side preparation (ES/OS):
+    // the migration uses the external name directly and waits on nothing.
+    z.object({ externalSnapshotName: z.string() }).strict(),
+    // Workflow-generated snapshot: the migration waits on the DataSnapshot CR named here, then
+    // reads the resolved snapshot name from the CR's status.
+    z.object({ dataSnapshotResourceName: z.string() }).strict()
 ]);
 
 export const SNAPSHOT_REPO_CONFIG = z.object({
@@ -299,6 +365,8 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     snapshotConfigChecksum: z.string(),
     metadataMigrationConfig: ARGO_METADATA_OPTIONS.optional(),
     documentBackfillConfig: ARGO_RFS_OPTIONS.optional(),
+    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     sourceVersion: z.string(),
     sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
@@ -329,18 +397,28 @@ export const NAMED_KAFKA_CLIENT_CONFIG =
 export const DENORMALIZED_PROXY_CONFIG = z.object({
     name: z.string(),
     sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG,
+    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     proxyConfig: ARGO_PROXY_OPTIONS,
     configChecksum: z.string(),
     topicConfigChecksum: z.string(),
     checksumForSnapshot: z.string(),
     checksumForReplayer: z.string(),
+    // When true, the proxy-setup approval gate is auto-skipped. The config
+    // processor resolves this from proxy-level skipApproval first, then global
+    // skipApprovals, then false.
+    skipApproval: z.boolean(),
     resourceUid: z.string(),
+});
+
+export const DENORMALIZED_PROXY_SETUP_CONFIG = DENORMALIZED_PROXY_CONFIG.omit({
+    skipApproval: true,
 });
 
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     label: z.string(),
     snapshotPrefix: z.string(),
+    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
     repo: DENORMALIZED_REPO_CONFIG,
     semaphoreConfigMapName: z.string(),
@@ -349,8 +427,17 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
         name: z.string(),
         configChecksum: z.string(),
     })),
+    // Resolved dependency-graph edge names (the proxy-setup names) written to the DataSnapshot
+    // CR's spec.dependsOn by tryApply. Kept as a flat name list so the apply manifest does not
+    // need to map over dependsOnProxySetups; the reset CLI reads spec.dependsOn from the live CR.
+    dependsOn: z.array(z.string()),
     configChecksum: z.string(),
     resourceUid: z.string(),
+    // Solr external-backup prepare only. When present, this item does NOT create
+    // a new backup; CreateSnapshot runs with `--mode import` against the
+    // externally-managed backup named here, uploading the source schema into the
+    // repo. `config` carries mode:"import" and the prepare options.
+    solrExternalBackupName: z.string().optional(),
 });
 
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({
@@ -376,6 +463,7 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     replayerConfig: ARGO_REPLAYER_OPTIONS,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
+    targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
     configChecksum: z.string(),
     resourceUid: z.string(),
 });
@@ -407,6 +495,7 @@ function makeResourceUidOptional<
 }
 
 export const ARGO_MIGRATION_CONFIG = z.object({
+    requireBeginApproval: z.boolean(),
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
     proxies: z.array(DENORMALIZED_PROXY_CONFIG).default([]),
     s3TrafficLoaders: z.array(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG).default([]),

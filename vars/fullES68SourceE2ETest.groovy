@@ -104,45 +104,27 @@ def call(Map config = [:]) {
             defaultGitBranch: config.defaultGitBranch ?: 'main',
             integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202',
             preDeployStep: { Map args ->
-                // Pre-deploy stack deletion is intentionally disabled by default.
-                //
-                // Tearing down the migration CDK app and then the source (E2E solution)
-                // CDK app, and redeploying both from scratch each run, adds ~30-60+
-                // minutes per pipeline invocation. Since `cdk deploy` on an already-
-                // deployed stack is a no-op for unchanged resources, we reuse the
-                // stacks across runs and rely on `preIntegTestStep` to reset
-                // run-scoped state (snapshots, S3 objects) between tests.
-                //
-                // ENABLE THIS BLOCK when making a breaking change to the source or
-                // migration CDK stacks (e.g. incompatible context changes, resource
-                // replacements that cdk deploy can't perform in-place, IAM/security
-                // refactors, or anything that otherwise requires a clean redeploy).
-                // To re-enable, uncomment the two `sh` lines below. The destroy order
-                // (migration first, then source) must be preserved: `npx cdk destroy`
-                // polls CFN synchronously, and --clean-up-migration-only additionally
-                // waits on `aws cloudformation wait stack-delete-complete` for any
-                // leftover "OSMigrations-<stage>" stacks, so the second call cannot
-                // start until the first has fully returned.
-                //
-                // CloudFormation stacks are named purely by `--stage` (e.g.
-                // OSMigrations-<stage>, opensearch-infra-stack-ec2-source-<stage>),
-                // so cleanup is already stage-scoped regardless of context content.
-                // The context file is only required for `cdk destroy` to synth
-                // successfully so it can enumerate its own stack list;
-                // awsE2ESolutionSetup.sh substitutes placeholder <VPC_ID> /
-                // <SOURCE_CLUSTER_ENDPOINT> values when the real source side is
-                // already gone, so a stale or default context is still safe.
-                //
-                // def commonArgs = "--source-context-file './${args.sourceContextFileName}' " +
-                //         "--migration-context-file './${args.migrationContextFileName}' " +
-                //         "--source-context-id ${args.sourceContextId} " +
-                //         "--migration-context-id ${args.migrationContextId} " +
-                //         "--stage ${args.stage}"
-                // sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-migration-only"
-                // sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-source-only"
-                echo "Skipping pre-deploy stack cleanup (reusing existing stacks). " +
-                        "Uncomment the destroy block in vars/fullES68SourceE2ETest.groovy " +
-                        "when making a breaking change to the CDK stacks."
+                def activeUpdateStacks = sh(
+                        script: "aws cloudformation list-stacks " +
+                                "--stack-status-filter UPDATE_IN_PROGRESS UPDATE_ROLLBACK_IN_PROGRESS " +
+                                "UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS UPDATE_COMPLETE_CLEANUP_IN_PROGRESS " +
+                                "--query 'StackSummaries[].StackName' --output text",
+                        returnStdout: true
+                ).trim().tokenize().findAll {
+                    it.startsWith("OSMigrations-${args.stage}-")
+                }
+                if (activeUpdateStacks) {
+                    echo "Recovering interrupted migration deployment before redeploy: " +
+                            activeUpdateStacks.join(', ')
+                    def commonArgs = "--source-context-file './${args.sourceContextFileName}' " +
+                            "--migration-context-file './${args.migrationContextFileName}' " +
+                            "--source-context-id ${args.sourceContextId} " +
+                            "--migration-context-id ${args.migrationContextId} " +
+                            "--stage ${args.stage}"
+                    sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-migration-only"
+                } else {
+                    echo "No interrupted migration deployment found; reusing existing stacks."
+                }
             },
             preIntegTestStep: { deployStage ->
                 def sourceEndpoint = "https://alb.migration.${deployStage}.local:9201"

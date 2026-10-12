@@ -7,7 +7,12 @@ import {
 } from "./argoExpressionRender";
 import {StepGroup} from "../models/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "../models/plainObject";
-import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
+import {
+    EnvironmentVariableValueSource,
+    ExpressionOrConfigMapValue,
+    GenericScope,
+    LoopWithUnion
+} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
 import {
     BaseExpression,
@@ -161,11 +166,18 @@ function isTemplateWhenWrapper(
     return typeof when === "object" && when !== null && "templateExp" in when;
 }
 
-function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
+function isEnvironmentVariableValueSource(
+    value: ExpressionOrConfigMapValue<string>
+): value is EnvironmentVariableValueSource<string> {
+    return typeof value === "object" && value !== null &&
+        ("configMapKeyRef" in value || "secretKeyRef" in value);
+}
+
+function formatContainerEnvs(envVars: Record<string, ExpressionOrConfigMapValue<string>>) {
     const result: any[] = [];
     Object.entries(envVars).forEach(([key, value]) => {
         const transformedValue = transformExpressionsDeep(value);
-        const v = ("configMapKeyRef" in value || "secretKeyRef" in value) ?
+        const v = isEnvironmentVariableValueSource(value) ?
             { valueFrom: _.omit(transformedValue, "type") } :
             { value: transformedValue };
         result.push({name: key, ...v});

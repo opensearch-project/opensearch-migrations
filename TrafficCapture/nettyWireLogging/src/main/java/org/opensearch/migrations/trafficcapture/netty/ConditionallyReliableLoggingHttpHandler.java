@@ -9,7 +9,6 @@ import org.opensearch.migrations.trafficcapture.netty.tracing.IWireCaptureContex
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
-import io.netty.util.ReferenceCountUtil;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -50,7 +49,6 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                     // https://opensearch.atlassian.net/browse/MIGRATIONS-1276
                     log.atWarn().setCause(t)
                         .setMessage("Error offloading the request, but forwarding it to the service anyway").log();
-                    ReferenceCountUtil.release(msg);
                     messageContext.addCaughtException(t);
                 }
                 try {
