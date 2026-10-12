@@ -1142,7 +1142,23 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     public static ManagedPhysicalTupleSink<Map<String, Object>> deployedTupleSink(
         @NonNull TupleSink sink
     ) {
+        return deployedTupleSink(sink, false);
+    }
+
+    /**
+     * @param sinkCopiesTupleOnAccept whether {@code sink.accept} has serialized the tuple by the time it
+     *                                returns and retries its own durability, as the S3 tuple sink does
+     */
+    public static ManagedPhysicalTupleSink<Map<String, Object>> deployedTupleSink(
+        @NonNull TupleSink sink,
+        boolean sinkCopiesTupleOnAccept
+    ) {
         return new ManagedPhysicalTupleSink<>() {
+            @Override
+            public boolean copiesTupleOnWrite() {
+                return sinkCopiesTupleOnAccept;
+            }
+
             @Override
             public CompletionStage<Void> write(
                 IReplayContexts.ITupleHandlingContext replayContext,

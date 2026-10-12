@@ -112,6 +112,30 @@ class SourceReconstructionTest {
     }
 
     /**
+     * The source never answered and the proxy closed the connection on its timeout. The request must still
+     * learn that its source response ended, or its tuple, and so its record, never finishes.
+     */
+    @Test
+    void aCloseWithNoSourceResponseBytesStillEndsTheRequestsSourceResponse() {
+        var script = new RecordScript(TOPIC)
+            .addTraffic(0, 0, Instant.ofEpochMilli(1_000), WRITER,
+                stream(0, read(1, REQUEST_BYTES), endOfMessage(2)))
+            .addTraffic(0, 1, Instant.ofEpochMilli(1_100), WRITER, stream(1, close(3)));
+
+        applyAll(script);
+
+        Assertions.assertEquals(1, sink.requests.size());
+        Assertions.assertEquals(
+            List.of(sink.requestIds.get(0)),
+            sink.completeResponses,
+            () -> "the close must end the unanswered request's source response; closes=" + sink.closes
+                + " incomplete=" + sink.incompleteResponses + " unproven=" + sink.unprovenResponses
+                + " events=" + sink.sourceResponseEvents + " retryComplete=" + sink.completeRetryResponses
+                + " retryUnavailable=" + sink.unavailableRetryResponses + " expired=" + sink.expiredConnections
+        );
+    }
+
+    /**
      * {@code §17.2}: periodic record boundaries must not change response reconstruction either.
      */
     @Test

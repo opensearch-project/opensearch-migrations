@@ -26,12 +26,11 @@ class TupleDurabilityMetricsTest {
             var metrics = new TupleDurabilityMetrics(
                 telemetry.openTelemetrySdk.getMeter("tuple-durability-test")
             );
-            metrics.writeAccepted();
-            metrics.writeAccepted();
-            metrics.writeAccepted();
-            metrics.writeAccepted();
-            metrics.writeAccepted();
-            metrics.writeAccepted();
+            // One durable, one cancelled, and one terminal failure per reason: accepted equals resolved.
+            var acceptedWrites = TupleWriter.FailureReason.values().length + 2;
+            for (var i = 0; i < acceptedWrites; i++) {
+                metrics.writeAccepted();
+            }
             metrics.retryScheduled();
             metrics.writeDurable(Duration.ofMillis(12));
             metrics.writeCancelled();
@@ -41,7 +40,7 @@ class TupleDurabilityMetricsTest {
 
             var recorded = telemetry.getFinishedMetrics();
             Assertions.assertEquals(
-                6,
+                acceptedWrites,
                 InMemoryInstrumentationBundle.getMetricValueOrZero(
                     recorded,
                     TupleDurabilityMetrics.MetricNames.WRITES_ACCEPTED

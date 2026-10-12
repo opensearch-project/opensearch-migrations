@@ -180,6 +180,75 @@ class TupleWriterTest {
     }
 
     @Test
+    void aCopyingSinkReleasesTheTupleAtWriteWhileDurabilityStillGatesCompletion() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var contexts = new ContextFixture();
+            var clock = new FakeClock();
+            var eventLoop = new TestEventLoop(clock);
+            var sink = new ScriptedSink();
+            sink.copiesTupleOnWrite = true;
+            var fatalFailures = new ArrayList<Error>();
+            var releases = new AtomicInteger();
+            var writer = new TupleWriter<>(
+                eventLoop,
+                clock,
+                Duration.ofSeconds(1),
+                sink,
+                ignored -> releases.incrementAndGet(),
+                fatalFailures::add,
+                new TupleDurabilityMetrics(telemetry.openTelemetrySdk.getMeter("tuple-writer-hand-off-test"))
+            );
+
+            var write = writer.write(new TupleWriter.WriteTuple<>(contexts.tuple, "tuple"));
+            eventLoop.runUntilIdle();
+
+            Assertions.assertTrue(write.handedOff().toCompletableFuture().isDone(), "copied at write");
+            Assertions.assertEquals(1, releases.get(), "the tuple is released before it is durable");
+            Assertions.assertFalse(write.completion().toCompletableFuture().isDone(), "durability still pending");
+
+            sink.durableNext();
+            eventLoop.runUntilIdle();
+            Assertions.assertInstanceOf(TupleWriter.TupleDurable.class, write.completion().toCompletableFuture().join());
+            Assertions.assertEquals(1, releases.get(), "released exactly once");
+            Assertions.assertTrue(fatalFailures.isEmpty());
+            contexts.close();
+        }
+    }
+
+    @Test
+    void aFailureAfterHandOffIsFatalBecauseNothingRemainsToRewrite() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var contexts = new ContextFixture();
+            var clock = new FakeClock();
+            var eventLoop = new TestEventLoop(clock);
+            var sink = new ScriptedSink();
+            sink.copiesTupleOnWrite = true;
+            var fatalFailures = new ArrayList<Error>();
+            var writer = new TupleWriter<>(
+                eventLoop,
+                clock,
+                Duration.ofSeconds(1),
+                sink,
+                ignored -> {},
+                fatalFailures::add,
+                new TupleDurabilityMetrics(telemetry.openTelemetrySdk.getMeter("tuple-writer-hand-off-failure-test"))
+            );
+
+            var write = writer.write(new TupleWriter.WriteTuple<>(contexts.tuple, "tuple"));
+            eventLoop.runUntilIdle();
+            sink.failNext();
+            eventLoop.runUntilIdle();
+            eventLoop.advance(Duration.ofSeconds(5));
+
+            Assertions.assertEquals(1, sink.writes.get(), "no retry once the sink owned the tuple");
+            Assertions.assertEquals(1, fatalFailures.size());
+            Assertions.assertTrue(write.completion().toCompletableFuture().isCompletedExceptionally());
+            Assertions.assertEquals(0, writer.operations().activeCount());
+            contexts.close();
+        }
+    }
+
+    @Test
     void cancellationIsTypedAndLatePhysicalCompletionCannotBecomeDurability() {
         try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
             var contexts = new ContextFixture();
@@ -531,6 +600,12 @@ class TupleWriterTest {
         private final AtomicInteger writes = new AtomicInteger();
         private final AtomicInteger flushes = new AtomicInteger();
         private final Queue<CompletableFuture<Void>> completions = new ArrayDeque<>();
+        private boolean copiesTupleOnWrite;
+
+        @Override
+        public boolean copiesTupleOnWrite() {
+            return copiesTupleOnWrite;
+        }
 
         @Override
         public CompletionStage<Void> write(

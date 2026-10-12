@@ -349,7 +349,8 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     private final Instant nominalTargetTime;
-    private final S sourceRequest;
+    /** Dropped once the tuple has been handed off, with the other payload-bearing fields below. */
+    private S sourceRequest;
     private final IReplayContexts.IRequestContext replayContext;
     private final EventLoop eventLoop;
     private final Clock clock;
@@ -365,7 +366,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private final FatalHandler fatalHandler;
     private final Metrics metrics;
     private final OutstandingOperationRegistry operations;
-    private final List<TargetAttemptOutcome<R>> attemptHistory = new ArrayList<>();
+    private List<TargetAttemptOutcome<R>> attemptHistory = new ArrayList<>();
 
     private PreparationState<P> preparationState = new PreparationState.Admitted<>();
     private TargetServerState<R> targetServerState = new TargetServerState.NotStarted<>();
@@ -1410,6 +1411,19 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         tupleState = new TupleState.Writing(write, registration);
+        final CompletionStage<Void> handedOff;
+        try {
+            handedOff = Objects.requireNonNull(write.handedOff(), "tuple writer returned no hand-off stage");
+        } catch (Throwable failure) {
+            closeTupleContext();
+            impossible("logical tuple write hand-off", failure);
+            return;
+        }
+        handedOff.whenComplete((ignored, failure) -> {
+            if (failure == null) {
+                postRequired("tuple hand-off", this::dropPayloadsAfterTupleHandOff, ignoredFailure -> {});
+            }
+        });
         final CompletionStage<TupleWriteResult> completion;
         try {
             completion = Objects.requireNonNull(
@@ -1802,6 +1816,23 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             } catch (Throwable failure) {
                 reportFatal("prepared-request release", failure);
             }
+        }
+    }
+
+    /**
+     * The tuple no longer needs anything this request holds, though it may not be durable yet. Releasing
+     * here rather than at durability keeps a request awaiting upload to its ids and futures.
+     */
+    private void dropPayloadsAfterTupleHandOff() {
+        requireOwnerThread();
+        releaseRequestResources();
+        sourceRequest = null;
+        attemptHistory = new ArrayList<>();
+        if (retrySourceState instanceof RetrySourceState.Complete<F>) {
+            retrySourceState = new RetrySourceState.Unavailable<>();
+        }
+        if (finalSourceState instanceof FinalSourceState.Complete<F>) {
+            finalSourceState = new FinalSourceState.Incomplete<>("released after tuple hand-off");
         }
     }
 

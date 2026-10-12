@@ -79,6 +79,17 @@ public final class TupleWriter<T> {
         );
 
         void flush();
+
+        /**
+         * Whether {@link #write} has taken everything it needs from the tuple by the time it returns, and
+         * owns retrying its own durability from there. Such a sink lets the writer drop the tuple, and the
+         * request its payloads, while durability is still pending, so memory held for tuples awaiting an
+         * upload is ids and futures rather than request and response bytes. A write that later fails cannot
+         * be retried, because nothing is left to rewrite.
+         */
+        default boolean copiesTupleOnWrite() {
+            return false;
+        }
     }
 
     public sealed interface TupleTransformation<T>
@@ -112,7 +123,8 @@ public final class TupleWriter<T> {
         OWNER_SUBMISSION_REJECTED,
         DUPLICATE_REQUEST,
         TRANSFORMATION,
-        RETRY_SCHEDULING
+        RETRY_SCHEDULING,
+        FAILED_AFTER_HANDOFF
     }
 
     public interface Metrics {
@@ -129,6 +141,15 @@ public final class TupleWriter<T> {
 
     public interface LogicalWrite {
         CompletionStage<TupleWriteResult> completion();
+
+        /**
+         * Completes once nothing the tuple was built from is needed any more: the sink copied the tuple, or
+         * the tuple was dropped. Durability may still be pending. Never completes for a sink that needs the
+         * tuple until it is durable.
+         */
+        default CompletionStage<Void> handedOff() {
+            return new CompletableFuture<>();
+        }
 
         void cancel(CancellationException cause);
     }
@@ -355,7 +376,7 @@ public final class TupleWriter<T> {
 
     private void start(WriteOperation operation) {
         requireOwnerThread();
-        var requestId = operation.input.requestId();
+        var requestId = operation.requestId;
         if (active.putIfAbsent(requestId, operation) != null) {
             var failure = new IllegalStateException(
                 "tuple write already active for " + requestId
@@ -367,7 +388,7 @@ public final class TupleWriter<T> {
             return;
         }
         operation.logicalRegistration = operations.register(
-            operation.input.replayContext()
+            operation.replayContext
                 .getLogicalEnclosingScope()
                 .getLogicalEnclosingScope()
                 .getLogicalEnclosingScope()
@@ -383,8 +404,8 @@ public final class TupleWriter<T> {
         try {
             transformed = Objects.requireNonNull(
                 transformer.transform(
-                    operation.input.replayContext(),
-                    operation.input.tuple()
+                    operation.replayContext,
+                    operation.tuple
                 ),
                 "tuple transformer returned no result"
             );
@@ -399,6 +420,7 @@ public final class TupleWriter<T> {
             }
             case TupleDropped<T> ignored -> {
                 operation.state = State.DURABLE;
+                handOff(operation);
                 finish(operation, new TupleDurable());
             }
         }
@@ -411,9 +433,9 @@ public final class TupleWriter<T> {
         }
         operation.retryTimer = null;
         operation.state = State.WRITING;
-        var requestId = operation.input.requestId();
+        var requestId = operation.requestId;
         var physicalRegistration = operations.register(
-            operation.input.replayContext()
+            operation.replayContext
                 .getLogicalEnclosingScope()
                 .getLogicalEnclosingScope()
                 .getLogicalEnclosingScope()
@@ -431,19 +453,22 @@ public final class TupleWriter<T> {
         try {
             attempt = Objects.requireNonNull(
                 sink.write(
-                    operation.input.replayContext(),
+                    operation.replayContext,
                     operation.transformedTuple
                 ),
                 "physical tuple sink returned no completion stage"
             );
             if (eagerFlushReferences.containsKey(
-                operation.input.requestId().connectionProcessingId().generation()
+                operation.requestId.connectionProcessingId().generation()
             )) {
                 flushSink();
             }
         } catch (Throwable failure) {
             onPhysicalWriteComplete(operation, physicalRegistration, failure);
             return;
+        }
+        if (sink.copiesTupleOnWrite()) {
+            handOff(operation);
         }
         attempt.whenComplete((ignored, failure) ->
             postRequired(
@@ -476,7 +501,7 @@ public final class TupleWriter<T> {
             reportFatal(
                 "duplicate or stale physical tuple completion",
                 new IllegalStateException(
-                    "unexpected physical tuple completion for " + operation.input.requestId()
+                    "unexpected physical tuple completion for " + operation.requestId
                 )
             );
             return;
@@ -489,6 +514,21 @@ public final class TupleWriter<T> {
             operation.state = State.DURABLE;
             operations.complete(registration);
             finish(operation, new TupleDurable());
+            return;
+        }
+        if (operation.handedOffToSink) {
+            // The sink took ownership and then gave up; nothing remains to rewrite. The record stays
+            // uncommitted, so a successor process re-delivers and re-replays it.
+            operation.state = State.FAILED;
+            operations.complete(registration);
+            active.remove(operation.requestId, operation);
+            if (operation.logicalRegistration != null) {
+                operations.complete(operation.logicalRegistration);
+                operation.logicalRegistration = null;
+            }
+            operation.completion.completeExceptionally(failure);
+            operation.recordTerminalFailure(FailureReason.FAILED_AFTER_HANDOFF);
+            reportFatal("tuple durability after the sink took ownership", failure);
             return;
         }
         operation.state = State.WAITING_TO_RETRY;
@@ -516,7 +556,7 @@ public final class TupleWriter<T> {
                         "event=tuple_durability_degraded request={} state=retrying "
                             + "failed_attempts={} retry_delay_ms={}"
                     )
-                    .addArgument(operation.input::requestId)
+                    .addArgument(() -> operation.requestId)
                     .addArgument(() -> operation.failedAttemptCount)
                     .addArgument(retryDelay::toMillis)
                     .log();
@@ -525,7 +565,7 @@ public final class TupleWriter<T> {
                     .setMessage(
                         "event=tuple_write_retried request={} failed_attempts={} retry_delay_ms={}"
                     )
-                    .addArgument(operation.input::requestId)
+                    .addArgument(() -> operation.requestId)
                     .addArgument(() -> operation.failedAttemptCount)
                     .addArgument(retryDelay::toMillis)
                     .log();
@@ -559,7 +599,7 @@ public final class TupleWriter<T> {
 
     private void failTransformation(WriteOperation operation, Throwable failure) {
         operation.state = State.FAILED;
-        active.remove(operation.input.requestId(), operation);
+        active.remove(operation.requestId, operation);
         if (operation.logicalRegistration != null) {
             operations.complete(operation.logicalRegistration);
             operation.logicalRegistration = null;
@@ -571,7 +611,7 @@ public final class TupleWriter<T> {
     }
 
     private void finish(WriteOperation operation, TupleWriteResult result) {
-        active.remove(operation.input.requestId(), operation);
+        active.remove(operation.requestId, operation);
         if (operation.logicalRegistration != null) {
             operations.complete(operation.logicalRegistration);
             operation.logicalRegistration = null;
@@ -589,15 +629,27 @@ public final class TupleWriter<T> {
     private void releaseCandidate(WriteOperation operation) {
         if (operation.released.compareAndSet(false, true)) {
             try {
-                tupleReleaser.accept(operation.input.tuple());
+                tupleReleaser.accept(operation.tuple);
                 if (operation.transformedTuple != null
-                    && operation.transformedTuple != operation.input.tuple()) {
+                    && operation.transformedTuple != operation.tuple) {
                     tupleReleaser.accept(operation.transformedTuple);
                 }
             } catch (Throwable failure) {
                 reportFatal("tuple ownership release", failure);
             }
         }
+    }
+
+    /** Drops the tuple once nothing needs it, and tells the request it may drop what it was built from. */
+    private void handOff(WriteOperation operation) {
+        if (operation.handedOffToSink) {
+            return;
+        }
+        operation.handedOffToSink = true;
+        releaseCandidate(operation);
+        operation.tuple = null;
+        operation.transformedTuple = null;
+        operation.handedOff.complete(null);
     }
 
     private void postRequired(
@@ -651,7 +703,12 @@ public final class TupleWriter<T> {
     }
 
     private final class WriteOperation implements LogicalWrite {
-        private final WriteTuple<T> input;
+        private final IReplayContexts.ITupleHandlingContext replayContext;
+        private final ReplayRequestId requestId;
+        /** Cleared on hand-off, so a tuple awaiting durability is not retained by its write. */
+        private T tuple;
+        private boolean handedOffToSink;
+        private final CompletableFuture<Void> handedOff = new CompletableFuture<>();
         private final CompletableFuture<TupleWriteResult> completion = new CompletableFuture<>();
         private final AtomicBoolean released = new AtomicBoolean();
         private final AtomicBoolean metricCompleted = new AtomicBoolean();
@@ -664,7 +721,9 @@ public final class TupleWriter<T> {
         private T transformedTuple;
 
         private WriteOperation(WriteTuple<T> input) {
-            this.input = input;
+            this.replayContext = input.replayContext();
+            this.requestId = input.requestId();
+            this.tuple = input.tuple();
             this.acceptedAt = clock.instant();
         }
 
@@ -676,7 +735,7 @@ public final class TupleWriter<T> {
                     .setMessage(
                         "event=tuple_write_durable request={} retries={} latency_ms={}"
                     )
-                    .addArgument(input::requestId)
+                    .addArgument(() -> requestId)
                     .addArgument(() -> failedAttemptCount)
                     .addArgument(latency::toMillis)
                     .log();
@@ -685,7 +744,7 @@ public final class TupleWriter<T> {
                         .setMessage(
                             "event=tuple_durability_recovered request={} retries={} latency_ms={}"
                         )
-                        .addArgument(input::requestId)
+                        .addArgument(() -> requestId)
                         .addArgument(() -> failedAttemptCount)
                         .addArgument(latency::toMillis)
                         .log();
@@ -698,7 +757,7 @@ public final class TupleWriter<T> {
                 metrics.writeCancelled();
                 log.atDebug()
                     .setMessage("event=tuple_write_cancelled request={}")
-                    .addArgument(input::requestId)
+                    .addArgument(() -> requestId)
                     .log();
             }
         }
@@ -710,7 +769,7 @@ public final class TupleWriter<T> {
                     .setMessage(
                         "event=tuple_durability_degraded request={} state=terminal reason={}"
                     )
-                    .addArgument(input::requestId)
+                    .addArgument(() -> requestId)
                     .addArgument(() -> reason.name().toLowerCase(java.util.Locale.ROOT))
                     .log();
             }
@@ -722,9 +781,14 @@ public final class TupleWriter<T> {
         }
 
         @Override
+        public CompletionStage<Void> handedOff() {
+            return handedOff.minimalCompletionStage();
+        }
+
+        @Override
         public void cancel(@NonNull CancellationException cause) {
             postRequired(
-                "logical tuple cancellation " + input.requestId(),
+                "logical tuple cancellation " + requestId,
                 () -> cancelOnOwner(this, cause),
                 ignored -> {}
             );

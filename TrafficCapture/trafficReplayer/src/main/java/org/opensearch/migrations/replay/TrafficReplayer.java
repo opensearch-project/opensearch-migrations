@@ -876,7 +876,9 @@ public class TrafficReplayer {
                     Duration.ofSeconds(params.tupleMaxBufferSeconds),
                     params.tupleMaxPerFile,
                     uploadMetrics
-                )
+                ),
+                // S3TupleSink serializes on accept, gzips into a temp file, and retries uploads itself.
+                true
             ),
             s3Client
         );

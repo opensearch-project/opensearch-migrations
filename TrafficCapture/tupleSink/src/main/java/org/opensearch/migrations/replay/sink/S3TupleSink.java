@@ -6,6 +6,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -57,6 +58,13 @@ public class S3TupleSink implements TupleSink {
     // Set on close() so accept() rejects late writes synchronously (rather than racing the executor
     // shutdown), preserving the explicit IllegalStateException behavior from the accept-after-close fix.
     private final AtomicBoolean closeRequested = new AtomicBoolean();
+
+    private record QueuedTask(Runnable task, CompletableFuture<Void> futureToFailOnReject) {}
+
+    // Callers enqueue and wake the worker only when no drain is pending, so a busy worker takes a
+    // batch per wakeup instead of paying an executor submit and thread unpark for every tuple.
+    private final ConcurrentLinkedQueue<QueuedTask> pending = new ConcurrentLinkedQueue<>();
+    private final AtomicBoolean drainScheduled = new AtomicBoolean();
 
     public S3TupleSink(
         S3AsyncClient s3Client,
@@ -219,7 +227,10 @@ public class S3TupleSink implements TupleSink {
         // messages on the next startup.
         closeRequested.set(true);
         try {
-            runAndAwaitOnWorker(writer::close);
+            runAndAwaitOnWorker(() -> {
+                drainPending();
+                writer.close();
+            });
         } finally {
             executor.shutdown();
         }
@@ -228,11 +239,51 @@ public class S3TupleSink implements TupleSink {
     /** Submit work to the single worker thread; on rejection (post-close) fail the associated
      * future if any, so callers never wait forever. */
     private void runOnWorker(Runnable task, CompletableFuture<Void> futureToFailOnReject) {
+        pending.add(new QueuedTask(task, futureToFailOnReject));
+        if (!drainScheduled.compareAndSet(false, true)) {
+            return;
+        }
         try {
-            executor.execute(task);
+            executor.execute(this::drainPendingThenRelease);
         } catch (RejectedExecutionException e) {
-            if (futureToFailOnReject != null) {
-                futureToFailOnReject.completeExceptionally(e);
+            drainScheduled.set(false);
+            failPending(e);
+        }
+    }
+
+    private void drainPendingThenRelease() {
+        drainPending();
+        drainScheduled.set(false);
+        // A caller may have enqueued after the drain emptied the queue but before the flag cleared.
+        if (!pending.isEmpty() && drainScheduled.compareAndSet(false, true)) {
+            try {
+                executor.execute(this::drainPendingThenRelease);
+            } catch (RejectedExecutionException e) {
+                drainScheduled.set(false);
+                failPending(e);
+            }
+        }
+    }
+
+    private void drainPending() {
+        QueuedTask queued;
+        while ((queued = pending.poll()) != null) {
+            try {
+                queued.task().run();
+            } catch (RuntimeException e) {
+                log.atError().setCause(e).setMessage("S3 tuple sink worker task failed").log();
+                if (queued.futureToFailOnReject() != null) {
+                    queued.futureToFailOnReject().completeExceptionally(e);
+                }
+            }
+        }
+    }
+
+    private void failPending(RejectedExecutionException rejection) {
+        QueuedTask queued;
+        while ((queued = pending.poll()) != null) {
+            if (queued.futureToFailOnReject() != null) {
+                queued.futureToFailOnReject().completeExceptionally(rejection);
             }
         }
     }
