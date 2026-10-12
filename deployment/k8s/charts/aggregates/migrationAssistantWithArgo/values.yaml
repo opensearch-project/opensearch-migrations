@@ -111,6 +111,13 @@ cluster:
 # launches supported families, never nano/micro/small sizes, and nothing with a single CPU
 # (https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html#auto-supported-instances).
 workloadsNodePool:
+  # Controls placement for the capture/replay data plane:
+  #   shared   - Kafka, capture proxies and replayers use general-work-pool together.
+  #   isolated - Kafka, capture proxies and replayers each use a dedicated, tainted pool.
+  # The optional k6 load generator always uses its own tainted pool in either mode.
+  # This setting only has an effect when cluster.useCustomKarpenterNodePool is true.
+  mode: isolated
+  name: general-work-pool
   architectures: []  # e.g. ["arm64"] for Graviton only.
   # With no capacity type, Auto Mode prioritizes reserved, then spot, then on-demand
   # (https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#auto-supported-labels),
@@ -137,6 +144,25 @@ workloadsNodePool:
     # out the value EKS itself defaults to when the block is omitted: remove empty nodes right away.
     # Set e.g. 30m to keep an empty node around for the next migration step.
     consolidateAfter: 0s
+
+  # Dedicated pools inherit the architecture, capacity-type, instance-category, generation,
+  # instance-size and disruption settings above unless that setting is overridden below.
+  # Pool limits are deliberately independent and empty by default: taints plus required pod
+  # selection provide isolation without imposing a capacity ceiling. Set limits when a deployment
+  # needs an explicit cost or quota guardrail.
+  dedicatedPools:
+    kafka:
+      name: kafka-work-pool
+      limits: {}
+    proxy:
+      name: proxy-work-pool
+      limits: {}
+    replayer:
+      name: replayer-work-pool
+      limits: {}
+    k6:
+      name: k6-work-pool
+      limits: {}
 
 # Worker fleets: migration-console-identical pods on bigger hardware.
 # Dormant at replicas: 0. Scale up with: kubectl scale deployment/worker-fleet-<name> --replicas=N

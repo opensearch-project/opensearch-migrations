@@ -21,6 +21,11 @@ import {
 import {ResourceManagement} from "./resourceManagement";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {
+    workloadNodePoolResolvedInput,
+    workloadNodeSelector,
+    workloadNodeTolerations,
+} from "./commonUtils/workloadNodePool";
 
 type KafkaConfig = z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>;
 const KAFKA_CLUSTER_LABEL = "migrations.opensearch.org/kafka-cluster";
@@ -112,7 +117,20 @@ function makeDeployKafkaNodePool(args: {
     nodePoolSpec: BaseExpression<Serialized<Record<string, any>>>,
     migrationRunNumber: BaseExpression<string>,
     ownerUid: BaseExpression<string>,
+    workloadNodePoolName: BaseExpression<string>,
 }): Record<string, any> {
+    const scheduling = expr.ternary(
+        expr.isEmpty(args.workloadNodePoolName),
+        expr.makeDict({}),
+        expr.makeDict({
+            template: expr.makeDict({
+                pod: expr.makeDict({
+                    nodeSelector: workloadNodeSelector(args.workloadNodePoolName),
+                    tolerations: workloadNodeTolerations(args.workloadNodePoolName),
+                }),
+            }),
+        }),
+    );
     return {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "KafkaNodePool",
@@ -130,17 +148,20 @@ function makeDeployKafkaNodePool(args: {
         spec: makeDirectTypeProxy(
             expr.mergeDicts(
                 expr.mergeDicts(
-                    expr.makeDict({
-                        template: expr.makeDict({
-                            pod: expr.makeDict({
-                                metadata: expr.makeDict({
-                                    labels: expr.makeDict({
-                                        [MIGRATION_RESOURCE_UID_LABEL]: args.ownerUid,
+                    expr.mergeDicts(
+                        expr.makeDict({
+                            template: expr.makeDict({
+                                pod: expr.makeDict({
+                                    metadata: expr.makeDict({
+                                        labels: expr.makeDict({
+                                            [MIGRATION_RESOURCE_UID_LABEL]: args.ownerUid,
+                                        }),
                                     }),
                                 }),
                             }),
                         }),
-                    }),
+                        scheduling,
+                    ),
                     expr.deserializeRecord(args.nodePoolSpec)
                 ),
                 expr.makeDict({resources: expr.templateValue(DEFAULT_RESOURCES.KAFKA_BROKER)})
@@ -389,6 +410,7 @@ exit 1
         .addRequiredInput("nodePoolSpec", typeToken<Serialized<Record<string, any>>>())
         .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
+        .addInputsFromRecord(workloadNodePoolResolvedInput("kafkaNodePoolName"))
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -398,6 +420,7 @@ exit 1
                     nodePoolSpec: b.inputs.nodePoolSpec,
                     migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
+                    workloadNodePoolName: b.inputs.workloadNodePoolName,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

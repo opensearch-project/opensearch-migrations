@@ -992,16 +992,23 @@ describe('MigrationConfigTransformer validation', () => {
                             topologySpreadConstraints: [
                                 {
                                     maxSkew: 1,
+                                    topologyKey: "topology.kubernetes.io/zone",
+                                    whenUnsatisfiable: "DoNotSchedule",
+                                    labelSelector: {},
+                                    matchLabelKeys: [
+                                        "strimzi.io/cluster",
+                                        "strimzi.io/pool-name",
+                                    ],
+                                },
+                                {
+                                    maxSkew: 1,
                                     topologyKey: "kubernetes.io/hostname",
                                     whenUnsatisfiable: "ScheduleAnyway",
-                                    labelSelector: {
-                                        matchExpressions: [
-                                            {
-                                                key: "strimzi.io/name",
-                                                operator: "Exists",
-                                            },
-                                        ],
-                                    },
+                                    labelSelector: {},
+                                    matchLabelKeys: [
+                                        "strimzi.io/cluster",
+                                        "strimzi.io/pool-name",
+                                    ],
                                 },
                             ],
                         },

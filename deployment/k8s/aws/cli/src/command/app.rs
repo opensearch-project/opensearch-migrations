@@ -395,7 +395,10 @@ impl<'r, R: CommandRunner> App<'r, R> {
         args.push(format!("stageName={stage}"));
         args.push("--set".into());
         args.push(format!("aws.region={region}"));
-        args.push("--set".into());
+        // Helm otherwise parses a 12-digit account ID as a number. On a later
+        // --reuse-values upgrade it can be serialized in scientific notation,
+        // producing invalid account-derived resource names such as S3 buckets.
+        args.push("--set-string".into());
         args.push(format!("aws.account={account}"));
         if let Some(role) = snapshot_role {
             args.push("--set".into());
@@ -1362,6 +1365,7 @@ mod tests {
             "defaultBucketConfiguration.snapshotRoleArn=arn:aws:iam::629003556176:role/snap"
         ));
         assert!(j.contains("stageName=ma"));
+        assert!(j.contains("--set-string aws.account=629003556176"));
         // Waited for the console pod.
         assert!(r.any_call_contains("pod/migration-console-0"));
     }

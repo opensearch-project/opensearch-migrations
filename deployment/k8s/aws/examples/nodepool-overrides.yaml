@@ -1,4 +1,4 @@
-# Example overrides for the main EKS general workload NodePool (`general-work-pool`).
+# Example overrides for the EKS workload NodePools.
 # Pass with:
 #   ./deployment/k8s/aws/aws-bootstrap.sh --helm-values deployment/k8s/aws/examples/nodepool-overrides.yaml ...
 #
@@ -9,6 +9,7 @@
 # List fields replace the full default list, so provide the complete desired list when overriding.
 
 workloadsNodePool:
+  mode: isolated
   architectures: ["amd64", "arm64"]
   capacityTypes: ["on-demand"]
   instanceCategories: ["c", "m", "r"]
@@ -20,3 +21,21 @@ workloadsNodePool:
   disruption:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 30m
+  dedicatedPools:
+    # Dedicated-pool limits are independent of the shared-pool limit above.
+    kafka:
+      limits:
+        cpu: "192"
+        memory: "384Gi"
+    proxy:
+      limits:
+        cpu: "448"
+        memory: "896Gi"
+    replayer:
+      limits:
+        cpu: "640"
+        memory: "1280Gi"
+    k6:
+      limits:
+        cpu: "224"
+        memory: "448Gi"

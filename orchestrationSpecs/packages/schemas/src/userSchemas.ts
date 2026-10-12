@@ -514,22 +514,31 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         },
         template: {
             pod: {
-                // Spread brokers one-per-node so a single node disruption can only take
-                // one broker. ScheduleAnyway keeps this soft so <3-node dev clusters still
-                // schedule instead of wedging Pending.
+                // Keep each Kafka pool balanced across the zones available to the Kubernetes
+                // cluster. matchLabelKeys scopes the calculation to this Kafka cluster and pool
+                // without requiring the schema default to know their runtime names.
                 topologySpreadConstraints: [
+                    {
+                        maxSkew: 1,
+                        topologyKey: "topology.kubernetes.io/zone",
+                        whenUnsatisfiable: "DoNotSchedule",
+                        labelSelector: {},
+                        matchLabelKeys: [
+                            "strimzi.io/cluster",
+                            "strimzi.io/pool-name",
+                        ],
+                    },
+                    // Prefer spreading brokers within each zone too, while keeping development
+                    // clusters schedulable when they have fewer nodes than broker replicas.
                     {
                         maxSkew: 1,
                         topologyKey: "kubernetes.io/hostname",
                         whenUnsatisfiable: "ScheduleAnyway",
-                        labelSelector: {
-                            matchExpressions: [
-                                {
-                                    key: "strimzi.io/name",
-                                    operator: "Exists",
-                                },
-                            ],
-                        },
+                        labelSelector: {},
+                        matchLabelKeys: [
+                            "strimzi.io/cluster",
+                            "strimzi.io/pool-name",
+                        ],
                     },
                 ],
             },
