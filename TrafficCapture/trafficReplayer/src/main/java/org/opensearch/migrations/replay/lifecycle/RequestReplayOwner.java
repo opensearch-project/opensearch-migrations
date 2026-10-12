@@ -151,6 +151,9 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         );
 
         Duration retryDelay(int completedAttemptCount);
+
+        /** Called as each target attempt for a request begins, numbered from 1. */
+        default void targetAttemptStarted(int attemptNumber) {}
     }
 
     @FunctionalInterface
@@ -776,6 +779,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         var attemptNumber = nextAttemptNumber++;
+        retryPolicy.targetAttemptStarted(attemptNumber);
         var registration = operations.register(
             partitionGenerationId(),
             connectionProcessingId(),

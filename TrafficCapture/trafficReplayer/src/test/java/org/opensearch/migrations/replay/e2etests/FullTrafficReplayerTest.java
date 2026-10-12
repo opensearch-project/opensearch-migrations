@@ -21,6 +21,7 @@ import org.opensearch.migrations.replay.ProcessSupervisor;
 import org.opensearch.migrations.replay.ResultsToLogsConsumer;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datahandlers.TargetConnectionLimiter;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
@@ -173,6 +174,26 @@ public class FullTrafficReplayerTest {
         RootReplayerContext rootContext,
         int expectedTupleCount
     ) throws Exception {
+        return replay(
+            targetUri,
+            records,
+            requestTransformerSupplier,
+            responsePostProcessorSupplier,
+            rootContext,
+            expectedTupleCount,
+            TargetConnectionLimiter.UNLIMITED
+        );
+    }
+
+    protected static ReplayResult replay(
+        URI targetUri,
+        List<CaptureRecord> records,
+        Supplier<IJsonTransformer> requestTransformerSupplier,
+        Supplier<IJsonTransformer> responsePostProcessorSupplier,
+        RootReplayerContext rootContext,
+        int expectedTupleCount,
+        TargetConnectionLimiter connectionLimiter
+    ) throws Exception {
         if (records.isEmpty()) {
             throw new IllegalArgumentException("records must not be empty");
         }
@@ -231,7 +252,8 @@ public class FullTrafficReplayerTest {
                         connectionContext,
                         targetUri,
                         null,
-                        Duration.ofSeconds(5)
+                        Duration.ofSeconds(5),
+                        connectionLimiter
                     );
                 },
                 (replayContext, result) -> {

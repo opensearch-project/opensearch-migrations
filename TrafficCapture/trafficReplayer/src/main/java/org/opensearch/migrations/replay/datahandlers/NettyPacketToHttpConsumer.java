@@ -141,6 +141,28 @@ public final class NettyPacketToHttpConsumer
         SslContext sslContext,
         @NonNull Duration readTimeout
     ) {
+        return create(
+            connectionProcessingId,
+            eventLoop,
+            clock,
+            connectionContext,
+            serverUri,
+            sslContext,
+            readTimeout,
+            TargetConnectionLimiter.UNLIMITED
+        );
+    }
+
+    public static NettyPacketToHttpConsumer create(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull IReplayContexts.IConnectionContext connectionContext,
+        @NonNull URI serverUri,
+        SslContext sslContext,
+        @NonNull Duration readTimeout,
+        @NonNull TargetConnectionLimiter connectionLimiter
+    ) {
         if (readTimeout.isNegative() || readTimeout.isZero()) {
             throw new IllegalArgumentException("readTimeout must be positive");
         }
@@ -155,7 +177,8 @@ public final class NettyPacketToHttpConsumer
                 connectionContext,
                 serverUri,
                 sslContext,
-                readTimeout
+                readTimeout,
+                connectionLimiter
             )
         );
     }
@@ -282,6 +305,7 @@ public final class NettyPacketToHttpConsumer
         private final URI serverUri;
         private final SslContext sslContext;
         private final Duration readTimeout;
+        private final TargetConnectionLimiter connectionLimiter;
         private Channel channel;
         private boolean closed;
 
@@ -292,7 +316,8 @@ public final class NettyPacketToHttpConsumer
             IReplayContexts.IConnectionContext connectionContext,
             URI serverUri,
             SslContext sslContext,
-            Duration readTimeout
+            Duration readTimeout,
+            TargetConnectionLimiter connectionLimiter
         ) {
             this.connectionProcessingId = connectionProcessingId;
             this.eventLoop = eventLoop;
@@ -301,6 +326,7 @@ public final class NettyPacketToHttpConsumer
             this.serverUri = serverUri;
             this.sslContext = sslContext;
             this.readTimeout = readTimeout;
+            this.connectionLimiter = connectionLimiter;
         }
 
         @Override
@@ -366,13 +392,42 @@ public final class NettyPacketToHttpConsumer
             var connectingContext =
                 consumer.input.replayContext().createHttpConnectingContext();
             result.whenComplete((unused, failure) -> connectingContext.close());
+            var delayNanos = connectionLimiter.reserveConnectDelayNanos();
+            if (delayNanos <= 0) {
+                startConnect(consumer, connectingContext, result);
+                return result;
+            }
+            try {
+                eventLoop.schedule(
+                    () -> startConnect(consumer, connectingContext, result),
+                    delayNanos,
+                    TimeUnit.NANOSECONDS
+                );
+            } catch (Throwable failure) {
+                connectingContext.addTraceException(failure, true);
+                result.completeExceptionally(failure);
+            }
+            return result;
+        }
+
+        private void startConnect(
+            DeployedTargetPacketConsumer consumer,
+            IReplayContexts.IRequestConnectingContext connectingContext,
+            CompletableFuture<Channel> result
+        ) {
+            if (closed) {
+                result.completeExceptionally(
+                    new CancellationException("target packet factory closed before connecting")
+                );
+                return;
+            }
             if (eventLoop.isShuttingDown()) {
                 var failure = new IllegalStateException(
                     "target event loop is shutting down for " + connectionProcessingId
                 );
                 connectingContext.addTraceException(failure, true);
                 result.completeExceptionally(failure);
-                return result;
+                return;
             }
             final ChannelFuture connectFuture;
             try {
@@ -393,11 +448,12 @@ public final class NettyPacketToHttpConsumer
                 channel = connectFuture.channel();
             } catch (Throwable failure) {
                 result.completeExceptionally(failure);
-                return result;
+                return;
             }
             connectFuture.addListener(ignored -> {
                 try {
                     if (!connectFuture.isSuccess()) {
+                        connectionLimiter.connectFailed();
                         connectionContext.addFailedChannelCreation();
                         var failure = Objects.requireNonNullElseGet(
                             connectFuture.cause(),
@@ -413,6 +469,7 @@ public final class NettyPacketToHttpConsumer
                     var connected = connectFuture.channel();
                     if (!connected.isActive()) {
                         var failure = new ChannelNotActiveException();
+                        connectionLimiter.connectFailed();
                         connectionContext.addFailedChannelCreation();
                         connectingContext.addTraceException(failure, true);
                         discardChannel(connected);
@@ -429,7 +486,6 @@ public final class NettyPacketToHttpConsumer
                     );
                 }
             });
-            return result;
         }
 
         private void initializeTls(
@@ -439,6 +495,7 @@ public final class NettyPacketToHttpConsumer
             CompletableFuture<Channel> result
         ) {
             if (sslContext == null) {
+                connectionLimiter.connectSucceeded();
                 publishConnectedChannel(connected, consumer, result);
                 return;
             }
@@ -458,8 +515,10 @@ public final class NettyPacketToHttpConsumer
             }
             sslHandler.handshakeFuture().addListener(ignored -> {
                 if (sslHandler.handshakeFuture().isSuccess()) {
+                    connectionLimiter.connectSucceeded();
                     publishConnectedChannel(connected, consumer, result);
                 } else {
+                    connectionLimiter.connectFailed();
                     var failure = Objects.requireNonNullElseGet(
                         sslHandler.handshakeFuture().cause(),
                         () -> new IOException("TLS handshake failed without a cause")

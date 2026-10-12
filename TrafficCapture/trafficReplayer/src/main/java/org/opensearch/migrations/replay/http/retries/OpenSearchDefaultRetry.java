@@ -257,18 +257,26 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
         return new BulkResponseInspection(analyzer.getAnalysis(), analyzer.getErrorTypes());
     }
 
-    private static final int MAXIMUM_BACKOFF_SHIFT = 62;
     private static final Duration INITIAL_RETRY_DELAY = Duration.ofMillis(100);
     private static final Duration MAXIMUM_RETRY_DELAY = Duration.ofSeconds(300);
 
     private final BulkItemErrorClassifier errorClassifier;
+    private final TargetRetryPacing pacing;
 
     public OpenSearchDefaultRetry() {
         this(new BulkItemErrorClassifier());
     }
 
     public OpenSearchDefaultRetry(@NonNull BulkItemErrorClassifier errorClassifier) {
+        this(errorClassifier, TargetRetryPacing.deterministic(INITIAL_RETRY_DELAY, MAXIMUM_RETRY_DELAY));
+    }
+
+    public OpenSearchDefaultRetry(
+        @NonNull BulkItemErrorClassifier errorClassifier,
+        @NonNull TargetRetryPacing pacing
+    ) {
         this.errorClassifier = errorClassifier;
+        this.pacing = pacing;
     }
 
     @Override
@@ -330,23 +338,14 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
 
     @Override
     public Duration retryDelay(int completedAttemptCount) {
-        if (completedAttemptCount <= 0) {
-            throw new IllegalArgumentException("completedAttemptCount must be positive");
+        return pacing.delayBeforeRetry(completedAttemptCount);
+    }
+
+    @Override
+    public void targetAttemptStarted(int attemptNumber) {
+        if (attemptNumber == 1) {
+            pacing.firstAttemptStarted();
         }
-        var shift = Math.min(completedAttemptCount - 1, MAXIMUM_BACKOFF_SHIFT);
-        var multiplier = 1L << shift;
-        final long delayMillis;
-        try {
-            delayMillis = Math.multiplyExact(
-                INITIAL_RETRY_DELAY.toMillis(),
-                multiplier
-            );
-        } catch (ArithmeticException overflow) {
-            return MAXIMUM_RETRY_DELAY;
-        }
-        return Duration.ofMillis(
-            Math.min(delayMillis, MAXIMUM_RETRY_DELAY.toMillis())
-        );
     }
 
     private static BulkResponseInspection inspectBulkResponse(

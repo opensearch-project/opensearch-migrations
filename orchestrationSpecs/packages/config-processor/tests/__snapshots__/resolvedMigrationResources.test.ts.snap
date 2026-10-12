@@ -325,6 +325,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
     "name": "source-proxy-target-replay",
     "parameters": {
       "cancellationGraceMs": 1000,
+      "catchUpFactor": 2,
       "dependsOn": [
         "source-proxy",
       ],
@@ -364,8 +365,12 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "targetAuthSigv4Region": "",
       "targetAuthSigv4Service": "",
       "targetAuthType": "none",
+      "targetConnectionInitialRate": 200,
       "targetEndpoint": "https://target.example.com",
       "targetLabel": "target",
+      "targetRetryBudgetFloorPerSecond": 50,
+      "targetRetryBudgetRatio": 0.2,
+      "targetRetryMaxDelayMs": 30000,
       "targetServerResponseTimeoutSeconds": 150,
       "tupleMaxBufferSeconds": 60,
       "tupleMaxFileSizeMb": 128,

@@ -3104,6 +3104,30 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "minimum": 1,
                       "default": 60000
                     },
+                    "targetRetryMaxDelayMs": {
+                      "type": "integer",
+                      "minimum": 100,
+                      "default": 30000
+                    },
+                    "targetRetryBudgetRatio": {
+                      "type": "number",
+                      "minimum": 0,
+                      "default": 0.2
+                    },
+                    "targetRetryBudgetFloorPerSecond": {
+                      "type": "number",
+                      "default": 50
+                    },
+                    "targetConnectionInitialRate": {
+                      "type": "number",
+                      "minimum": 0,
+                      "default": 200
+                    },
+                    "catchUpFactor": {
+                      "type": "number",
+                      "minimum": 0,
+                      "default": 2
+                    },
                     "heartbeatExpirationIntervalSeconds": {
                       "type": "integer",
                       "minimum": 1,
@@ -6162,6 +6186,35 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "minimum": 1,
                     "default": 60000,
                     "description": "Milliseconds Kafka consumer-group membership must stop growing before partitions are rebalanced across new replayers. Replacements for departed replayers are filled immediately. Also the delay before the first assignment after the whole replayer fleet starts. Must be greater than cancellationGraceMs."
+                  },
+                  "targetRetryMaxDelayMs": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "default": 30000,
+                    "description": "Upper bound in milliseconds on one request's jittered exponential backoff between target attempts."
+                  },
+                  "targetRetryBudgetRatio": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 0.2,
+                    "description": "Sustained target retries allowed per first attempt across each replayer process. Retries beyond the budget wait for it, so retry load stays proportional to the replayed load."
+                  },
+                  "targetRetryBudgetFloorPerSecond": {
+                    "type": "number",
+                    "default": 50,
+                    "description": "Target retries per second always allowed in each replayer process, so a process whose requests are all retrying still makes progress."
+                  },
+                  "targetConnectionInitialRate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 200,
+                    "description": "Starting allowance, in new target connections per second, for each replayer process's adaptive connection limiter. The allowance halves when connects or TLS handshakes fail and grows while they succeed. 0 disables the limiter."
+                  },
+                  "catchUpFactor": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 2,
+                    "description": "How many times faster than the normal schedule a newly assigned partition replays work that is already overdue. 0 sends overdue work immediately."
                   },
                   "heartbeatExpirationIntervalSeconds": {
                     "type": "integer",

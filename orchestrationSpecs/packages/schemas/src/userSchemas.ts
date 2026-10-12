@@ -767,6 +767,25 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("Milliseconds Kafka consumer-group membership must stop growing before partitions are rebalanced across new replayers. " +
             "Replacements for departed replayers are filled immediately. Also the delay before the first assignment after the whole " +
             "replayer fleet starts. Must be greater than cancellationGraceMs."),
+    targetRetryMaxDelayMs: z.number().int().min(100).default(30000).optional()
+        .describe("Upper bound in milliseconds on one request's jittered exponential backoff between target attempts."),
+    targetRetryBudgetRatio: z.number().nonnegative().default(0.2).optional()
+        .describe("Sustained target retries allowed per first attempt across each replayer process. Retries beyond the budget wait for it, " +
+            "so retry load stays proportional to the replayed load."),
+    targetRetryBudgetFloorPerSecond: z.number()
+        .refine(value => value > 0, "targetRetryBudgetFloorPerSecond must be positive")
+        .default(50).optional()
+        .describe("Target retries per second always allowed in each replayer process, so a process whose requests are all retrying still makes progress."),
+    targetConnectionInitialRate: z.number().nonnegative()
+        .refine(value => value === 0 || (value >= 10 && value <= 1000000), "targetConnectionInitialRate must be 0 or between 10 and 1000000")
+        .default(200).optional()
+        .describe("Starting allowance, in new target connections per second, for each replayer process's adaptive connection limiter. " +
+            "The allowance halves when connects or TLS handshakes fail and grows while they succeed. 0 disables the limiter."),
+    catchUpFactor: z.number().nonnegative()
+        .refine(value => value === 0 || value > 1, "catchUpFactor must be 0 or greater than 1")
+        .default(2).optional()
+        .describe("How many times faster than the normal schedule a newly assigned partition replays work that is already overdue. " +
+            "0 sends overdue work immediately."),
     heartbeatExpirationIntervalSeconds: z.number().int().min(1).default(30).optional()
         .describe("Broker-time heartbeat expiration interval E in seconds."),
     maximumBackwardSkewSeconds: z.number().int().nonnegative().default(5).optional()

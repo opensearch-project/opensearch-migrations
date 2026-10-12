@@ -25,8 +25,10 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datahandlers.TargetConnectionLimiter;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
+import org.opensearch.migrations.replay.http.retries.TargetRetryPacing;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.intake.PartitionIntakeState;
 import org.opensearch.migrations.replay.kafka.KafkaConsumerProperties;
@@ -271,6 +273,41 @@ public class TrafficReplayer {
         long kafkaQuietWindowMs = QuietWindowAssignor.DEFAULT_QUIET_MILLIS;
         @Parameter(
             required = false,
+            names = { "--target-retry-max-delay-ms", "--targetRetryMaxDelayMs" },
+            arity = 1,
+            description = "Upper bound on one request's jittered exponential backoff between target attempts.")
+        long targetRetryMaxDelayMs = TargetRetryPacing.DEFAULT_MAXIMUM_DELAY.toMillis();
+        @Parameter(
+            required = false,
+            names = { "--target-retry-budget-ratio", "--targetRetryBudgetRatio" },
+            arity = 1,
+            description = "Sustained target retries allowed per first attempt, across the process. "
+                + "Retries beyond the budget wait for it.")
+        double targetRetryBudgetRatio = TargetRetryPacing.DEFAULT_BUDGET_RATIO;
+        @Parameter(
+            required = false,
+            names = { "--target-retry-budget-floor-per-second", "--targetRetryBudgetFloorPerSecond" },
+            arity = 1,
+            description = "Retries per second always allowed, so a process whose requests are all retrying "
+                + "still makes progress.")
+        double targetRetryBudgetFloorPerSecond = TargetRetryPacing.DEFAULT_BUDGET_FLOOR_PER_SECOND;
+        @Parameter(
+            required = false,
+            names = { "--target-connection-initial-rate", "--targetConnectionInitialRate" },
+            arity = 1,
+            description = "Starting allowance, in new target connections per second, for the process's adaptive "
+                + "connection limiter, which halves on connect or TLS failures and grows while connects succeed. "
+                + "0 disables the limiter.")
+        double targetConnectionInitialRate = TargetConnectionLimiter.DEFAULT_INITIAL_RATE;
+        @Parameter(
+            required = false,
+            names = { "--catch-up-factor", "--catchUpFactor" },
+            arity = 1,
+            description = "How many times faster than the normal schedule a newly assigned partition replays "
+                + "work that is already overdue. 0 sends overdue work immediately.")
+        double catchUpFactor = ReplayCatchUpPacer.DEFAULT_CATCH_UP_FACTOR;
+        @Parameter(
+            required = false,
             names = {
                 "--heartbeat-expiration-interval-seconds",
                 "--heartbeatExpirationIntervalSeconds"
@@ -500,6 +537,30 @@ public class TrafficReplayer {
                 throw new ParameterException(
                     "--kafka-quiet-window-ms must be greater than --cancellation-grace-ms"
                 );
+            }
+            if (targetRetryMaxDelayMs < TargetRetryPacing.DEFAULT_INITIAL_DELAY.toMillis()) {
+                throw new ParameterException(
+                    "--target-retry-max-delay-ms must be at least "
+                        + TargetRetryPacing.DEFAULT_INITIAL_DELAY.toMillis()
+                );
+            }
+            if (!(targetRetryBudgetRatio >= 0) || Double.isInfinite(targetRetryBudgetRatio)) {
+                throw new ParameterException("--target-retry-budget-ratio must be a finite non-negative value");
+            }
+            if (!(targetRetryBudgetFloorPerSecond > 0) || Double.isInfinite(targetRetryBudgetFloorPerSecond)) {
+                throw new ParameterException("--target-retry-budget-floor-per-second must be finite and positive");
+            }
+            if (targetConnectionInitialRate != 0
+                && !(targetConnectionInitialRate >= TargetConnectionLimiter.MINIMUM_INITIAL_RATE
+                    && targetConnectionInitialRate <= TargetConnectionLimiter.MAXIMUM_INITIAL_RATE)) {
+                throw new ParameterException(
+                    "--target-connection-initial-rate must be 0 or between "
+                        + TargetConnectionLimiter.MINIMUM_INITIAL_RATE + " and "
+                        + TargetConnectionLimiter.MAXIMUM_INITIAL_RATE
+                );
+            }
+            if (catchUpFactor != 0 && !(catchUpFactor > 1) || Double.isInfinite(catchUpFactor)) {
+                throw new ParameterException("--catch-up-factor must be 0 or a finite value greater than 1");
             }
             if (heartbeatExpirationIntervalSeconds <= 0) {
                 throw new ParameterException(
@@ -1200,6 +1261,12 @@ public class TrafficReplayer {
             Duration.ZERO,
             clock
         );
+        var connectionLimiter = params.targetConnectionInitialRate == 0
+            ? TargetConnectionLimiter.UNLIMITED
+            : new TargetConnectionLimiter(params.targetConnectionInitialRate, nanoTime);
+        var catchUpPacer = params.catchUpFactor == 0
+            ? ReplayCatchUpPacer.unbounded()
+            : ReplayCatchUpPacer.bounded(params.catchUpFactor, clock);
         var transformationLoader = new TransformationLoader();
         var requestTransformerConfig =
             TransformerConfigUtils.getTransformerConfig(
@@ -1267,7 +1334,14 @@ public class TrafficReplayer {
                     params.speedupFactor,
                     rootContext.getResourceOwnershipMetrics()
                 ),
-            new OpenSearchDefaultRetry(errorClassifier),
+            new OpenSearchDefaultRetry(
+                errorClassifier,
+                TargetRetryPacing.deployed(
+                    Duration.ofMillis(params.targetRetryMaxDelayMs),
+                    params.targetRetryBudgetRatio,
+                    params.targetRetryBudgetFloorPerSecond
+                )
+            ),
             (connectionId, eventLoop, connectionContext) ->
                 NettyPacketToHttpConsumer.create(
                     connectionId,
@@ -1278,7 +1352,8 @@ public class TrafficReplayer {
                     sslContext,
                     Duration.ofSeconds(
                         params.targetServerResponseTimeoutSeconds
-                    )
+                    ),
+                    connectionLimiter
                 ),
             resultsToLogsConsumer::createTupleAndReportProgress,
             deployedResourceReleaser(),
@@ -1294,7 +1369,8 @@ public class TrafficReplayer {
             brokerTimeConfiguration,
             params.readyRequestsBufferPerThread,
             DEFAULT_MAXIMUM_RESPONSE_RETRIES,
-            params.maxConcurrentRequests
+            params.maxConcurrentRequests,
+            catchUpPacer
         );
         var replayer = new TrafficReplayerTopLevel<>(
             consumer,

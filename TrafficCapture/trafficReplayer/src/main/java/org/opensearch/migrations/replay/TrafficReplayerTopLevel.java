@@ -155,7 +155,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
         int readyRequestsBufferPerThread,
         int maximumResponseRetries,
-        int maximumTargetAttempts
+        int maximumTargetAttempts,
+        @NonNull ReplayCatchUpPacer catchUpPacer
     ) {
         public Configuration(
             @NonNull Clock clock,
@@ -212,7 +213,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 brokerTimeConfiguration,
                 readyRequestsBufferPerThread,
                 maximumResponseRetries,
-                maximumTargetAttempts
+                maximumTargetAttempts,
+                ReplayCatchUpPacer.unbounded()
             );
         }
 
@@ -270,7 +272,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 brokerTimeConfiguration,
                 DEFAULT_READY_REQUESTS_BUFFER_PER_THREAD,
                 maximumResponseRetries,
-                maximumTargetAttempts
+                maximumTargetAttempts,
+                ReplayCatchUpPacer.unbounded()
             );
         }
 
@@ -436,7 +439,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         );
         watchTargetEventLoops();
         this.connectionAssemblySink = new ConnectionAssemblySink(
-            configuration.replayTimeMapper()
+            configuration.replayTimeMapper(),
+            configuration.catchUpPacer()
         );
         this.intakeOwner = new ReplayIntakeOwner(
             intakeInputs,
@@ -1280,7 +1284,10 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             eventLoop,
             configuration.clock(),
             configuration.nanoTime(),
-            configuration.replayTimeMapper(),
+            sourceTime -> configuration.catchUpPacer().pace(
+                connectionId.generation(),
+                configuration.replayTimeMapper().apply(sourceTime)
+            ),
             configuration.requestPreparerFactory().apply(connectionId, connectionContext),
             configuration.retryPolicy(),
             configuration.targetChannelFactory().create(
@@ -1489,11 +1496,16 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
 
     private final class ConnectionAssemblySink implements SourceAssemblySink {
         private final Function<Instant, Instant> replayTimeMapper;
+        private final ReplayCatchUpPacer catchUpPacer;
         private final ConcurrentHashMap<ConnectionProcessingId, ConnectionBinding> connections =
             new ConcurrentHashMap<>();
 
-        private ConnectionAssemblySink(Function<Instant, Instant> replayTimeMapper) {
+        private ConnectionAssemblySink(
+            Function<Instant, Instant> replayTimeMapper,
+            ReplayCatchUpPacer catchUpPacer
+        ) {
             this.replayTimeMapper = replayTimeMapper;
+            this.catchUpPacer = catchUpPacer;
         }
 
         @Override
@@ -1686,7 +1698,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                     HttpMessageAndTimestamp.Request,
                     HttpMessageAndTimestamp.Response
                 >(connectionId, connectionId.generation(), capturedOrdinal,
-                    replayTimeMapper.apply(closeTime))
+                    catchUpPacer.pace(connectionId.generation(), replayTimeMapper.apply(closeTime)))
             );
         }
 
