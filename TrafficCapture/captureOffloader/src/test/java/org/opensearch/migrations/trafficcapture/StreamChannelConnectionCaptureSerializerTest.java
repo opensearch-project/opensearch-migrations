@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -991,6 +992,37 @@ class StreamChannelConnectionCaptureSerializerTest {
         );
     }
 
+    @Test
+    void terminalFlushFailureReleasesTheCurrentStream() throws IOException {
+        var holder = new FailingFlushHolder();
+        var manager = new StreamLifecycleManager<Void>() {
+            @Override
+            public CodedOutputStreamHolder createStream() {
+                return holder;
+            }
+
+            @Override
+            public CompletableFuture<Void> closeStream(
+                CodedOutputStreamHolder outputStreamHolder,
+                int index
+            ) {
+                throw new AssertionError("A stream that did not flush must not be published");
+            }
+        };
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
+            manager
+        );
+        serializer.addCloseEvent(Instant.EPOCH);
+
+        Assertions.assertThrows(
+            IOException.class,
+            () -> serializer.flushCommitAndResetStream(true)
+        );
+        Assertions.assertEquals(1, holder.closeCalls.get());
+    }
+
     private StreamChannelConnectionCaptureSerializer<Void> createSerializerWithTestHandler(
         ConcurrentLinkedQueue<ByteBuffer> outputBuffers,
         int bufferSize
@@ -1110,6 +1142,36 @@ class StreamChannelConnectionCaptureSerializerTest {
             buffer.limit(wrapper.getOutputStream().getTotalBytesWritten());
             outputBuffers.add(buffer);
             return CompletableFuture.completedFuture(null);
+        }
+    }
+
+    private static class FailingFlushHolder implements CodedOutputStreamHolder {
+        private final AtomicInteger closeCalls = new AtomicInteger();
+        private final CodedOutputStream output = CodedOutputStream.newInstance(new OutputStream() {
+            @Override
+            public void write(int value) throws IOException {
+                throw new IOException("injected flush failure");
+            }
+
+            @Override
+            public void write(byte[] bytes, int offset, int length) throws IOException {
+                throw new IOException("injected flush failure");
+            }
+        });
+
+        @Override
+        public int getOutputStreamBytesLimit() {
+            return 1024;
+        }
+
+        @Override
+        public CodedOutputStream getOutputStream() {
+            return output;
+        }
+
+        @Override
+        public void close() {
+            closeCalls.incrementAndGet();
         }
     }
 }

@@ -920,7 +920,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "numThreads": {
                       "type": "number",
-                      "default": 1
+                      "default": 0
                     },
                     "tls": {
                       "oneOf": [
@@ -5586,7 +5586,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "destinationConnectionPoolSize": {
                     "type": "number",
                     "default": 0,
-                    "description": "Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."
+                    "description": "Number of warm destination connections maintained per Netty worker thread. 0 disables the warm pool and opens destination connections on demand."
                   },
                   "destinationConnectionPoolTimeout": {
                     "type": "string",
@@ -5628,8 +5628,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "numThreads": {
                     "type": "number",
-                    "default": 1,
-                    "description": "Number of Netty worker threads for the proxy to handle concurrent connections."
+                    "default": 0,
+                    "description": "Number of Netty worker threads for the proxy to handle concurrent connections. 0 uses Netty's processor-aware default."
                   },
                   "tls": {
                     "oneOf": [

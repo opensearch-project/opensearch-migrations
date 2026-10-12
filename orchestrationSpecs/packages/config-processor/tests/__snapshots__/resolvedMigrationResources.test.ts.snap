@@ -127,7 +127,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "maxTrafficBufferSize": 1048576,
       "minPodReplicas": 0,
       "noCapture": false,
-      "numThreads": 1,
+      "numThreads": 0,
       "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "podReplicas": 1,
       "resources": {

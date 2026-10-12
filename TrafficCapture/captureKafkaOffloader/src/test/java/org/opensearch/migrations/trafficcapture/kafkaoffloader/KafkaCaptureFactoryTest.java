@@ -25,6 +25,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.util.concurrent.DefaultEventExecutor;
 import org.apache.kafka.clients.consumer.MockConsumer;
@@ -73,6 +74,80 @@ class KafkaCaptureFactoryTest {
             Duration.ofSeconds(30),
             KafkaCaptureFactory.DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL
         );
+    }
+
+    @Test
+    void captureBuffersAllocateOnDemandAndReleaseAfterParsing() throws Exception {
+        var wrapper = KafkaCaptureFactory.CodedOutputStreamWrapper.create(
+            PooledByteBufAllocator.DEFAULT,
+            MAXIMUM_KAFKA_MESSAGE_SIZE
+        );
+        assertEquals(0, wrapper.allocatedCapacity());
+        assertEquals(0, wrapper.componentCount());
+
+        var expected = TrafficStream.newBuilder()
+            .setConnectionId("adaptive-buffer")
+            .setNodeId("proxy")
+            .setNumber(1)
+            .build();
+        expected.writeTo(wrapper.getOutputStream());
+        wrapper.getOutputStream().flush();
+
+        assertTrue(wrapper.allocatedCapacity() > 0);
+        assertTrue(wrapper.allocatedCapacity() < MAXIMUM_KAFKA_MESSAGE_SIZE);
+        assertEquals(expected, wrapper.parseTrafficStreamAndRelease());
+        assertEquals(0, wrapper.referenceCount());
+    }
+
+    @Test
+    void captureBuffersGrowAcrossComponentsWithoutReservingTheRecordLimit() throws Exception {
+        var wrapper = KafkaCaptureFactory.CodedOutputStreamWrapper.create(
+            PooledByteBufAllocator.DEFAULT,
+            MAXIMUM_KAFKA_MESSAGE_SIZE
+        );
+        try {
+            wrapper.getOutputStream().writeRawBytes(new byte[128 * 1024]);
+            wrapper.getOutputStream().flush();
+
+            assertTrue(wrapper.componentCount() > 1);
+            assertTrue(wrapper.allocatedCapacity() < MAXIMUM_KAFKA_MESSAGE_SIZE);
+        } finally {
+            wrapper.close();
+        }
+        assertEquals(0, wrapper.referenceCount());
+    }
+
+    @Test
+    void captureBuffersEnforceTheConfiguredPayloadLimit() {
+        var wrapper = KafkaCaptureFactory.CodedOutputStreamWrapper.create(
+            PooledByteBufAllocator.DEFAULT,
+            64
+        );
+        try {
+            assertThrows(
+                java.io.IOException.class,
+                () -> {
+                    wrapper.getOutputStream().writeRawBytes(new byte[65]);
+                    wrapper.getOutputStream().flush();
+                }
+            );
+        } finally {
+            wrapper.close();
+        }
+        assertEquals(0, wrapper.referenceCount());
+    }
+
+    @Test
+    void malformedCapturePayloadReleasesItsCompositeBuffer() throws Exception {
+        var wrapper = KafkaCaptureFactory.CodedOutputStreamWrapper.create(
+            PooledByteBufAllocator.DEFAULT,
+            MAXIMUM_KAFKA_MESSAGE_SIZE
+        );
+        wrapper.getOutputStream().writeRawByte(0xFF);
+        wrapper.getOutputStream().flush();
+
+        assertThrows(InvalidProtocolBufferException.class, wrapper::parseTrafficStreamAndRelease);
+        assertEquals(0, wrapper.referenceCount());
     }
 
     @Test

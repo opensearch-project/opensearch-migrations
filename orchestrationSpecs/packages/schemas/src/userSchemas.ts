@@ -676,7 +676,8 @@ export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
     destinationConnectionPoolSize: z.number().default(0).optional()
-        .describe("Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."),
+        .describe("Number of warm destination connections maintained per Netty worker thread. " +
+            "0 disables the warm pool and opens destination connections on demand."),
     destinationConnectionPoolTimeout: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
         .default("PT30S").optional()
@@ -694,8 +695,9 @@ export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
-    numThreads: z.number().default(1).optional()
-        .describe("Number of Netty worker threads for the proxy to handle concurrent connections."),
+    numThreads: z.number().default(0).optional()
+        .describe("Number of Netty worker threads for the proxy to handle concurrent connections. " +
+            "0 uses Netty's processor-aware default."),
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.")
         .changeRestriction('gated'),

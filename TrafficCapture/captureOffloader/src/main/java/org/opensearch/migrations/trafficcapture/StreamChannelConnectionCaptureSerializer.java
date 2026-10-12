@@ -509,6 +509,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             return CompletableFuture.completedFuture(null);
         }
         CompletableFuture<T> publication;
+        boolean ownershipTransferred = false;
         try {
             CodedOutputStream currentStream = getOrCreateCodedOutputStream();
             var fieldNum = isFinal
@@ -521,9 +522,13 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that "
                 + "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
             publication = streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
+            ownershipTransferred = true;
             observeDetachedRecord(publication);
             return publication;
         } finally {
+            if (!ownershipTransferred && currentCodedOutputStreamHolderOrNull != null) {
+                currentCodedOutputStreamHolderOrNull.close();
+            }
             invalidatePeriodicFlushDeadline();
             currentCodedOutputStreamHolderOrNull = null;
             currentRecordHasObservations = false;

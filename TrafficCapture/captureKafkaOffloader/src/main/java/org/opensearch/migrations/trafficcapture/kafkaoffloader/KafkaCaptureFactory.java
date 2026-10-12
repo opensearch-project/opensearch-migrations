@@ -1,8 +1,8 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
-import java.nio.ByteBuffer;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -29,8 +29,10 @@ import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafk
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.InvalidProtocolBufferException;
-import lombok.AllArgsConstructor;
+import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.Admin;
@@ -1124,19 +1126,125 @@ public class KafkaCaptureFactory implements
         }
     }
 
-    @AllArgsConstructor
     static class CodedOutputStreamWrapper implements CodedOutputStreamHolder {
+        static final int CODED_OUTPUT_BUFFER_SIZE = 4096;
+        static final int MAX_COMPONENTS = 64;
+
         private final CodedOutputStream codedOutputStream;
-        private final ByteBuffer byteBuffer;
+        private final CompositeByteBuf byteBuffer;
+        private final int bytesLimit;
+        private boolean released;
+
+        private CodedOutputStreamWrapper(
+            CodedOutputStream codedOutputStream,
+            CompositeByteBuf byteBuffer,
+            int bytesLimit
+        ) {
+            this.codedOutputStream = codedOutputStream;
+            this.byteBuffer = byteBuffer;
+            this.bytesLimit = bytesLimit;
+        }
+
+        static CodedOutputStreamWrapper create(int bytesLimit) {
+            return create(PooledByteBufAllocator.DEFAULT, bytesLimit);
+        }
+
+        static CodedOutputStreamWrapper create(ByteBufAllocator allocator, int bytesLimit) {
+            if (bytesLimit <= 0) {
+                throw new IllegalArgumentException("bytesLimit must be positive");
+            }
+            var byteBuffer = allocator.compositeHeapBuffer(MAX_COMPONENTS);
+            var output = new BoundedCompositeOutputStream(byteBuffer, bytesLimit);
+            return new CodedOutputStreamWrapper(
+                CodedOutputStream.newInstance(
+                    output,
+                    Math.min(CODED_OUTPUT_BUFFER_SIZE, bytesLimit)
+                ),
+                byteBuffer,
+                bytesLimit
+            );
+        }
 
         @Override
         public int getOutputStreamBytesLimit() {
-            return byteBuffer.limit();
+            return bytesLimit;
         }
 
         @Override
         public @NonNull CodedOutputStream getOutputStream() {
             return codedOutputStream;
+        }
+
+        TrafficStream parseTrafficStreamAndRelease() throws IOException {
+            try {
+                var bytesWritten = codedOutputStream.getTotalBytesWritten();
+                if (byteBuffer.writerIndex() != bytesWritten) {
+                    throw new IllegalStateException(
+                        "Coded output was not flushed before parsing: expected "
+                            + bytesWritten
+                            + " bytes but found "
+                            + byteBuffer.writerIndex()
+                    );
+                }
+                return TrafficStream.parseFrom(
+                    new ByteBufInputStream(byteBuffer.duplicate(), bytesWritten, false)
+                );
+            } finally {
+                close();
+            }
+        }
+
+        int allocatedCapacity() {
+            return byteBuffer.capacity();
+        }
+
+        int componentCount() {
+            return byteBuffer.numComponents();
+        }
+
+        int referenceCount() {
+            return byteBuffer.refCnt();
+        }
+
+        @Override
+        public void close() {
+            if (!released) {
+                released = true;
+                byteBuffer.release();
+            }
+        }
+    }
+
+    private static class BoundedCompositeOutputStream extends OutputStream {
+        private final CompositeByteBuf byteBuffer;
+        private final int bytesLimit;
+
+        private BoundedCompositeOutputStream(CompositeByteBuf byteBuffer, int bytesLimit) {
+            this.byteBuffer = byteBuffer;
+            this.bytesLimit = bytesLimit;
+        }
+
+        @Override
+        public void write(int value) throws IOException {
+            requireSpace(1);
+            byteBuffer.writeByte(value);
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) throws IOException {
+            Objects.checkFromIndexSize(offset, length, bytes.length);
+            requireSpace(length);
+            byteBuffer.writeBytes(bytes, offset, length);
+        }
+
+        private void requireSpace(int length) throws IOException {
+            if (length > bytesLimit - byteBuffer.writerIndex()) {
+                throw new IOException(
+                    "Capture record exceeded its "
+                        + bytesLimit
+                        + "-byte payload limit"
+                );
+            }
         }
     }
 
@@ -1153,17 +1261,14 @@ public class KafkaCaptureFactory implements
             this.route = route;
         }
 
-        private byte[] payload(CodedOutputStreamHolder outputStreamHolder) {
+        private TrafficStream parseTrafficStream(CodedOutputStreamHolder outputStreamHolder)
+            throws IOException {
             if (!(outputStreamHolder instanceof CodedOutputStreamWrapper outputStream)) {
                 throw new IllegalArgumentException(
                     "Unknown outputStreamHolder sent back to StreamManager: " + outputStreamHolder
                 );
             }
-            return Arrays.copyOfRange(
-                outputStream.byteBuffer.array(),
-                0,
-                outputStream.byteBuffer.position()
-            );
+            return outputStream.parseTrafficStreamAndRelease();
         }
 
         private boolean isTerminalRecord(TrafficStream trafficStream) {
@@ -1218,8 +1323,7 @@ public class KafkaCaptureFactory implements
         public CodedOutputStreamWrapper createStream() {
             telemetryContext.addEvent("streamCreated");
 
-            ByteBuffer bb = ByteBuffer.allocate(bufferSize);
-            return new CodedOutputStreamWrapper(CodedOutputStream.newInstance(bb), bb);
+            return CodedOutputStreamWrapper.create(bufferSize);
         }
 
         @Override
@@ -1228,15 +1332,14 @@ public class KafkaCaptureFactory implements
             int index
         ) {
             try {
-                var recordPayload = payload(outputStreamHolder);
-                var trafficStream = TrafficStream.parseFrom(recordPayload);
+                var trafficStream = parseTrafficStream(outputStreamHolder);
                 return publishPayload(
                     trafficStream,
                     isTerminalRecord(trafficStream),
                     index,
                     Objects.requireNonNull(publisher)
                 );
-            } catch (InvalidProtocolBufferException e) {
+            } catch (IOException e) {
                 return CompletableFuture.failedFuture(e);
             }
         }
