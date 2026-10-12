@@ -19,12 +19,16 @@ spec:
         value: {{ .Values.captureProxyUrl | quote }}
       - name: INDEX_NAME
         value: nyc_taxis
+      - name: INDEX_NUMBER_OF_SHARDS
+        value: "1"
       - name: DURATION
         value: 20s
       - name: authSecretName
         value: {{ .Values.authSecretName | quote }}
       - name: BULK_BATCH_SIZE
         value: "10"
+      - name: DOCUMENT_PADDING_BYTES
+        value: "0"
       - name: RETRY_ENABLED
         value: "false"
       - name: RETRY_WINDOW_SECONDS
@@ -102,6 +106,8 @@ spec:
             value: "{{`{{workflow.parameters.CAPTURE_PROXY_URL}}`}}"
           - name: INDEX_NAME
             value: "{{`{{workflow.parameters.INDEX_NAME}}`}}"
+          - name: INDEX_NUMBER_OF_SHARDS
+            value: "{{`{{workflow.parameters.INDEX_NUMBER_OF_SHARDS}}`}}"
 
     - name: pod-churn
       inputs:
@@ -193,6 +199,8 @@ spec:
                   value: "{{`{{inputs.parameters.maxVus}}`}}"
                 - name: BULK_BATCH_SIZE
                   value: "{{`{{workflow.parameters.BULK_BATCH_SIZE}}`}}"
+                - name: DOCUMENT_PADDING_BYTES
+                  value: "{{`{{workflow.parameters.DOCUMENT_PADDING_BYTES}}`}}"
                 - name: DOCUMENT_ID_PREFIX
                   value: "{{`{{workflow.name}}`}}-{{`{{inputs.parameters.name}}`}}"
                 - name: BULK_FRACTION

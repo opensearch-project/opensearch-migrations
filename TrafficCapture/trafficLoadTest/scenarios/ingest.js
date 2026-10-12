@@ -18,6 +18,8 @@
  *   DURATION           — test duration for constant-arrival-rate executor;
  *                        ignored when EXECUTOR=ramping-arrival-rate (stages define duration)
  *   BULK_BATCH_SIZE    — documents per _bulk call
+ *   DOCUMENT_PADDING_BYTES — additional string bytes placed in a mapped text field on each
+ *                            generated document (default 0)
  *   DOCUMENT_ID_PREFIX — namespace for replay-stable IDs from one distributed test run
  *   SEQUENCE_FRACTION  — share of iterations run as a create→update→query→delete sequence
  *                        (0.0 disables sequences; default 0.15)
@@ -48,6 +50,7 @@ import { runSequence } from '../lib/sequences.js';
 import { pinned, spread } from '../lib/connection-control.js';
 import { checkControl } from '../lib/control.js';
 import { CFG } from '../lib/config.js';
+import { randomBulkBatch } from '../lib/doc-utils.js';
 
 // ── Custom metrics ─────────────────────────────────────────────────────────
 // k6 remote-write appends its own type suffix; names here must NOT include suffixes.
@@ -63,7 +66,6 @@ const bulkBatchDocs    = new Trend('ingest_bulk_batch_docs');
 // ── Schema selection ───────────────────────────────────────────────────────
 const SCHEMA = CFG.SCHEMA || 'nyc_taxis';
 const docs     = SCHEMA === 'logs_data' ? logsDocs : nycTaxisDocs;
-const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
 const INDEX_MAPPING = docs.mapping;
 
 // ── Config ─────────────────────────────────────────────────────────────────
@@ -74,6 +76,10 @@ const VUS             = parseInt(CFG.INGEST_VUS          || '20');
 const MAX_VUS         = parseInt(CFG.INGEST_MAX_VUS      || '100');
 const DURATION        = CFG.DURATION            || '5m';
 const BATCH_SIZE      = parseInt(CFG.BULK_BATCH_SIZE     || '20');
+const DOCUMENT_PADDING_BYTES = Math.max(
+  0,
+  parseInt(CFG.DOCUMENT_PADDING_BYTES || '0'),
+);
 const DOCUMENT_ID_PREFIX = CFG.DOCUMENT_ID_PREFIX        || 'k6';
 const SEQ_FRACTION    = parseFloat(CFG.SEQUENCE_FRACTION || '0.15');
 const BULK_FRACTION   = parseFloat(CFG.BULK_FRACTION     || '0.70');
@@ -92,6 +98,17 @@ const EXECUTOR            = CFG.EXECUTOR                 || 'constant-arrival-ra
 const RAMP_STAGES     = CFG.RAMP_STAGES
   ? JSON.parse(CFG.RAMP_STAGES)
   : [{ duration: DURATION, target: RATE }];
+
+function randomDocument() {
+  const document = docs.randomDocument();
+  if (DOCUMENT_PADDING_BYTES > 0) {
+    const field = SCHEMA === 'logs_data' ? 'message' : 'vendor_name';
+    document[field] = `${document[field] || ''}${'x'.repeat(DOCUMENT_PADDING_BYTES)}`;
+  }
+  return document;
+}
+
+const docFns = { randomDocument, randomUpdateBody: docs.randomUpdateBody };
 
 // ── Connection params (resolved once per VU in init context) ───────────────
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
@@ -225,8 +242,8 @@ function requestWithRetry(method, url, body, params, succeeded) {
 }
 
 function sendBulk() {
-  const { body, docCount } = docs.randomBulkBatch(
-    INDEX, BATCH_SIZE, (item) => stableId('bulk', item),
+  const { body, docCount } = randomBulkBatch(
+    INDEX, BATCH_SIZE, randomDocument, (item) => stableId('bulk', item),
   );
   const res = requestWithRetry(
     'POST',
@@ -247,7 +264,7 @@ function sendBulk() {
 }
 
 function sendSingleDoc() {
-  const body = JSON.stringify(docs.randomDocument());
+  const body = JSON.stringify(randomDocument());
   const res = requestWithRetry(
     'PUT',
     `${PROXY_URL}/${INDEX}/_doc/${stableId('single')}`,

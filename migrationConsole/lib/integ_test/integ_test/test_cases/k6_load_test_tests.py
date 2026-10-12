@@ -93,10 +93,10 @@ def _delete_k6_auth_secret(namespace, name):
 
 
 class Test0080CdcK6LoadTest(MATestBase):
-    """Routine CDC check using three low-rate k6 connection testers.
+    """Routine CDC-only check using three low-rate k6 connection testers.
 
-    k6 runs in the replay-only (post-snapshot) phase so its docs reach the target via replay only
-    (no snapshot/backfill duplication), making the source/target counts directly comparable.
+    No snapshot or backfill is configured. Every k6 document reaches the target through live
+    capture and replay, making the source/target counts directly comparable.
     """
     requires_explicit_selection = True
     K6_DURATION = "20s"
@@ -112,21 +112,22 @@ class Test0080CdcK6LoadTest(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
         super().__init__(
             user_args=user_args,
-            description="Full E2E CDC driven by a k6 load test through the capture proxy.",
-            migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL,
-                                 MigrationType.CAPTURE_AND_REPLAY],
+            description="CDC-only migration driven by a k6 load test through the capture proxy.",
+            migrations_required=[MigrationType.CAPTURE_AND_REPLAY],
             allow_source_target_combinations=CDC_SOURCE_TARGET_COMBINATIONS,
         )
         self._index_name = f"{K6_INDEX_PREFIX}-{uuid.uuid4().hex[:12]}"
         self._source_count = None
 
+    def prepare_workflow_snapshot_and_migration_config(self):
+        self.workflow_snapshot_and_migration_config = []
+
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = (
-            "cdc-full-e2e-imported-clusters" if self.imported_clusters
+            "cdc-only-imported-clusters" if self.imported_clusters
             else "cdc-e2e-migration-with-clusters"
         )
-        self.parameters["pre-snapshot-proxy-submit"] = "true"
         self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
         self.parameters.update(self.K6_WORKFLOW_PARAMETERS)
 
@@ -220,18 +221,11 @@ class Test0080CdcK6LoadTest(MATestBase):
         ns = self.argo_service.namespace
 
         if not self.imported_clusters:
-            logger.info("Resuming workflow past pause-for-test-data to start proxy-only capture...")
+            logger.info("Resuming workflow past cluster setup to start CDC-only capture and replay...")
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for capture-proxy to be ready...")
         wait_for_proxy_ready(ns, timeout_seconds, workflow_name=self.workflow_name)
-
-        # Advance to the full migration (snapshot + backfill + replay). No pre-snapshot load, so
-        # everything k6 writes next reaches the target via replay only.
-        logger.info("Waiting for workflow to pause before full migration submit...")
-        self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)
-        logger.info("Resuming workflow to submit full migration...")
-        self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=ns, workflow_name=self.workflow_name)
@@ -250,7 +244,7 @@ class Test0080CdcK6LoadTest(MATestBase):
             )
 
         if not self.imported_clusters:
-            logger.info("Waiting for workflow to reach pause-for-migration-verification suspend...")
+            logger.info("Waiting for workflow to reach the CDC verification suspend...")
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)
 
     def post_migration_actions(self):
@@ -305,29 +299,41 @@ class Test0081CdcK6StressTest(Test0080CdcK6LoadTest):
 
 
 class Test0082CdcK6HighLoadStressTest(Test0081CdcK6StressTest):
-    """Two-hour 40.5K-request/s stress run using the proven large EKS rig."""
+    """Two-hour 160K-request/s stress run with approximately 2 KiB requests."""
 
     K6_DURATION = "2h"
     K6_RUN_TIMEOUT_SECONDS = 14_400
     K6_DRAIN_TIMEOUT_SECONDS = 7_200
     K6_WORKFLOW_PARAMETERS = {
-        "capture-proxy-pod-replicas": "30",
-        "kafka-broker-replicas": "4",
-        "traffic-topic-partitions": "240",
-        "replayer-pod-replicas": "101",
+        "capture-proxy-pod-replicas": "128",
+        "kafka-broker-replicas": "12",
+        "traffic-topic-partitions": "480",
+        "replayer-pod-replicas": "320",
         "replayer-config-overrides": (
             '{"maxConcurrentRequests":64,"numClientThreads":4}'
         ),
     }
     K6_PARAMETERS = {
         **Test0081CdcK6StressTest.K6_PARAMETERS,
-        "BULK_BATCH_SIZE": "4",
-        "podChurnExpectedKafkaBrokers": "4",
+        # One NYC-taxi bulk item plus 1.3 KiB in its mapped vendor_name field
+        # produces an approximately 2 KiB HTTP request without multiplying the
+        # target document rate above the requested 160K requests/second.
+        "BULK_BATCH_SIZE": "1",
+        "DOCUMENT_PADDING_BYTES": "1300",
+        # Spread this billion-document test across the six-node source cluster instead of
+        # inheriting the cluster's one-primary default.
+        "INDEX_NUMBER_OF_SHARDS": "24",
+        # Sequences issue four HTTP requests per scheduled iteration. Disable
+        # them here so the configured arrival rate is the actual request rate.
+        "SEQUENCE_FRACTION": "0",
+        "podChurnExpectedKafkaBrokers": "12",
         # Offered high-load arrivals are observational; accepted writes must still all succeed.
         "DROPPED_ITERATIONS_THRESHOLD": "count>=0",
     }
     K6_LOAD = (
-        ("31154", 64, "16384", "32768"),
-        ("7788", 32, "6144", "12288"),
-        ("1558", 16, "2048", "4096"),
+        # k6-operator validates parallelism against the initializer's inspected default
+        # MaxVUs (100); runner environment overrides are not visible during that check.
+        ("123077", 100, "65536", "131072"),
+        ("30769", 64, "24576", "49152"),
+        ("6154", 32, "8192", "16384"),
     )

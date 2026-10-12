@@ -1212,6 +1212,7 @@ class TestRenderedChartMatchesTheValues:
             for parameter in suite["spec"]["arguments"]["parameters"]
         }
         assert "value" not in arguments["runs"]
+
         run_tester = next(
             template for template in suite["spec"]["templates"]
             if template["name"] == "run-tester"
@@ -1224,6 +1225,27 @@ class TestRenderedChartMatchesTheValues:
         }
         assert child_parameters["BULK_EXPLICIT_IDS"] == "true"
         assert child_parameters["BULK_ID_PREFIX"] == "{{inputs.parameters.name}}"
+
+    def test_connection_mode_suite_renders_index_shard_input(self):
+        suite = self._rendered(
+            "templates/k6-ingest-connection-modes.yaml"
+        )["k6-ingest-connection-modes"]
+        arguments = {
+            parameter["name"]: parameter
+            for parameter in suite["spec"]["arguments"]["parameters"]
+        }
+        assert arguments["INDEX_NUMBER_OF_SHARDS"]["value"] == "1"
+        prepare_index = next(
+            template for template in suite["spec"]["templates"]
+            if template["name"] == "prepare-index"
+        )
+        prepare_env = {
+            item["name"]: item["value"]
+            for item in prepare_index["container"]["env"]
+        }
+        assert prepare_env["INDEX_NUMBER_OF_SHARDS"] == (
+            "{{workflow.parameters.INDEX_NUMBER_OF_SHARDS}}"
+        )
 
     def test_the_parameters_and_the_runner_env_are_the_same_set(self):
         for name, template in sorted(self._rendered().items()):

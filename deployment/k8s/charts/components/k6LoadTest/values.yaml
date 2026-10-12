@@ -48,6 +48,24 @@ k6-operator:
 testRun:
   parallelism: 1
   useSeparatePodPerTestInstance: false
+  runner:
+    # Explicit requests prevent distributed runs from being scheduled as BestEffort pods and
+    # concentrated on nodes that cannot support their startup load.
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+    # Keep each TestRun's runner fleet balanced across available zones. The generated selector
+    # also matches that TestRun's k6_cr label, so independent load tests do not affect each
+    # other's skew calculation. A single-zone cluster still has a valid one-domain placement.
+    zoneSpread:
+      enabled: true
+      maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
 
 # Where a run aims its traffic. This is deployment topology — the proxy's service name and namespace
 # — not a load profile, so it belongs to the chart rather than to the k6-config/*.env presets, which
@@ -106,6 +124,7 @@ scenarios:
       INGEST_MAX_VUS: "100"
       EXECUTOR: constant-arrival-rate    # decides the timing knob: DURATION, or a stage list
       BULK_BATCH_SIZE: "20"              # documents per _bulk call
+      DOCUMENT_PADDING_BYTES: "0"        # extra bytes in a mapped text field on each document
       DOCUMENT_ID_PREFIX: k6             # suite overrides this with a unique per-tester prefix
       BULK_FRACTION: "0.70"              # share of iterations that send _bulk
       SEQUENCE_FRACTION: "0.15"          # share that run create→update→query→delete

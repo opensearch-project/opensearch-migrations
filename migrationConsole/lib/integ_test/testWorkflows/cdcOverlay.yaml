@@ -119,9 +119,6 @@ spec:
                   "replay1": {
                     "fromCapturedTraffic": "capture-proxy",
                     "toTarget": "target1",
-                    "dependsOnSnapshotMigrations": [
-                      {"source": "source1", "snapshot": "testsnapshot"}
-                    ],
                     "replayerConfig": ({
                       "speedupFactor": {{inputs.parameters.speedupFactor}},
                       "useLocalStack": $useLocalStack,
@@ -138,6 +135,11 @@ spec:
                       } else {} end)
                     + $replayerOverrides)
                   }
+                  + (if ((.snapshotMigrationConfigs // []) | length) > 0 then {
+                      "dependsOnSnapshotMigrations": [
+                        {"source": "source1", "snapshot": "testsnapshot"}
+                      ]
+                    } else {} end)
                 }
               }
             }')

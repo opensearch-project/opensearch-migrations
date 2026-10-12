@@ -154,6 +154,20 @@ spec:
             runner:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
+              resources:
+{{ toYaml $.Values.testRun.runner.resources | nindent 16 }}
+{{- if $.Values.testRun.runner.zoneSpread.enabled }}
+              topologySpreadConstraints:
+                - maxSkew: {{ $.Values.testRun.runner.zoneSpread.maxSkew | int }}
+                  topologyKey: {{ $.Values.testRun.runner.zoneSpread.topologyKey | quote }}
+                  whenUnsatisfiable: {{ $.Values.testRun.runner.zoneSpread.whenUnsatisfiable }}
+                  labelSelector:
+                    matchLabels:
+                      # The k6 operator adds these labels to runner pods. Scoping by the dynamic
+                      # TestRun name prevents concurrent runs from sharing one skew calculation.
+                      k6_cr: "{{`{{workflow.name}}`}}"
+                      runner: "true"
+{{- end }}
               envFrom:
                 - secretRef:
                     name: "{{`{{workflow.parameters.authSecretName}}`}}"
