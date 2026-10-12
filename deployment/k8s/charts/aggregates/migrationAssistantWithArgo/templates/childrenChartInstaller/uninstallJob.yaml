@@ -48,7 +48,11 @@ spec:
               #!/bin/sh
               set -e
               {{- include "migration.retryFunctions" . | nindent 14 }}
+              {{- include "migration.preDeleteCleanupFunctions" . | nindent 14 }}
               {{- include "migration.helmUninstallFunctions" . | nindent 14 }}
+
+              # Drain runtime resources while Argo, Strimzi, and ACK controllers are alive.
+              prepare_release_for_uninstall
 
               # Phase 1: Uninstall all charts except fluent-bit (kept for logging) and kyverno (uninstalled last).
               # See _uninstallHelper.tpl for the full uninstall strategy documentation.

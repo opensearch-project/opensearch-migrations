@@ -109,6 +109,17 @@ tasks.register('verifyCaptureReplayObservability', Exec) {
     )
 }
 
+tasks.register('verifyHelmUninstallTeardown', Exec) {
+    description = 'Validates rendered Migration Assistant pre-delete teardown'
+    group = 'verification'
+    commandLine(
+            'python3',
+            layout.projectDirectory.file('scripts/verify-helm-uninstall-teardown.py').asFile,
+            chartSourceDir.asFile
+    )
+}
+
 tasks.named('check') {
-    dependsOn 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability'
+    dependsOn 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability',
+            'verifyHelmUninstallTeardown'
 }

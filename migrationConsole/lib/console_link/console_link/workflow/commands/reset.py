@@ -1012,10 +1012,16 @@ def _reset_by_resource_name(ctx, path, namespace, cascade, include_proxies, dele
         ctx.exit(ExitCode.FAILURE.value)
         return
     kafka_names = [name for plural, name, _, _ in targets if plural == 'kafkaclusters']
-    _handle_kafka_storage(namespace, kafka_names, delete_storage)
+    if not delete_storage:
+        _handle_kafka_storage(namespace, kafka_names, False)
     if not _delete_targets(targets, namespace, delete_output_artifacts):
         ctx.exit(ExitCode.FAILURE.value)
         return
+    if delete_storage:
+        # PVC protection prevents deleting claims that are still mounted by Kafka pods.
+        # Tear down the Strimzi workload first, then explicitly remove any claims that
+        # remain because of their deleteClaim or reclaim policy.
+        _handle_kafka_storage(namespace, kafka_names, True)
     _warn_target_indexes_remain(targets)
 
 
@@ -1094,11 +1100,16 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
             click.echo("Use --include-proxies to delete them.")
 
         kafka_names = [name for plural, name, _, _ in delete_targets if plural == 'kafkaclusters']
-        _handle_kafka_storage(namespace, kafka_names, delete_storage)
+        if not delete_storage:
+            _handle_kafka_storage(namespace, kafka_names, False)
 
         if delete_targets and not _delete_targets(delete_targets, namespace, not keep_output_artifacts):
             ctx.exit(ExitCode.FAILURE.value)
             return
+
+        if delete_storage:
+            # Delete retained Kafka storage only after the broker workload has released it.
+            _handle_kafka_storage(namespace, kafka_names, True)
 
         _warn_target_indexes_remain(delete_targets)
         click.echo("Done.")
