@@ -72,6 +72,45 @@ def test_wait_for_proxy_ready_fails_on_outer_workflow_before_polling_again(monke
         )
 
 
+@pytest.mark.parametrize(
+    ("service_endpoint", "load_balancer_endpoint", "expected"),
+    (
+        (
+            "capture-proxy.ma.svc.cluster.local:9201",
+            "proxy.example.elb.amazonaws.com ",
+            "https://proxy.example.elb.amazonaws.com:9201",
+        ),
+        (
+            "capture-proxy.ma.svc.cluster.local:9201",
+            "proxy.example.elb.amazonaws.com:9443",
+            "https://proxy.example.elb.amazonaws.com:9443",
+        ),
+        (
+            "capture-proxy.ma.svc.cluster.local:9201",
+            "",
+            "https://capture-proxy.ma.svc.cluster.local:9201",
+        ),
+    ),
+)
+def test_wait_for_proxy_ready_prefers_load_balancer_endpoint(
+    monkeypatch,
+    service_endpoint,
+    load_balancer_endpoint,
+    expected,
+):
+    monkeypatch.setattr(cdc_base, "load_k8s_config", lambda: None)
+    monkeypatch.setattr(
+        cdc_base,
+        "_get_capture_proxy_readiness_status",
+        lambda namespace: ("Ready", "", service_endpoint, load_balancer_endpoint),
+    )
+
+    assert cdc_base.wait_for_proxy_ready(
+        "ma",
+        workflow_name="outer-workflow",
+    ) == expected
+
+
 def test_wait_for_replayer_consuming_waits_for_pod_ready_first(monkeypatch):
     ready_calls = []
     assignment_checks = []

@@ -1173,7 +1173,10 @@ class TestRenderedChartMatchesTheValues:
         return copy
 
     @staticmethod
-    def _rendered(template_file="templates/k6-workflowtemplates.yaml"):
+    def _rendered(
+        template_file="templates/k6-workflowtemplates.yaml",
+        extra_helm_args=(),
+    ):
         helm = shutil.which("helm")
         if helm is None:
             pytest.skip("helm is not installed")
@@ -1183,7 +1186,7 @@ class TestRenderedChartMatchesTheValues:
                 chart, Path(tmp))
             out = subprocess.run(
                 [helm, "template", "t", str(renderable), "--namespace", "ma",
-                 "--show-only", template_file],
+                 "--show-only", template_file, *extra_helm_args],
                 capture_output=True, text=True)
         if out.returncode != 0:
             pytest.fail(f"helm template failed:\n{out.stderr}")
@@ -1203,6 +1206,44 @@ class TestRenderedChartMatchesTheValues:
     def test_every_profile_renders_a_template(self):
         assert set(self._rendered()) == {f"k6-{p}" for p in _chart_values()["profiles"]}
 
+    def test_dedicated_pool_applies_to_load_runners_but_not_initializers(self):
+        templates = self._rendered(extra_helm_args=(
+            "--set-string", "testRun.nodePoolName=k6-work-pool",
+        ))
+        for name, template in sorted(templates.items()):
+            defaults = {
+                parameter["name"]: parameter.get("value", "")
+                for parameter in template["spec"]["arguments"]["parameters"]
+            }
+            manifest = template["spec"]["templates"][0]["resource"]["manifest"]
+            substituted = re.sub(
+                r"\{\{workflow\.parameters\.([A-Za-z0-9_-]+)\}\}",
+                lambda match: defaults[match.group(1)],
+                manifest,
+            ).replace("{{workflow.name}}", "a-run")
+            test_run = yaml.safe_load(substituted)["spec"]
+
+            assert "nodeSelector" not in test_run["initializer"], name
+            assert test_run["runner"]["nodeSelector"] == {
+                "migrations.opensearch.org/workload-pool": "k6-work-pool"
+            }, name
+
+    def test_chart_defaults_to_repository_patched_operator(self):
+        operator = _chart_values()["k6-operator"]["manager"]["image"]
+        assert operator == {
+            "registry": "docker.io",
+            "repository": "migrations/k6_operator",
+            "tag": "latest",
+            "pullPolicy": "IfNotPresent",
+        }
+
+        installer = (
+            _repo_dir("deployment/k8s") / "installK6Chart.sh"
+        ).read_text()
+        assert "migrations_k6_operator_latest" in installer
+        assert "k6-operator.manager.image.repository" in installer
+        assert "k6-operator.manager.image.tag" in installer
+
     def test_connection_mode_suite_renders_required_inputs_and_replay_stable_bulk_ids(self):
         suite = self._rendered(
             "templates/k6-ingest-connection-modes.yaml"
@@ -1217,14 +1258,16 @@ class TestRenderedChartMatchesTheValues:
             template for template in suite["spec"]["templates"]
             if template["name"] == "run-tester"
         )
-        assert run_tester["activeDeadlineSeconds"] == 10800
+        assert run_tester["activeDeadlineSeconds"] == 14400
         child = yaml.safe_load(run_tester["resource"]["manifest"])
         child_parameters = {
             parameter["name"]: parameter["value"]
             for parameter in child["spec"]["arguments"]["parameters"]
         }
-        assert child_parameters["BULK_EXPLICIT_IDS"] == "true"
-        assert child_parameters["BULK_ID_PREFIX"] == "{{inputs.parameters.name}}"
+        assert (
+            child_parameters["DOCUMENT_ID_PREFIX"]
+            == "{{workflow.name}}-{{inputs.parameters.name}}"
+        )
 
     def test_connection_mode_suite_renders_index_shard_input(self):
         suite = self._rendered(
@@ -1235,6 +1278,18 @@ class TestRenderedChartMatchesTheValues:
             for parameter in suite["spec"]["arguments"]["parameters"]
         }
         assert arguments["INDEX_NUMBER_OF_SHARDS"]["value"] == "1"
+        assert arguments["PREPARE_INDEX"]["value"] == "true"
+        prepare_task = next(
+            task for task in suite["spec"]["templates"][0]["dag"]["tasks"]
+            if task["name"] == "prepare-index"
+        )
+        assert prepare_task["when"] == "{{workflow.parameters.PREPARE_INDEX}} == true"
+        for task_name in ("tester", "pod-churn"):
+            task = next(
+                task for task in suite["spec"]["templates"][0]["dag"]["tasks"]
+                if task["name"] == task_name
+            )
+            assert task["depends"] == "prepare-index.Succeeded || prepare-index.Skipped"
         prepare_index = next(
             template for template in suite["spec"]["templates"]
             if template["name"] == "prepare-index"

@@ -65,6 +65,8 @@
 {{- end }}
 {{- end }}
 {{- end }}
+{{- $zoneSpread := $.Values.testRun.runner.zoneSpread | default dict }}
+{{- $hostnameSpread := $.Values.testRun.runner.hostnameSpread | default dict }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -146,27 +148,63 @@ spec:
             starter:
               image: "{{`{{workflow.parameters.starterImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
+{{- if $.Values.testRun.nodePoolName }}
+              nodeSelector:
+                migrations.opensearch.org/workload-pool: {{ $.Values.testRun.nodePoolName | quote }}
+              tolerations:
+                - key: migrations.opensearch.org/workload-pool
+                  operator: Equal
+                  value: {{ $.Values.testRun.nodePoolName | quote }}
+                  effect: NoSchedule
+{{- end }}
             # The initializer runs `k6 archive`. The custom runner image contains both the compiled
             # extensions and the scenarios under /scripts, so initializer and runners use one image.
+            # Keep this short control-plane task off the dedicated runner pool. Otherwise an empty
+            # pool provisions its first node solely for the initializer, and the operator can race
+            # that new node's kubelet log endpoint while inspecting the completed archive.
             initializer:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
             runner:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
+{{- if $.Values.testRun.nodePoolName }}
+              nodeSelector:
+                migrations.opensearch.org/workload-pool: {{ $.Values.testRun.nodePoolName | quote }}
+              tolerations:
+                - key: migrations.opensearch.org/workload-pool
+                  operator: Equal
+                  value: {{ $.Values.testRun.nodePoolName | quote }}
+                  effect: NoSchedule
+{{- end }}
               resources:
 {{ toYaml $.Values.testRun.runner.resources | nindent 16 }}
-{{- if $.Values.testRun.runner.zoneSpread.enabled }}
+{{- with $.Values.testRun.runner.livenessProbe }}
+              livenessProbe:
+{{ toYaml . | nindent 16 }}
+{{- end }}
+{{- if or $zoneSpread.enabled $hostnameSpread.enabled }}
               topologySpreadConstraints:
-                - maxSkew: {{ $.Values.testRun.runner.zoneSpread.maxSkew | int }}
-                  topologyKey: {{ $.Values.testRun.runner.zoneSpread.topologyKey | quote }}
-                  whenUnsatisfiable: {{ $.Values.testRun.runner.zoneSpread.whenUnsatisfiable }}
+{{- if $zoneSpread.enabled }}
+                - maxSkew: {{ $zoneSpread.maxSkew | int }}
+                  topologyKey: {{ $zoneSpread.topologyKey | quote }}
+                  whenUnsatisfiable: {{ $zoneSpread.whenUnsatisfiable }}
                   labelSelector:
                     matchLabels:
                       # The k6 operator adds these labels to runner pods. Scoping by the dynamic
                       # TestRun name prevents concurrent runs from sharing one skew calculation.
                       k6_cr: "{{`{{workflow.name}}`}}"
                       runner: "true"
+{{- end }}
+{{- if $hostnameSpread.enabled }}
+                - maxSkew: {{ $hostnameSpread.maxSkew | int }}
+                  topologyKey: {{ $hostnameSpread.topologyKey | quote }}
+                  whenUnsatisfiable: {{ $hostnameSpread.whenUnsatisfiable }}
+                  labelSelector:
+                    matchLabels:
+                      k6_cr: "{{`{{workflow.name}}`}}"
+                      runner: "true"
+{{- end }}
 {{- end }}
               envFrom:
                 - secretRef:

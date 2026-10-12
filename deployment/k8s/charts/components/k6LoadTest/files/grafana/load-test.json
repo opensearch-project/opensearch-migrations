@@ -1149,8 +1149,8 @@
     {
       "id": 21,
       "type": "timeseries",
-      "title": "k6 failures by transport error",
-      "description": "Status-zero HTTP attempts are transport failures before an HTTP response. This separates request timeouts, EOFs, and other connection failures from valid HTTP error responses.",
+      "title": "k6 failures by transport error code",
+      "description": "Status-zero HTTP attempts are transport failures before an HTTP response, grouped by k6 error_code (e.g. 1050 request timeout, 1000 generic/EOF, 1200-series TLS). This separates connection failures from valid HTTP error responses.",
       "gridPos": {
         "x": 0,
         "y": 65,
@@ -1167,8 +1167,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (error) (rate(http_reqs_total{scenario=~\"$scenario\",status=\"0\"}[1m]))",
-          "legendFormat": "{{error}}",
+          "expr": "sum by (error_code) (rate(http_reqs_total{scenario=~\"$scenario\",status=\"0\"}[1m]))",
+          "legendFormat": "{{error_code}}",
           "refId": "A"
         }
       ],

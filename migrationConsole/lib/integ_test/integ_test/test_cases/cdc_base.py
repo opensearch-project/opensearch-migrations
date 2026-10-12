@@ -6,6 +6,7 @@ import logging
 import subprocess
 import time
 from typing import Optional, Sequence
+from urllib.parse import urlsplit, urlunsplit
 
 from kubernetes import client, config as k8s_config
 from kubernetes.client.rest import ApiException
@@ -23,9 +24,10 @@ logger = logging.getLogger(__name__)
 PROXY_DEPLOYMENT_NAME = "capture-proxy"
 PROXY_RESOURCE_NAME = "capture-proxy"
 PROXY_SERVICE_NAME = "capture-proxy"
+PROXY_PORT = 9201
 REPLAYER_LABEL_SELECTOR = "app=replayer"
 PROXY_LABEL_SELECTOR = "migrations/proxy=capture-proxy"
-PROXY_ENDPOINT = "https://capture-proxy:9201"
+PROXY_ENDPOINT = f"https://capture-proxy:{PROXY_PORT}"
 CDC_SOURCE_TARGET_COMBINATIONS = CDC_MIGRATION_COMBINATIONS
 PROXY_READY_TIMEOUT_SECONDS = 3600
 REPLAYER_POD_READY_BUFFER_SECONDS = 20 * 60
@@ -94,12 +96,20 @@ def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int
     raise TimeoutError(f"No pod with label '{label_selector}' reached Ready within {timeout_seconds}s")
 
 
-def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200, *, workflow_name: str):
+def wait_for_proxy_ready(
+    namespace: str,
+    timeout_seconds: int = 1200,
+    *,
+    workflow_name: str,
+) -> str:
     """Wait until the CaptureProxy CR is Ready.
 
     The workflow owns pod, Service, endpoint, and load-balancer readiness.
     Tests gate only on the parent CaptureProxy CR status and inspect lower-level
     objects only when collecting diagnostics after an Error or timeout.
+
+    Returns the externally load-balanced HTTPS endpoint when one is present.
+    ClusterIP-only environments such as kind fall back to the service endpoint.
     """
     load_k8s_config()
 
@@ -114,7 +124,12 @@ def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200, *, workflo
                 "captureproxy/%s is Ready: serviceEndpoint=%s loadBalancerEndpoint=%s",
                 PROXY_RESOURCE_NAME, service_endpoint or "<unset>", load_balancer_endpoint or "<unset>",
             )
-            return
+            endpoint = (load_balancer_endpoint or service_endpoint).strip()
+            if not endpoint:
+                raise RuntimeError(
+                    f"captureproxy/{PROXY_RESOURCE_NAME} is Ready but publishes no endpoint"
+                )
+            return _normalize_proxy_endpoint(endpoint, service_endpoint)
         if phase == "Error":
             _dump_proxy_readiness_diagnostics(namespace)
             raise RuntimeError(f"captureproxy/{PROXY_RESOURCE_NAME} entered Error phase: {message}")
@@ -132,6 +147,18 @@ def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200, *, workflo
 
     _dump_proxy_readiness_diagnostics(namespace)
     raise TimeoutError(f"captureproxy/{PROXY_RESOURCE_NAME} did not reach Ready within {timeout_seconds}s")
+
+
+def _normalize_proxy_endpoint(endpoint: str, service_endpoint: str) -> str:
+    """Return an HTTPS proxy URL, adding the service port when the LB omits it."""
+    normalized = endpoint if "://" in endpoint else f"https://{endpoint}"
+    parsed = urlsplit(normalized)
+    if parsed.port is not None:
+        return normalized
+
+    service = service_endpoint if "://" in service_endpoint else f"//{service_endpoint}"
+    service_port = urlsplit(service).port or PROXY_PORT
+    return urlunsplit(parsed._replace(netloc=f"{parsed.netloc}:{service_port}"))
 
 
 def _get_capture_proxy_readiness_status(namespace: str) -> tuple[str, str, str, str]:

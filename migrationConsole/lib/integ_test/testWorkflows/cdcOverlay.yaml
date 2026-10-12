@@ -43,6 +43,8 @@ spec:
             default: "1"
           - name: kafkaBrokerReplicas
             default: "3"
+          - name: kafkaNodePoolSpecOverrides
+            default: "{}"
           - name: trafficTopicPartitions
             default: "2"
           - name: replayerPodReplicas
@@ -66,6 +68,7 @@ spec:
             TUPLE_S3_BUCKET='{{inputs.parameters.tupleS3BucketName}}'
             OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otelTraceCollectorEndpoint}}'
             CLIENT_AUTH_PEM=$(echo "{{inputs.parameters.clientAuthPemBase64}}" | base64 -d)
+            KAFKA_NODE_POOL_SPEC_OVERRIDES='{{inputs.parameters.kafkaNodePoolSpecOverrides}}'
 
             # Overlay CDC traffic config with capture enabled from start.
             CDC_CONFIG=$(echo "$BASE_CONFIG" | jq \
@@ -78,15 +81,18 @@ spec:
               --arg clientAuthPem "$CLIENT_AUTH_PEM" \
               --argjson captureProxyPodReplicas '{{inputs.parameters.captureProxyPodReplicas}}' \
               --argjson kafkaBrokerReplicas '{{inputs.parameters.kafkaBrokerReplicas}}' \
+              --argjson kafkaNodePoolSpecOverrides "$KAFKA_NODE_POOL_SPEC_OVERRIDES" \
               --argjson trafficTopicPartitions '{{inputs.parameters.trafficTopicPartitions}}' \
               --argjson replayerPodReplicas '{{inputs.parameters.replayerPodReplicas}}' \
               '. + {
               "kafkaClusterConfiguration": {
                 "default": {
                   "autoCreate": {
-                    "nodePoolSpecOverrides": {
-                      "replicas": $kafkaBrokerReplicas
-                    },
+                    "nodePoolSpecOverrides": (
+                      $kafkaNodePoolSpecOverrides + {
+                        "replicas": $kafkaBrokerReplicas
+                      }
+                    ),
                     "topicSpecOverrides": {
                       "partitions": $trafficTopicPartitions
                     }
@@ -167,6 +173,8 @@ spec:
             default: "1"
           - name: kafkaBrokerReplicas
             default: "3"
+          - name: kafkaNodePoolSpecOverrides
+            default: "{}"
           - name: trafficTopicPartitions
             default: "2"
           - name: otelTraceCollectorEndpoint
@@ -183,12 +191,14 @@ spec:
             BASE_CONFIG=$(echo "{{inputs.parameters.baseConfigBase64}}" | base64 -d)
             OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otelTraceCollectorEndpoint}}'
             CLIENT_AUTH_PEM=$(echo "{{inputs.parameters.clientAuthPemBase64}}" | base64 -d)
+            KAFKA_NODE_POOL_SPEC_OVERRIDES='{{inputs.parameters.kafkaNodePoolSpecOverrides}}'
 
             PROXY_ONLY_CONFIG=$(echo "$BASE_CONFIG" | jq \
               --arg otelTraceCollectorEndpoint "$OTEL_TRACE_COLLECTOR_ENDPOINT" \
               --arg clientAuthPem "$CLIENT_AUTH_PEM" \
               --argjson captureProxyPodReplicas '{{inputs.parameters.captureProxyPodReplicas}}' \
               --argjson kafkaBrokerReplicas '{{inputs.parameters.kafkaBrokerReplicas}}' \
+              --argjson kafkaNodePoolSpecOverrides "$KAFKA_NODE_POOL_SPEC_OVERRIDES" \
               --argjson trafficTopicPartitions '{{inputs.parameters.trafficTopicPartitions}}' \
               '
               .sourceClusters |= with_entries(.value |= del(.snapshotInfo))
@@ -197,9 +207,11 @@ spec:
                 "kafkaClusterConfiguration": {
                   "default": {
                     "autoCreate": {
-                      "nodePoolSpecOverrides": {
-                        "replicas": $kafkaBrokerReplicas
-                      },
+                      "nodePoolSpecOverrides": (
+                        $kafkaNodePoolSpecOverrides + {
+                          "replicas": $kafkaBrokerReplicas
+                        }
+                      ),
                       "topicSpecOverrides": {
                         "partitions": $trafficTopicPartitions
                       }

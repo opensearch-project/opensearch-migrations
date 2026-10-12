@@ -50,6 +50,8 @@ BUILD  (the load test itself — this directory)
 ──────────────────────────────────────────────────────────────
   TrafficCapture/trafficLoadTest [1] ──Dockerfile──► migrations/k6_runner [2]
     k6 2.2.0 + xk6-redis + scenarios/*.js + lib/** + k6-config/*.env
+  TrafficCapture/trafficLoadTest/k6Operator ───────► migrations/k6_operator [2a]
+    pinned upstream v1.5.0 + local termination-message result transport
 
 INSTALL  (opt-in, separate from the migration)
 ──────────────────────────────────────────────────────────────
@@ -88,6 +90,7 @@ USAGE  (console optional — the WorkflowTemplate is the definition)
 |---|---|---|
 | 1 | Scenarios, libs, schemas, presets | `TrafficCapture/trafficLoadTest/{scenarios,lib,data,k6-config}` |
 | 2 | Combined load-test runner | `Dockerfile` here, built by `buildImages/build.gradle` as `migrations/k6_runner` |
+| 2a | Patched load-test operator | `k6Operator/{Dockerfile,patches/**}`, built as `migrations/k6_operator` |
 | 3 | Standalone chart | `deployment/k8s/charts/components/k6LoadTest/` |
 | 4 | k6-operator subchart (TestRun CRD) | `Chart.yaml` dependency → `grafana/k6-operator` |
 | 5 | Per-profile WorkflowTemplates (the run definition) | `templates/k6-workflowtemplates.yaml` + the `scenarios`/`profiles` maps in `values.yaml` |
@@ -110,12 +113,12 @@ unit test keeps each one equal to the chart profile of the same name.
 
 ## Install the load-test chart (opt-in)
 
-Build and push the **load-test runner** first — it carries the executable and scenarios into the
-cluster (locally, `deployment/k8s/fillLocalRegistry.sh` puts it in the dev registry along with the
-other `migrations/*` images):
+Build and push the **load-test images** first. The runner carries the executable and scenarios; the
+patched operator keeps local initializer results in Pod status instead of using logs as a control
+channel. Locally, `deployment/k8s/fillLocalRegistry.sh` puts both in the dev registry:
 
 ```bash
-./gradlew :buildImages:buildKitLoadTestAll       # builds and pushes migrations/k6_runner
+./gradlew :buildImages:buildKitLoadTestAll
 ```
 
 > **Networks that block the public Go module proxy.** This image compiles k6 from source to embed the
@@ -157,13 +160,17 @@ other `migrations/*` images):
 > ./gradlew :buildImages:buildKitLoadTestAll -PregistryEndpoint=<acct>.dkr.ecr.<region>.amazonaws.com/<repo>
 > helm upgrade --install k6-load-test "$CHART" -n ma \
 >   --set image.repository=<acct>.dkr.ecr.<region>.amazonaws.com/<repo> \
->   --set image.tag=migrations_k6_runner_latest
+>   --set image.tag=migrations_k6_runner_latest \
+>   --set k6-operator.manager.image.registry=<acct>.dkr.ecr.<region>.amazonaws.com \
+>   --set k6-operator.manager.image.repository=<repo> \
+>   --set k6-operator.manager.image.tag=migrations_k6_operator_latest
 > ```
 > The test runner does exactly this for you when given `--k6-runner-image` (or, as a fallback,
 > `--registry-prefix`) — see [Integration test](#integration-test).
 
-The chart depends on the `k6-operator` subchart, so vendor that once, then install into the
-migration namespace (`ma`), pointing `image.repository` at wherever the runner landed:
+The chart depends on the upstream `k6-operator` subchart for its Kubernetes resources, but uses the
+repository's narrowly patched controller image. Build the load-test image set, vendor the subchart,
+then install into the migration namespace (`ma`) with both image locations:
 
 ```bash
 CHART=deployment/k8s/charts/components/k6LoadTest
@@ -171,7 +178,10 @@ helm repo add grafana https://grafana.github.io/helm-charts
 helm dependency build "$CHART"          # vendors grafana/k6-operator into charts/
 
 helm upgrade --install k6-load-test "$CHART" -n ma \
-  --set image.repository=<registry>/migrations/k6_runner --set image.tag=latest
+  --set image.repository=<registry>/migrations/k6_runner --set image.tag=latest \
+  --set k6-operator.manager.image.registry=<registry> \
+  --set k6-operator.manager.image.repository=migrations/k6_operator \
+  --set k6-operator.manager.image.tag=latest
 ```
 
 Or let the CDC deploy script do it for you. It submits a capture-and-replay migration config and
@@ -193,7 +203,7 @@ Summing up, there are three ways the chart lands on a cluster - pick by context:
 All three end in the same `helm upgrade --install k6-load-test <chart-path>`; the manual route is the
 general one and the reference for the others. The last two go through
 `deployment/k8s/installK6Chart.sh`, which is the single implementation of that install — it resolves
-the runner image (digest pins and the ECR flat-repo layout) and vendors
+the runner and patched operator images (including the ECR flat-repo layout) and vendors
 the k6-operator subchart. The same script removes the chart again with
 `installK6Chart.sh uninstall`, which is what `deployCdcLoadTestConfig.sh down` calls, so the release
 name is resolved in one place for both directions.
@@ -209,10 +219,9 @@ kubectl -n ma get workflowtemplate k6-ingest-steady \
 ```
 
 Installing the chart needs access to `grafana.github.io` unless the operator subchart is already
-vendored. Running it needs image access to the registry holding `migrations/k6_runner` and to
-`ghcr.io` for the operator controller and starter images. The source-build path pushes the runner to
-ECR, but it does not mirror those upstream operator images, so this setup belongs on public-access
-EKS clusters rather than the isolated-VPC pipeline.
+vendored. Running it needs image access to the registry holding `migrations/k6_runner` and
+`migrations/k6_operator`, plus the version-pinned upstream starter image. The source-build path
+pushes both repository-owned images to the selected registry.
 
 ---
 
@@ -843,7 +852,10 @@ Why the current setup looks the way it does (decision → rationale → alternat
 2. **k6-operator `TestRun` CRs — not an Argo WorkflowTemplate.** Chosen for native distributed
    runners (one test split across `--parallelism` pods via k6 execution segments) and a
    CRD-native lifecycle. *Cost:* a second orchestrator (the operator) alongside Argo — but it is
-   scoped entirely to this opt-in chart. The earlier Argo `k6LoadTest.ts` template was retired.
+   scoped entirely to this opt-in chart. Local TestRuns use the repository's narrow v1.5.0 patch:
+   the initializer writes inspection success and `maxVUs` to `/dev/termination-log`, and the
+   controller reads the terminated container message from the Pod object. Grafana Cloud output
+   retains upstream's full inspect/log path. The earlier Argo `k6LoadTest.ts` template was retired.
 
 3. **One OCI image carries the runtime and scripts — scenarios are not ConfigMaps.** The whole load
    test (`scenarios/`, `lib/`, `k6-config/`) lives here in its natural tree and is published as
@@ -901,11 +913,15 @@ Why the current setup looks the way it does (decision → rationale → alternat
    `Pending`). *Rejected:* hand-writing an `affinity` block per runner — `separate` is the
    CRD-native equivalent, valid since well before the vendored operator v1.5.0.
 
-7. **The custom runner is load-test-only and fully pinned.** `migrations/k6_runner` compiles
+7. **The custom load-test images are load-test-only and fully pinned.** `migrations/k6_runner` compiles
    `xk6-redis` into k6 and disables automatic extension resolution, so test execution performs no
-   runtime code download. Both versions are pinned in the Dockerfile. The image is deliberately **not** published as a release artifact — load testing is a dev/test
-   capability, so it is absent from `publishedRepoByImageName` and from the list `aws-bootstrap.sh` mirrors out of `public.ecr.aws`. It is still an ordinary build target,
-   so `aws-bootstrap.sh --build --with-load-test-images` pushes it to the private ECR registry.
+   runtime code download. Both versions are pinned in the Dockerfile. The patched operator build
+   verifies an immutable upstream source checksum and applies the small repository-owned patch
+   without vendoring upstream source. These images are deliberately **not** published as release
+   artifacts: load testing is a dev/test capability, so they are absent from
+   `publishedRepoByImageName` and from the list `aws-bootstrap.sh` mirrors out of
+   `public.ecr.aws`. They remain ordinary build targets, so
+   `aws-bootstrap.sh --build --with-load-test-images` pushes them to the private ECR registry.
    *Rejected:* publishing a public k6 image, which would make a load generator part of the released
    surface for every customer — and would enable nothing on its own, since the bootstrap never
    installs the k6 chart.

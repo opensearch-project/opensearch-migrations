@@ -21,6 +21,8 @@ spec:
         value: nyc_taxis
       - name: INDEX_NUMBER_OF_SHARDS
         value: "1"
+      - name: PREPARE_INDEX
+        value: "true"
       - name: DURATION
         value: 20s
       - name: authSecretName
@@ -66,8 +68,9 @@ spec:
         tasks:
           - name: prepare-index
             template: prepare-index
+            when: "{{`{{workflow.parameters.PREPARE_INDEX}}`}} == true"
           - name: tester
-            depends: prepare-index.Succeeded
+            depends: prepare-index.Succeeded || prepare-index.Skipped
             template: run-tester
             withParam: "{{`{{workflow.parameters.runs}}`}}"
             arguments:
@@ -87,7 +90,7 @@ spec:
                 - name: noConnectionReuse
                   value: "{{`{{item.noConnectionReuse}}`}}"
           - name: pod-churn
-            depends: prepare-index.Succeeded
+            depends: prepare-index.Succeeded || prepare-index.Skipped
             when: "{{`{{workflow.parameters.podChurnEnabled}}`}} == true"
             template: pod-churn
 
