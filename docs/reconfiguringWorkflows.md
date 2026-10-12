@@ -389,13 +389,16 @@ Migration CRD resources follow a common lifecycle tracked natively in the `.stat
 
 | State | Meaning | Used By |
 | --- | --- | --- |
-| `Initialized` | Placeholder — created by the initialization process but not yet acted upon. | All |
-| `Running` | Work is in progress (deployment rolling out, snapshot copying). | All |
+| `Created` | Placeholder — created by the initialization process but not yet acted upon. | All |
+| `Pending` | Argo is applying work (deployment rolling out, snapshot copying). | All |
 | `Ready` | Infrastructure is healthy, operational, and serving traffic. | **Long-Lived** (Proxy, Kafka) |
 | `Completed` | A finite task has finished successfully. The output is immutable. | **Terminal** (Snapshots) |
+| `Deleting` | `workflow reset` is tearing the resource down; a VAP rejects updates other than deletion bookkeeping (it does not cover the `/status` subresource). | **Long-Lived**, **Terminal** |
 | `Error` | Execution failed. The resource is "poisoned". | All |
 
-Bootstrap placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with only the minimal bootstrap fields needed up front, plus `status.phase: Initialized` and an empty `status.configChecksum`. The workflow's first successful `tryApply` writes the real desired spec contract.
+ApprovalGates have their own lifecycle: `Created`, then `Pending` while waiting for approval, then `Approved`, or `Error`.
+
+Bootstrap placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with only the minimal bootstrap fields needed up front, plus `status.phase: Created` and, except for ApprovalGates, an empty `status.configChecksum`. The workflow's first successful `tryApply` writes the real desired spec contract.
 
 ### The "Fail Forward / Poison Resource" Principle
 
@@ -497,7 +500,7 @@ validations:
 
 ```
 
-*(Note: There is explicitly **no** "Running Guard" in this architecture. Long-lived infrastructure supports native K8s stacked rollouts. If a Proxy is `Running`, the user is free to push a corrective workflow over it immediately, governed purely by the standard Gated/Impossible field checks).*
+*(Note: There is explicitly **no** guard on `Pending` resources in this architecture. Long-lived infrastructure supports native K8s stacked rollouts. If a Proxy is `Pending`, the user is free to push a corrective workflow over it immediately, governed purely by the standard Gated/Impossible field checks).*
 
 ### CRD Upgrade "In-Flight" Handling
 
@@ -542,7 +545,7 @@ If the Kafka cluster config changes, its checksum changes, which cascades throug
 **Runtime flow:**
 
 1. Config processor computes all checksums and includes them in the workflow config
-2. The initializer creates placeholder CRDs with `status.phase: Initialized`, an empty `status.configChecksum`, and only the minimal bootstrap fields needed before the workflow starts
+2. The initializer creates placeholder CRDs with `status.phase: Created`, an empty `status.configChecksum` (except ApprovalGates), and only the minimal bootstrap fields needed before the workflow starts
 3. The initializer also emits helper scripts because CRD status must be patched through the `/status` subresource separately from the initial create/apply
 4. Lifecycle templates only stamp the final success state and the new `status.configChecksum` after the child-resource subtree succeeds
 5. Waiters compare both lifecycle state and checksum for CRDs, and compare Strimzi readiness plus a checksum annotation for Kafka
@@ -620,8 +623,8 @@ the migration-console image; they are not hand-maintained Helm templates.
 
 Each resource is a single CRD with configuration in `.spec` and lifecycle in `.status.phase`. Choose the lifecycle type:
 
-* **Long-lived** (proxy, replayer): phases `[Initialized, Running, Ready, Error]`
-* **Terminal** (snapshot, migration job): phases `[Initialized, Running, Completed, Error]`
+* **Long-lived** (proxy, replayer): phases `[Created, Pending, Ready, Deleting, Error]`
+* **Terminal** (snapshot, migration job): phases `[Created, Pending, Completed, Deleting, Error]`
 
 Include a typed schema for every spec field — don't use `x-kubernetes-preserve-unknown-fields` on the spec root. This enables CEL field-level comparisons in VAPs.
 
@@ -682,7 +685,7 @@ includes the resource in `lock-on-complete-policy`.
 
 ### 5. Add initializer placeholder
 
-In `migrationInitializer.ts`, create the resource with only the minimal bootstrap fields it needs before workflow execution (for example, dependency links or identity fields needed by waiters), plus `status: { phase: "Initialized", configChecksum: "" }`. Do **not** duplicate the full desired spec contract in the initializer; the workflow-owned `tryApply` step is the canonical place that writes the full root spec.
+In `migrationInitializer.ts`, create the resource with only the minimal bootstrap fields it needs before workflow execution (for example, dependency links or identity fields needed by waiters), plus `status: { phase: "Created", configChecksum: "" }`. Do **not** duplicate the full desired spec contract in the initializer; the workflow-owned `tryApply` step is the canonical place that writes the full root spec.
 
 If the resource is a CRD with a status subresource, make sure the initializer also emits the corresponding status patch handling in the generated resource handler script.
 
@@ -757,7 +760,7 @@ Call the lifecycle template from `fullMigration.ts` (or the appropriate orchestr
 Create a test pod in `templates/tests/` modeled on `test-vap-kafka.yaml`. The test should:
 
 1. Create the resource
-2. Apply a spec (should succeed on `Initialized`)
+2. Apply a spec (should succeed on `Created`)
 3. Try an Impossible field change (should fail)
 4. Try a Gated field change without approval (should fail)
 5. Add matching run label + approval annotation, retry the Gated change (should succeed)
