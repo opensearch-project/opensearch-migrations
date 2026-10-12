@@ -321,7 +321,7 @@ class WakeupAgainstRealKafkaTest {
         var port = new KafkaConsumerSourcePort(consumer, LONG_POLL);
 
         controller.enterProtectedOperation();
-        KafkaSourcePort.CommitOutcome outcome;
+        KafkaSourcePort.CommitResult outcome;
         try {
             queue.submit(generationCleanupFinished(topicPartition));
             assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_DEFERRED, 1);
@@ -335,7 +335,7 @@ class WakeupAgainstRealKafkaTest {
         }
 
         Assertions.assertEquals(
-            KafkaSourcePort.CommitOutcome.ACKNOWLEDGED,
+            KafkaSourcePort.CommitResult.acknowledged(),
             outcome,
             "the commit was disturbed, which is what deferring the wakeup exists to prevent"
         );

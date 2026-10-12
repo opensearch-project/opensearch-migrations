@@ -44,7 +44,18 @@ public interface KafkaSourcePort {
      * poll error, because an empty result is indistinguishable from a partition with nothing to read and
      * would silently stall the source instead of ending the process.
      */
-    Map<TopicPartition, List<PolledKafkaRecord>> poll();
+    Map<TopicPartition, List<PolledKafkaRecord>> poll(Duration maximumWait);
+
+    /**
+     * Polls using the port's configured timeout.
+     *
+     * <p>The owner supplies a shorter bound while a commit retry is backing off, so Kafka polling itself is
+     * the Kafka-aware wait for the retry deadline. Direct adapter callers that do not own such a deadline use
+     * this convenience form.</p>
+     */
+    default Map<TopicPartition, List<PolledKafkaRecord>> poll() {
+        return poll(Duration.ofNanos(Long.MAX_VALUE));
+    }
 
     void pause(TopicPartition topicPartition);
 
@@ -69,7 +80,7 @@ public interface KafkaSourcePort {
      */
     AsyncCommitSubmission commitAsync(
         Map<TopicPartition, CommitPoint> commitPoints,
-        Consumer<CommitOutcome> onResolved
+        Consumer<CommitResult> onResolved
     );
 
     /**
@@ -82,9 +93,9 @@ public interface KafkaSourcePort {
      */
     // The warning targets the compiler-generated canonical constructor of this public contract record.
     @SuppressWarnings("java:S100")
-    record AsyncCommitSubmission(boolean accepted, CommitOutcome rejectionOutcome) {
+    record AsyncCommitSubmission(boolean accepted, CommitResult rejection) {
         public AsyncCommitSubmission {
-            if (accepted == (rejectionOutcome != null)) {
+            if (accepted == (rejection != null)) {
                 throw new IllegalArgumentException(
                     "accepted submissions have no rejection outcome; rejected submissions require one"
                 );
@@ -95,8 +106,8 @@ public interface KafkaSourcePort {
             return new AsyncCommitSubmission(true, null);
         }
 
-        public static AsyncCommitSubmission rejectedBeforeAcceptance(@NonNull CommitOutcome outcome) {
-            return new AsyncCommitSubmission(false, outcome);
+        public static AsyncCommitSubmission rejectedBeforeAcceptance(@NonNull CommitResult rejection) {
+            return new AsyncCommitSubmission(false, rejection);
         }
     }
 
@@ -110,7 +121,7 @@ public interface KafkaSourcePort {
      * of one second, and overrunning the rebalance timeout fences the member and turns this graceful
      * revocation into a lost one.
      */
-    CommitOutcome commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound);
+    CommitResult commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound);
 
     /**
      * One durable replay watermark committed atomically for a partition.
@@ -161,5 +172,52 @@ public interface KafkaSourcePort {
          * distinctions commit handling keeps apart, and commit handling spans both.
          */
         LATE_CALLBACK
+    }
+
+    /**
+     * A fixed-cardinality operational explanation for a failed commit.
+     *
+     * <p>This deliberately carries no exception message, broker, topic, partition, generation, or offset.
+     * Those details remain in bounded logs while metrics aggregate safely across a fleet.</p>
+     */
+    enum CommitFailureClass {
+        NONE,
+        REBALANCE,
+        COORDINATOR,
+        TIMEOUT,
+        TRANSPORT,
+        WAKEUP,
+        OTHER
+    }
+
+    /** One commit outcome together with its bounded operational failure classification. */
+    record CommitResult(
+        @NonNull CommitOutcome outcome,
+        @NonNull CommitFailureClass failureClass
+    ) {
+        public CommitResult {
+            if ((outcome == CommitOutcome.ACKNOWLEDGED)
+                != (failureClass == CommitFailureClass.NONE)) {
+                throw new IllegalArgumentException(
+                    "acknowledged commits require NONE; failed commits require a failure class"
+                );
+            }
+            if (outcome == CommitOutcome.LATE_CALLBACK) {
+                throw new IllegalArgumentException(
+                    "LATE_CALLBACK is assigned by the owner, not returned by a port"
+                );
+            }
+        }
+
+        public static CommitResult acknowledged() {
+            return new CommitResult(CommitOutcome.ACKNOWLEDGED, CommitFailureClass.NONE);
+        }
+
+        public static CommitResult failed(
+            @NonNull CommitOutcome outcome,
+            @NonNull CommitFailureClass failureClass
+        ) {
+            return new CommitResult(outcome, failureClass);
+        }
     }
 }

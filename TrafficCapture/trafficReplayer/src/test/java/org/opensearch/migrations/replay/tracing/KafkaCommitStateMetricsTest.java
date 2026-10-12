@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.tracing;
 import java.util.Set;
 
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 import io.opentelemetry.api.common.Attributes;
@@ -42,6 +43,11 @@ class KafkaCommitStateMetricsTest {
         metrics.commitResolved(KafkaSourceOwner.CommitResolution.ACKNOWLEDGED);
         metrics.commitResolved(KafkaSourceOwner.CommitResolution.REJECTED);
         metrics.commitResolved(KafkaSourceOwner.CommitResolution.OUTCOME_UNKNOWN);
+        metrics.commitRetryDegradedChanged(1);
+        metrics.commitRetryAttempted(KafkaSourcePort.CommitFailureClass.COORDINATOR);
+        metrics.commitRetryAttempted(KafkaSourcePort.CommitFailureClass.TRANSPORT);
+        metrics.commitRetryDegradedChanged(-1);
+        metrics.commitRetryRecovered();
 
         var recorded = telemetry.getFinishedMetrics();
         assertPoint(recorded, KafkaCommitStateMetrics.MetricNames.RECORDS_READ, Attributes.empty(), 8);
@@ -59,6 +65,36 @@ class KafkaCommitStateMetricsTest {
             KafkaCommitStateMetrics.MetricNames.COMMIT_ATTEMPTS_REJECTED,
             Attributes.empty(),
             2
+        );
+        assertPoint(
+            recorded,
+            KafkaCommitStateMetrics.MetricNames.COMMIT_RETRY_DEGRADED,
+            Attributes.empty(),
+            0
+        );
+        assertPoint(
+            recorded,
+            KafkaCommitStateMetrics.MetricNames.COMMIT_RETRY_RECOVERIES,
+            Attributes.empty(),
+            1
+        );
+        assertPoint(
+            recorded,
+            KafkaCommitStateMetrics.MetricNames.COMMIT_RETRY_ATTEMPTS,
+            Attributes.of(
+                KafkaCommitStateMetrics.FAILURE_CLASS_ATTRIBUTE,
+                "coordinator"
+            ),
+            1
+        );
+        assertPoint(
+            recorded,
+            KafkaCommitStateMetrics.MetricNames.COMMIT_RETRY_ATTEMPTS,
+            Attributes.of(
+                KafkaCommitStateMetrics.FAILURE_CLASS_ATTRIBUTE,
+                "transport"
+            ),
+            1
         );
 
         for (var cause : KafkaSourceOwner.AbandonmentCause.values()) {
@@ -104,6 +140,14 @@ class KafkaCommitStateMetricsTest {
                 Attributes.of(KafkaCommitStateMetrics.OUTCOME_ATTRIBUTE, "acknowledged"),
                 Attributes.of(KafkaCommitStateMetrics.OUTCOME_ATTRIBUTE, "rejected"),
                 Attributes.of(KafkaCommitStateMetrics.OUTCOME_ATTRIBUTE, "outcome_unknown")
+            )
+        );
+        assertAttributeSets(
+            recorded,
+            KafkaCommitStateMetrics.MetricNames.COMMIT_RETRY_ATTEMPTS,
+            Set.of(
+                Attributes.of(KafkaCommitStateMetrics.FAILURE_CLASS_ATTRIBUTE, "coordinator"),
+                Attributes.of(KafkaCommitStateMetrics.FAILURE_CLASS_ATTRIBUTE, "transport")
             )
         );
     }

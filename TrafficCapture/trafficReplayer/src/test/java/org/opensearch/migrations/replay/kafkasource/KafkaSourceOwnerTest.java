@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -23,6 +24,7 @@ import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
+import org.opensearch.migrations.replay.testing.TestLogAppender;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
@@ -32,9 +34,12 @@ import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import org.apache.kafka.common.TopicPartition;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * Covers the Kafka-side cases in {@code kafkaLLD §17.4} and the exit properties Plan A names for G2, driving
@@ -49,6 +54,12 @@ class KafkaSourceOwnerTest {
     private static final TopicPartition PARTITION_0 = new TopicPartition("traffic", 0);
     private static final TopicPartition PARTITION_1 = new TopicPartition("traffic", 1);
     private static final Duration GRACE = Duration.ofMillis(200);
+
+    private enum DelayedCommitFailure {
+        RETRIABLE,
+        OUTCOME_UNKNOWN,
+        REJECTED_BEFORE_ACCEPTANCE
+    }
 
     private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, true);
     private final AtomicLong clockNanos = new AtomicLong();
@@ -70,6 +81,7 @@ class KafkaSourceOwnerTest {
      * of reach.
      */
     private boolean nextWaitConsumesTheWholeInterval;
+    private Runnable nextGraceWaitAction = () -> {};
     private final KafkaSourceInputQueue sourceInputs = new KafkaSourceInputQueue(wakeupController);
     private final RecordingMetrics commitMetrics = new RecordingMetrics();
 
@@ -78,6 +90,62 @@ class KafkaSourceOwnerTest {
         Assertions.assertEquals(
             Duration.ofSeconds(1),
             KafkaSourceOwner.DEFAULT_REVOCATION_GRACE
+        );
+    }
+
+    @Test
+    void commitRetryBackoffGrowsExponentiallyAndStopsAtTheCap() {
+        var policy = KafkaSourceOwner.randomizedExponentialCommitRetryDelay(
+            Duration.ofMillis(100),
+            Duration.ofSeconds(5),
+            0.20,
+            () -> 0.0
+        );
+
+        Assertions.assertEquals(Duration.ofMillis(100), policy.delayAfterFailure(1));
+        Assertions.assertEquals(Duration.ofMillis(200), policy.delayAfterFailure(2));
+        Assertions.assertEquals(Duration.ofMillis(400), policy.delayAfterFailure(3));
+        Assertions.assertEquals(Duration.ofMillis(800), policy.delayAfterFailure(4));
+        Assertions.assertEquals(Duration.ofMillis(1_600), policy.delayAfterFailure(5));
+        Assertions.assertEquals(Duration.ofMillis(3_200), policy.delayAfterFailure(6));
+        Assertions.assertEquals(Duration.ofSeconds(5), policy.delayAfterFailure(7));
+        Assertions.assertEquals(Duration.ofSeconds(5), policy.delayAfterFailure(100));
+    }
+
+    @Test
+    void commitRetryJitterIsBoundedAndSampledOncePerOwnerPolicy() {
+        var samples = new AtomicLong();
+        var policy = KafkaSourceOwner.randomizedExponentialCommitRetryDelay(
+            Duration.ofMillis(100),
+            Duration.ofSeconds(5),
+            0.20,
+            () -> {
+                samples.incrementAndGet();
+                return 0.75;
+            }
+        );
+
+        Assertions.assertEquals(1, samples.get(), "process jitter must be sampled once");
+        Assertions.assertEquals(Duration.ofMillis(85), policy.delayAfterFailure(1));
+        Assertions.assertEquals(Duration.ofMillis(170), policy.delayAfterFailure(2));
+        Assertions.assertEquals(Duration.ofMillis(85), policy.delayAfterFailure(1));
+        Assertions.assertEquals(Duration.ofMillis(4_250), policy.delayAfterFailure(100));
+        Assertions.assertEquals(1, samples.get(), "retries must retain the process-local jitter");
+
+        var lowerBound = KafkaSourceOwner.randomizedExponentialCommitRetryDelay(
+            Duration.ofMillis(100),
+            Duration.ofSeconds(5),
+            0.20,
+            () -> Math.nextDown(1.0)
+        );
+        Assertions.assertTrue(
+            lowerBound.delayAfterFailure(1).compareTo(Duration.ofMillis(80)) >= 0
+        );
+        Assertions.assertTrue(
+            lowerBound.delayAfterFailure(100).compareTo(Duration.ofSeconds(4)) >= 0
+        );
+        Assertions.assertTrue(
+            lowerBound.delayAfterFailure(100).compareTo(Duration.ofSeconds(5)) <= 0
         );
     }
 
@@ -226,6 +294,29 @@ class KafkaSourceOwnerTest {
         KafkaSourceOwner.ProtocolViolationHandler protocolViolationHandler,
         Duration heartbeatInterval
     ) {
+        return ownerFor(
+            port,
+            cancellationGrace,
+            recordContextFactory,
+            protocolViolationHandler,
+            heartbeatInterval,
+            KafkaSourceOwner.randomizedExponentialCommitRetryDelay(
+                KafkaSourceOwner.DEFAULT_INITIAL_COMMIT_RETRY_DELAY,
+                KafkaSourceOwner.DEFAULT_MAXIMUM_COMMIT_RETRY_DELAY,
+                KafkaSourceOwner.DEFAULT_COMMIT_RETRY_JITTER_FRACTION,
+                () -> 0.0
+            )
+        );
+    }
+
+    private KafkaSourceOwner ownerFor(
+        PumpedKafkaSource port,
+        Duration cancellationGrace,
+        KafkaSourceOwner.RecordContextFactory recordContextFactory,
+        KafkaSourceOwner.ProtocolViolationHandler protocolViolationHandler,
+        Duration heartbeatInterval,
+        KafkaSourceOwner.CommitRetryDelayPolicy commitRetryDelayPolicy
+    ) {
         return new KafkaSourceOwner(
             port,
             sourceInputs,
@@ -239,6 +330,9 @@ class KafkaSourceOwnerTest {
             // when it did nothing of the kind -- the revocation test asserting that force cancellation follows
             // the grace period would have passed while cancelling immediately.
             deadline -> {
+                var graceWaitAction = nextGraceWaitAction;
+                nextGraceWaitAction = () -> {};
+                graceWaitAction.run();
                 // Deadline first, exactly as GraceIntervalWait.blockingOn does. Checking the queue first made
                 // the fake more permissive than production and put "deadline passed with inputs still queued"
                 // out of reach -- which is the state a commit-with-no-grace-left is reached from.
@@ -258,7 +352,8 @@ class KafkaSourceOwnerTest {
             commitMetrics,
             recordContextFactory,
             protocolViolationHandler,
-            heartbeatInterval
+            heartbeatInterval,
+            commitRetryDelayPolicy
         );
     }
 
@@ -269,10 +364,15 @@ class KafkaSourceOwnerTest {
         private long recordsCommitIneligible;
         private long recordsOutstanding;
         private long commitAttemptsRejected;
+        private long commitRetryAttempts;
+        private long commitRetryDegraded;
+        private long commitRetryRecoveries;
         private final EnumMap<KafkaSourceOwner.AbandonmentCause, Long> abandoned =
             new EnumMap<>(KafkaSourceOwner.AbandonmentCause.class);
         private final EnumMap<KafkaSourceOwner.CommitResolution, Long> resolutions =
             new EnumMap<>(KafkaSourceOwner.CommitResolution.class);
+        private final EnumMap<KafkaSourcePort.CommitFailureClass, Long> retryAttempts =
+            new EnumMap<>(KafkaSourcePort.CommitFailureClass.class);
 
         @Override
         public void recordsRead(long count) {
@@ -315,6 +415,22 @@ class KafkaSourceOwnerTest {
         @Override
         public void commitResolved(KafkaSourceOwner.CommitResolution resolution) {
             resolutions.merge(resolution, 1L, Long::sum);
+        }
+
+        @Override
+        public void commitRetryAttempted(KafkaSourcePort.CommitFailureClass failureClass) {
+            commitRetryAttempts++;
+            retryAttempts.merge(failureClass, 1L, Long::sum);
+        }
+
+        @Override
+        public void commitRetryDegradedChanged(long delta) {
+            commitRetryDegraded += delta;
+        }
+
+        @Override
+        public void commitRetryRecovered() {
+            commitRetryRecoveries++;
         }
 
         private long abandoned(KafkaSourceOwner.AbandonmentCause cause) {
@@ -1440,16 +1556,9 @@ class KafkaSourceOwnerTest {
         }
     }
 
-    /**
-     * An unknown outcome is a property of the operation, so it marks every partition in the batch — including
-     * one that is not being revoked.
-     *
-     * <p>{@code kafkaLLD §5.7}: the outcomes "describe the operation, not individual partitions", and the client
-     * reports one result without saying which positions were recorded. Marking only the revoked partition would
-     * be exactly the per-partition inference §5.7 forbids.
-     */
+    /** A revocation-terminal operation contains only revoked generations, not still-owned partitions. */
     @Test
-    void aBatchedUnknownOutcomeMarksEveryPartitionInTheOperation() throws Exception {
+    void aRevocationTerminalUnknownOutcomeDoesNotMarkARetainedPartition() throws Exception {
         var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
         var owner = ownerFor(port);
         assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
@@ -1484,24 +1593,22 @@ class KafkaSourceOwnerTest {
             "the revoked partition was in the operation"
         );
         Assertions.assertEquals(
-            PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN,
+            PartitionSourceState.CommitUncertainty.NONE_OBSERVED,
             retainedState.commitUncertainty(),
-            "and so was the retained one, which the operation-level result covers just as much"
+            "the retained partition was not part of the terminal operation"
         );
+        Assertions.assertEquals(Optional.of(21L), owner.stagedCommitPosition(PARTITION_1));
     }
 
     /**
-     * A retained partition's uncertainty clears once an acknowledged retry covers the records it restored.
-     *
-     * <p>The revoked partition cannot retry — `§5.7` has it discard rather than re-offer — so only the retained
-     * one recovers. That asymmetry is the point: the diagnostic is not sticky for a partition that goes on to
-     * prove its progress.
+     * A terminal commit for a revoked partition neither consumes nor resets a retained partition's ordinary
+     * retry backoff. The retained partition recovers only when its own later retry is acknowledged.
      */
     @Test
-    void anAcknowledgedRetryClearsARetainedPartitionsUncertainty() throws Exception {
+    void aRetainedPartitionKeepsOrdinaryBackoffAcrossAnotherPartitionsTerminalCommit() throws Exception {
         try (var logs = new CloseableLogSetup(KafkaSourceOwner.class.getName())) {
             var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
-            var owner = ownerFor(port);
+            var owner = ownerFor(port, Duration.ofMillis(50));
             assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
             var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
             var generation1 = owner.partitionState(PARTITION_1).orElseThrow().generation();
@@ -1517,14 +1624,11 @@ class KafkaSourceOwnerTest {
             drainIntake();
             var retainedState = owner.partitionState(PARTITION_1).orElseThrow();
 
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation0, 10)));
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation1, 20)));
             port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
-            port.scriptRebalanceDuringNextPoll(() -> {
-                sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
-                    new KafkaRecordId(generation0, 10)));
-                sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
-                    new KafkaRecordId(generation1, 20)));
-                owner.onPartitionsRevoked(List.of(PARTITION_0));
-            });
             owner.runOnce();
             Assertions.assertEquals(
                 PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN,
@@ -1532,11 +1636,46 @@ class KafkaSourceOwnerTest {
                 "precondition: the retained partition starts uncertain"
             );
 
-            // The unknown outcome re-staged its position and restored its records, so an acknowledgement of the
-            // re-offered position covers them and the earlier uncertainty no longer explains anything.
+            port.clearHistory();
+            port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+            port.scriptRebalanceDuringNextPoll(() ->
+                owner.onPartitionsRevoked(List.of(PARTITION_0)));
+            owner.runOnce();
+
+            var terminalAttempt = port.observations().stream()
+                .filter(PumpedKafkaSource.CommitAttempted.class::isInstance)
+                .map(PumpedKafkaSource.CommitAttempted.class::cast)
+                .findFirst()
+                .orElseThrow();
+            Assertions.assertEquals(
+                Map.of(PARTITION_0, 11L),
+                terminalAttempt.nextPositions(),
+                "retained positions must not be pulled into revocation-terminal work"
+            );
+            Assertions.assertEquals(Optional.of(21L), owner.stagedCommitPosition(PARTITION_1));
+            Assertions.assertEquals(
+                PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN,
+                retainedState.commitUncertainty(),
+                "another partition's terminal acknowledgment does not prove this one committed"
+            );
+
+            port.clearHistory();
+            clockNanos.set(Duration.ofMillis(99).toNanos());
+            owner.runOnce();
+            Assertions.assertTrue(
+                port.history().stream().noneMatch(call -> call.startsWith("commit")),
+                "the retained partition must continue observing its ordinary retry deadline"
+            );
+
+            port.clearHistory();
+            clockNanos.set(Duration.ofMillis(100).toNanos());
             port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
             owner.runOnce();
 
+            Assertions.assertEquals(
+                List.of("commitAsync{traffic-1=21}"),
+                port.history().stream().filter(call -> call.startsWith("commit")).toList()
+            );
             Assertions.assertEquals(
                 PartitionSourceState.CommitUncertainty.NONE_OBSERVED,
                 retainedState.commitUncertainty()
@@ -1935,6 +2074,7 @@ class KafkaSourceOwnerTest {
             new KafkaRecordId(generation, 10)));
 
         owner.runOnce();
+        clockNanos.addAndGet(KafkaSourceOwner.DEFAULT_INITIAL_COMMIT_RETRY_DELAY.toNanos());
         owner.runOnce();
 
         Assertions.assertEquals(
@@ -2112,10 +2252,10 @@ class KafkaSourceOwnerTest {
      * not retry or wait indefinitely for a commit" — it does not ask a still-owned partition to discard a
      * position it has already computed. Abandoning it would mean waiting for the next
      * {@code RecordProcessingFinished} to re-derive the same prefix, which head-of-line blocking can delay
-     * indefinitely. Reissuing is paced by the loop: one attempt per iteration, each of which also polls.
+     * indefinitely. Reissuing is paced by a monotonic owner-local deadline while polling continues.
      */
     @Test
-    void aRejectedCommitTellsIntakeNothingAndIsReissuedOncePerIteration() {
+    void aRejectedCommitPollsButIsNotReissuedBeforeTheBackoffDeadline() {
         var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
@@ -2125,23 +2265,425 @@ class KafkaSourceOwnerTest {
         owner.runOnce();
         sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
             new KafkaRecordId(generation, 10)));
-        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        port.scriptCommitAsyncRejection(KafkaSourcePort.CommitOutcome.RETRIABLE);
         drainIntake();
-        port.clearHistory();
 
+        owner.runOnce();
+        port.clearHistory();
+        clockNanos.set(
+            KafkaSourceOwner.DEFAULT_INITIAL_COMMIT_RETRY_DELAY.minusNanos(1).toNanos()
+        );
+        owner.runOnce();
         owner.runOnce();
         owner.runOnce();
 
         var commits = port.history().stream().filter(c -> c.startsWith("commit")).toList();
+        Assertions.assertTrue(
+            commits.isEmpty(),
+            () -> "retry must remain delayed before its deadline: " + port.history()
+        );
+        var polls = port.observations().stream()
+            .filter(PumpedKafkaSource.Polled.class::isInstance)
+            .map(PumpedKafkaSource.Polled.class::cast)
+            .toList();
+        Assertions.assertEquals(3, polls.size(), "every loop must continue polling");
+        Assertions.assertTrue(
+            polls.stream().allMatch(poll -> poll.maximumWait().equals(Duration.ofNanos(1))),
+            () -> "poll should block for the remaining retry delay instead of busy-spinning: " + polls
+        );
+
+        clockNanos.set(KafkaSourceOwner.DEFAULT_INITIAL_COMMIT_RETRY_DELAY.toNanos());
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+        owner.runOnce();
+
         Assertions.assertEquals(
-            List.of("commitAsync{traffic-0=11}", "commitAsync{traffic-0=11}"),
-            commits,
-            () -> "expected one attempt per iteration, not a spin and not abandonment: " + port.history()
+            List.of("commitAsync{traffic-0=11}"),
+            port.history().stream().filter(c -> c.startsWith("commit")).toList(),
+            () -> "exactly one retry becomes eligible at the deadline: " + port.history()
         );
         Assertions.assertTrue(drainIntake().isEmpty(), "a commit outcome must not travel back to intake");
+        Assertions.assertTrue(owner.stagedCommitPosition(PARTITION_0).isEmpty());
+        Assertions.assertEquals(1, commitMetrics.commitAttemptsRejected);
+        Assertions.assertEquals(1, commitMetrics.commitRetryAttempts);
+        Assertions.assertEquals(0, commitMetrics.commitRetryDegraded);
+        Assertions.assertEquals(1, commitMetrics.commitRetryRecoveries);
+    }
+
+    @ParameterizedTest
+    @EnumSource(DelayedCommitFailure.class)
+    void aDelayedCommitReceivesExactlyOneTerminalOpportunityDuringRevocation(
+        DelayedCommitFailure delayedFailure
+    ) throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        switch (delayedFailure) {
+            case RETRIABLE ->
+                port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+            case OUTCOME_UNKNOWN ->
+                port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
+            case REJECTED_BEFORE_ACCEPTANCE ->
+                port.scriptCommitAsyncRejection(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        }
+        owner.runOnce();
+        Assertions.assertEquals(
+            Optional.of(11L),
+            owner.stagedCommitPosition(PARTITION_0),
+            "the failed ordinary attempt must be retained under backoff"
+        );
+        port.clearHistory();
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        var terminalAttempts = port.observations().stream()
+            .filter(PumpedKafkaSource.CommitAttempted.class::isInstance)
+            .map(PumpedKafkaSource.CommitAttempted.class::cast)
+            .toList();
+        Assertions.assertEquals(
+            1,
+            terminalAttempts.size(),
+            () -> delayedFailure + " must receive one terminal opportunity: " + port.history()
+        );
+        Assertions.assertEquals(
+            Map.of(PARTITION_0, 11L),
+            terminalAttempts.get(0).nextPositions()
+        );
+        Assertions.assertTrue(owner.partitionState(PARTITION_0).isEmpty());
+        Assertions.assertTrue(owner.stagedCommitPosition(PARTITION_0).isEmpty());
+
+        port.clearHistory();
+        clockNanos.addAndGet(Duration.ofSeconds(10).toNanos());
+        owner.runOnce();
+        owner.runOnce();
+
         Assertions.assertTrue(
-            owner.stagedCommitPosition(PARTITION_0).isPresent(),
-            "the position stays staged while the partition is still owned"
+            port.history().stream().noneMatch(call -> call.startsWith("commit")),
+            () -> "terminal work must not be retried after callback return: " + port.history()
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+        value = KafkaSourcePort.CommitOutcome.class,
+        names = {"RETRIABLE", "GENERATION_STALE", "OUTCOME_UNKNOWN"}
+    )
+    void aFailedTerminalRevocationAttemptIsNeverRestaged(
+        KafkaSourcePort.CommitOutcome finalOutcome
+    ) throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptCommitAsyncRejection(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        owner.runOnce();
+        port.clearHistory();
+        port.scriptCommitOutcome(finalOutcome);
+
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        Assertions.assertEquals(
+            1,
+            port.history().stream().filter(call -> call.startsWith("commitSync")).count(),
+            () -> "revocation must make one terminal attempt: " + port.history()
+        );
+        Assertions.assertTrue(owner.partitionState(PARTITION_0).isEmpty());
+        Assertions.assertTrue(owner.stagedCommitPosition(PARTITION_0).isEmpty());
+        Assertions.assertEquals(0, commitMetrics.commitRetryDegraded);
+
+        port.clearHistory();
+        clockNanos.addAndGet(Duration.ofSeconds(10).toNanos());
+        owner.runOnce();
+        owner.runOnce();
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            port.history().stream().noneMatch(call -> call.startsWith("commit")),
+            () -> finalOutcome + " terminal result must never enter ordinary retry: " + port.history()
+        );
+    }
+
+    @Test
+    void newerProgressSupersedesADelayedPointBeforeTheTerminalRevocationAttempt() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10), record(12))));
+        owner.runOnce();
+        drainIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        owner.runOnce();
+        Assertions.assertEquals(Optional.of(11L), owner.stagedCommitPosition(PARTITION_0));
+        port.clearHistory();
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+
+        nextGraceWaitAction = () -> sourceInputs.submit(
+            new KafkaSourceInput.RecordProcessingFinished(new KafkaRecordId(generation, 12))
+        );
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        var terminalAttempt = port.observations().stream()
+            .filter(PumpedKafkaSource.CommitAttempted.class::isInstance)
+            .map(PumpedKafkaSource.CommitAttempted.class::cast)
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(
+            Map.of(PARTITION_0, 13L),
+            terminalAttempt.nextPositions(),
+            "queued progress must merge before the generation spends its terminal attempt"
+        );
+        Assertions.assertEquals(2, commitMetrics.recordsCommitted);
+    }
+
+    @Test
+    void progressAfterTheTerminalAttemptDoesNotCreateARevocationRetryLoop() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10), record(12))));
+        owner.runOnce();
+        drainIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        owner.runOnce();
+        port.clearHistory();
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+        port.onObservation(call -> {
+            if (call.startsWith("commitSync")) {
+                sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                    new KafkaRecordId(generation, 12)));
+            }
+        });
+
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        var terminalAttempts = port.observations().stream()
+            .filter(PumpedKafkaSource.CommitAttempted.class::isInstance)
+            .map(PumpedKafkaSource.CommitAttempted.class::cast)
+            .toList();
+        Assertions.assertEquals(
+            1,
+            terminalAttempts.size(),
+            () -> "one generation may spend only one terminal attempt: " + port.history()
+        );
+        Assertions.assertEquals(Map.of(PARTITION_0, 11L), terminalAttempts.get(0).nextPositions());
+        Assertions.assertTrue(owner.partitionState(PARTITION_0).isEmpty());
+        Assertions.assertTrue(owner.stagedCommitPosition(PARTITION_0).isEmpty());
+    }
+
+    @Test
+    void partitionsLostDiscardsDelayedWorkWithoutAFinalAttempt() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        owner.runOnce();
+        Assertions.assertEquals(Optional.of(11L), owner.stagedCommitPosition(PARTITION_0));
+        port.clearHistory();
+
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsLost(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            port.history().stream().noneMatch(call -> call.startsWith("commit")),
+            () -> "lost ownership has no graceful final-commit opportunity: " + port.history()
+        );
+        Assertions.assertTrue(owner.partitionState(PARTITION_0).isEmpty());
+        Assertions.assertTrue(owner.stagedCommitPosition(PARTITION_0).isEmpty());
+        Assertions.assertEquals(0, commitMetrics.commitRetryDegraded);
+    }
+
+    @Test
+    void anAcknowledgmentResetsTheNextFailureToTheInitialBackoff() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10), record(12))));
+        owner.runOnce();
+        drainIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        owner.runOnce();
+
+        clockNanos.set(Duration.ofMillis(100).toNanos());
+        owner.runOnce();
+        clockNanos.set(Duration.ofMillis(300).toNanos());
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+        owner.runOnce();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 12)));
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        owner.runOnce();
+        port.clearHistory();
+
+        owner.runOnce();
+
+        var lastPoll = port.observations().stream()
+            .filter(PumpedKafkaSource.Polled.class::isInstance)
+            .map(PumpedKafkaSource.Polled.class::cast)
+            .reduce((first, second) -> second)
+            .orElseThrow();
+        Assertions.assertEquals(
+            KafkaSourceOwner.DEFAULT_INITIAL_COMMIT_RETRY_DELAY,
+            lastPoll.maximumWait(),
+            "a later degraded episode must restart at the initial delay"
+        );
+        Assertions.assertEquals(1, commitMetrics.commitRetryRecoveries);
+        Assertions.assertEquals(1, commitMetrics.commitRetryDegraded);
+    }
+
+    @Test
+    void commitRetryLoggingAndMetricsAreTransitionBounded() {
+        try (var logs = new TestLogAppender(KafkaSourceOwner.class)) {
+            var port = pumpedSource(List.of(PARTITION_0));
+            var owner = ownerFor(port);
+            var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation, 1)));
+            port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+            owner.runOnce();
+            drainIntake();
+
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation, 10)));
+            port.scriptCommitResult(KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.RETRIABLE,
+                KafkaSourcePort.CommitFailureClass.COORDINATOR
+            ));
+            owner.runOnce();
+            owner.runOnce();
+            owner.runOnce();
+
+            clockNanos.set(Duration.ofMillis(100).toNanos());
+            owner.runOnce();
+
+            Assertions.assertEquals(1, logs.count("kafka_commit_retry_degraded", Level.WARN));
+            Assertions.assertEquals(0, logs.count("kafka_commit_retry_recovered", Level.INFO));
+            Assertions.assertEquals(0, logs.count("kafka_commit_uncertain", Level.WARN));
+            Assertions.assertEquals(1, commitMetrics.commitRetryAttempts);
+            Assertions.assertEquals(1, commitMetrics.commitRetryDegraded);
+            Assertions.assertEquals(
+                1,
+                commitMetrics.retryAttempts.getOrDefault(
+                    KafkaSourcePort.CommitFailureClass.COORDINATOR,
+                    0L
+                )
+            );
+
+            clockNanos.set(Duration.ofMillis(300).toNanos());
+            port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+            owner.runOnce();
+
+            Assertions.assertEquals(1, logs.count("kafka_commit_retry_degraded", Level.WARN));
+            Assertions.assertEquals(1, logs.count("kafka_commit_retry_recovered", Level.INFO));
+            Assertions.assertEquals(0, logs.count("kafka_commit_uncertain", Level.WARN));
+            Assertions.assertTrue(logs.contains(
+                "kafka_commit_retry_degraded",
+                "outcome=RETRIABLE",
+                "failure_class=COORDINATOR",
+                "retry_delay_ms=100"
+            ));
+            Assertions.assertTrue(logs.contains(
+                "kafka_commit_retry_recovered",
+                "failed_attempts=2"
+            ));
+            Assertions.assertEquals(2, commitMetrics.commitRetryAttempts);
+            Assertions.assertEquals(0, commitMetrics.commitRetryDegraded);
+            Assertions.assertEquals(1, commitMetrics.commitRetryRecoveries);
+        }
+    }
+
+    @Test
+    void revocationTerminalCommitDoesNotCrossIntoAReassignedSuccessor() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
+        owner.runOnce();
+        port.clearHistory();
+
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        Assertions.assertEquals(
+            List.of("commitSync{traffic-0=11}"),
+            port.history().stream().filter(call -> call.startsWith("commit")).toList(),
+            () -> "the retiring generation must receive one terminal opportunity: " + port.history()
+        );
+        Assertions.assertTrue(owner.stagedCommitPosition(PARTITION_0).isEmpty());
+        Assertions.assertEquals(0, commitMetrics.commitRetryDegraded);
+
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation));
+        port.scriptRebalanceDuringNextPoll(() ->
+            owner.onPartitionsAssigned(List.of(PARTITION_0)));
+        owner.runOnce();
+        port.clearHistory();
+        clockNanos.addAndGet(Duration.ofSeconds(10).toNanos());
+
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            port.history().stream().noneMatch(call -> call.startsWith("commit")),
+            () -> "a successor must never submit its predecessor's delayed position: " + port.history()
+        );
+        Assertions.assertNotEquals(
+            generation,
+            owner.partitionState(PARTITION_0).orElseThrow().generation()
         );
     }
 
@@ -2199,6 +2741,7 @@ class KafkaSourceOwnerTest {
         // Next iteration: the retained positions are offered again, without the dropped one.
         port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
         port.clearHistory();
+        clockNanos.addAndGet(KafkaSourceOwner.DEFAULT_INITIAL_COMMIT_RETRY_DELAY.toNanos());
         owner.runOnce();
 
         var retry = port.history().stream().filter(c -> c.startsWith("commit")).toList();
@@ -2232,6 +2775,7 @@ class KafkaSourceOwnerTest {
         port.clearHistory();
 
         owner.runOnce();
+        clockNanos.addAndGet(KafkaSourceOwner.DEFAULT_INITIAL_COMMIT_RETRY_DELAY.toNanos());
         owner.runOnce();
 
         Assertions.assertEquals(
@@ -2278,6 +2822,7 @@ class KafkaSourceOwnerTest {
         port.scriptResolveAsyncCommits();
         owner.runOnce();
         port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+        clockNanos.addAndGet(KafkaSourceOwner.DEFAULT_INITIAL_COMMIT_RETRY_DELAY.toNanos());
         owner.runOnce();
 
         Assertions.assertEquals(

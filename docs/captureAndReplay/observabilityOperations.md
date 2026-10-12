@@ -119,6 +119,9 @@ in `ReplayIntakeMetrics`; all dimensions are bounded enums.
 | `kafkaSourceRecordsOutstanding` | up-down / records | — | Bounded; drains to zero |
 | `kafkaSourceCommitAttemptsRejected` | counter / attempts | — | Zero or transient |
 | `kafkaSourceCommitResolutions` | counter / events | `outcome` | Acknowledged outcomes dominate |
+| `kafkaSourceCommitRetryAttempts` | counter / attempts | `failure_class` | Low; exponential pacing during an outage |
+| `kafkaSourceCommitRetryDegraded` | up-down / episodes | — | Zero; one while this process is backing off |
+| `kafkaSourceCommitRetryRecoveries` | counter / events | — | Advances when an acknowledged commit ends degradation |
 | `targetAttemptPermitsActive` | up-down / permits | — | At or below configured capacity; drains to zero |
 | `targetAttemptPermitAcquisitionsPending` | up-down / requests | — | Normally zero or short lived |
 | `targetAttemptPermitHeldDuration` | histogram / ms | — | Stable around target latency |
@@ -230,7 +233,8 @@ Useful bounded event names include:
   `capture_broker_time_violation`, `capture_connection_dropped`,
   `capture_publisher_failed`, `capture_shutdown_summary`;
 - replay: `replayer_startup_summary`, `kafka_assignment_changed`,
-  `kafka_generation_retiring`, `kafka_commit_uncertain`,
+  `kafka_generation_retiring`, `kafka_commit_retry_degraded`,
+  `kafka_commit_retry_recovered`,
   `replay_generation_grace_started`, `replay_generation_force_started`,
   `replay_generation_cleanup_finished`, `replay_health`,
   `replay_oldest_record`, `replay_stall_detected`,
@@ -242,6 +246,24 @@ Useful bounded event names include:
 Repeated inner S3 retry failures are DEBUG
 `event=tuple_sink_upload_retry_failed`; the transition into degradation is one WARN,
 and complete recovery is one INFO.
+
+Kafka commit retry follows the same transition discipline:
+`event=kafka_commit_retry_degraded` is one WARN per degraded episode,
+`event=kafka_commit_retry_backoff` and `event=kafka_commit_uncertain` are DEBUG details,
+and `event=kafka_commit_retry_recovered` is one INFO after a later acknowledgment.
+The `failure_class` metric attribute is one of the bounded rebalance, coordinator,
+timeout, transport, wakeup, or other classifications; partition and offset details
+remain bounded log fields rather than metric dimensions.
+
+Commit backoff bounds failure amplification after a commit error; it does not pace
+initial consumer-group admission. A `TrafficReplay` currently creates one
+Kubernetes Deployment at the requested `podReplicas`, without application startup
+jitter or a controller-side join-rate limit. For large fleet increases, raise the
+replica count in batches and wait for assignments to stabilize before the next
+batch. During the ramp, require the degraded gauge to return to zero, retry-attempt
+growth to stop, and broker coordinator and storage saturation signals to remain
+healthy. Cooperative sticky assignment limits partition movement after membership
+changes, but does not remove the initial join/coordinator burst.
 
 Per-attempt target failures, retry exhaustion, source-connection expiration, and
 positive-byte post-response-boundary observations can scale with workload volume

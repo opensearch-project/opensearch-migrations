@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.tracing;
 import java.util.Locale;
 
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
@@ -25,6 +26,8 @@ import lombok.NonNull;
 public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
     public static final AttributeKey<String> CAUSE_ATTRIBUTE = AttributeKey.stringKey("cause");
     public static final AttributeKey<String> OUTCOME_ATTRIBUTE = AttributeKey.stringKey("outcome");
+    public static final AttributeKey<String> FAILURE_CLASS_ATTRIBUTE =
+        AttributeKey.stringKey("failure_class");
     private static final String RECORDS_UNIT = "records";
 
     public static final class MetricNames {
@@ -41,6 +44,12 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
         public static final String COMMIT_ATTEMPTS_REJECTED =
             "kafkaSourceCommitAttemptsRejected";
         public static final String COMMIT_RESOLUTIONS = "kafkaSourceCommitResolutions";
+        public static final String COMMIT_RETRY_ATTEMPTS =
+            "kafkaSourceCommitRetryAttempts";
+        public static final String COMMIT_RETRY_DEGRADED =
+            "kafkaSourceCommitRetryDegraded";
+        public static final String COMMIT_RETRY_RECOVERIES =
+            "kafkaSourceCommitRetryRecoveries";
     }
 
     private final LongCounter recordsRead;
@@ -51,6 +60,9 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
     private final LongUpDownCounter recordsOutstanding;
     private final LongCounter commitAttemptsRejected;
     private final LongCounter commitResolutions;
+    private final LongCounter commitRetryAttempts;
+    private final LongUpDownCounter commitRetryDegraded;
+    private final LongCounter commitRetryRecoveries;
 
     public KafkaCommitStateMetrics(@NonNull Meter meter) {
         recordsRead = meter.counterBuilder(MetricNames.RECORDS_READ)
@@ -84,6 +96,18 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
             .build();
         commitResolutions = meter.counterBuilder(MetricNames.COMMIT_RESOLUTIONS)
             .setDescription("Kafka commit operation resolutions by bounded outcome")
+            .setUnit("events")
+            .build();
+        commitRetryAttempts = meter.counterBuilder(MetricNames.COMMIT_RETRY_ATTEMPTS)
+            .setDescription("Kafka commit retries submitted after owner-local backoff")
+            .setUnit("attempts")
+            .build();
+        commitRetryDegraded = meter.upDownCounterBuilder(MetricNames.COMMIT_RETRY_DEGRADED)
+            .setDescription("Whether Kafka commit processing is currently degraded and retrying")
+            .setUnit("episodes")
+            .build();
+        commitRetryRecoveries = meter.counterBuilder(MetricNames.COMMIT_RETRY_RECOVERIES)
+            .setDescription("Kafka commit retry episodes recovered by an acknowledged commit")
             .setUnit("events")
             .build();
     }
@@ -132,6 +156,26 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
     @Override
     public void commitResolved(@NonNull KafkaSourceOwner.CommitResolution resolution) {
         commitResolutions.add(1, Attributes.of(OUTCOME_ATTRIBUTE, label(resolution)));
+    }
+
+    @Override
+    public void commitRetryAttempted(
+        @NonNull KafkaSourcePort.CommitFailureClass failureClass
+    ) {
+        commitRetryAttempts.add(
+            1,
+            Attributes.of(FAILURE_CLASS_ATTRIBUTE, label(failureClass))
+        );
+    }
+
+    @Override
+    public void commitRetryDegradedChanged(long delta) {
+        commitRetryDegraded.add(delta);
+    }
+
+    @Override
+    public void commitRetryRecovered() {
+        commitRetryRecoveries.add(1);
     }
 
     private static String label(Enum<?> value) {

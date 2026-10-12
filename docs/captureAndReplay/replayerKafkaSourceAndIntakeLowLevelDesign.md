@@ -498,12 +498,16 @@ callback dangerous. The loop polls every iteration and a poll is what delivers t
 asynchronous submission needs nothing extra to make progress.
 
 Inside `onPartitionsRevoked` the owner submits **synchronously**, bounded by the time remaining before
-the grace deadline. **It attempts the commit however little of the interval is left, and there is no minimum
-remainder below which it declines to try.** The work whose position this commits has already been sent to the
-target and cannot be recalled, so every remaining millisecond is worth spending on recording it completely: the
-alternative is not a saving but a guaranteed re-send of traffic the target has already seen. The bound is what
-confines the call, so a small remainder is a small budget rather than a hazard, and a revoked generation's
-position is discarded once the callback returns whether or not the attempt was made. Asynchronous
+the grace deadline. A point already waiting in ordinary retry backoff is held while normally completing
+work advances: the owner waits until cleanup proves no more progress can arrive, or until a final-commit
+window begins. That window reserves the smaller of half the configured grace interval and one second.
+The latest contiguous point then receives the generation's one terminal attempt. **Once the launch boundary
+is reached, it attempts the commit however little of the interval is left, and there is no minimum remainder
+below which it declines to try.** The work whose position this commits has already been sent to the target
+and cannot be recalled, so every remaining millisecond is worth spending on recording it completely: the
+alternative is not a saving but a guaranteed re-send of traffic the target has already seen. The bound is
+what confines the call, so a small remainder is a small budget rather than a hazard, and a revoked
+generation's position is discarded once the callback returns whether or not the attempt was made. Asynchronous
 submission cannot be used there: its callback is delivered by a later poll, and the generation is gone
 before that poll happens. A commit that cannot finish within the remaining grace must not be started,
 because the rest of the interval belongs to force-cancellation delivery (§15.2).
@@ -511,12 +515,56 @@ because the rest of the interval belongs to force-cancellation delivery (§15.2)
 **At most one commit operation is in flight at a time.** Positions submitted and not yet resolved are
 held apart from staged positions, so a partition whose contiguous prefix advances again while its
 commit is outstanding stages the newer position rather than racing a second operation for the same
-partition. This is also what keeps the source from spamming the broker (`procCommit §9.4`).
+partition.
 
 Commit-point merging compares `nextPosition`. The greater position wins together with its matching
 timestamp; the source never combines an offset from one point with a timestamp from another. Two
 points with the same position and different timestamps are an invariant failure. This preserves
 the newer watermark when an uncertain older operation is re-staged after the prefix has advanced.
+
+**Failed commit operations enter owner-local retry backoff.** The first eligible commit is attempted
+immediately. When a nonfatal failed operation leaves at least one same-generation commit point staged,
+the owner records a monotonic retry deadline and does not submit another operation before it. It
+continues calling `poll()` with the smaller of the configured poll timeout and the remaining retry
+delay. Polling therefore continues to deliver heartbeats, rebalance callbacks, commit callbacks, and
+queued-input wakeups while also preventing an event-loop busy spin.
+
+The nominal retry delays are 100 ms, 200 ms, 400 ms, and so on, capped at 5 seconds. Each process
+samples one deterministic-for-that-process jitter multiplier in `(0.8, 1.0]`; actual delays are
+therefore 80–100 percent of the nominal delay and the steady-state cap is 4–5 seconds. Tests inject
+both monotonic time and the jitter sample.
+
+Every nonfatal unsuccessful outcome uses this pacing while the generation remains ordinarily owned:
+
+- **retriable** failures require caller retry and must not be resubmitted in the same hot loop;
+- **generation-stale** failures wait for polling to finish the rebalance. A retained partition may
+  then retry under the refreshed broker generation; a generation entering its revocation callback
+  instead converts its delayed point into terminal work;
+- **outcome-unknown** failures may already have committed, but retrying the same or a later offset is
+  idempotent and still must be paced; and
+- **rejected-before-acceptance** submissions are known not to have moved the broker position, but the
+  local or coordinator condition that rejected them may persist, so they use the same pacing.
+
+An acknowledgment resets the consecutive-failure count and retry deadline. A newer staged point may
+supersede an older delayed point.
+
+**Revocation-terminal commit is distinct from still-owned retry.** Entering
+`onPartitionsRevoked` retains the latest delayed point instead of deleting it. After intake ends and
+graceful cancellation is accepted, queued completion inputs are applied so newer contiguous progress
+may supersede that point. Normally completing work continues to supersede it until cleanup finishes or
+the reserved final-commit window begins. Each revoked generation may then participate in at most one
+synchronous commit operation, bounded by the grace time remaining. This terminal operation bypasses
+the ordinary retry deadline, includes only revoked generations, and neither consumes nor resets
+retained partitions' backoff state. An existing accepted asynchronous operation remains the one
+operation in flight and suppresses the terminal synchronous attempt rather than being overlapped.
+
+An acknowledged terminal attempt records its covered progress. A rejected, retriable,
+generation-stale, wakeup-interrupted, or outcome-unknown terminal attempt is never restaged. Progress
+that becomes eligible after a generation has spent its terminal attempt is likewise not submitted
+again. When the callback returns, retirement discards every remaining point and coverage for that
+generation. `onPartitionsLost` skips the terminal state entirely and discards immediately because
+Kafka provides no graceful ownership interval. A successor generation starts with fresh state and
+cannot inherit any predecessor point.
 
 Commit handling distinguishes:
 
@@ -555,16 +603,10 @@ unobservable. Abandoning the position instead would hold that partition's commit
 next contiguous prefix advances, which work blocked behind an unfinished record can delay without
 bound.
 
-After revocation, the old generation does not retry or wait indefinitely for a commit. Its staged
-position is discarded rather than re-offered. The next assigned Kafka position determines redelivery.
-
-Revocation begins when `onPartitionsRevoked` is entered, not when it returns. Within the callback the
-owner knows which partitions it is losing, because Kafka handed it that collection, so the decision to
-discard needs no inference from an outcome. A first synchronous attempt during the grace interval is
-still permitted (`procCommit §9.2` step 5); what the discard rule forbids is offering the same position
-again after that attempt did not succeed. Re-offering cannot succeed — a stale generation's commit is
-rejected identically however many times it is sent — and it consumes the interval that force
-cancellation needs.
+Revocation begins when `onPartitionsRevoked` is entered, not when it returns. The old generation stops
+ordinary retry at that boundary and receives only the terminal opportunity above. After that
+opportunity, or immediately on loss, retired-generation discard is unconditional. The next assigned
+Kafka position determines redelivery.
 
 ## 6. Replay-intake partition state
 
@@ -1311,12 +1353,18 @@ the process supervisor immediately.
   next poll before the commit resolves.
 - At most one commit operation is in flight; a position advancing while a commit is outstanding is
   staged rather than submitted as a second operation for the same partition.
+- A failed commit with still-owned work enters monotonic exponential backoff: nominally 100 ms,
+  doubling to a 5-second cap, with one bounded process-local jitter multiplier.
+- Polling continues during commit backoff and is bounded by the retry deadline, so heartbeats and
+  rebalance callbacks progress without a sleep or busy loop.
 - Out-of-order completion and physical offset gaps commit the timestamp of the last record removed
   from the contiguous head, not the timestamp of the callback that happened to arrive last.
 - The Kafka adapter writes the next position as the offset and the replay-through timestamp as
   decimal offset metadata.
 - Re-staging an uncertain older commit point cannot replace a newer staged offset or its timestamp.
-- A retriable asynchronous commit failure re-stages its positions; an acknowledged one clears them.
+- Retriable, generation-stale, outcome-unknown, and rejected-before-acceptance commit results
+  re-stage same-generation positions under backoff; an acknowledged operation clears them and resets
+  the backoff.
 - A commit callback for a generation no longer held locally is recorded and changes no state.
 - A structurally invalid commit — authorization, oversized metadata, invalid offset size — reaches the
   process-failure path rather than becoming an outcome.
@@ -1340,6 +1388,15 @@ the process supervisor immediately.
 - The successor generation stays paused until `GenerationCleanupFinished`.
 - Unrelated partitions continue.
 - Rejected or unknown old-generation commits are not retried.
+- A delayed still-owned point becomes revocation-terminal work and may be superseded by newer
+  contiguous progress completed before cleanup or the reserved final-commit launch boundary.
+- Each revoked generation participates in at most one bounded synchronous final attempt; a failed or
+  unknown result is never restaged.
+- Retained partitions are excluded from the terminal batch and remain under ordinary retry backoff.
+- An accepted asynchronous operation is not overlapped by a terminal synchronous attempt.
+- `onPartitionsLost` provides no final attempt and discards immediately.
+- Callback return discards all remaining retired-generation positions; none can be inherited by a
+  successor generation.
 - A commit attempted inside the callback cannot hold it past the grace deadline, and is bounded by the
   interval that remains however small that is.
 - Every retired generation reports `recordsCommittedInGeneration` and `recordsReadInGeneration`
@@ -1355,8 +1412,8 @@ the process supervisor immediately.
   work, may finish through tuple durability.
 - Incomplete source assembly is released without authorizing commit.
 - Tuple sinks flush on grace entry and after each tuple accepted during grace.
-- Every newly eligible contiguous commit position is attempted without intentional batching delay,
-  with at most one commit operation in flight.
+- Every newly eligible contiguous commit position receives an immediate first attempt, with at most
+  one commit operation in flight; failed final attempts retain the same bounded retry backoff.
 - No force-cancellation input or shutdown deadline is created.
 - A fully drained process exits after final commit resolution and resource closure.
 - Work that cannot drain leaves the process waiting for host termination and remains uncommitted

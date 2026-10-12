@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.DoubleSupplier;
 import java.util.function.LongSupplier;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
@@ -54,7 +56,12 @@ import org.slf4j.LoggerFactory;
 public final class KafkaSourceOwner {
     public static final Duration DEFAULT_REVOCATION_GRACE = Duration.ofSeconds(1);
     public static final Duration DEFAULT_HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
+    public static final Duration DEFAULT_INITIAL_COMMIT_RETRY_DELAY = Duration.ofMillis(100);
+    public static final Duration DEFAULT_MAXIMUM_COMMIT_RETRY_DELAY = Duration.ofSeconds(5);
+    public static final double DEFAULT_COMMIT_RETRY_JITTER_FRACTION = 0.20;
+    private static final Duration MAXIMUM_REVOCATION_COMMIT_RESERVE = Duration.ofSeconds(1);
     private static final int MAX_LOGGED_PARTITIONS = 16;
+    private static final Duration UNBOUNDED_POLL_WAIT = Duration.ofNanos(Long.MAX_VALUE);
     private static final Logger HEARTBEAT_LOGGER = LoggerFactory.getLogger("KafkaHeartbeat");
 
     public enum AbandonmentCause {
@@ -135,6 +142,19 @@ public final class KafkaSourceOwner {
         void recordsOutstandingChanged(long delta);
         void commitAttemptRejected();
         void commitResolved(CommitResolution resolution);
+        void commitRetryAttempted(KafkaSourcePort.CommitFailureClass failureClass);
+        void commitRetryDegradedChanged(long delta);
+        void commitRetryRecovered();
+    }
+
+    @FunctionalInterface
+    public interface CommitRetryDelayPolicy {
+        Duration delayAfterFailure(int consecutiveFailureCount);
+    }
+
+    private enum CommitOperationMode {
+        STILL_OWNED_RETRYABLE,
+        REVOCATION_TERMINAL
     }
 
     @FunctionalInterface
@@ -163,6 +183,7 @@ public final class KafkaSourceOwner {
     private final RecordContextFactory recordContextFactory;
     private final ProtocolViolationHandler protocolViolationHandler;
     private final long heartbeatIntervalNanos;
+    private final CommitRetryDelayPolicy commitRetryDelayPolicy;
 
     private final Map<TopicPartition, PartitionSourceState> partitions = new LinkedHashMap<>();
     private final Map<KafkaRecordId, IReplayContexts.IKafkaRecordContext> recordContexts =
@@ -180,6 +201,12 @@ public final class KafkaSourceOwner {
      */
     private CommitOperation inFlightCommitOperation;
     private long nextCommitOperationId;
+    private int consecutiveCommitFailures;
+    private long commitRetryNotBeforeNanos;
+    private boolean commitRetryScheduled;
+    private KafkaSourcePort.CommitFailureClass commitRetryFailureClass =
+        KafkaSourcePort.CommitFailureClass.OTHER;
+    private boolean commitRetryDegraded;
     /**
      * Generations revoked or lost whose cleanup replay intake has not yet reported.
      *
@@ -280,7 +307,8 @@ public final class KafkaSourceOwner {
             metrics,
             recordContextFactory,
             protocolViolationHandler,
-            DEFAULT_HEARTBEAT_INTERVAL
+            DEFAULT_HEARTBEAT_INTERVAL,
+            defaultCommitRetryDelayPolicy()
         );
     }
 
@@ -297,6 +325,36 @@ public final class KafkaSourceOwner {
         @NonNull ProtocolViolationHandler protocolViolationHandler,
         @NonNull Duration heartbeatInterval
     ) {
+        this(
+            port,
+            sourceInputs,
+            intakeInputs,
+            wakeupController,
+            cancellationGrace,
+            monotonicNanos,
+            graceWait,
+            metrics,
+            recordContextFactory,
+            protocolViolationHandler,
+            heartbeatInterval,
+            defaultCommitRetryDelayPolicy()
+        );
+    }
+
+    KafkaSourceOwner(
+        @NonNull KafkaSourcePort port,
+        @NonNull KafkaSourceInputQueue sourceInputs,
+        @NonNull ReplayIntakeInputQueue intakeInputs,
+        @NonNull WakeupController wakeupController,
+        @NonNull Duration cancellationGrace,
+        @NonNull LongSupplier monotonicNanos,
+        @NonNull GraceIntervalWait graceWait,
+        @NonNull Metrics metrics,
+        @NonNull RecordContextFactory recordContextFactory,
+        @NonNull ProtocolViolationHandler protocolViolationHandler,
+        @NonNull Duration heartbeatInterval,
+        @NonNull CommitRetryDelayPolicy commitRetryDelayPolicy
+    ) {
         this.port = port;
         this.sourceInputs = sourceInputs;
         this.intakeInputs = intakeInputs;
@@ -307,6 +365,7 @@ public final class KafkaSourceOwner {
         this.metrics = metrics;
         this.recordContextFactory = recordContextFactory;
         this.protocolViolationHandler = protocolViolationHandler;
+        this.commitRetryDelayPolicy = commitRetryDelayPolicy;
         if (cancellationGrace.isNegative()) {
             throw new IllegalArgumentException("cancellationGrace must not be negative");
         }
@@ -315,6 +374,59 @@ public final class KafkaSourceOwner {
         }
         heartbeatIntervalNanos = heartbeatInterval.toNanos();
         nextHeartbeatNanos = monotonicNanos.getAsLong() + heartbeatIntervalNanos;
+    }
+
+    private static CommitRetryDelayPolicy defaultCommitRetryDelayPolicy() {
+        return randomizedExponentialCommitRetryDelay(
+            DEFAULT_INITIAL_COMMIT_RETRY_DELAY,
+            DEFAULT_MAXIMUM_COMMIT_RETRY_DELAY,
+            DEFAULT_COMMIT_RETRY_JITTER_FRACTION,
+            () -> ThreadLocalRandom.current().nextDouble()
+        );
+    }
+
+    static CommitRetryDelayPolicy randomizedExponentialCommitRetryDelay(
+        @NonNull Duration initialDelay,
+        @NonNull Duration maximumDelay,
+        double jitterFraction,
+        @NonNull DoubleSupplier processRandomFraction
+    ) {
+        if (initialDelay.isZero() || initialDelay.isNegative()) {
+            throw new IllegalArgumentException("initialDelay must be positive");
+        }
+        if (maximumDelay.compareTo(initialDelay) < 0) {
+            throw new IllegalArgumentException(
+                "maximumDelay must be greater than or equal to initialDelay"
+            );
+        }
+        if (!(jitterFraction >= 0.0 && jitterFraction <= 1.0)) {
+            throw new IllegalArgumentException("jitterFraction must be in [0.0, 1.0]");
+        }
+        var randomFraction = processRandomFraction.getAsDouble();
+        if (!(randomFraction >= 0.0 && randomFraction < 1.0)) {
+            throw new IllegalStateException(
+                "processRandomFraction must return a value in [0.0, 1.0)"
+            );
+        }
+        var processJitterMultiplier = 1.0 - jitterFraction * randomFraction;
+        var initialNanos = initialDelay.toNanos();
+        var maximumNanos = maximumDelay.toNanos();
+        return consecutiveFailureCount -> {
+            if (consecutiveFailureCount < 1) {
+                throw new IllegalArgumentException(
+                    "consecutiveFailureCount must be positive"
+                );
+            }
+            var unjitteredNanos = initialNanos;
+            for (var failure = 1;
+                 failure < consecutiveFailureCount && unjitteredNanos < maximumNanos;
+                 failure++) {
+                unjitteredNanos = unjitteredNanos > maximumNanos / 2
+                    ? maximumNanos
+                    : unjitteredNanos * 2;
+            }
+            return Duration.ofNanos((long) (unjitteredNanos * processJitterMultiplier));
+        };
     }
 
     /**
@@ -563,13 +675,19 @@ public final class KafkaSourceOwner {
      * path rather than the revocation path, and {@code kafkaLLD §5.7} resolves it by making the loop's
      * submission asynchronous. The loop polls every iteration and a poll is what delivers the callback.
      *
-     * <p>One operation at a time, so the source cannot spam the broker ({@code procCommit §9.4}) and a
-     * partition that advances mid-flight stages the newer position rather than racing the old one.
+     * <p>One operation at a time plus owner-local retry backoff bounds broker pressure
+     * ({@code procCommit §9.4}); a partition that advances mid-flight stages the newer position rather than
+     * racing the old one.
      */
     private void submitLoopCommitIfEligible() {
         if (stagedCommitPoints.isEmpty() || inFlightCommitOperation != null) {
             return;
         }
+        var nowNanos = monotonicNanos.getAsLong();
+        if (commitRetryScheduled && commitRetryNotBeforeNanos - nowNanos > 0) {
+            return;
+        }
+        recordRetryAttemptIfDue();
         var submitted = detachForSubmission();
         var operation = new CommitOperation(nextCommitOperationId++, submitted);
         inFlightCommitOperation = operation;
@@ -585,10 +703,20 @@ public final class KafkaSourceOwner {
         try {
             var submission = port.commitAsync(
                 commitPointsOf(submitted),
-                outcome -> resolveCommitOperation(operation, outcome, false)
+                result -> resolveCommitOperation(
+                    operation,
+                    result,
+                    false,
+                    CommitOperationMode.STILL_OWNED_RETRYABLE
+                )
             );
             if (!submission.accepted()) {
-                resolveCommitOperation(operation, submission.rejectionOutcome(), true);
+                resolveCommitOperation(
+                    operation,
+                    submission.rejection(),
+                    true,
+                    CommitOperationMode.STILL_OWNED_RETRYABLE
+                );
             }
         } catch (WakeupException absorbedByTheSubmission) {
             // §5.4 leaves this owner as the only interpreter of a wakeup, which is why the adapter propagates it
@@ -601,7 +729,15 @@ public final class KafkaSourceOwner {
             // asynchronous submission. Unknown is right either way — the operation may already have reached the
             // broker — and it keeps a still-owned partition's position and re-offers it.
             wakeupController.onWakeupAbsorbedByProtectedOperation();
-            resolveCommitOperation(operation, KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN, false);
+            resolveCommitOperation(
+                operation,
+                KafkaSourcePort.CommitResult.failed(
+                    KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN,
+                    KafkaSourcePort.CommitFailureClass.WAKEUP
+                ),
+                false,
+                CommitOperationMode.STILL_OWNED_RETRYABLE
+            );
         } finally {
             wakeupController.leaveProtectedOperation();
         }
@@ -616,11 +752,27 @@ public final class KafkaSourceOwner {
      * would credit or re-stage against a successor that never submitted it.
      */
     private Map<TopicPartition, SubmittedCommitPoint> detachForSubmission() {
+        return detachForSubmission(new LinkedHashSet<>(stagedCommitPoints.keySet()));
+    }
+
+    /**
+     * Detaches only the selected partitions.
+     *
+     * <p>The revocation-terminal path uses this to keep retained partitions staged under their ordinary
+     * retry deadline while giving only the generations Kafka is revoking their final bounded opportunity.
+     */
+    private Map<TopicPartition, SubmittedCommitPoint> detachForSubmission(
+        Set<TopicPartition> selectedPartitions
+    ) {
         var submitted = new LinkedHashMap<TopicPartition, SubmittedCommitPoint>();
-        stagedCommitPoints.forEach((topicPartition, commitPoint) -> {
+        for (var topicPartition : selectedPartitions) {
+            var commitPoint = stagedCommitPoints.get(topicPartition);
+            if (commitPoint == null) {
+                continue;
+            }
             var state = partitions.get(topicPartition);
             if (state == null) {
-                return;
+                continue;
             }
             submitted.put(
                 topicPartition,
@@ -630,8 +782,8 @@ public final class KafkaSourceOwner {
                     state.takeRecordsAwaitingCommit()
                 )
             );
-        });
-        stagedCommitPoints.clear();
+        }
+        submitted.keySet().forEach(stagedCommitPoints::remove);
         return submitted;
     }
 
@@ -696,9 +848,11 @@ public final class KafkaSourceOwner {
      */
     private void resolveCommitOperation(
         CommitOperation operation,
-        KafkaSourcePort.CommitOutcome outcome,
-        boolean rejectedWithoutBrokerMovement
+        KafkaSourcePort.CommitResult result,
+        boolean rejectedWithoutBrokerMovement,
+        CommitOperationMode mode
     ) {
+        var outcome = result.outcome();
         if (!operation.claimResolution()) {
             metrics.commitResolved(CommitResolution.DUPLICATE_IGNORED);
             log.atDebug().setMessage("Ignoring duplicate resolution for commit operation {}: {}")
@@ -720,22 +874,24 @@ public final class KafkaSourceOwner {
         log.atDebug()
             .setMessage(
                 "event=kafka_commit_resolved operation={} outcome={} rejected_before_acceptance={} "
-                    + "partition_count={}"
+                    + "failure_class={} partition_count={}"
             )
             .addArgument(() -> operation.operationId)
             .addArgument(outcome)
             .addArgument(rejectedWithoutBrokerMovement)
+            .addArgument(result::failureClass)
             .addArgument(() -> operation.submitted.size())
             .log();
-        if (!rejectedWithoutBrokerMovement
-            && outcome != KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
-            log.atWarn()
+        if (outcome != KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
+            log.atDebug()
                 .setMessage(
-                    "event=kafka_commit_uncertain operation={} outcome={} partition_count={} "
-                        + "partitions={}"
+                    "event=kafka_commit_uncertain operation={} outcome={} "
+                        + "rejected_before_acceptance={} failure_class={} partition_count={} partitions={}"
                 )
                 .addArgument(() -> operation.operationId)
                 .addArgument(outcome)
+                .addArgument(rejectedWithoutBrokerMovement)
+                .addArgument(result::failureClass)
                 .addArgument(() -> operation.submitted.size())
                 .addArgument(() -> summarizePartitions(operation.submitted.keySet()))
                 .log();
@@ -758,8 +914,6 @@ public final class KafkaSourceOwner {
             }
 
             if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
-                var recoveredFromUncertainty =
-                    state.commitUncertainty() != PartitionSourceState.CommitUncertainty.NONE_OBSERVED;
                 state.creditRecordsCommitted(detail.recordsCovered());
                 completeCommittedRecordContexts(detail.generation(), detail.nextPosition());
                 metrics.recordsCommitted(detail.recordsCovered().total());
@@ -769,18 +923,6 @@ public final class KafkaSourceOwner {
                 // re-offered position covers those restored records, so the earlier uncertainty no longer
                 // explains its retirement count.
                 state.clearCommitUncertainty();
-                if (recoveredFromUncertainty) {
-                    log.atInfo()
-                        .setMessage(
-                            "event=kafka_commit_recovered topic={} partition={} generation={} "
-                                + "next_position={}"
-                        )
-                        .addArgument(topicPartition::topic)
-                        .addArgument(topicPartition::partition)
-                        .addArgument(() -> detail.generation().localSequence())
-                        .addArgument(detail::nextPosition)
-                        .log();
-                }
                 return;
             }
 
@@ -794,10 +936,107 @@ public final class KafkaSourceOwner {
             if (stillOwnsForCommit(topicPartition)) {
                 stageCommitPoint(topicPartition, detail.commitPoint());
             } else {
-                log.atInfo().setMessage("Dropping commit position {} for {}: {} and no longer committable")
+                log.atDebug().setMessage("Dropping commit position {} for {}: {} and no longer committable")
                     .addArgument(detail::nextPosition).addArgument(topicPartition).addArgument(outcome).log();
             }
         });
+        if (mode == CommitOperationMode.STILL_OWNED_RETRYABLE) {
+            if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
+                recoverCommitRetryIfNeeded();
+            } else if (!stagedCommitPoints.isEmpty()) {
+                scheduleCommitRetry(operation, result, rejectedWithoutBrokerMovement);
+            } else {
+                clearCommitRetryWithoutRecovery();
+            }
+        } else if (stagedCommitPoints.isEmpty() && inFlightCommitOperation == null) {
+            if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
+                recoverCommitRetryIfNeeded();
+            } else {
+                clearCommitRetryWithoutRecovery();
+            }
+        }
+    }
+
+    private void scheduleCommitRetry(
+        CommitOperation operation,
+        KafkaSourcePort.CommitResult result,
+        boolean rejectedWithoutBrokerMovement
+    ) {
+        if (consecutiveCommitFailures < Integer.MAX_VALUE) {
+            consecutiveCommitFailures++;
+        }
+        var delay = commitRetryDelayPolicy.delayAfterFailure(consecutiveCommitFailures);
+        if (delay.isNegative()) {
+            throw new IllegalStateException("commit retry delay must not be negative");
+        }
+        commitRetryNotBeforeNanos = monotonicNanos.getAsLong() + delay.toNanos();
+        commitRetryScheduled = true;
+        commitRetryFailureClass = result.failureClass();
+        if (!commitRetryDegraded) {
+            commitRetryDegraded = true;
+            metrics.commitRetryDegradedChanged(1);
+            log.atWarn()
+                .setMessage(
+                    "event=kafka_commit_retry_degraded outcome={} rejected_before_acceptance={} "
+                        + "failure_class={} retry_delay_ms={} partition_count={} partitions={}"
+                )
+                .addArgument(result::outcome)
+                .addArgument(rejectedWithoutBrokerMovement)
+                .addArgument(result::failureClass)
+                .addArgument(delay::toMillis)
+                .addArgument(() -> operation.submitted.size())
+                .addArgument(() -> summarizePartitions(operation.submitted.keySet()))
+                .log();
+        }
+        log.atDebug()
+            .setMessage(
+                "event=kafka_commit_retry_backoff operation={} consecutive_failures={} outcome={} "
+                    + "rejected_before_acceptance={} failure_class={} retry_delay_ms={} "
+                    + "staged_partition_count={}"
+            )
+            .addArgument(() -> operation.operationId)
+            .addArgument(consecutiveCommitFailures)
+            .addArgument(result::outcome)
+            .addArgument(rejectedWithoutBrokerMovement)
+            .addArgument(result::failureClass)
+            .addArgument(delay::toMillis)
+            .addArgument(stagedCommitPoints::size)
+            .log();
+    }
+
+    private void recordRetryAttemptIfDue() {
+        if (!commitRetryScheduled) {
+            return;
+        }
+        commitRetryScheduled = false;
+        metrics.commitRetryAttempted(commitRetryFailureClass);
+    }
+
+    private void recoverCommitRetryIfNeeded() {
+        if (!commitRetryDegraded) {
+            consecutiveCommitFailures = 0;
+            commitRetryScheduled = false;
+            return;
+        }
+        var failedAttempts = consecutiveCommitFailures;
+        consecutiveCommitFailures = 0;
+        commitRetryScheduled = false;
+        commitRetryDegraded = false;
+        metrics.commitRetryDegradedChanged(-1);
+        metrics.commitRetryRecovered();
+        log.atInfo()
+            .setMessage("event=kafka_commit_retry_recovered failed_attempts={}")
+            .addArgument(failedAttempts)
+            .log();
+    }
+
+    private void clearCommitRetryWithoutRecovery() {
+        consecutiveCommitFailures = 0;
+        commitRetryScheduled = false;
+        if (commitRetryDegraded) {
+            commitRetryDegraded = false;
+            metrics.commitRetryDegradedChanged(-1);
+        }
     }
 
     private static CommitResolution resolutionOf(KafkaSourcePort.CommitOutcome outcome) {
@@ -856,7 +1095,7 @@ public final class KafkaSourceOwner {
         Map<TopicPartition, List<PolledKafkaRecord>> polled;
         wakeupController.enterPoll(!sourceInputs.isEmpty());
         try {
-            polled = port.poll();
+            polled = port.poll(commitRetryPollWait());
         } catch (WakeupException wokenToInspectTheQueue) {
             log.atTrace().setMessage("Poll woken to inspect the source-input queue").log();
             return;
@@ -878,6 +1117,16 @@ public final class KafkaSourceOwner {
                 .log();
         }
         polled.forEach(this::deliver);
+    }
+
+    private Duration commitRetryPollWait() {
+        if (!commitRetryScheduled) {
+            return UNBOUNDED_POLL_WAIT;
+        }
+        var remainingNanos = commitRetryNotBeforeNanos - monotonicNanos.getAsLong();
+        return remainingNanos <= 0
+            ? Duration.ZERO
+            : Duration.ofNanos(remainingNanos);
     }
 
     private void deliver(TopicPartition topicPartition, List<PolledKafkaRecord> records) {
@@ -989,6 +1238,7 @@ public final class KafkaSourceOwner {
         // the commit queue are replaced rather than reset (kafkaLLD §5.2).
         partitions.put(topicPartition, state);
         stagedCommitPoints.remove(topicPartition);
+        clearCommitRetryIfNoWork();
         // Gated on whether any earlier generation of this partition is still cleaning up, which map membership
         // cannot answer: the predecessor's state was removed when it was revoked, before this point.
         if (cleanupOutstanding.containsKey(topicPartition)) {
@@ -1102,6 +1352,7 @@ public final class KafkaSourceOwner {
         // The old generation must not go on offering a commit: kafkaLLD §5.7 has it neither retrying nor
         // waiting, with the next assigned position deciding redelivery instead.
         stagedCommitPoints.remove(topicPartition);
+        clearCommitRetryIfNoWork();
         if (state == null) {
             return;
         }
@@ -1148,6 +1399,12 @@ public final class KafkaSourceOwner {
                 state.recordsCommitted(),
                 state.recordsRead()
             );
+        }
+    }
+
+    private void clearCommitRetryIfNoWork() {
+        if (stagedCommitPoints.isEmpty() && inFlightCommitOperation == null) {
+            clearCommitRetryWithoutRecovery();
         }
     }
 
@@ -1374,31 +1631,69 @@ public final class KafkaSourceOwner {
         CancellationDeadline deadline,
         List<PartitionGenerationId> revokedGenerations
     ) throws InterruptedException {
+        var terminalCommitAttempted = new LinkedHashSet<PartitionGenerationId>();
+        var terminalCommitLaunchDeadline = terminalCommitLaunchDeadline(deadline);
         // The wait is injected, not called on the queue directly. kafkaLLD §15.1 requires one monotonic source
         // for the deadline, and no arrangement of durations achieves that with a raw Object.wait: waiting always
         // elapses in real time, so "the wait expired" and "the deadline passed" would be two different clocks
         // answering one question. GraceIntervalWait returns only when the deadline's own clock says so.
-        // Attempted once before waiting, not only after an input arrives. Positions can already be staged when
-        // revocation begins -- a prefix that advanced earlier in this iteration, or one reclaimed from an
-        // abandoned async submission -- and `procCommit §9.2` step 5 permits attempting them without making the
-        // attempt conditional on further inputs. Only reaching this inside the loop meant that with no new input
-        // during the interval, a staged commit point was never committed at all.
-        submitRevocationCommit(deadline);
+        //
+        // Apply everything already queued after intake has ended and graceful cancellation has been accepted.
+        // This gives progress completed at the revocation boundary the chance to supersede an older point that
+        // was waiting in ordinary retry backoff before the generation spends its one terminal commit attempt.
+        applyQueuedInputs();
         if (allCleanupReported(revokedGenerations)) {
+            submitRevocationCommit(deadline, revokedGenerations, terminalCommitAttempted);
             return true;
         }
-        while (graceWait.awaitInputUntil(deadline)) {
+
+        // Keep accumulating normally completed progress until either cleanup proves that no more can arrive or
+        // the final-commit launch boundary is reached. The reserved tail is still part of the original grace
+        // interval; it merely makes the terminal opportunity real instead of waiting until its bound is zero.
+        while (graceWait.awaitInputUntil(terminalCommitLaunchDeadline)) {
             applyQueuedInputs();
-            submitRevocationCommit(deadline);
             // procCommit:1308: "If the generation has no unfinished work, the callback returns immediately."
             // Cleanup completion is how that becomes observable -- intake sends it once its tracker empties --
             // so waiting out the rest of the interval after it arrives holds the whole consumer, and the
             // group's rebalance, for nothing.
             if (allCleanupReported(revokedGenerations)) {
+                submitRevocationCommit(deadline, revokedGenerations, terminalCommitAttempted);
+                return true;
+            }
+        }
+
+        submitRevocationCommit(deadline, revokedGenerations, terminalCommitAttempted);
+        if (allCleanupReported(revokedGenerations)) {
+            return true;
+        }
+        while (graceWait.awaitInputUntil(deadline)) {
+            applyQueuedInputs();
+            // Generations without an eligible point at the launch boundary may spend their one terminal
+            // attempt if progress becomes eligible during the reserved tail. A generation already attempted
+            // is filtered out, so this cannot become a retry loop.
+            submitRevocationCommit(deadline, revokedGenerations, terminalCommitAttempted);
+            if (allCleanupReported(revokedGenerations)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Reserves the smaller of half the configured grace interval and one second for the terminal commit.
+     *
+     * <p>The other half remains available for already-started replay and tuple work to finish. Long grace
+     * intervals do not turn the final Kafka call into a multi-second block, while short intervals still divide
+     * their available time between useful completion and the one bounded broker opportunity.
+     */
+    private CancellationDeadline terminalCommitLaunchDeadline(CancellationDeadline deadline) {
+        var graceNanos = cancellationGrace.toNanos();
+        var halfGraceNanos = graceNanos / 2 + graceNanos % 2;
+        var reserveNanos = Math.min(
+            halfGraceNanos,
+            MAXIMUM_REVOCATION_COMMIT_RESERVE.toNanos()
+        );
+        return new CancellationDeadline(deadline.monotonicDeadlineNanos() - reserveNanos);
     }
 
     /** True once no revoked generation is still awaiting cleanup, which is procCommit:1308's condition. */
@@ -1423,7 +1718,11 @@ public final class KafkaSourceOwner {
      * round-trip could still have committed — a revoked generation's position is discarded anyway once the
      * callback returns, so attempting is never the worse choice.
      */
-    private void submitRevocationCommit(CancellationDeadline deadline) {
+    private void submitRevocationCommit(
+        CancellationDeadline deadline,
+        List<PartitionGenerationId> revokedGenerations,
+        Set<PartitionGenerationId> terminalCommitAttempted
+    ) {
         if (stagedCommitPoints.isEmpty()) {
             return;
         }
@@ -1439,11 +1738,27 @@ public final class KafkaSourceOwner {
                 .addArgument(() -> inFlightCommitOperation.submitted.keySet()).log();
             return;
         }
+        var terminalPartitions = new LinkedHashSet<TopicPartition>();
+        for (var generation : revokedGenerations) {
+            if (terminalCommitAttempted.contains(generation)) {
+                continue;
+            }
+            var state = partitions.get(generation.topicPartition());
+            if (state != null
+                && state.generation().equals(generation)
+                && stagedCommitPoints.containsKey(generation.topicPartition())) {
+                terminalPartitions.add(generation.topicPartition());
+            }
+        }
+        if (terminalPartitions.isEmpty()) {
+            return;
+        }
+        var nowNanos = monotonicNanos.getAsLong();
         // Attempted however little grace is left. The bound is what keeps the call inside the deadline, so a
         // sliver of remaining time is a small budget rather than a hazard -- and skipping the attempt would
         // discard a position that a fast round-trip could still have committed, since a revoked generation's
         // position is discarded either way once the callback returns.
-        var remainingNanos = deadline.remainingNanos(monotonicNanos.getAsLong());
+        var remainingNanos = deadline.remainingNanos(nowNanos);
         if (remainingNanos <= 0) {
             // §5.7: "a commit that cannot finish within the remaining grace must not be started". Zero is the
             // absence of a remainder rather than a minimum, so this does not reintroduce the floor the owner
@@ -1451,7 +1766,8 @@ public final class KafkaSourceOwner {
             // including partitions that are being retained.
             return;
         }
-        var submitted = detachForSubmission();
+        var submitted = detachForSubmission(terminalPartitions);
+        submitted.values().forEach(detail -> terminalCommitAttempted.add(detail.generation()));
         var operation = new CommitOperation(nextCommitOperationId++, submitted);
         log.atDebug()
             .setMessage(
@@ -1464,22 +1780,30 @@ public final class KafkaSourceOwner {
             .addArgument(() -> summarizePartitions(submitted.keySet()))
             .log();
         wakeupController.enterProtectedOperation();
-        KafkaSourcePort.CommitOutcome outcome;
+        KafkaSourcePort.CommitResult result;
         try {
-            outcome = port.commitSync(commitPointsOf(submitted), Duration.ofNanos(remainingNanos));
+            result = port.commitSync(commitPointsOf(submitted), Duration.ofNanos(remainingNanos));
         } catch (WakeupException absorbedByTheCommit) {
             // §5.7 classifies a wakeup-interrupted commit as an unknown outcome. Recording the absorption is
             // what keeps the callback's exit able to issue its deferred wakeup: the commit spent the one that
             // was outstanding, and a controller that still believes it is outstanding issues nothing.
             wakeupController.onWakeupAbsorbedByProtectedOperation();
-            outcome = KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN;
+            result = KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN,
+                KafkaSourcePort.CommitFailureClass.WAKEUP
+            );
         } finally {
             wakeupController.leaveProtectedOperation();
         }
         // The synchronous call was accepted by the client. A failed batched operation may have applied some
         // positions, so no returned outcome proves the broker position stayed put. The common resolution path
         // restores that uncertain coverage and marks each still-live generation accordingly.
-        resolveCommitOperation(operation, outcome, false);
+        resolveCommitOperation(
+            operation,
+            result,
+            false,
+            CommitOperationMode.REVOCATION_TERMINAL
+        );
     }
 
     /**

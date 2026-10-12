@@ -21,6 +21,8 @@ import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetCommitCallback;
 import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.CoordinatorNotAvailableException;
+import org.apache.kafka.common.errors.DisconnectException;
 import org.apache.kafka.common.errors.FencedInstanceIdException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
 import org.apache.kafka.common.errors.TimeoutException;
@@ -172,7 +174,10 @@ class KafkaConsumerSourcePortTest {
         var port = portThrowingFromSync(new TimeoutException("bound exhausted"));
 
         Assertions.assertEquals(
-            KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN,
+            KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN,
+                KafkaSourcePort.CommitFailureClass.TIMEOUT
+            ),
             port.commitSync(COMMIT_POINTS, BOUND)
         );
     }
@@ -180,11 +185,17 @@ class KafkaConsumerSourcePortTest {
     @Test
     void aLostGenerationIsStaleRatherThanRetriable() {
         Assertions.assertEquals(
-            KafkaSourcePort.CommitOutcome.GENERATION_STALE,
+            KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.GENERATION_STALE,
+                KafkaSourcePort.CommitFailureClass.REBALANCE
+            ),
             portThrowingFromSync(new CommitFailedException()).commitSync(COMMIT_POINTS, BOUND)
         );
         Assertions.assertEquals(
-            KafkaSourcePort.CommitOutcome.GENERATION_STALE,
+            KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.GENERATION_STALE,
+                KafkaSourcePort.CommitFailureClass.REBALANCE
+            ),
             portThrowingFromSync(new FencedInstanceIdException("fenced"))
                 .commitSync(COMMIT_POINTS, BOUND)
         );
@@ -198,7 +209,10 @@ class KafkaConsumerSourcePortTest {
     @Test
     void aRebalanceInProgressIsRetriableBecauseTheGenerationSurvives() {
         Assertions.assertEquals(
-            KafkaSourcePort.CommitOutcome.RETRIABLE,
+            KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.RETRIABLE,
+                KafkaSourcePort.CommitFailureClass.REBALANCE
+            ),
             portThrowingFromSync(new RebalanceInProgressException("rejoining"))
                 .commitSync(COMMIT_POINTS, BOUND)
         );
@@ -221,11 +235,51 @@ class KafkaConsumerSourcePortTest {
             new ScriptedCommitConsumer(null, null, new RetriableCommitFailedException("retry")),
             Duration.ofSeconds(1)
         );
-        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+        var resolutions = new ArrayList<KafkaSourcePort.CommitResult>();
 
         port.commitAsync(COMMIT_POINTS, resolutions::add);
 
-        Assertions.assertEquals(List.of(KafkaSourcePort.CommitOutcome.RETRIABLE), resolutions);
+        Assertions.assertEquals(
+            List.of(KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.RETRIABLE,
+                KafkaSourcePort.CommitFailureClass.OTHER
+            )),
+            resolutions
+        );
+    }
+
+    @Test
+    void wrappedRetriableFailuresRetainBoundedOperationalClassification() {
+        Assertions.assertEquals(
+            KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.RETRIABLE,
+                KafkaSourcePort.CommitFailureClass.COORDINATOR
+            ),
+            classifyAsyncFailure(new RetriableCommitFailedException(
+                new CoordinatorNotAvailableException("coordinator unavailable")
+            ))
+        );
+        Assertions.assertEquals(
+            KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.RETRIABLE,
+                KafkaSourcePort.CommitFailureClass.TRANSPORT
+            ),
+            classifyAsyncFailure(new RetriableCommitFailedException(
+                new DisconnectException("disconnected")
+            ))
+        );
+    }
+
+    private static KafkaSourcePort.CommitResult classifyAsyncFailure(Exception failure) {
+        var port = new KafkaConsumerSourcePort(
+            new ScriptedCommitConsumer(null, null, failure),
+            Duration.ofSeconds(1)
+        );
+        var resolutions = new ArrayList<KafkaSourcePort.CommitResult>();
+
+        port.commitAsync(COMMIT_POINTS, resolutions::add);
+
+        return resolutions.getFirst();
     }
 
     /**
@@ -241,13 +295,16 @@ class KafkaConsumerSourcePortTest {
             new ScriptedCommitConsumer(null, new FencedInstanceIdException("fenced"), null),
             Duration.ofSeconds(1)
         );
-        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+        var resolutions = new ArrayList<KafkaSourcePort.CommitResult>();
 
         var submission = port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(
             KafkaSourcePort.AsyncCommitSubmission.rejectedBeforeAcceptance(
-                KafkaSourcePort.CommitOutcome.GENERATION_STALE
+                KafkaSourcePort.CommitResult.failed(
+                    KafkaSourcePort.CommitOutcome.GENERATION_STALE,
+                    KafkaSourcePort.CommitFailureClass.REBALANCE
+                )
             ),
             submission
         );
@@ -269,12 +326,15 @@ class KafkaConsumerSourcePortTest {
             new ScriptedCommitConsumer(null, new TimeoutException("stopped waiting"), null),
             Duration.ofSeconds(1)
         );
-        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+        var resolutions = new ArrayList<KafkaSourcePort.CommitResult>();
 
         var submission = port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(
-            List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
+            List.of(KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN,
+                KafkaSourcePort.CommitFailureClass.TIMEOUT
+            )),
             resolutions,
             "the same failure type the synchronous path calls unknown must not be fatal here"
         );
@@ -290,12 +350,15 @@ class KafkaConsumerSourcePortTest {
             new ScriptedCommitConsumer(null, null, new TimeoutException("broker answer timed out")),
             Duration.ofSeconds(1)
         );
-        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+        var resolutions = new ArrayList<KafkaSourcePort.CommitResult>();
 
         var submission = port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(
-            List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
+            List.of(KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN,
+                KafkaSourcePort.CommitFailureClass.TIMEOUT
+            )),
             resolutions
         );
         Assertions.assertTrue(submission.accepted());
@@ -307,7 +370,7 @@ class KafkaConsumerSourcePortTest {
         var port = new KafkaConsumerSourcePort(consumer, Duration.ofSeconds(1));
 
         Assertions.assertEquals(
-            KafkaSourcePort.CommitOutcome.ACKNOWLEDGED,
+            KafkaSourcePort.CommitResult.acknowledged(),
             port.commitSync(COMMIT_POINTS, BOUND)
         );
         Assertions.assertEquals(
@@ -336,7 +399,7 @@ class KafkaConsumerSourcePortTest {
             new ScriptedCommitConsumer(null, new WakeupException(), null),
             Duration.ofSeconds(1)
         );
-        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+        var resolutions = new ArrayList<KafkaSourcePort.CommitResult>();
 
         Assertions.assertThrows(
             WakeupException.class,
@@ -393,12 +456,15 @@ class KafkaConsumerSourcePortTest {
     @Test
     void aSubmissionThatBothResolvesAndThrowsResolvesExactlyOnce() {
         var port = new KafkaConsumerSourcePort(new ThrowsAfterRegisteringConsumer(), Duration.ofSeconds(1));
-        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+        var resolutions = new ArrayList<KafkaSourcePort.CommitResult>();
 
         var submission = port.commitAsync(COMMIT_POINTS, resolutions::add);
 
         Assertions.assertEquals(
-            List.of(KafkaSourcePort.CommitOutcome.RETRIABLE),
+            List.of(KafkaSourcePort.CommitResult.failed(
+                KafkaSourcePort.CommitOutcome.RETRIABLE,
+                KafkaSourcePort.CommitFailureClass.OTHER
+            )),
             resolutions,
             "one submission resolves once; a second resolution credits or re-stages the same positions twice"
         );
@@ -411,7 +477,7 @@ class KafkaConsumerSourcePortTest {
             new StructurallyInvalidSynchronousCallbackConsumer(),
             Duration.ofSeconds(1)
         );
-        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+        var resolutions = new ArrayList<KafkaSourcePort.CommitResult>();
 
         Assertions.assertThrows(
             IllegalStateException.class,

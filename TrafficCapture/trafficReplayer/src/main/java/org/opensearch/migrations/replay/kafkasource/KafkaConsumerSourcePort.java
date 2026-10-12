@@ -24,9 +24,16 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.CoordinatorLoadInProgressException;
+import org.apache.kafka.common.errors.CoordinatorNotAvailableException;
+import org.apache.kafka.common.errors.DisconnectException;
 import org.apache.kafka.common.errors.FencedInstanceIdException;
+import org.apache.kafka.common.errors.IllegalGenerationException;
+import org.apache.kafka.common.errors.NotCoordinatorException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
+import org.apache.kafka.common.errors.StaleMemberEpochException;
 import org.apache.kafka.common.errors.TimeoutException;
+import org.apache.kafka.common.errors.UnknownMemberIdException;
 import org.apache.kafka.common.errors.WakeupException;
 
 /**
@@ -69,8 +76,14 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
      * ({@code kafkaLLD §5.4}).
      */
     @Override
-    public Map<TopicPartition, List<PolledKafkaRecord>> poll() {
-        var polled = consumer.poll(pollTimeout);
+    public Map<TopicPartition, List<PolledKafkaRecord>> poll(@NonNull Duration maximumWait) {
+        if (maximumWait.isNegative()) {
+            throw new IllegalArgumentException("maximumWait must not be negative");
+        }
+        var effectiveTimeout = maximumWait.compareTo(pollTimeout) < 0
+            ? maximumWait
+            : pollTimeout;
+        var polled = consumer.poll(effectiveTimeout);
         var byPartition = new LinkedHashMap<TopicPartition, List<PolledKafkaRecord>>();
         for (var topicPartition : polled.partitions()) {
             var records = new ArrayList<PolledKafkaRecord>();
@@ -111,7 +124,7 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
     @Override
     public AsyncCommitSubmission commitAsync(
         Map<TopicPartition, CommitPoint> commitPoints,
-        java.util.function.Consumer<CommitOutcome> onResolved
+        java.util.function.Consumer<CommitResult> onResolved
     ) {
         // The operation-level resolution latch belongs to KafkaSourceOwner, which owns the operation identity
         // and the one-in-flight slot. This local flag answers only whether the callback ran before this method
@@ -141,7 +154,7 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
                 // The consumer-group protocol can enqueue the event before timing out while preparing its
                 // offsets. It may reach the broker and may still invoke the callback later, so this is unknown,
                 // not a rejection. The owner's operation latch makes that later callback idempotent.
-                onResolved.accept(CommitOutcome.OUTCOME_UNKNOWN);
+                onResolved.accept(classifyAsync(refusedBeforeSubmission));
                 return AsyncCommitSubmission.acceptedByClient();
             }
             if (isRetriable(refusedBeforeSubmission) || isGenerationStale(refusedBeforeSubmission)) {
@@ -154,19 +167,26 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
     }
 
     /**
-     * Unlike {@code commitSync}, {@code commitAsync} does not exhaust retriable errors itself — it wraps them
-     * in {@code RetriableCommitFailedException} whose own message is "You should retry committing the latest
-     * consumed offsets". So the retriable case reaches us here and only here.
+     * Unlike {@code commitSync}, {@code commitAsync} does not retry a failed offset-commit request itself. Both
+     * Kafka consumer implementations wrap transient request failures in
+     * {@code RetriableCommitFailedException}, preserving the concrete cause for bounded operational
+     * classification.
      */
-    private static CommitOutcome classifyAsync(Exception failure) {
+    private static CommitResult classifyAsync(Exception failure) {
         if (failure == null) {
-            return CommitOutcome.ACKNOWLEDGED;
+            return CommitResult.acknowledged();
         }
         if (isRetriable(failure)) {
-            return CommitOutcome.RETRIABLE;
+            return CommitResult.failed(
+                CommitOutcome.RETRIABLE,
+                failureClass(failure)
+            );
         }
         if (isGenerationStale(failure)) {
-            return CommitOutcome.GENERATION_STALE;
+            return CommitResult.failed(
+                CommitOutcome.GENERATION_STALE,
+                CommitFailureClass.REBALANCE
+            );
         }
         if (failure instanceof TimeoutException) {
             // A timeout says the client stopped waiting, not that the commit is invalid. On
@@ -174,7 +194,10 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
             // so the operation may well have reached the broker -- which is what an unknown outcome means. The
             // synchronous path has always classified a timeout this way; killing the process on the
             // asynchronous one would abandon every partition's progress over one partition's slow commit.
-            return CommitOutcome.OUTCOME_UNKNOWN;
+            return CommitResult.failed(
+                CommitOutcome.OUTCOME_UNKNOWN,
+                CommitFailureClass.TIMEOUT
+            );
         }
         throw structurallyInvalid(failure);
     }
@@ -188,10 +211,10 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
      * dressed as a distinction.
      */
     @Override
-    public CommitOutcome commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound) {
+    public CommitResult commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound) {
         try {
             consumer.commitSync(toOffsets(commitPoints), bound);
-            return CommitOutcome.ACKNOWLEDGED;
+            return CommitResult.acknowledged();
         } catch (WakeupException absorbedByTheCommit) {
             // Re-thrown rather than classified, even though §5.7 makes a wakeup-interrupted commit an unknown
             // outcome, because §5.4 leaves the owner as the only boundary that may interpret a wakeup: the
@@ -201,13 +224,22 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
             // structural branch below and kills the process.
             throw absorbedByTheCommit;
         } catch (TimeoutException ranOutOfTime) {
-            return CommitOutcome.OUTCOME_UNKNOWN;
+            return CommitResult.failed(
+                CommitOutcome.OUTCOME_UNKNOWN,
+                CommitFailureClass.TIMEOUT
+            );
         } catch (RuntimeException failure) {
             if (isRetriable(failure)) {
-                return CommitOutcome.RETRIABLE;
+                return CommitResult.failed(
+                    CommitOutcome.RETRIABLE,
+                    failureClass(failure)
+                );
             }
             if (isGenerationStale(failure)) {
-                return CommitOutcome.GENERATION_STALE;
+                return CommitResult.failed(
+                    CommitOutcome.GENERATION_STALE,
+                    CommitFailureClass.REBALANCE
+                );
             }
             throw structurallyInvalid(failure);
         }
@@ -231,13 +263,41 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
      */
     private static boolean isGenerationStale(Throwable failure) {
         return failure instanceof CommitFailedException
-            || failure instanceof FencedInstanceIdException;
+            || failure instanceof FencedInstanceIdException
+            || failure instanceof IllegalGenerationException
+            || failure instanceof StaleMemberEpochException
+            || failure instanceof UnknownMemberIdException;
     }
 
     /** Generation intact; the caller retries. Only {@code commitAsync} surfaces this, so it is checked first. */
     private static boolean isRetriable(Throwable failure) {
         return failure instanceof RetriableCommitFailedException
             || failure instanceof RebalanceInProgressException;
+    }
+
+    private static CommitFailureClass failureClass(Throwable failure) {
+        for (var current = failure; current != null; current = current.getCause()) {
+            if (current instanceof RebalanceInProgressException
+                || current instanceof CommitFailedException
+                || current instanceof FencedInstanceIdException
+                || current instanceof IllegalGenerationException
+                || current instanceof StaleMemberEpochException
+                || current instanceof UnknownMemberIdException) {
+                return CommitFailureClass.REBALANCE;
+            }
+            if (current instanceof CoordinatorLoadInProgressException
+                || current instanceof CoordinatorNotAvailableException
+                || current instanceof NotCoordinatorException) {
+                return CommitFailureClass.COORDINATOR;
+            }
+            if (current instanceof TimeoutException) {
+                return CommitFailureClass.TIMEOUT;
+            }
+            if (current instanceof DisconnectException) {
+                return CommitFailureClass.TRANSPORT;
+            }
+        }
+        return CommitFailureClass.OTHER;
     }
 
     /**

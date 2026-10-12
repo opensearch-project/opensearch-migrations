@@ -923,6 +923,23 @@ The Kafka source owner:
 3. discards its process-local request after Kafka accepts, rejects, or leaves the broker outcome
    unknown.
 
+The first eligible commit attempt is immediate. A nonfatal failure that leaves same-generation work
+staged enters owner-local monotonic exponential backoff: nominally 100 ms, doubling to a 5-second cap,
+with one bounded process-local jitter multiplier. The owner continues Kafka polling during the delay,
+using the retry deadline to shorten the poll timeout. Newer contiguous progress supersedes an older
+delayed point. Acknowledgment resets the backoff while ownership remains ordinary.
+
+Revocation changes the disposition of delayed work rather than deleting it immediately. Once
+`onPartitionsRevoked` ends intake, the latest point for each revoked generation becomes
+**revocation-terminal**: normally completing work may supersede it until cleanup finishes or a
+final-commit window begins. The window reserves the smaller of half the configured grace interval and
+one second. The generation may then participate in at most one synchronous commit bounded by the grace
+time remaining. The terminal operation bypasses the ordinary retry deadline, includes no retained
+partition, and is suppressed if an accepted async operation is already in flight. A failed or unknown
+terminal result is never restaged. Callback return then performs **retired-generation discard** of
+every remaining point and coverage.
+`onPartitionsLost` goes directly to discard because Kafka offers no graceful commit opportunity.
+
 Knowing that the generation has ended may avoid a pointless call, but that fast failure is an
 optimization rather than a correctness requirement. If assignment loss races Kafka submission,
 Kafka may reject the operation or leave its broker outcome unknown. The old generation neither
@@ -1467,7 +1484,9 @@ No timeout declares cancellation successful. A timeout may terminate the process
 ### 9.4 Commit races
 
 During the revocation grace period, normally completed work may continue producing commit requests.
-The Kafka source owner may attempt those commits while Kafka still accepts them.
+The Kafka source owner merges those requests into the generation's latest terminal point until that
+generation participates in its single bounded synchronous final attempt. Later requests are accounted
+as uncommitted at retirement rather than causing another commit operation.
 
 Normal request completion established before the request owner handles force cancellation remains
 normal completion, even if its required result reaches replay intake concurrently with cancellation.
@@ -1477,12 +1496,13 @@ After ownership is gone:
 - cancelled work emits no commit request;
 - a commit attempt may be rejected by Kafka; that rejection is an expected at-least-once outcome,
   not a correctness failure;
-- an already-submitted commit is neither retried nor awaited indefinitely;
+- an already-submitted terminal commit is neither retried nor awaited indefinitely;
 - a late callback is diagnostic only; and
 - Kafka's next assigned offset determines redelivery.
 
 The source owner avoids broker spam by submitting only the commit position after consecutive finished records at the head of its observed-record queue and by
-never retrying an old-generation commit after rejection or unknown outcome.
+using exponential backoff while still owned, one terminal opportunity during graceful revocation,
+and unconditional discard after retirement.
 
 ### 9.5 Forward progress across revocations, and how it is observed
 
@@ -1855,6 +1875,14 @@ output, and Kafka-record completion remain independent and may continue afterwar
 - The committed offset metadata is the Kafka timestamp of the final record in that exact
   contiguous prefix, including with out-of-order completion and physical offset gaps.
 - An uncertain older commit retry cannot replace a newer staged offset/timestamp pair.
+- Retriable, generation-stale, outcome-unknown, and pre-acceptance-rejected commits are paced by
+  owner-local exponential backoff while Kafka polling continues.
+- An acknowledged still-owned commit resets the backoff.
+- A revoked generation's delayed point becomes a single bounded terminal commit opportunity; a
+  rejected or unknown terminal result is not restaged.
+- Mixed revocation batches exclude retained partitions from terminal submission, preserving their
+  ordinary retry deadline.
+- Callback return, loss, and successor assignment cannot retain or inherit predecessor commit state.
 - A record with no downstream work follows the same commit-order rule.
 - Commits completed during revocation grace are attempted; broker rejection after ownership loss
   leaves the record available for redelivery.

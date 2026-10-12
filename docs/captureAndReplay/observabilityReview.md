@@ -1003,7 +1003,8 @@ aggregate instruments. Those identities belong in logs.
 - `replayer_startup_summary`
 - `kafka_assignment_changed`
 - `kafka_generation_retiring`
-- `kafka_commit_uncertain`
+- `kafka_commit_retry_degraded`
+- `kafka_commit_retry_recovered`
 - `replay_generation_grace_started`
 - `replay_generation_force_started`
 - `replay_generation_cleanup_finished`
@@ -1297,7 +1298,7 @@ monotonic counter.
 | `replayIntakeGenerationCleanupFinished` | counter | generations | — |
 | `replayIntakeStaleGenerationInputsIgnored` | counter | inputs | `inputKind` |
 
-### `KafkaCommitStateMetrics` — scope `replayer`, 8 instruments — see `O-4`
+### `KafkaCommitStateMetrics` — scope `replayer`, 11 instruments — see `O-4`
 
 | Name | Type | Unit | Attributes |
 |---|---|---|---|
@@ -1309,6 +1310,9 @@ monotonic counter.
 | `kafkaSourceRecordsOutstanding` | UD | records | — |
 | `kafkaSourceCommitAttemptsRejected` | counter | attempts | — |
 | `kafkaSourceCommitResolutions` | counter | events | `outcome` |
+| `kafkaSourceCommitRetryAttempts` | counter | attempts | `failure_class` |
+| `kafkaSourceCommitRetryDegraded` | UD | episodes | — |
+| `kafkaSourceCommitRetryRecoveries` | counter | events | — |
 
 ### `TargetAttemptPermitMetrics` — scope `replayer`, 8 instruments
 

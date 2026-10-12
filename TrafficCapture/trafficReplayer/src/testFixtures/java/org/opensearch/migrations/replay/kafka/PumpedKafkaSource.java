@@ -55,7 +55,10 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     public record PartitionResumed(TopicPartition topicPartition) implements Observation {}
 
     /** One poll and the partitions it returned records for, so an empty poll is distinguishable. */
-    public record Polled(Set<TopicPartition> partitionsReturned) implements Observation {}
+    public record Polled(
+        Set<TopicPartition> partitionsReturned,
+        Duration maximumWait
+    ) implements Observation {}
 
     /** An asynchronous submission from the ordinary loop; its outcome arrives at a later {@link #poll()}. */
     public record CommitSubmittedAsync(Map<TopicPartition, CommitPoint> commitPoints)
@@ -91,14 +94,14 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     /** Async commits awaiting a poll to resolve them, exactly as the real client defers its callbacks. */
     private final Deque<Runnable> pendingAsyncCommits = new ArrayDeque<>();
     private final LongConsumer clockAdvance;
-    private CommitOutcome nextCommitOutcome = CommitOutcome.ACKNOWLEDGED;
+    private CommitResult nextCommitResult = CommitResult.acknowledged();
     private RuntimeException pollFailure;
     private Duration commitDuration;
     private boolean wakeupNextPollAfterRebalance;
     private boolean wakeupNextCommitSync;
     private boolean wakeupNextCommitAsync;
     private boolean wakeupNextCommitAsyncAfterRegistration;
-    private CommitOutcome nextRejectedCommitOutcome;
+    private CommitResult nextRejectedCommitResult;
     private boolean neverResolveAsyncCommits;
     private boolean closed;
     private ThrowingRunnable closeCallback = () -> {};
@@ -177,7 +180,11 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     public void scriptCommitOutcome(@NonNull CommitOutcome outcome) {
-        nextCommitOutcome = outcome;
+        nextCommitResult = defaultResult(outcome);
+    }
+
+    public void scriptCommitResult(@NonNull CommitResult result) {
+        nextCommitResult = result;
     }
 
     /**
@@ -214,7 +221,11 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
 
     /** Refuses the next asynchronous operation before a callback is registered. */
     public void scriptCommitAsyncRejection(@NonNull CommitOutcome outcome) {
-        nextRejectedCommitOutcome = outcome;
+        nextRejectedCommitResult = defaultResult(outcome);
+    }
+
+    public void scriptCommitAsyncRejection(@NonNull CommitResult result) {
+        nextRejectedCommitResult = result;
     }
 
     public void setCommittedPosition(TopicPartition topicPartition, long position) {
@@ -240,7 +251,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     @Override
-    public Map<TopicPartition, List<PolledKafkaRecord>> poll() {
+    public Map<TopicPartition, List<PolledKafkaRecord>> poll(@NonNull Duration maximumWait) {
         // Rebalance callbacks run before commit callbacks are resolved. Kafka delivers both from inside poll()
         // and guarantees no order between them, so either is faithful -- but this order is the one that can
         // expose a commit resolving after its generation was revoked and reassigned, and a fixture that always
@@ -286,7 +297,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
                 delivered.put(topicPartition, records);
             }
         });
-        record(new Polled(Set.copyOf(delivered.keySet())));
+        record(new Polled(Set.copyOf(delivered.keySet()), maximumWait));
         return delivered;
     }
 
@@ -323,13 +334,13 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     @Override
     public AsyncCommitSubmission commitAsync(
         Map<TopicPartition, CommitPoint> commitPoints,
-        java.util.function.Consumer<CommitOutcome> onResolved
+        java.util.function.Consumer<CommitResult> onResolved
     ) {
         var submitted = Map.copyOf(commitPoints);
         record(new CommitSubmittedAsync(submitted));
-        if (nextRejectedCommitOutcome != null) {
-            var rejected = nextRejectedCommitOutcome;
-            nextRejectedCommitOutcome = null;
+        if (nextRejectedCommitResult != null) {
+            var rejected = nextRejectedCommitResult;
+            nextRejectedCommitResult = null;
             return AsyncCommitSubmission.rejectedBeforeAcceptance(rejected);
         }
         if (wakeupNextCommitAsync) {
@@ -339,7 +350,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         }
         // Held rather than resolved here, because the real client resolves from inside a later poll(). A test
         // that asserts the loop is not blocked depends on that difference being real in the fixture too.
-        pendingAsyncCommits.add(() -> onResolved.accept(nextCommitOutcome));
+        pendingAsyncCommits.add(() -> onResolved.accept(nextCommitResult));
         if (wakeupNextCommitAsyncAfterRegistration) {
             wakeupNextCommitAsyncAfterRegistration = false;
             throw new WakeupException();
@@ -357,7 +368,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
      * sleeping: a commit that "takes" longer than the remaining grace is expressed as a clock advance.
      */
     @Override
-    public CommitOutcome commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound) {
+    public CommitResult commitSync(Map<TopicPartition, CommitPoint> commitPoints, Duration bound) {
         record(new CommitAttempted(Map.copyOf(commitPoints), bound));
         // Pending async callbacks run first even when this call is about to be interrupted. The real client
         // invokes completed commit callbacks at the top of commitOffsetsSync, before the network poll that
@@ -374,7 +385,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
             wakeupNextCommitSync = false;
             throw new WakeupException();
         }
-        return nextCommitOutcome;
+        return nextCommitResult;
     }
 
     /**
@@ -435,6 +446,18 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
             positions.put(topicPartition, commitPoint.nextPosition())
         );
         return Map.copyOf(positions);
+    }
+
+    private static CommitResult defaultResult(CommitOutcome outcome) {
+        return switch (outcome) {
+            case ACKNOWLEDGED -> CommitResult.acknowledged();
+            case RETRIABLE -> CommitResult.failed(outcome, CommitFailureClass.OTHER);
+            case GENERATION_STALE -> CommitResult.failed(outcome, CommitFailureClass.REBALANCE);
+            case OUTCOME_UNKNOWN -> CommitResult.failed(outcome, CommitFailureClass.TIMEOUT);
+            case LATE_CALLBACK -> throw new IllegalArgumentException(
+                "LATE_CALLBACK is assigned by the owner"
+            );
+        };
     }
 
     /** Renders the call history compactly, so a failure message shows the sequence rather than a count. */

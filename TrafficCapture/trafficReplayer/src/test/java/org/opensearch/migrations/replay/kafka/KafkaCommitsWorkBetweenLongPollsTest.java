@@ -72,7 +72,7 @@ public class KafkaCommitsWorkBetweenLongPollsTest {
                 records.get(partition).getFirst().logAppendTimeMillis();
 
             var resolution =
-                new AtomicReference<KafkaSourcePort.CommitOutcome>();
+                new AtomicReference<KafkaSourcePort.CommitResult>();
             var submission = port.commitAsync(
                 Map.of(
                     partition,
@@ -88,7 +88,7 @@ public class KafkaCommitsWorkBetweenLongPollsTest {
             port.poll();
 
             Assertions.assertEquals(
-                KafkaSourcePort.CommitOutcome.ACKNOWLEDGED,
+                KafkaSourcePort.CommitResult.acknowledged(),
                 resolution.get()
             );
             var committed = consumer.committed(Set.of(partition)).get(partition);
