@@ -43,24 +43,81 @@ import org.apache.kafka.clients.producer.RecordMetadata;
  * and heartbeats while existing connections drain, then retire locally once no accepted send or
  * connection remains. Any failure that makes acknowledged ordering or heartbeat continuity
  * uncertain permanently closes the process-wide write gate.
+ *
+ * <p>{@link KafkaCaptureFactory} creates this object after the traffic topic has passed its
+ * capability probes and transfers ownership of the Kafka producer to it. {@link
+ * CaptureKafkaMembership} then asks it to initialize routing generations as Kafka membership
+ * changes. The factory does not expose capture to new connections until the first generation's
+ * initial heartbeats have completed; after that, connection serializers submit traffic through
+ * their immutable {@link CaptureRoutingState.ConnectionRoute}.
+ *
+ * <p>The factory also manages shutdown around this object. Orderly shutdown first stops membership
+ * changes and waits for connections to drain, then asks the publisher to retire every
+ * writer-partition lane before {@link #close()} flushes and closes the producer and executors. A
+ * publication or heartbeat-continuity failure takes the shorter failure path: the shared write
+ * gate closes immediately and all pending work is failed because the process can no longer claim
+ * authoritative capture. These responsibilities implement the publisher ownership, heartbeat,
+ * and retirement rules in Capture and Replay Architecture §§4–7 and Proxy Capture Protocol
+ * §§4.2–5.4.
  */
 @Slf4j
 public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher, AutoCloseable {
     static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(30);
 
+    /**
+     * Local lifecycle of one {@code (writerNodeId, partition)} publisher lane. This is separate
+     * from routing-generation state: a lane can remain {@link #OPEN} after its generation stops
+     * receiving new connections because existing connections still need traffic publication and
+     * heartbeats while they drain.
+     */
     private enum PublisherLaneStatus {
+        /** Accepts publication and schedules heartbeats for a current or draining writer. */
         OPEN,
+
+        /** Accepts no new work and waits for already accepted sends and callbacks to quiesce. */
         RETIRING,
+
+        /** Permanently quiet; the writer-partition pair can never publish again. */
         RETIRED
     }
 
+    /**
+     * Result of the race required by Proxy Capture Protocol §5.2 between Kafka's heartbeat
+     * acknowledgement callback, the independent monotonic deadline scheduler, and lifecycle
+     * cleanup. Only one transition out of {@link #PENDING} is allowed.
+     */
     private enum AcknowledgementDeadlineStatus {
+        /** Neither the acknowledgement callback nor a terminal deadline action has won. */
         PENDING,
+
+        /**
+         * Kafka's callback arrived first. The callback may now be handed to the publisher thread
+         * to validate its broker timestamp and advance the heartbeat baseline.
+         */
         ACKNOWLEDGED,
+
+        /**
+         * The local {@code E} deadline won. Capture is permanently compromised; a later callback
+         * must not update the heartbeat baseline, activate routing, or complete retirement.
+         */
         EXPIRED,
+
+        /**
+         * The deadline was deliberately disarmed because its lane or publisher is ending. This is
+         * not a liveness failure: it tells a racing late callback to perform no state transition.
+         */
         CANCELLED
     }
 
+    /**
+     * Cross-thread arbiter for one heartbeat acknowledgement interval.
+     *
+     * <p>The Kafka callback and the dedicated deadline executor do not run on the publisher
+     * thread, so cancelling only the scheduled task would leave a race in which both sides believe
+     * they succeeded. The atomic status is the authoritative decision. The scheduled future is
+     * retained only so the losing timer can be removed promptly; {@link #setExpirationTask} also
+     * handles acknowledgement or cancellation winning before the scheduler returns the future.
+     */
     private static final class AcknowledgementDeadline {
         private final AtomicReference<AcknowledgementDeadlineStatus> status =
             new AtomicReference<>(AcknowledgementDeadlineStatus.PENDING);
@@ -111,6 +168,15 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         }
     }
 
+    /**
+     * Publication and retirement bookkeeping for one writer identity on one Kafka partition.
+     *
+     * <p>The lane is the implementation of the single-owner publisher rule in Proxy Capture
+     * Protocol §4.2. {@code heartbeatInFlight} prevents overlapping heartbeats, {@code
+     * acknowledgementDeadline} proves heartbeat continuity, and {@code acceptedSends} plus the
+     * connection registry form the §4.3 retirement barrier. The {@code retirement} future resolves
+     * only after the lane is permanently quiet.
+     */
     private static final class PublisherLane {
         private final CaptureRoutingState.WriterPartition writerPartition;
         private final CompletableFuture<Void> retirement = new CompletableFuture<>();
@@ -125,6 +191,11 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         }
     }
 
+    /**
+     * A Kafka membership snapshot waiting to become a routing generation. Its result is completed
+     * only after every new writer-partition lane has an accepted initial heartbeat, which is the
+     * generation-wide acceptance gate described by Proxy Capture Protocol §5.3.
+     */
     private static final class RoutingGenerationInitialization {
         private final List<Integer> partitions;
         private final CompletableFuture<String> result;
@@ -146,6 +217,7 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         }
     }
 
+    // Producer, protocol configuration, and process-level failure integration.
     private final Producer<String, byte[]> producer;
     private final String topic;
     @Getter
@@ -156,13 +228,22 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
     private final Duration heartbeatInterval;
     private final Duration heartbeatExpirationInterval;
     private final Clock clock;
+
+    // The publisher executor owns ordered state transitions. The separate deadline executor must
+    // remain responsive even if publisher work is queued, so publisher backlog cannot win a
+    // heartbeat-deadline race by delaying the timer.
     private final ScheduledThreadPoolExecutor executor;
     private final ScheduledThreadPoolExecutor acknowledgementDeadlineExecutor;
     private final AtomicReference<Thread> publisherThread = new AtomicReference<>();
+
+    // Routing-generation and lane lifecycle state, normally advanced on the publisher executor.
     private final Map<CaptureRoutingState.WriterPartition, PublisherLane> publisherLanes =
         new HashMap<>();
     private final ArrayDeque<RoutingGenerationInitialization> routingGenerationInitializations =
         new ArrayDeque<>();
+
+    // Terminal state and producer callbacks cross executor boundaries. The atomics and in-flight
+    // registry make failure and close visible immediately without permitting another write.
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean unstableProcessFailureReported = new AtomicBoolean();

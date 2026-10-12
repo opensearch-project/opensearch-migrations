@@ -228,7 +228,13 @@ public class CaptureProxy {
         @Parameter(required = false,
             names = { "--minimumKafkaTopicPartitions" },
             arity = 1,
-            description = "Minimum Kafka traffic-topic partition count to establish before accepting traffic.")
+            description = "Minimum required partition count for the existing Kafka traffic topic. "
+                + "Before opening its listener, the proxy reads the topic metadata and, when the topic has fewer "
+                + "partitions, uses the Kafka Admin API to increase the partition count to this value; partitions "
+                + "are never removed. The Kafka principal must have permission to alter the topic. Retriable errors "
+                + "delay startup; a permanent partition-increase failure terminates the proxy under the default "
+                + "fail-closed policy, while fail-open starts the proxy without capture. Set to 0 to disable "
+                + "partition provisioning.")
         public int minimumKafkaTopicPartitions;
         @Parameter(required = false,
             names = { "--traffic-stream-flush-interval-seconds" },
