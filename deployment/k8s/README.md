@@ -131,6 +131,12 @@ cluster is created from
 [kindClusterConfig.yaml](kindClusterConfig.yaml), which configures kind to pull project images from the local registry
 mirror at `localhost:5001`.
 
+The kind configs also label their nodes with `topology.kubernetes.io/zone`, as cloud providers do. The chart's
+`workloadsNodePool.zoneSpread` setting (`preferred` by default, `required` in `valuesEks.yaml`) spreads Kafka brokers,
+capture proxies and replayers across zones, and `required` cannot schedule onto nodes without that label. On minikube or
+docker-desktop, label the nodes yourself before using `required`, e.g.
+`kubectl label nodes --all topology.kubernetes.io/zone=local-a`.
+
 Both local flows use the same docker-hosted backend:
 
 * `kindTesting.sh` source `buildImages/backends/dockerHostedBuildkit.sh`. It shares a single `docker-registry`

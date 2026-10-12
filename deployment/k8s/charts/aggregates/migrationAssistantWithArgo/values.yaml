@@ -117,6 +117,16 @@ workloadsNodePool:
   # The optional k6 load generator always uses its own tainted pool in either mode.
   # This setting only has an effect when cluster.useCustomKarpenterNodePool is true.
   mode: isolated
+  # How Kafka brokers, capture proxies and replayers spread across availability zones
+  # (topology.kubernetes.io/zone), applied whether or not the custom NodePools are enabled:
+  #   required  - never place a pod where its zone would be more than one pod ahead of the least
+  #               populated zone; pods wait for capacity in that zone instead.
+  #   preferred - bias placement toward balance but never block scheduling.
+  #   none      - no zone spread.
+  # Nodes without a zone label (kind, minikube, docker-desktop) are ineligible under "required".
+  # A workflow configuration's kafka nodePoolSpecOverrides.template.pod.topologySpreadConstraints,
+  # when set, replaces the generated Kafka constraints.
+  zoneSpread: preferred
   name: general-work-pool
   architectures: []  # e.g. ["arm64"] for Graviton only.
   # With no capacity type, Auto Mode prioritizes reserved, then spot, then on-demand

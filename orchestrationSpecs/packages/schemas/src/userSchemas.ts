@@ -512,37 +512,9 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
             size: "2Gi",
             deleteClaim: true,
         },
-        template: {
-            pod: {
-                // Keep each Kafka pool balanced across the zones available to the Kubernetes
-                // cluster. matchLabelKeys scopes the calculation to this Kafka cluster and pool
-                // without requiring the schema default to know their runtime names.
-                topologySpreadConstraints: [
-                    {
-                        maxSkew: 1,
-                        topologyKey: "topology.kubernetes.io/zone",
-                        whenUnsatisfiable: "DoNotSchedule",
-                        labelSelector: {},
-                        matchLabelKeys: [
-                            "strimzi.io/cluster",
-                            "strimzi.io/pool-name",
-                        ],
-                    },
-                    // Prefer spreading brokers within each zone too, while keeping development
-                    // clusters schedulable when they have fewer nodes than broker replicas.
-                    {
-                        maxSkew: 1,
-                        topologyKey: "kubernetes.io/hostname",
-                        whenUnsatisfiable: "ScheduleAnyway",
-                        labelSelector: {},
-                        matchLabelKeys: [
-                            "strimzi.io/cluster",
-                            "strimzi.io/pool-name",
-                        ],
-                    },
-                ],
-            },
-        },
+        // Zone and host spread are not defaults here: the workflow generates them from the
+        // deployment's workloadZoneSpread setting unless template.pod.topologySpreadConstraints is
+        // set explicitly in these overrides, in which case that list is used as given.
     },
     topicSpecOverrides: {
         ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES

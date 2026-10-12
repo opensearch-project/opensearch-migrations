@@ -987,32 +987,6 @@ describe('MigrationConfigTransformer validation', () => {
                         size: "2Gi",
                         deleteClaim: true,
                     },
-                    template: {
-                        pod: {
-                            topologySpreadConstraints: [
-                                {
-                                    maxSkew: 1,
-                                    topologyKey: "topology.kubernetes.io/zone",
-                                    whenUnsatisfiable: "DoNotSchedule",
-                                    labelSelector: {},
-                                    matchLabelKeys: [
-                                        "strimzi.io/cluster",
-                                        "strimzi.io/pool-name",
-                                    ],
-                                },
-                                {
-                                    maxSkew: 1,
-                                    topologyKey: "kubernetes.io/hostname",
-                                    whenUnsatisfiable: "ScheduleAnyway",
-                                    labelSelector: {},
-                                    matchLabelKeys: [
-                                        "strimzi.io/cluster",
-                                        "strimzi.io/pool-name",
-                                    ],
-                                },
-                            ],
-                        },
-                    },
                 },
                 topicSpecOverrides: {
                     partitions: 2,
@@ -1035,6 +1009,31 @@ describe('MigrationConfigTransformer validation', () => {
                     }
                 }
             }
+        });
+    });
+
+    it('should leave Kafka topology spread to the deployment unless the configuration overrides it', async () => {
+        const defaults = await transformer.processFromObject(baseConfig);
+        expect(defaults.kafkaClusters?.[0]?.config?.nodePoolSpecOverrides?.template).toBeUndefined();
+
+        const constraints = [{
+            maxSkew: 2,
+            topologyKey: "topology.kubernetes.io/zone",
+            whenUnsatisfiable: "ScheduleAnyway",
+            labelSelector: {},
+        }];
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    nodePoolSpecOverrides: {template: {pod: {topologySpreadConstraints: constraints}}},
+                },
+            },
+        };
+        const overridden = await transformer.processFromObject(config);
+        expect(overridden.kafkaClusters?.[0]?.config?.nodePoolSpecOverrides).toMatchObject({
+            replicas: 3,
+            template: {pod: {topologySpreadConstraints: constraints}},
         });
     });
 

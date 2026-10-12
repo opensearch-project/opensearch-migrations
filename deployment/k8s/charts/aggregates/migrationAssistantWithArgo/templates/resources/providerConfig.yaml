@@ -47,4 +47,9 @@ data:
   kafkaNodePoolName: {{ ternary $kafkaPoolName "" $nodePoolsEnabled | quote }}
   proxyNodePoolName: {{ ternary $proxyPoolName "" $nodePoolsEnabled | quote }}
   replayerNodePoolName: {{ ternary $replayerPoolName "" $nodePoolsEnabled | quote }}
+  {{- $zoneSpread := .Values.workloadsNodePool.zoneSpread | default "preferred" }}
+  {{- if not (has $zoneSpread (list "required" "preferred" "none")) }}
+  {{- fail (printf "workloadsNodePool.zoneSpread must be required, preferred or none, got %q" $zoneSpread) }}
+  {{- end }}
+  workloadZoneSpread: {{ $zoneSpread | quote }}
   k6NodePoolName: {{ ternary .Values.workloadsNodePool.dedicatedPools.k6.name "" $nodePoolsEnabled | quote }}

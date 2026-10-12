@@ -8,7 +8,7 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
     function getResourceManifest(rendered: any, templateName: string): any {
         const manifest = getRawManifest(rendered, templateName)
             .replace(
-                /^(\s*)(nodeSelector|tolerations|volumeMounts|volumes): \{\{=.*$/gm,
+                /^(\s*)(nodeSelector|tolerations|topologySpreadConstraints|volumeMounts|volumes): \{\{=.*$/gm,
                 "$1$2: []",
             );
         return yaml.load(manifest);

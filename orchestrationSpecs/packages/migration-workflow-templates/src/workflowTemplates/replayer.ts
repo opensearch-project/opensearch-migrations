@@ -45,6 +45,8 @@ import {
     workloadNodePoolResolvedInput,
     workloadNodeSelector,
     workloadNodeTolerations,
+    workloadZoneSpreadConstraints,
+    workloadZoneSpreadResolvedInput,
 } from "./commonUtils/workloadNodePool";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
@@ -204,6 +206,7 @@ function getReplayerDeploymentManifest
     targetK8sLabel: BaseExpression<string>,
     taskK8sLabel: BaseExpression<string>,
     workloadNodePoolName: BaseExpression<string>,
+    workloadZoneSpread: BaseExpression<string>,
 }): Deployment {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const baseContainerDefinition = {
@@ -301,13 +304,9 @@ function getReplayerDeploymentManifest
                     serviceAccountName: "argo-workflow-executor",
                     nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
                     tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
-                    topologySpreadConstraints: [{
-                        maxSkew: 1,
-                        topologyKey: "topology.kubernetes.io/zone",
-                        whenUnsatisfiable: "DoNotSchedule",
-                        labelSelector: {},
-                        matchLabelKeys: [REPLAYER_SELECTOR_LABEL],
-                    }],
+                    topologySpreadConstraints: makeDirectTypeProxy(
+                        workloadZoneSpreadConstraints(args.workloadZoneSpread, [REPLAYER_SELECTOR_LABEL])
+                    ),
                     containers: [finalContainerDefinition.container],
                     volumes: finalContainerDefinition.volumes
                 },
@@ -335,6 +334,7 @@ const createDeploymentInputs = {
     targetK8sLabel: defineRequiredParam<string>(),
     taskK8sLabel: defineParam<string>({expression: expr.literal("trafficReplayer")}),
     ...workloadNodePoolResolvedInput("replayerNodePoolName"),
+    ...workloadZoneSpreadResolvedInput(),
     ...makeRequiredImageParametersForKeys(["TrafficReplayer"]),
     resources: defineRequiredParam<ResourceRequirementsType>()
 };
@@ -388,6 +388,7 @@ function makeReplayerDeploymentDefinition(
             targetK8sLabel: inputs.targetK8sLabel,
             taskK8sLabel: inputs.taskK8sLabel,
             workloadNodePoolName: inputs.workloadNodePoolName,
+            workloadZoneSpread: inputs.workloadZoneSpread,
         })
     };
 }

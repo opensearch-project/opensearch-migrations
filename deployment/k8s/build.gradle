@@ -182,7 +182,20 @@ tasks.register('verifyHelmUninstallTeardown', Exec) {
     dependsOn 'installHelmClient'
 }
 
+tasks.register('verifyWorkloadZoneSpread', Exec) {
+    description = 'Validates the workload zone-spread policy the chart publishes to the workflows'
+    group = 'verification'
+    commandLine(
+            'python3',
+            layout.projectDirectory.file('scripts/verify-workload-zone-spread.py').asFile,
+            chartSourceDir.asFile,
+            '--helm',
+            helmExecutable.get().asFile
+    )
+    dependsOn 'installHelmClient'
+}
+
 tasks.named('check') {
     dependsOn 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability',
-            'verifyHelmUninstallTeardown'
+            'verifyHelmUninstallTeardown', 'verifyWorkloadZoneSpread'
 }

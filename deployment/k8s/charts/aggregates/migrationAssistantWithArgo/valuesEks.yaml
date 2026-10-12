@@ -12,6 +12,10 @@ aws:
   region: ""
   account: ""
 
+# EKS Auto Mode labels every node with its zone and launches capacity in the zone a pod needs.
+workloadsNodePool:
+  zoneSpread: required
+
 cluster:
   dedicatedKarpenterNodePoolForMigrationConsole: true
   # When true, deploys the custom Karpenter NodePools configured by workloadsNodePool
