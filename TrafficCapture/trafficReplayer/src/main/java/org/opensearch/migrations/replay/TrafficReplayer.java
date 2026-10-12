@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.Charset;
@@ -11,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntFunction;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -20,8 +23,12 @@ import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
+import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
+import org.opensearch.migrations.replay.sink.KafkaTupleSink;
+import org.opensearch.migrations.replay.sink.MultiTupleSink;
 import org.opensearch.migrations.replay.sink.S3TupleSink;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
+import org.opensearch.migrations.replay.sink.TupleSink;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -50,6 +57,7 @@ import com.beust.jcommander.ParametersDelegate;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.KafkaProducer;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -406,6 +414,15 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
+            names = { "--tuple-kafka-topic", "--tupleKafkaTopic" },
+            arity = 1,
+            description = "When set, tuples (ES + OS request/response pairs) are also published to this Kafka "
+                + "topic for real-time monitoring. Reuses the same broker and auth as --kafkaBrokers / "
+                + "--kafkaAuthType. Can be used alongside --tupleS3Bucket (dual sink) or alone.")
+        String tupleKafkaTopic;
+
+        @Parameter(
+            required = false,
             names = { "--non-retryable-doc-exception-types", "--nonRetryableDocExceptionTypes" },
             description = "Optional. Comma-separated list of document-level exception types that should NOT be "
                 + "retried during bulk replay. These errors still count as failures but won't be retried since "
@@ -416,6 +433,10 @@ public class TrafficReplayer {
         List<String> nonRetryableDocExceptionTypes;
 
         void validateKafkaAuthFlags() {
+            if (tupleKafkaTopic != null && !tupleKafkaTopic.isEmpty()
+                && (kafkaTrafficBrokers == null || kafkaTrafficBrokers.isBlank())) {
+                throw new ParameterException("--tuple-kafka-topic requires --kafkaBrokers to be set");
+            }
             if (kafkaTrafficAuthType != null && !kafkaTrafficAuthType.isBlank()) {
                 if (Boolean.TRUE.equals(kafkaTrafficEnableMSKAuth)
                     && !KAFKA_AUTH_TYPE_MSK_IAM.equals(kafkaTrafficAuthType)) {
@@ -662,7 +683,7 @@ public class TrafficReplayer {
         );
 
         ActiveContextMonitor activeContextMonitor = null;
-        ThreadLocalTupleWriter tupleWriter = null;
+        TupleWriterResources tupleWriterResources = null;
         try (
             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(
                 topContext,
@@ -752,17 +773,17 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            tupleWriter = createS3TupleWriterIfConfigured(
+            tupleWriterResources = createS3TupleWriterIfConfigured(
                 params,
                 () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
             );
-            if (tupleWriter != null) {
+            if (tupleWriterResources != null) {
                 tr.setupRunAndWaitForReplayWithShutdownChecks(
                     Duration.ofSeconds(params.observedPacketConnectionTimeout),
                     serverTimeout,
                     blockingTrafficSource,
                     timeShifter,
-                    tupleWriter,
+                    tupleWriterResources.tupleWriter,
                     Duration.ofMillis(params.quiescentPeriodMs)
                 );
             } else {
@@ -780,8 +801,8 @@ public class TrafficReplayer {
             }
             log.info("Done processing TrafficStreams");
         } finally {
-            if (tupleWriter != null) {
-                tupleWriter.close();
+            if (tupleWriterResources != null) {
+                tupleWriterResources.close();
             }
             scheduledExecutorService.shutdown();
             if (activeContextMonitor != null) {
@@ -821,13 +842,28 @@ public class TrafficReplayer {
         }
     }
 
-    private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
-        Parameters params,
-        Supplier<IJsonTransformer> tupleTransformerSupplier
-    ) {
-        if (params.tupleS3Bucket == null || params.tupleS3Bucket.isEmpty()) {
-            return null;
+    /** Bundles the tuple writer with the shared Kafka producer it references (if any) so both
+     * get closed together — the producer must outlive every {@link ThreadLocalTupleWriter}-owned
+     * {@code KafkaTupleSink} and is only safe to close once they've all flushed. */
+    private static final class TupleWriterResources implements AutoCloseable {
+        final ThreadLocalTupleWriter tupleWriter;
+        private final KafkaProducer<String, byte[]> kafkaProducer;
+
+        TupleWriterResources(ThreadLocalTupleWriter tupleWriter, KafkaProducer<String, byte[]> kafkaProducer) {
+            this.tupleWriter = tupleWriter;
+            this.kafkaProducer = kafkaProducer;
         }
+
+        @Override
+        public void close() {
+            tupleWriter.close();
+            if (kafkaProducer != null) {
+                kafkaProducer.close();
+            }
+        }
+    }
+
+    private static IntFunction<TupleSink> buildS3TupleSinkFactory(Parameters params) {
         log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
             params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
         var credentialsProvider = DefaultCredentialsProvider.builder().build();
@@ -841,18 +877,88 @@ public class TrafficReplayer {
         }
         var s3Client = s3ClientBuilder.build();
         var replayerId = ProcessHelpers.getNodeInstanceName();
-        return new ThreadLocalTupleWriter(
-            sinkIndex -> new S3TupleSink(
-                s3Client,
-                params.tupleS3Bucket,
-                params.tupleS3Prefix,
-                replayerId,
-                sinkIndex,
-                params.tupleMaxFileSizeMb * 1024L * 1024L,
-                Duration.ofSeconds(params.tupleMaxBufferSeconds),
-                params.tupleMaxPerFile
-            ),
-            tupleTransformerSupplier
+        return sinkIndex -> new S3TupleSink(
+            s3Client,
+            params.tupleS3Bucket,
+            params.tupleS3Prefix,
+            replayerId,
+            sinkIndex,
+            params.tupleMaxFileSizeMb * 1024L * 1024L,
+            Duration.ofSeconds(params.tupleMaxBufferSeconds),
+            params.tupleMaxPerFile
+        );
+    }
+
+    /** The producer is shared across all sink instances. */
+    private static KafkaProducer<String, byte[]> buildKafkaTupleProducer(Parameters params) {
+        log.info("Kafka tuple writing enabled — topic={}, brokers={}",
+            params.tupleKafkaTopic, params.kafkaTrafficBrokers);
+        try {
+            // Reuse the same auth/SSL property setup as the consumer for consistency
+            var kafkaProps = KafkaTrafficCaptureSource.buildKafkaProperties(
+                params.kafkaTrafficBrokers,
+                "tuple-producer",
+                params.getEffectiveKafkaAuthType(),
+                params.kafkaTrafficUserName,
+                params.kafkaTrafficPassword,
+                params.kafkaTrafficPropertyFile
+            );
+            // Override consumer defaults with producer-specific settings
+            kafkaProps.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+            kafkaProps.put("value.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
+            kafkaProps.remove("key.deserializer");
+            kafkaProps.remove("value.deserializer");
+            kafkaProps.remove("enable.auto.commit");
+            kafkaProps.remove("auto.offset.reset");
+            kafkaProps.remove("group.id");
+            kafkaProps.remove("partition.assignment.strategy");
+            kafkaProps.put("acks", "1");
+            log.info("Kafka tuple producer configured — security.protocol={}, sasl.mechanism={}, password={}",
+                kafkaProps.get("security.protocol"),
+                kafkaProps.get("sasl.mechanism"),
+                kafkaProps.get("sasl.jaas.config") != null ? "(set)" : "(null)");
+            return new KafkaProducer<>(kafkaProps);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to configure Kafka tuple producer", e);
+        }
+    }
+
+    private static IntFunction<TupleSink> combineTupleSinkFactories(
+        boolean hasS3,
+        boolean hasKafka,
+        IntFunction<TupleSink> s3Factory,
+        KafkaProducer<String, byte[]> kafkaProducer,
+        String kafkaTopic
+    ) {
+        if (hasS3 && hasKafka) {
+            return sinkIndex -> new MultiTupleSink(List.of(
+                s3Factory.apply(sinkIndex),
+                new KafkaTupleSink(kafkaProducer, kafkaTopic)
+            ));
+        }
+        if (hasS3) {
+            return s3Factory;
+        }
+        return sinkIndex -> new KafkaTupleSink(kafkaProducer, kafkaTopic);
+    }
+
+    private static TupleWriterResources createS3TupleWriterIfConfigured(
+        Parameters params,
+        Supplier<IJsonTransformer> tupleTransformerSupplier
+    ) {
+        boolean hasS3 = params.tupleS3Bucket != null && !params.tupleS3Bucket.isEmpty();
+        boolean hasKafka = params.tupleKafkaTopic != null && !params.tupleKafkaTopic.isEmpty();
+        if (!hasS3 && !hasKafka) {
+            return null;
+        }
+
+        var s3Factory = hasS3 ? buildS3TupleSinkFactory(params) : null;
+        var kafkaProducer = hasKafka ? buildKafkaTupleProducer(params) : null;
+        var combinedFactory = combineTupleSinkFactories(hasS3, hasKafka, s3Factory, kafkaProducer, params.tupleKafkaTopic);
+
+        return new TupleWriterResources(
+            new ThreadLocalTupleWriter(combinedFactory, tupleTransformerSupplier),
+            kafkaProducer
         );
     }
 
