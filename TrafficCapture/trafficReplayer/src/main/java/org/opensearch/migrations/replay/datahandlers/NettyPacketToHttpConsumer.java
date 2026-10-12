@@ -573,17 +573,31 @@ public final class NettyPacketToHttpConsumer
 
         private static final class ConnectionClosedListenerHandler
             extends ChannelInboundHandlerAdapter {
-            private final IReplayContexts.ISocketContext socketContext;
+            private final IReplayContexts.IConnectionContext connectionContext;
+            private IReplayContexts.ISocketContext socketContext;
 
             private ConnectionClosedListenerHandler(
                 IReplayContexts.IConnectionContext connectionContext
             ) {
+                this.connectionContext = connectionContext;
+            }
+
+            @Override
+            public void channelActive(ChannelHandlerContext context) throws Exception {
+                if (socketContext != null) {
+                    throw new IllegalStateException("TCP socket context is already active");
+                }
                 socketContext = connectionContext.createSocketContext();
+                super.channelActive(context);
             }
 
             @Override
             public void channelInactive(ChannelHandlerContext context) throws Exception {
-                socketContext.close();
+                var contextToClose = socketContext;
+                socketContext = null;
+                if (contextToClose != null) {
+                    contextToClose.close();
+                }
                 super.channelInactive(context);
             }
 
@@ -592,7 +606,9 @@ public final class NettyPacketToHttpConsumer
                 ChannelHandlerContext context,
                 Throwable cause
             ) throws Exception {
-                socketContext.addTraceException(cause, true);
+                if (socketContext != null) {
+                    socketContext.addTraceException(cause, true);
+                }
                 context.close();
                 super.exceptionCaught(context, cause);
             }

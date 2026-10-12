@@ -8,6 +8,7 @@
 
 package org.opensearch.migrations.replay;
 
+import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -1053,6 +1054,105 @@ class TrafficReplayerTopLevelConstructionTest {
                     ),
                     "both requests must reuse one target socket"
                 );
+                Assertions.assertEquals(
+                    1,
+                    InMemoryInstrumentationBundle.getMetricValueOrZero(
+                        telemetry.getFinishedMetrics(),
+                        IReplayContexts.MetricNames.CONNECTIONS_CLOSED
+                    )
+                );
+                Assertions.assertEquals(
+                    0,
+                    InMemoryInstrumentationBundle.getMetricValueOrZero(
+                        telemetry.getFinishedMetrics(),
+                        IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS
+                    )
+                );
+            } finally {
+                eventLoops.shutdownGracefully().sync();
+            }
+        }
+    }
+
+    @Test
+    void failedTcpConnectDoesNotLeaveSocketContextActive() throws Exception {
+        final int unusedPort;
+        try (var socket = new ServerSocket(0)) {
+            unusedPort = socket.getLocalPort();
+        }
+
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var eventLoops = new NioEventLoopGroup(
+                1,
+                new DefaultThreadFactory("g5-failed-target-connect")
+            );
+            try {
+                var generation = new PartitionGenerationId(TOPIC_PARTITION, 12);
+                var connectionId = new ConnectionProcessingId(
+                    generation,
+                    new CapturedConnectionId("writer", "failed-target"),
+                    4
+                );
+                var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+                var contextManager = new ChannelContextManager(rootContext);
+                var connectionContext = contextManager.apply(connectionId);
+                var eventLoop = eventLoops.next();
+                var targetChannel = NettyPacketToHttpConsumer.create(
+                    connectionId,
+                    eventLoop,
+                    Clock.systemUTC(),
+                    connectionContext,
+                    URI.create("http://127.0.0.1:" + unusedPort),
+                    null,
+                    Duration.ofSeconds(5)
+                );
+
+                var outcome = runRealTargetAttemptExpectingWrites(
+                    targetChannel,
+                    rootContext,
+                    generation,
+                    connectionId,
+                    eventLoop,
+                    1,
+                    0
+                );
+                Assertions.assertInstanceOf(
+                    TargetAttemptOutcome.NoTargetResponseObtained.class,
+                    outcome
+                );
+
+                var close = eventLoop.submit(() -> targetChannel.close(connectionId))
+                    .sync()
+                    .getNow();
+                close.toCompletableFuture().get(10, TimeUnit.SECONDS);
+                contextManager.releaseContextFor(connectionContext);
+
+                Assertions.assertEquals(
+                    0,
+                    rootContext.activeContextTracker.getActiveScopesByAge()
+                        .filter(context ->
+                            IReplayContexts.ActivityNames.TCP_CONNECTION.equals(
+                                context.getActivityName()
+                            )
+                        )
+                        .count(),
+                    "a failed pre-active TCP connect must not leave a socket context open"
+                );
+                Assertions.assertEquals(
+                    0,
+                    InMemoryInstrumentationBundle.getMetricValueOrZero(
+                        telemetry.getFinishedMetrics(),
+                        IReplayContexts.MetricNames.CONNECTIONS_OPENED
+                    ),
+                    "a refused connect is an attempt, not an opened TCP connection"
+                );
+                Assertions.assertEquals(
+                    0,
+                    InMemoryInstrumentationBundle.getMetricValueOrZero(
+                        telemetry.getFinishedMetrics(),
+                        IReplayContexts.MetricNames.ACTIVE_TARGET_CONNECTIONS
+                    )
+                );
             } finally {
                 eventLoops.shutdownGracefully().sync();
             }
@@ -1288,6 +1388,29 @@ class TrafficReplayerTopLevelConstructionTest {
         long ordinal,
         String... requestFragments
     ) throws Exception {
+        return runRealTargetAttemptExpectingWrites(
+            targetChannel,
+            rootContext,
+            generation,
+            connectionId,
+            eventLoop,
+            ordinal,
+            1,
+            requestFragments
+        );
+    }
+
+    private static TargetAttemptOutcome<AggregatedRawResponse>
+        runRealTargetAttemptExpectingWrites(
+            NettyPacketToHttpConsumer targetChannel,
+            RootReplayerContext rootContext,
+            PartitionGenerationId generation,
+            ConnectionProcessingId connectionId,
+            EventLoop eventLoop,
+            long ordinal,
+            int expectedWrites,
+            String... requestFragments
+        ) throws Exception {
         var recordContext = rootContext.createKafkaRecordContext(
             new KafkaRecordId(generation, ordinal),
             0
@@ -1349,8 +1472,8 @@ class TrafficReplayerTopLevelConstructionTest {
             var outcome = attempt.outcome()
                 .toCompletableFuture()
                 .get(10, TimeUnit.SECONDS);
-            Assertions.assertEquals(1, firstWrites.get());
-            Assertions.assertEquals(1, finalWrites.get());
+            Assertions.assertEquals(expectedWrites, firstWrites.get());
+            Assertions.assertEquals(expectedWrites, finalWrites.get());
             return outcome;
         } finally {
             prepared.close();
