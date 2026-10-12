@@ -68,8 +68,8 @@ class LuceneReaderVersionStreamTest {
             result.stream().map(doc -> doc.luceneDocNumber).toList());
         assertEquals(Arrays.asList(versions), result.stream().map(doc -> doc.version).toList());
         assertTrue(completionOrder.indexOf(1) < completionOrder.indexOf(0));
-        assertEquals(List.of(IntStream.range(0, documentCount).boxed().toList()), visits);
-        verify(reader, times(1)).openNumericValueReader("_version");
+        assertEquals(IntStream.range(0, documentCount).boxed().toList(),
+            visits.stream().flatMap(List::stream).sorted().toList());
         verify(reader, never()).getNumericValue(anyInt(), anyString());
     }
 
@@ -83,8 +83,8 @@ class LuceneReaderVersionStreamTest {
             documents.subscribeOn(Schedulers.parallel())).collectList().block(TIMEOUT);
 
         assertEquals(6, result.size());
-        assertEquals(List.of(List.of(0, 1, 2), List.of(0, 1, 2)), visits);
-        verify(reader, times(2)).openNumericValueReader("_version");
+        assertEquals(List.of(0, 0, 1, 1, 2, 2),
+            visits.stream().flatMap(List::stream).sorted().toList());
     }
 
     @Test
@@ -94,9 +94,10 @@ class LuceneReaderVersionStreamTest {
         var documents = stream(reader, 0, 0, DocumentChangeType.INDEX);
 
         assertEquals(1, documents.take(1).collectList().block(TIMEOUT).size());
-        assertEquals(3, documents.collectList().block(TIMEOUT).size());
-        assertEquals(List.of(0, 1, 2), visits.get(1));
-        verify(reader, times(2)).openNumericValueReader("_version");
+        int previousCursors = visits.size();
+        var result = documents.collectList().block(TIMEOUT);
+        assertEquals(List.of(7L, 8L, 9L), result.stream().map(doc -> doc.version).toList());
+        assertTrue(visits.size() > previousCursors);
     }
 
     @Test
@@ -115,7 +116,7 @@ class LuceneReaderVersionStreamTest {
         assertEquals(List.of(103, 104), result.stream().map(doc -> doc.luceneDocNumber).toList());
         assertNull(result.get(0).version);
         assertEquals(Long.MAX_VALUE, result.get(1).version);
-        assertEquals(List.of(List.of(3, 4)), visits);
+        assertEquals(List.of(3, 4), visits.stream().flatMap(List::stream).sorted().toList());
     }
 
     @Test
@@ -183,22 +184,38 @@ class LuceneReaderVersionStreamTest {
     }
 
     @Test
-    void skippedDocumentDiscardsVersionFailureAndReopensCursor() throws Exception {
+    void skippedDocumentNeverReadsItsVersion() throws Exception {
         var reader = reader(2);
         var nestedDocument = document(null);
         when(reader.document(0)).thenReturn(nestedDocument);
-        LuceneLeafReader.NumericValueReader failed = docId -> {
-            throw new IOException("unreadable nested document version");
-        };
-        when(reader.openNumericValueReader("_version"))
-            .thenReturn(failed, docId -> Long.MAX_VALUE);
+        when(reader.openNumericValueReader("_version")).thenReturn(docId -> {
+            assertEquals(1, docId);
+            return Long.MAX_VALUE;
+        });
 
         var result = stream(reader, 0, 0, DocumentChangeType.INDEX).collectList().block(TIMEOUT);
 
         assertEquals(1, result.size());
         assertEquals(1, result.get(0).luceneDocNumber);
         assertEquals(Long.MAX_VALUE, result.get(0).version);
-        verify(reader, times(2)).openNumericValueReader("_version");
+        verify(reader, times(1)).openNumericValueReader("_version");
+    }
+
+    @Test
+    void invalidDocumentsNeverOpenAVersionCursor() throws Exception {
+        var reader = reader(3);
+        var nestedDocument = document(null);
+        when(reader.document(0)).thenReturn(nestedDocument);
+        when(reader.document(1)).thenThrow(new IOException("unreadable stored fields"));
+        var id = mock(LuceneField.class);
+        when(id.name()).thenReturn("_id");
+        when(id.asUid()).thenReturn("missing-source");
+        when(reader.document(2)).thenReturn(() -> List.of(id));
+
+        assertTrue(stream(reader, 0, 0, DocumentChangeType.INDEX).collectList().block(TIMEOUT).isEmpty());
+
+        verify(reader, never()).openNumericValueReader(anyString());
+        verify(reader, never()).getNumericValue(anyInt(), anyString());
     }
 
     private static LuceneLeafReader reader(int count) throws IOException {
@@ -215,14 +232,17 @@ class LuceneReaderVersionStreamTest {
     private static List<List<Integer>> cursors(LuceneLeafReader reader, Long[] versions) throws IOException {
         var visits = new CopyOnWriteArrayList<List<Integer>>();
         when(reader.openNumericValueReader("_version")).thenAnswer(invocation -> {
+            var owner = Thread.currentThread();
+            assertTrue(owner.getName().startsWith("lucene-io-"));
             var cursorVisits = new ArrayList<Integer>();
             visits.add(cursorVisits);
             var last = new AtomicInteger(-1);
             var advancing = new AtomicBoolean();
             return (LuceneLeafReader.NumericValueReader) docId -> {
+                assertSame(owner, Thread.currentThread());
                 assertTrue(advancing.compareAndSet(false, true), "cursor must not be shared by concurrent tasks");
                 try {
-                    assertTrue(docId > last.getAndSet(docId), "cursor must advance monotonically");
+                    assertTrue(docId >= last.getAndSet(docId), "cursor must advance monotonically");
                     cursorVisits.add(docId);
                     return versions[docId];
                 } finally {
