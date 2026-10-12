@@ -11,6 +11,8 @@ package org.opensearch.migrations.replay.kafkasource;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -113,15 +115,46 @@ public final class KafkaSourceOwner {
         @NonNull Optional<Long> inFlightCommitPosition
     ) {}
 
+    /**
+     * What a record's diagnostic state is derived from, captured once per partition so the snapshot does not
+     * materialize a diagnostic for every in-flight record when the monitor looks up only the oldest one.
+     */
+    public record RecordStateSource(
+        @NonNull ObservedRecordCommitQueue.Snapshot queue,
+        @NonNull PartitionSourceState.CommitUncertainty commitUncertainty,
+        @NonNull Optional<Long> stagedCommitPosition,
+        @NonNull Optional<Long> inFlightCommitPosition
+    ) {}
+
     public record DiagnosticSnapshot(
         @NonNull Map<PartitionGenerationId, PartitionDiagnostic> partitions,
-        @NonNull Map<KafkaRecordId, RecordDiagnostic> records
+        @NonNull Map<PartitionGenerationId, RecordStateSource> recordStateSources,
+        @NonNull Set<KafkaRecordId> trackedRecords
     ) {
-        public static final DiagnosticSnapshot EMPTY = new DiagnosticSnapshot(Map.of(), Map.of());
+        public static final DiagnosticSnapshot EMPTY = new DiagnosticSnapshot(Map.of(), Map.of(), Set.of());
 
         public DiagnosticSnapshot {
             partitions = Map.copyOf(partitions);
-            records = Map.copyOf(records);
+            recordStateSources = Map.copyOf(recordStateSources);
+            // Not Set.copyOf: immutable sets probe linearly, and record ids from consecutive offsets hash
+            // to consecutive values, so copying a large backlog clustered into minutes of probing.
+            trackedRecords = Collections.unmodifiableSet(new HashSet<>(trackedRecords));
+        }
+
+        /** The diagnostic for one tracked record, or empty if the owner held no context for it. */
+        public Optional<RecordDiagnostic> record(KafkaRecordId recordId) {
+            if (!trackedRecords.contains(recordId)) {
+                return Optional.empty();
+            }
+            return Optional.ofNullable(recordStateSources.get(recordId.generation()))
+                .map(source -> new RecordDiagnostic(recordId, diagnosticState(recordId, source)));
+        }
+
+        /** Every tracked record's diagnostic; proportional to the records in flight, so for inspection only. */
+        public Map<KafkaRecordId, RecordDiagnostic> records() {
+            var all = new LinkedHashMap<KafkaRecordId, RecordDiagnostic>();
+            trackedRecords.forEach(recordId -> record(recordId).ifPresent(diagnostic -> all.put(recordId, diagnostic)));
+            return Collections.unmodifiableMap(all);
         }
 
         public long uncertainPartitionCount() {
@@ -1869,7 +1902,7 @@ public final class KafkaSourceOwner {
 
     private void publishDiagnosticSnapshot() {
         var partitionCopies = new LinkedHashMap<PartitionGenerationId, PartitionDiagnostic>();
-        var recordCopies = new LinkedHashMap<KafkaRecordId, RecordDiagnostic>();
+        var recordStateSources = new LinkedHashMap<PartitionGenerationId, RecordStateSource>();
         for (var state : partitions.values()) {
             var generation = state.generation();
             var topicPartition = state.topicPartition();
@@ -1901,28 +1934,20 @@ public final class KafkaSourceOwner {
                     inFlightPosition
                 )
             );
-
-            recordContexts.keySet().stream()
-                .filter(recordId -> recordId.generation().equals(generation))
-                .forEach(recordId -> recordCopies.put(
-                    recordId,
-                    new RecordDiagnostic(
-                        recordId,
-                        diagnosticState(recordId, queue, state, stagedPosition, inFlightPosition)
-                    )
-                ));
+            recordStateSources.put(
+                generation,
+                new RecordStateSource(queue, state.commitUncertainty(), stagedPosition, inFlightPosition)
+            );
         }
-        diagnosticSnapshot = new DiagnosticSnapshot(partitionCopies, recordCopies);
+        diagnosticSnapshot = new DiagnosticSnapshot(
+            partitionCopies,
+            recordStateSources,
+            recordContexts.keySet()
+        );
     }
 
-    private static RecordDiagnosticState diagnosticState(
-        KafkaRecordId recordId,
-        ObservedRecordCommitQueue.Snapshot queue,
-        PartitionSourceState state,
-        Optional<Long> stagedPosition,
-        Optional<Long> inFlightPosition
-    ) {
-        var queueState = queue.recordStates().get(recordId);
+    private static RecordDiagnosticState diagnosticState(KafkaRecordId recordId, RecordStateSource source) {
+        var queueState = source.queue().recordStates().get(recordId);
         if (queueState != null) {
             return switch (queueState) {
                 case PROCESSING -> RecordDiagnosticState.PROCESSING;
@@ -1931,18 +1956,14 @@ public final class KafkaSourceOwner {
                 case COMMIT_INELIGIBLE -> RecordDiagnosticState.COMMIT_INELIGIBLE;
             };
         }
-        if (inFlightPosition.filter(position -> position > recordId.offset()).isPresent()) {
+        if (source.inFlightCommitPosition().filter(position -> position > recordId.offset()).isPresent()) {
             return RecordDiagnosticState.COMMIT_IN_FLIGHT;
         }
-        if (stagedPosition.filter(position -> position > recordId.offset()).isPresent()) {
-            return state.commitUncertainty() == PartitionSourceState.CommitUncertainty.NONE_OBSERVED
-                ? RecordDiagnosticState.READY_TO_COMMIT
-                : RecordDiagnosticState.COMMIT_UNCERTAIN;
+        var uncertain = source.commitUncertainty() != PartitionSourceState.CommitUncertainty.NONE_OBSERVED;
+        if (source.stagedCommitPosition().filter(position -> position > recordId.offset()).isPresent()) {
+            return uncertain ? RecordDiagnosticState.COMMIT_UNCERTAIN : RecordDiagnosticState.READY_TO_COMMIT;
         }
-        if (state.commitUncertainty() != PartitionSourceState.CommitUncertainty.NONE_OBSERVED) {
-            return RecordDiagnosticState.COMMIT_UNCERTAIN;
-        }
-        return RecordDiagnosticState.UNKNOWN;
+        return uncertain ? RecordDiagnosticState.COMMIT_UNCERTAIN : RecordDiagnosticState.UNKNOWN;
     }
 
     private Optional<PartitionSourceState> currentStateFor(PartitionGenerationId generation) {

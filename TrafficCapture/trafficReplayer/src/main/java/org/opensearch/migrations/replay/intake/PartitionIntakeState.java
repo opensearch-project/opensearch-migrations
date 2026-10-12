@@ -17,7 +17,6 @@ import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
-import java.util.function.Predicate;
 
 import org.opensearch.migrations.replay.identity.CancellationGrace;
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
@@ -245,6 +244,14 @@ public final class PartitionIntakeState {
      */
     private final Map<CapturedConnectionId, SourceConnectionState>
         activeSourceConnectionsByCapturedConnectionId = new LinkedHashMap<>();
+    /**
+     * The same entries grouped by capturing writer, kept in step with
+     * {@link #activeSourceConnectionsByCapturedConnectionId}. An expired writer stays expired for the
+     * generation, so every later record re-applies its expiration; this index keeps that proportional to the
+     * writer's own connections, usually none, instead of to every open connection in the partition.
+     */
+    private final Map<String, Map<CapturedConnectionId, SourceConnectionState>>
+        activeSourceConnectionsByWriterNodeId = new LinkedHashMap<>();
     /**
      * {@code §6}: "Older expired {@code ConnectionProcessingId} values may remain here while their target and
      * tuple work finishes." An expired lifetime's entry therefore outlives its captured-identity mapping.
@@ -574,7 +581,7 @@ public final class PartitionIntakeState {
             firstStream,
             sink
         );
-        activeSourceConnectionsByCapturedConnectionId.put(capturedConnectionId, lifetime);
+        putActiveSourceConnection(capturedConnectionId, lifetime);
         activeConnectionProcessingById.put(lifetime.connectionProcessingId(), lifetime);
         return lifetime;
     }
@@ -601,7 +608,7 @@ public final class PartitionIntakeState {
             return;
         }
         var capturedConnectionId = endedLifetime.connectionProcessingId().capturedConnectionId();
-        activeSourceConnectionsByCapturedConnectionId.remove(capturedConnectionId, endedLifetime);
+        removeActiveSourceConnection(capturedConnectionId, endedLifetime);
     }
 
     public Optional<SourceConnectionState> lifetimeOf(@NonNull ConnectionProcessingId id) {
@@ -616,7 +623,7 @@ public final class PartitionIntakeState {
         if (lifetime == null) {
             throw new IllegalStateException("No active connection owner for " + id);
         }
-        activeSourceConnectionsByCapturedConnectionId.remove(id.capturedConnectionId(), lifetime);
+        removeActiveSourceConnection(id.capturedConnectionId(), lifetime);
     }
 
     /**
@@ -654,7 +661,7 @@ public final class PartitionIntakeState {
         // an unfinished record into RecordProcessingFinished.
         new LinkedHashSet<>(activeConnectionProcessingById.values())
             .forEach(SourceConnectionState::cancelGeneration);
-        activeSourceConnectionsByCapturedConnectionId.clear();
+        clearActiveSourceConnections();
         activeConnectionProcessingById.clear();
 
         return new GenerationCancellationPlan(connectionOwners, cleanupTracker.isComplete());
@@ -727,7 +734,7 @@ public final class PartitionIntakeState {
             activeRecordTrackersChanged.accept(-1);
         }
         writerTimeStateByWriterNodeId.clear();
-        activeSourceConnectionsByCapturedConnectionId.clear();
+        clearActiveSourceConnections();
         activeConnectionProcessingById.clear();
     }
 
@@ -1009,28 +1016,27 @@ public final class PartitionIntakeState {
      * Expires every current lifetime for one writer and returns owners that need the matching target command.
      */
     public WriterExpirationResult expireConnectionsForWriter(@NonNull String writerNodeId) {
-        return expireOpenConnections(lifetime ->
-            lifetime.connectionProcessingId().capturedConnectionId().writerNodeId().equals(writerNodeId)
-        );
+        ownerThreadGuard.requireOwnerThread();
+        var writerConnections = activeSourceConnectionsByWriterNodeId.get(writerNodeId);
+        if (writerConnections == null) {
+            return new WriterExpirationResult(0, List.of());
+        }
+        return expireOpenConnections(List.copyOf(writerConnections.values()));
     }
 
     /**
      * A finalized finite archive is proof that no later observation can complete any open source assembly.
      */
     public WriterExpirationResult expireAllOpenConnections() {
-        return expireOpenConnections(ignored -> true);
+        ownerThreadGuard.requireOwnerThread();
+        return expireOpenConnections(List.copyOf(activeSourceConnectionsByCapturedConnectionId.values()));
     }
 
-    private WriterExpirationResult expireOpenConnections(
-        Predicate<SourceConnectionState> shouldExpire
-    ) {
-        ownerThreadGuard.requireOwnerThread();
+    private WriterExpirationResult expireOpenConnections(List<SourceConnectionState> lifetimes) {
         var ownersToExpire = new ArrayList<ConnectionProcessingId>();
         var expiredSourceConnections = 0;
-        var lifetimes = List.copyOf(activeSourceConnectionsByCapturedConnectionId.values());
         for (var lifetime : lifetimes) {
-            if (lifetime.lifetime() != SourceConnectionState.Lifetime.OPEN
-                || !shouldExpire.test(lifetime)) {
+            if (lifetime.lifetime() != SourceConnectionState.Lifetime.OPEN) {
                 continue;
             }
             var hasConnectionOwner = lifetime.hasConnectionOwner();
@@ -1046,6 +1052,36 @@ public final class PartitionIntakeState {
             }
         }
         return new WriterExpirationResult(expiredSourceConnections, ownersToExpire);
+    }
+
+    private void putActiveSourceConnection(
+        CapturedConnectionId capturedConnectionId,
+        SourceConnectionState lifetime
+    ) {
+        activeSourceConnectionsByCapturedConnectionId.put(capturedConnectionId, lifetime);
+        activeSourceConnectionsByWriterNodeId
+            .computeIfAbsent(capturedConnectionId.writerNodeId(), ignored -> new LinkedHashMap<>())
+            .put(capturedConnectionId, lifetime);
+    }
+
+    private void removeActiveSourceConnection(
+        CapturedConnectionId capturedConnectionId,
+        SourceConnectionState lifetime
+    ) {
+        if (!activeSourceConnectionsByCapturedConnectionId.remove(capturedConnectionId, lifetime)) {
+            return;
+        }
+        var writerNodeId = capturedConnectionId.writerNodeId();
+        var writerConnections = activeSourceConnectionsByWriterNodeId.get(writerNodeId);
+        writerConnections.remove(capturedConnectionId, lifetime);
+        if (writerConnections.isEmpty()) {
+            activeSourceConnectionsByWriterNodeId.remove(writerNodeId);
+        }
+    }
+
+    private void clearActiveSourceConnections() {
+        activeSourceConnectionsByCapturedConnectionId.clear();
+        activeSourceConnectionsByWriterNodeId.clear();
     }
 
     ExpirationReference expirationReferenceFor(String writerNodeId) {

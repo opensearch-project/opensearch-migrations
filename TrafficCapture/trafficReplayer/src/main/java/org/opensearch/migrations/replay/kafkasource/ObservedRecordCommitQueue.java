@@ -10,6 +10,7 @@ package org.opensearch.migrations.replay.kafkasource;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -234,7 +235,9 @@ public final class ObservedRecordCommitQueue {
                 .count(),
             head == null ? Optional.empty() : Optional.of(head.recordId),
             greatestObservedOffset,
-            Map.copyOf(states)
+            // Not Map.copyOf: its linear probing degenerates on the consecutive hash codes of record ids
+            // from consecutive offsets. The map is freshly built here and never escapes mutable.
+            Collections.unmodifiableMap(states)
         );
     }
 

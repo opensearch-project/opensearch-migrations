@@ -38,8 +38,7 @@ public final class KafkaDiagnosticCollector {
         return new Snapshot(
             sourceSnapshot.uncertainPartitionCount(),
             oldestRecordId.map(recordId ->
-                sourceSnapshot.records().getOrDefault(
-                    recordId,
+                sourceSnapshot.record(recordId).orElseGet(() ->
                     new KafkaSourceOwner.RecordDiagnostic(
                         recordId,
                         KafkaSourceOwner.RecordDiagnosticState.UNKNOWN

@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -145,6 +146,14 @@ public final class ContextActivityCollector {
         )
     );
 
+    private static final Map<Class<?>, Duration> THRESHOLD_BY_TYPE = KNOWN_ACTIVITIES.stream()
+        .collect(Collectors.toUnmodifiableMap(KnownActivity::type, KnownActivity::threshold));
+
+    /** Contexts younger than this cannot be over any threshold, so old-context scans stop at the first one. */
+    private static final Duration MINIMUM_AGE_THRESHOLD = KNOWN_ACTIVITIES.stream()
+        .map(KnownActivity::threshold)
+        .reduce(DEFAULT_AGE_THRESHOLD, (a, b) -> a.compareTo(b) <= 0 ? a : b);
+
     private final Clock clock;
     private final ActiveContextTracker globalTracker;
     private final ActiveContextTrackerByActivityType byActivityTracker;
@@ -160,32 +169,59 @@ public final class ContextActivityCollector {
     }
 
     public Snapshot collect() {
+        return collect(true);
+    }
+
+    /**
+     * Both indexes are ordered by start time, so contexts at or over an age threshold are always a prefix of
+     * their index. Every scan below stops at the first context younger than its threshold rather than copying
+     * or aging the whole index, which holds every in-flight Kafka record and all of its descendants.
+     *
+     * @param includeOldestRecordDescendants whether to find the oldest record's descendants, which needs an
+     *                                       ancestor walk from every active context; only the diagnostic log
+     *                                       reports them
+     */
+    public Snapshot collect(boolean includeOldestRecordDescendants) {
         var now = clock.instant();
-        var activeContexts = globalTracker.getActiveScopesByAge().toList();
         var activities = new LinkedHashMap<String, ActivitySummary>();
         KNOWN_ACTIVITIES.forEach(known -> {
-            var contexts = byActivityTracker.getOldestActiveScopes(scopeClass(known.type())).toList();
-            var oldestAge = contexts.isEmpty() ? Duration.ZERO : age(contexts.get(0), now);
-            var overThreshold = contexts.stream()
-                .filter(context -> age(context, now).compareTo(known.threshold()) >= 0)
-                .count();
+            var cutoff = now.minus(known.threshold());
+            long activeCount = 0;
+            long overThreshold = 0;
+            var oldestAge = Duration.ZERO;
+            var stillOverThreshold = true;
+            for (var iterator = byActivityTracker.getOldestActiveScopes(scopeClass(known.type())).iterator();
+                 iterator.hasNext();) {
+                var context = iterator.next();
+                if (activeCount++ == 0) {
+                    oldestAge = age(context, now);
+                }
+                if (stillOverThreshold) {
+                    stillOverThreshold = !context.getStartTimeInstant().isAfter(cutoff);
+                    if (stillOverThreshold) {
+                        overThreshold++;
+                    }
+                }
+            }
             activities.put(
                 known.name(),
-                new ActivitySummary(
-                    known.name(),
-                    contexts.size(),
-                    oldestAge,
-                    overThreshold,
-                    known.threshold()
-                )
+                new ActivitySummary(known.name(), activeCount, oldestAge, overThreshold, known.threshold())
             );
         });
 
         var oldContexts = new ArrayList<ContextDetail>();
         long oldContextCount = 0;
-        for (var context : activeContexts) {
-            var threshold = thresholdFor(context);
-            if (age(context, now).compareTo(threshold) < 0) {
+        var youngestPossiblyOld = now.minus(MINIMUM_AGE_THRESHOLD);
+        IScopedInstrumentationAttributes globallyOldest = null;
+        for (var iterator = globalTracker.getActiveScopesByAge().iterator(); iterator.hasNext();) {
+            var context = iterator.next();
+            if (globallyOldest == null) {
+                globallyOldest = context;
+            }
+            if (context.getStartTimeInstant().isAfter(youngestPossiblyOld)) {
+                break;
+            }
+            if (age(context, now).compareTo(thresholdFor(context)) < 0) {
                 continue;
             }
             oldContextCount++;
@@ -194,12 +230,15 @@ public final class ContextActivityCollector {
             }
         }
 
-        var oldestRecordContext = activeContexts.stream()
+        var oldestRecordContext = globalTracker.getActiveScopesByAge()
             .filter(IReplayContexts.IKafkaRecordContext.class::isInstance)
             .map(IReplayContexts.IKafkaRecordContext.class::cast)
             .findFirst();
         var oldestRecord = oldestRecordContext.map(record -> {
-            var descendants = activeContexts.stream()
+            if (!includeOldestRecordDescendants) {
+                return new OldestKafkaRecord(record.getRecordId(), age(record, now), 0, List.of());
+            }
+            var descendants = globalTracker.getActiveScopesByAge()
                 .filter(context -> context != record)
                 .filter(context -> hasAncestor(context, record))
                 .toList();
@@ -216,8 +255,8 @@ public final class ContextActivityCollector {
 
         return new Snapshot(
             now,
-            activeContexts.size(),
-            activeContexts.isEmpty() ? Duration.ZERO : age(activeContexts.get(0), now),
+            globalTracker.size(),
+            globallyOldest == null ? Duration.ZERO : age(globallyOldest, now),
             Map.copyOf(activities),
             List.copyOf(oldContexts),
             oldContextCount,
@@ -280,11 +319,7 @@ public final class ContextActivityCollector {
     }
 
     private static Duration thresholdFor(IScopedInstrumentationAttributes context) {
-        return KNOWN_ACTIVITIES.stream()
-            .filter(known -> known.type().equals(context.getClass()))
-            .map(KnownActivity::threshold)
-            .findFirst()
-            .orElse(DEFAULT_AGE_THRESHOLD);
+        return THRESHOLD_BY_TYPE.getOrDefault(context.getClass(), DEFAULT_AGE_THRESHOLD);
     }
 
     private static Duration age(IScopedInstrumentationAttributes context, Instant now) {

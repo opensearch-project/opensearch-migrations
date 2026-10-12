@@ -16,6 +16,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -52,6 +53,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
     private final KafkaDiagnosticCollector kafkaDiagnosticCollector;
     private final ReplayActivityMetrics metrics;
     private final Consumer<Report> reporter;
+    private final BooleanSupplier reportsOldestRecordDescendants;
     private final Duration reportInterval;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean started = new AtomicBoolean();
@@ -71,6 +73,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
             kafkaDiagnosticCollector,
             metrics,
             reporter,
+            () -> true,
             DEFAULT_REPORT_INTERVAL,
             null
         );
@@ -82,6 +85,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
         @NonNull KafkaDiagnosticCollector kafkaDiagnosticCollector,
         @NonNull ReplayActivityMetrics metrics,
         @NonNull Consumer<Report> reporter,
+        @NonNull BooleanSupplier reportsOldestRecordDescendants,
         @NonNull Duration reportInterval,
         ScheduledExecutorService scheduler
     ) {
@@ -93,6 +97,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
         this.kafkaDiagnosticCollector = kafkaDiagnosticCollector;
         this.metrics = metrics;
         this.reporter = reporter;
+        this.reportsOldestRecordDescendants = reportsOldestRecordDescendants;
         this.reportInterval = reportInterval;
         this.scheduler = scheduler;
     }
@@ -116,6 +121,8 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
             new KafkaDiagnosticCollector(kafkaSnapshots),
             metrics,
             ActiveContextMonitor::logReport,
+            // The descendant walk visits every active context and only its log line reports the result.
+            ACTIVE_WORK_LOGGER::isInfoEnabled,
             DEFAULT_REPORT_INTERVAL,
             scheduler
         );
@@ -150,7 +157,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
     }
 
     private Report collectAndReport(boolean finalSample) {
-        var contexts = contextCollector.collect();
+        var contexts = contextCollector.collect(reportsOldestRecordDescendants.getAsBoolean());
         var owners = ownerOperationCollector.collect();
         var kafka = kafkaDiagnosticCollector.collect(
             contexts.oldestKafkaRecord().map(ContextActivityCollector.OldestKafkaRecord::recordId)

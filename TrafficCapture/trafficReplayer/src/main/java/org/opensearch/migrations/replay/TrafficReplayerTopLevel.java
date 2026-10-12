@@ -687,17 +687,17 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
 
     java.util.List<org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.Snapshot>
     activitySnapshots() {
-        var unique =
-            new java.util.LinkedHashSet<
+        var snapshots =
+            new java.util.ArrayList<
                 org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.Snapshot
             >();
         connectionAssemblySink.connections.values().forEach(binding ->
-            unique.addAll(binding.owner.activitySnapshot())
+            snapshots.addAll(binding.owner.connectionActivitySnapshot())
         );
         tupleWriterWorkers.forEach(worker ->
-            unique.addAll(worker.writer.operations().snapshots())
+            snapshots.addAll(worker.writer.operations().snapshots())
         );
-        return List.copyOf(unique);
+        return List.copyOf(snapshots);
     }
 
     void runActivityMonitorOnce() {

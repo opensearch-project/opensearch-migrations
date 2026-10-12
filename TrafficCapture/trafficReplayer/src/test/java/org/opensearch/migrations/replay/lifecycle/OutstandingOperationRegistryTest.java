@@ -75,6 +75,54 @@ class OutstandingOperationRegistryTest {
     }
 
     @Test
+    void aLargeRegistryRebuildsItsSnapshotOnlyWhenRead() {
+        var clock = new FakeClock();
+        var eventLoop = new TestEventLoop(clock);
+        var fatalFailures = new ArrayList<Error>();
+        var registry = new OutstandingOperationRegistry("test owner", eventLoop, clock, fatalFailures::add);
+        var registrations = new ArrayList<OutstandingOperationRegistry.Registration>();
+        var operations = OutstandingOperationRegistry.EAGER_PUBLISH_LIMIT + 10;
+
+        eventLoop.execute(() -> {
+            for (var i = 0; i < operations; i++) {
+                registrations.add(registry.register(
+                    GENERATION,
+                    CONNECTION,
+                    request(i),
+                    OperationType.PHYSICAL_TUPLE_WRITE,
+                    Instant.EPOCH,
+                    WaitReason.SUBMITTING
+                ));
+            }
+        });
+        eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(operations, registry.activeCount());
+        Assertions.assertEquals(
+            OutstandingOperationRegistry.EAGER_PUBLISH_LIMIT,
+            registry.snapshots().size(),
+            "a read from another thread returns the last published snapshot"
+        );
+        eventLoop.runUntilIdle();
+        Assertions.assertEquals(operations, registry.snapshots().size(), "the read scheduled a rebuild");
+
+        var readOnLoop = new AtomicReference<Integer>();
+        eventLoop.execute(() -> {
+            registry.complete(registrations.get(0));
+            readOnLoop.set(registry.snapshots().size());
+        });
+        eventLoop.runUntilIdle();
+        Assertions.assertEquals(operations - 1, readOnLoop.get(), "a read on the event loop is current");
+        Assertions.assertEquals(operations - 1, registry.activeCount());
+
+        eventLoop.execute(() -> registrations.subList(1, operations).forEach(registry::complete));
+        eventLoop.runUntilIdle();
+        Assertions.assertTrue(registry.snapshots().isEmpty(), "a small registry republishes eagerly again");
+        Assertions.assertEquals(0, registry.activeCount());
+        Assertions.assertTrue(fatalFailures.isEmpty());
+    }
+
+    @Test
     void duplicateOrMissingCompletionReachesFatalHandling() {
         var clock = new FakeClock();
         var eventLoop = new TestEventLoop(clock);

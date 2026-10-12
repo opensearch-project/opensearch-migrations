@@ -601,12 +601,22 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     }
 
     public List<OutstandingOperationRegistry.Snapshot> activitySnapshot() {
+        var snapshot = new ArrayList<>(connectionActivitySnapshot());
+        snapshot.addAll(tupleWriter.operations().snapshots());
+        return List.copyOf(snapshot);
+    }
+
+    /**
+     * This connection's own operations and its request owners', without those of the tuple writer, which
+     * every connection on the same event loop shares. A fleet-wide survey adds each writer's operations once
+     * instead of once per connection.
+     */
+    public List<OutstandingOperationRegistry.Snapshot> connectionActivitySnapshot() {
         var snapshot = new ArrayList<>(operations.snapshots());
         for (var requestOwner : publishedRequestOwners) {
             snapshot.addAll(requestOwner.operations().snapshots());
         }
-        snapshot.addAll(tupleWriter.operations().snapshots());
-        return List.copyOf(snapshot);
+        return snapshot;
     }
 
     int registeredRequestCount() {

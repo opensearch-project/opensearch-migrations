@@ -14,6 +14,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -31,9 +33,12 @@ import lombok.NonNull;
  * wait reasons make duplicate, stale, or missing completions detectable and identify whether the owner is
  * preparing, waiting on a permit, performing I/O, delaying a retry, or delivering a result.</p>
  *
- * <p>All mutation is event-loop confined, but each change publishes an immutable snapshot for diagnostics
- * on other threads. Observability can therefore explain an apparently stuck owner without exposing its maps
- * to races or granting diagnostic code authority over lifecycle state.</p>
+ * <p>All mutation is event-loop confined, but an immutable snapshot is published for diagnostics on other
+ * threads. Observability can therefore explain an apparently stuck owner without exposing its maps to races
+ * or granting diagnostic code authority over lifecycle state. A small registry republishes on every change.
+ * Rebuilding a large one on every change would make each operation cost the size of the registry, so a
+ * large registry is only marked stale; it is rebuilt when read on its event loop, and a read from another
+ * thread returns the last snapshot and schedules a rebuild for the next read.</p>
  */
 public final class OutstandingOperationRegistry {
     public enum OperationType {
@@ -146,7 +151,12 @@ public final class OutstandingOperationRegistry {
     private final Clock clock;
     private final FatalHandler fatalHandler;
     private final Map<Long, Entry> active = new LinkedHashMap<>();
+    static final int EAGER_PUBLISH_LIMIT = 32;
+
     private volatile List<Snapshot> publishedSnapshots = List.of();
+    private volatile int activeCount;
+    private volatile boolean snapshotStale;
+    private final AtomicBoolean refreshScheduled = new AtomicBoolean();
     private long nextOperationId = 1;
     private boolean failed;
 
@@ -251,11 +261,23 @@ public final class OutstandingOperationRegistry {
     }
 
     public List<Snapshot> snapshots() {
+        if (eventLoop.inEventLoop()) {
+            refreshStaleSnapshot();
+        } else if (snapshotStale && refreshScheduled.compareAndSet(false, true)) {
+            try {
+                eventLoop.execute(() -> {
+                    refreshScheduled.set(false);
+                    refreshStaleSnapshot();
+                });
+            } catch (RejectedExecutionException shuttingDown) {
+                refreshScheduled.set(false);
+            }
+        }
         return publishedSnapshots;
     }
 
     public int activeCount() {
-        return publishedSnapshots.size();
+        return activeCount;
     }
 
     private Entry requireEntry(Registration registration, String operation) {
@@ -282,6 +304,22 @@ public final class OutstandingOperationRegistry {
     }
 
     private void publish() {
+        activeCount = active.size();
+        if (active.size() > EAGER_PUBLISH_LIMIT) {
+            snapshotStale = true;
+            return;
+        }
+        rebuildSnapshot();
+    }
+
+    private void refreshStaleSnapshot() {
+        if (snapshotStale) {
+            rebuildSnapshot();
+        }
+    }
+
+    private void rebuildSnapshot() {
+        snapshotStale = false;
         var snapshots = new ArrayList<Snapshot>(active.size());
         active.forEach((operationId, entry) ->
             snapshots.add(entry.snapshot(operationId, ownerIdentity, entry.kafkaRecordId()))
