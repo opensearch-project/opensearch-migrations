@@ -5,7 +5,8 @@ This walkthrough takes a new team member from an empty AWS account to a running 
 1. Deploy Migration Assistant (MA) on EKS, built from your checkout.
 2. Create a self-managed Elasticsearch 7.10 source.
 3. Create a target: an Amazon OpenSearch Service domain, or an OpenSearch Serverless collection.
-4. Configure and submit a capture-and-replay migration.
+4. Pre-load the source with OpenSearch Benchmark, then configure and submit a migration: snapshot
+   and backfill of the existing data, followed by capture and replay of live traffic.
 5. Send traffic through the capture proxy, then watch it flow with the dashboards, logs and
    console commands.
 6. Verify the result and tear everything down.
@@ -166,7 +167,7 @@ any ES cluster you run yourself works if the network allows it:
   - Basic auth: keep `authConfig.basic`.
   - No auth: delete `authConfig`.
   - Self-signed TLS: set `allowInsecure: true`.
-- **Snapshots.** Only needed for the optional backfill. The nodes need the `repository-s3` plugin
+- **Snapshots.** Needed for the `WithBackfill` configs. The nodes need the `repository-s3` plugin
   and credentials that can write the snapshot bucket.
 
 ### Target
@@ -266,33 +267,48 @@ and replayed bulk requests usually carry IDs. The same shape is exercised by `Te
 
 ---
 
-## 4. Configure and submit the migration
+## 4. Configure, pre-load and submit the migration
 
-Two ready-to-edit configs are in
+### 4.1 Pick a config and load it
+
+Four ready-to-edit configs are in
 [`deployment/k8s/configs/quickStart/`](../deployment/k8s/configs/quickStart):
 
-| File | Target | Target auth |
+| File | Target | What runs |
 |---|---|---|
-| `esToAosDomain.yaml` | OpenSearch Service domain | `sigv4`, service `es` |
-| `esToAossCollection.yaml` | Serverless collection | `sigv4`, service `aoss` |
+| `esToAosDomainWithBackfill.yaml` | OpenSearch Service domain | Snapshot, metadata, backfill, then capture and replay |
+| `esToAossCollectionWithBackfill.yaml` | Serverless collection | Snapshot, metadata, backfill, then capture and replay |
+| `esToAosDomain.yaml` | OpenSearch Service domain | Capture and replay only |
+| `esToAossCollection.yaml` | Serverless collection | Capture and replay only |
 
-Both configs set up one proxy fleet, an auto-created Kafka cluster, one replayer fleet, and result
-tuples written to MA's default S3 bucket. Fill in the placeholders:
+The `WithBackfill` files are the full live-migration shape and the recommended first run. Every
+config sets up:
+
+- one proxy fleet;
+- an auto-created Kafka cluster;
+- one replayer fleet;
+- result tuples written to MA's default S3 bucket.
+
+The backfill variants also take a snapshot of the source into the same bucket.
+
+Fill in the placeholders:
 
 ```bash
-TUPLE_BUCKET=$(kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}')
-CONFIG=deployment/k8s/configs/quickStart/esToAosDomain.yaml     # or esToAossCollection.yaml
+BUCKET=$(kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}')
+CONFIG=deployment/k8s/configs/quickStart/esToAosDomainWithBackfill.yaml
 sed -e "s|<TARGET_DOMAIN_ENDPOINT>|${TARGET_ENDPOINT}|; s|<COLLECTION_ENDPOINT>|${TARGET_ENDPOINT}|" \
-    -e "s|<REGION>|${AWS_REGION}|g; s|<TUPLE_BUCKET>|${TUPLE_BUCKET}|" \
+    -e "s|<REGION>|${AWS_REGION}|g; s|<BUCKET>|${BUCKET}|g" \
     "$CONFIG" > /tmp/migration.yaml
 ```
 
-Load the config into the console, create the source credentials, and submit:
+Load the config into the console and create the source credentials. **Don't submit yet.**
 
 ```bash
 kubectl -n ma exec -i migration-console-0 -- workflow configure edit --stdin < /tmp/migration.yaml
 kubectl -n ma exec -it migration-console-0 -- bash
 ```
+
+`configure edit` validates the config as it saves it and prints any errors.
 
 Inside the console:
 
@@ -300,18 +316,131 @@ Inside the console:
 workflow configure view                                   # check what you loaded
 printf 'admin:admin' | workflow configure credentials create --stdin --silent source-creds
 workflow configure credentials create --show-missing      # should list nothing
+console clusters connection-check --cluster source        # the console can already reach the source
+```
+
+The console resolves `source` and `target` from the *configured* migration, so the `console
+clusters ...` commands work before anything is submitted.
+
+### 4.2 Pre-load the source with OpenSearch Benchmark
+
+A backfill only has something to do if the source already holds data, so load some now. Do it
+before the proxy exists:
+
+- these writes go straight to the source, so they are never captured;
+- the only way they can reach the target is the snapshot and backfill.
+
+That makes the backfill easy to see and to verify separately from the replay.
+
+The migration console ships [OpenSearch Benchmark](https://opensearch.org/docs/latest/benchmark/)
+(OSB), and the console wraps it:
+
+```bash
+console clusters run-test-benchmarks --cluster source
+console clusters cat-indices --cluster source
+```
+
+**What the command does.** It runs four standard OSB workloads, one after another, against the
+source:
+
+| Workload | Data | Indices it creates |
+|---|---|---|
+| `geonames` | Points of interest from geonames.org | `geonames` |
+| `http_logs` | 1998 World Cup web server logs | `logs-181998`, `logs-191998`, ... |
+| `nested` | StackOverflow questions with nested answers | `sonested` |
+| `nyc_taxis` | 2015 NYC yellow-cab trips | `nyc_taxis` |
+
+Each one is an `opensearch-benchmark run` with these options (see
+`execute_benchmark_workload` in
+`migrationConsole/lib/console_link/console_link/models/cluster.py`):
+
+- **`--test-mode`.** OSB swaps each corpus for its 1,000-document sample (`documents-1k.json`).
+  It also cuts every timed task down to a few iterations or about 10 seconds. The result is about
+  1,000 documents per index, roughly 10K across the four workloads, in a few minutes.
+- **`--pipeline=benchmark-only`.** OSB doesn't provision a cluster; it targets the source's
+  endpoint.
+- **`--workload-params=bulk_size:10,bulk_indexing_clients:1`.** Small, gentle bulks.
+- **`--client-options`.** Built from the config: `use_ssl` and `verify_certs:false` for the HTTPS
+  `allowInsecure` source, plus the `source-creds` basic-auth user. A SigV4 source would get the
+  pod's AWS session instead.
+- **`--exclude-tasks=check-cluster-health`.** Skipped so that a yellow cluster, such as a single node with replicas,
+  doesn't stop the run.
+
+Each workload's test procedure also runs its search tasks briefly. That is harmless and leaves
+the indices in place.
+
+OSB downloads the workload definitions from GitHub, and the sample corpora from the OSB data
+bucket (`dbyiw3u3rf9yr.cloudfront.net`). The console therefore needs outbound internet access. The
+create-VPC deployment has a NAT gateway; an isolated VPC does not.
+
+**Loading more data.** Run OSB yourself without `--test-mode` and limit the ingest with
+`ingest_percentage`. `geonames` is a good choice: 11.4M documents (3.5 GB of JSON) in one index
+with a simple mapping. 5% loads about 570K documents into `geonames`, enough for the backfill to
+run for a while and show real progress:
+
+```bash
+opensearch-benchmark run --pipeline=benchmark-only --kill-running-processes \
+  --target-host=https://elasticsearch-master-headless:9200 \
+  --client-options="use_ssl:true,verify_certs:false,basic_auth_user:admin,basic_auth_password:admin" \
+  --workload=geonames \
+  --include-tasks="type:delete-index,type:create-index,type:bulk" \
+  --workload-params="ingest_percentage:5,bulk_size:1000,bulk_indexing_clients:2,number_of_replicas:0"
+```
+
+- **Your own source.** For a no-auth source, drop the `basic_auth_*` options. For plain HTTP, also
+  drop `use_ssl` and `verify_certs`. Set `--target-host` to your endpoint.
+- **`--include-tasks`** keeps only the delete-index, create-index and bulk-indexing steps. The
+  workload's searches and force-merge would only slow the load down.
+- **Download size.** OSB downloads and decompresses the whole corpus whatever the percentage: a
+  265 MB download that expands to about 3.5 GB under `~/.benchmark` in the console pod.
+- **Other workloads.** `opensearch-benchmark list workloads` shows the rest. `nyc_taxis` (165M
+  documents, 74 GB) and `http_logs` (247M) are far larger than the test source can hold, so use a
+  small `ingest_percentage` with those.
+- **Source size.** The testClusters source has a 512 MB heap. Raise `source.esJavaOpts` first if
+  you load more than a few million documents.
+
+Check what landed, and note the counts so you can compare them after the backfill:
+
+```bash
+console clusters curl source "/_cat/indices?v&s=index"
+console clusters curl source /_cat/count
+```
+
+### 4.3 Submit
+
+```bash
 workflow submit
 workflow status                                           # or: workflow manage  (interactive TUI)
 ```
 
-The workflow creates these resources, in order:
+With a backfill config, the workflow runs these steps in order:
 
-1. The Strimzi Kafka cluster and topic.
-2. The capture proxy Deployment and its NLB.
-3. The replayer Deployment.
+1. **Kafka.** The Strimzi cluster and topic.
+2. **Capture proxy.** The Deployment and its NLB.
+3. **Snapshot** (`createSnapshot`, `checkSnapshotCompletion`). This waits until the proxy is
+   ready. Every write from then on is captured, so nothing falls between the snapshot and the
+   capture.
+4. **Metadata** (`evaluateMetadata`, `migrateMetadata`). Index settings and mappings are created on
+   the target.
+5. **Backfill** (`startHistoricalBackfill`, `checkBackfillStatus`, `stopHistoricalBackfill`).
+   Reindex-From-Snapshot workers read the snapshot's shards from S3 and bulk-load the documents
+   into the target. Progress is on the `MA-<stage>-<region>-ReindexFromSnapshot` CloudWatch
+   dashboard.
+6. **Replayer.** It starts once the backfill completes (`dependsOnSnapshotMigrations`). It then
+   replays everything captured since step 2, starting from the beginning of the topic.
 
-Expect about 10 minutes, mostly Kafka and the NLB. `workflow status --resource-view` shows each
-resource, and `kubectl -n ma get captureproxy,trafficreplay,kafka` shows the CRs.
+Expect 10–15 minutes before the backfill starts; Kafka and the NLB take most of it. A `test-mode`
+pre-load backfills in seconds; the 5% geonames load takes a few minutes. Use
+`workflow status --resource-view` to see each resource, and
+`kubectl -n ma get kafkaclusters,captureproxies,datasnapshots,snapshotmigrations,trafficreplays` to see the
+CRs.
+
+**Timing your traffic.** Traffic you send through the proxy between step 2 and the snapshot is in
+the snapshot *and* in Kafka, so the replayer applies it a second time. Requests with explicit
+document IDs are idempotent. Requests without IDs, such as `_bulk` index actions, create
+duplicates. For exact before/after counts, wait until `checkSnapshotCompletion` has succeeded
+before you send section 5 traffic. In a real migration you would redirect clients to the proxy
+first and accept that overlap, or use writes that carry IDs.
 
 ### What the config controls
 
@@ -324,52 +453,14 @@ resource, and `kubectl -n ma get captureproxy,trafficreplay,kafka` shows the CRs
   PCA and bring-your-own certificates, see [`captureProxyTls.md`](captureProxyTls.md).
 - **Proxy service.** `serviceType` defaults to `LoadBalancer`, an internal NLB. Set
   `internetFacing: true` only if you understand the exposure.
+- **Backfill.** `snapshotMigrationConfigs` lists which snapshot goes to which target.
+  `metadataMigrationConfig` and `documentBackfillConfig` take index allowlists, transforms and
+  worker counts (`podReplicas`). An empty `{}` migrates every non-system index with defaults.
 - **Approvals.** `skipApprovals: true` lets the workflow run without manual gates. Remove it to
-  practise `workflow approve`.
+  practise `workflow approve`, for example before the backfill starts.
 
-**Optional snapshot, metadata and backfill.** To copy existing data before replay starts:
-
-1. Replace `snapshotMigrationConfigs: []` and add `snapshotInfo` to the source, as shown below.
-2. Add `dependsOnSnapshotMigrations` to the replayer, so replay waits for the backfill.
-
-```yaml
-sourceClusters:
-  source:
-    # ...endpoint, version, authConfig as before...
-    snapshotInfo:
-      repos:
-        default:
-          awsRegion: us-east-2
-          repoPathUri: s3://<TUPLE_BUCKET>/quickstart-snapshot
-      snapshots:
-        snap1:
-          repoName: default
-          config:
-            createSnapshotConfig: {}
-snapshotMigrationConfigs:
-  - fromSource: source
-    toTarget: target
-    perSnapshotConfig:
-      snap1:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
-traffic:
-  replayers:
-    replay1:
-      # ...as before...
-      dependsOnSnapshotMigrations:
-        - source: source
-          snapshot: snap1
-```
-
-The full schema is in
-`orchestrationSpecs/packages/schemas/src/userSchemas.ts`, and `workflow configure sample` prints an
-annotated example. To check a config offline before loading it:
-
-```bash
-cd orchestrationSpecs && npm ci
-cd packages/config-processor && npx tsx src/runMigrationConfigTransformer.ts /tmp/migration.yaml >/dev/null && echo valid
-```
+The full schema is in `orchestrationSpecs/packages/schemas/src/userSchemas.ts`, and
+`workflow configure sample` prints an annotated example.
 
 ---
 
@@ -405,7 +496,9 @@ loadtest run --scenario ingest --config ingest-steady \
 loadtest list
 ```
 
-`ingest-steady` holds 50 req/s for 5 minutes. `ingest-ramp` and `ingest-burst` are also defined.
+`ingest-steady` holds 50 req/s for 5 minutes. The `ingest` scenario writes NYC-taxi documents to
+the `nyc_taxis` index, the same index the benchmark pre-load created. That is fine for watching a
+live index change on top of backfilled data. For separate counts, add `-e INDEX_NAME=k6-taxis`. `ingest-ramp` and `ingest-burst` are also defined.
 For profiles, rates and SigV4 sources, see
 [`TrafficCapture/trafficLoadTest/README.md`](../TrafficCapture/trafficLoadTest/README.md).
 
@@ -570,18 +663,30 @@ SCRAM over TLS, so use `console kafka describe-consumer-group` for lag instead.
 
 ## 7. Verify the migration
 
-Inside the console:
+Inside the console.
+
+**Backfill.** Compare the pre-loaded indices on both sides once `checkBackfillStatus` has
+succeeded. The counts should match exactly.
 
 ```bash
-console clusters curl target /qs-test/_refresh -X POST     # domain only; Serverless refreshes on its own
-console clusters cat-indices --refresh
+console clusters cat-indices --refresh                  # source and target, side by side
+console clusters curl source /geonames/_count
+console clusters curl target /geonames/_count
+```
+
+On Serverless, skip `--refresh` and allow up to a minute for new documents to become searchable.
+
+**Replay.** Compare an index you wrote to through the proxy in section 5:
+
+```bash
+console clusters curl target /qs-test/_refresh -X POST  # domain only; Serverless refreshes on its own
 console clusters curl source /qs-test/_count
 console clusters curl target /qs-test/_count
 console kafka describe-consumer-group                   # LAG ≈ 0 when replay has caught up
 ```
 
 - **Result tuples.** One tuple per replayed request, comparing the source and target responses.
-  They land in `s3://$TUPLE_BUCKET/tuples/` as gzipped batches, about every 60 s. Copy one locally
+  They land in `s3://$BUCKET/tuples/` as gzipped batches, about every 60 s. Copy one locally
   and pretty-print it with `console tuples show --in <file>`.
 - **Document counts.** The target can end up with slightly *more* documents than the source. The
   replayer re-sends every captured request, including requests the source rejected.

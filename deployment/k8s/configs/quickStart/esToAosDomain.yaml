@@ -7,7 +7,7 @@
 
 skipApprovals: true
 
-# Capture and replay only. See the guide for the optional snapshot + backfill block.
+# Capture and replay only. The *WithBackfill.yaml sibling adds snapshot, metadata and backfill.
 snapshotMigrationConfigs: []
 
 sourceClusters:
@@ -53,5 +53,5 @@ traffic:
         speedupFactor: 1.1
         # Source/target comparison tuples. BUCKET_NAME from:
         #   kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}'
-        tupleS3Bucket: "<TUPLE_BUCKET>"
+        tupleS3Bucket: "<BUCKET>"
         tupleS3Region: "<REGION>"
