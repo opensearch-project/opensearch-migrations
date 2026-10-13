@@ -41,6 +41,8 @@ spec:
         value: "1"
       - name: GRACEFUL_STOP
         value: "30s"
+      - name: RAMP_UP_DURATION
+        value: ""
       - name: HTTP_REQ_FAILED_THRESHOLD
         value: "rate<0.05"
       - name: INGEST_ERROR_THRESHOLD
@@ -220,6 +222,8 @@ spec:
                   value: "{{`{{workflow.parameters.RETRY_BACKOFF_SECONDS}}`}}"
                 - name: GRACEFUL_STOP
                   value: "{{`{{workflow.parameters.GRACEFUL_STOP}}`}}"
+                - name: RAMP_UP_DURATION
+                  value: "{{`{{workflow.parameters.RAMP_UP_DURATION}}`}}"
                 - name: HTTP_REQ_FAILED_THRESHOLD
                   value: "{{`{{workflow.parameters.HTTP_REQ_FAILED_THRESHOLD}}`}}"
                 - name: INGEST_ERROR_THRESHOLD

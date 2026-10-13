@@ -773,10 +773,12 @@ The explicit-selection integration cases in
 `migrationConsole/lib/integ_test/.../test_cases/k6_load_test_tests.py` share one path:
 `Test0080CdcK6LoadTest` is the short litmus test, `Test0081CdcK6StressTest` adds low-rate serial
 Kafka broker, replayer, and proxy churn with five-minute client retries, and
-`Test0082CdcK6HighLoadStressTest` runs the same stress behavior for two hours at 40.5K offered
-requests/s on the 112-runner large rig. The Argo suite deletes only one pod at a time and waits for
-full fleet and traffic-topic ISR recovery before the next deletion; pytest only selects the
-parameters and checks the terminal results. IDs `0080-0089` are reserved for load tests.
+`Test0082CdcK6HighLoadStressTest` is the high-load benchmark without churn: k6 ramps to 160K
+requests/s of about 2 KiB single-document bulks over 25 minutes, holds it for two hours on 220
+runners, and 128 proxies capture it into a 512-partition topic that 64 replayers replay at 1.1x.
+For 0081, the Argo suite deletes only one pod at a time and waits for full fleet and traffic-topic
+ISR recovery before the next deletion; pytest only selects the parameters and checks the terminal
+results. IDs `0080-0089` are reserved for load tests.
 
 The **only** command that installs the chart for you is the test-automation runner
 (`libraries/testAutomation`) — it runs `helm upgrade --install k6-load-test` once the migration stack

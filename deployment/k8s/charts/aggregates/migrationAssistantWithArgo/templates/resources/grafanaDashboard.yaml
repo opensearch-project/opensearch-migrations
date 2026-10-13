@@ -162,8 +162,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Actual speedup (5 min)",
-          "description": "1 minus the 10-minute derivative of the 5-minute mean replay lag. Above 1 means replay is gaining on real time; 1 is real time; below 1 means lag is growing.",
+          "title": "Catch-up ETA to floor (hours)",
+          "description": "Hours for the 5-minute mean replay lag to reach the selected floor at the current lag-reduction rate; 0 when lag is already at or below it.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -171,13 +171,14 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "1 - deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m])",
-              "legendFormat": "Speedup"
+              "expr": "(((((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) - ${catchup_floor_seconds:raw}) / 3600) / (-deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]))) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) > ${catchup_floor_seconds:raw}) and on() (deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]) < -0.01)) or on() (0 * (sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) <= ${catchup_floor_seconds:raw}))",
+              "legendFormat": "Hours to floor (0 = caught up)"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "short"
+              "unit": "h",
+              "min": 0
             },
             "overrides": []
           },
@@ -201,8 +202,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Status-code match %",
-          "description": "Matching tuples divided by all tuples (including those without a source response), over the rate window.",
+          "title": "Actual speedup (5 min)",
+          "description": "1 minus the 10-minute derivative of the 5-minute mean replay lag. Above 1 means replay is gaining on real time; 1 is real time; below 1 means lag is growing.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -210,15 +211,13 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "100 * sum(rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval])) / sum(rate(tupleComparison_total[$__rate_interval]))",
-              "legendFormat": "Match %"
+              "expr": "1 - deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m])",
+              "legendFormat": "Speedup"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "percent",
-              "min": 0,
-              "max": 100
+              "unit": "short"
             },
             "overrides": []
           },
@@ -242,8 +241,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Pods reporting",
-          "description": "Distinct processes exporting replayer / proxy metrics. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn. A drop means pods stopped exporting, not that work stopped.",
+          "title": "Status-code match %",
+          "description": "Matching tuples divided by all tuples (including those without a source response), over the rate window.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -251,19 +250,15 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "count(count by (exported_instance) (replayActiveContexts_contexts))",
-              "legendFormat": "Replayers"
-            },
-            {
-              "refId": "B",
-              "expr": "count(count by (exported_instance) (captureConnectionsActive_connections)) or vector(0)",
-              "legendFormat": "Proxies"
+              "expr": "100 * sum(rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval])) / sum(rate(tupleComparison_total[$__rate_interval]))",
+              "legendFormat": "Match %"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
-              "min": 0
+              "unit": "percent",
+              "min": 0,
+              "max": 100
             },
             "overrides": []
           },
@@ -665,7 +660,7 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 0,
             "y": 15
@@ -716,7 +711,7 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 6,
             "y": 15
@@ -777,7 +772,7 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 12,
             "y": 15
@@ -903,7 +898,7 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 18,
             "y": 15
@@ -929,7 +924,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 21
+            "y": 22
           },
           "panels": [],
           "id": 22
@@ -977,10 +972,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 8,
             "w": 6,
             "x": 0,
-            "y": 22
+            "y": 23
           },
           "options": {
             "legend": {
@@ -1050,10 +1045,10 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 8,
             "w": 6,
             "x": 6,
-            "y": 22
+            "y": 23
           },
           "options": {
             "legend": {
@@ -1111,10 +1106,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 8,
             "w": 6,
             "x": 12,
-            "y": 22
+            "y": 23
           },
           "options": {
             "legend": {
@@ -1221,10 +1216,10 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 8,
             "w": 6,
             "x": 18,
-            "y": 22
+            "y": 23
           },
           "options": {
             "legend": {
@@ -1247,7 +1242,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 28
+            "y": 31
           },
           "panels": [],
           "id": 27
@@ -1290,10 +1285,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 0,
-            "y": 29
+            "y": 32
           },
           "options": {
             "legend": {
@@ -1358,10 +1353,10 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 6,
-            "y": 29
+            "y": 32
           },
           "options": {
             "legend": {
@@ -1379,7 +1374,7 @@ data:
         {
           "type": "timeseries",
           "title": "Oldest work (hottest pod, seconds)",
-          "description": "Age of the oldest replay context, oldest held Kafka record, and oldest context of any activity on the hottest process. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "description": "Age of the oldest open replay context and of the oldest held Kafka record on the hottest process. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -1394,11 +1389,6 @@ data:
               "refId": "B",
               "expr": "max(replayOldestKafkaRecordAge_milliseconds) / 1000",
               "legendFormat": "Oldest Kafka record"
-            },
-            {
-              "refId": "C",
-              "expr": "max(replayOldestContextAgeByActivity_milliseconds) / 1000",
-              "legendFormat": "Oldest by any activity"
             }
           ],
           "fieldConfig": {
@@ -1409,10 +1399,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 12,
-            "y": 29
+            "y": 32
           },
           "options": {
             "legend": {
@@ -1475,10 +1465,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 18,
-            "y": 29
+            "y": 32
           },
           "options": {
             "legend": {
@@ -1501,7 +1491,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 35
+            "y": 39
           },
           "panels": [],
           "id": 32
@@ -1544,10 +1534,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 0,
-            "y": 36
+            "y": 40
           },
           "options": {
             "legend": {
@@ -1600,10 +1590,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 6,
-            "y": 36
+            "y": 40
           },
           "options": {
             "legend": {
@@ -1656,10 +1646,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 12,
-            "y": 36
+            "y": 40
           },
           "options": {
             "legend": {
@@ -1712,10 +1702,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 18,
-            "y": 36
+            "y": 40
           },
           "options": {
             "legend": {
@@ -1738,7 +1728,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 42
+            "y": 47
           },
           "panels": [],
           "id": 37
@@ -1801,10 +1791,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 0,
-            "y": 43
+            "y": 48
           },
           "options": {
             "legend": {
@@ -1867,10 +1857,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 6,
-            "y": 43
+            "y": 48
           },
           "options": {
             "legend": {
@@ -1923,10 +1913,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 12,
-            "y": 43
+            "y": 48
           },
           "options": {
             "legend": {
@@ -1945,10 +1935,10 @@ data:
           "type": "text",
           "title": "Target domain health (TARGET_DOMAIN)",
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 18,
-            "y": 43
+            "y": 48
           },
           "options": {
             "mode": "markdown",
@@ -1964,7 +1954,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 49
+            "y": 55
           },
           "panels": [],
           "id": 42
@@ -2035,10 +2025,10 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 0,
-            "y": 50
+            "y": 56
           },
           "options": {
             "legend": {
@@ -2140,10 +2130,10 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 6,
-            "y": 50
+            "y": 56
           },
           "options": {
             "legend": {
@@ -2224,10 +2214,10 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 12,
-            "y": 50
+            "y": 56
           },
           "options": {
             "legend": {
@@ -2280,10 +2270,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 18,
-            "y": 50
+            "y": 56
           },
           "options": {
             "legend": {
@@ -2300,16 +2290,167 @@ data:
         },
         {
           "type": "row",
+          "title": "Fleet size — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 63
+          },
+          "panels": [],
+          "id": 47
+        },
+        {
+          "type": "timeseries",
+          "title": "Capture proxy pods and source domain nodes",
+          "description": "Capture proxy pods with a cAdvisor sample. Source domain node counts are CloudWatch-only (AWS/ES Nodes).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(count by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Proxy pods running"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 0,
+            "y": 64
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 48
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka broker pods",
+          "description": "Kafka broker pods with a cAdvisor sample.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(count by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"kafka\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Broker pods running"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 6,
+            "y": 64
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 49
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer pods",
+          "description": "Replayer pods with a cAdvisor sample.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(count by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"replayer\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Replayer pods running"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 64
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 50
+        },
+        {
+          "type": "text",
+          "title": "Target domain nodes",
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 64
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "This panel exists only on the CloudWatch dashboard: it reads the AWS/ES Nodes metric for the target domain, which is not exported to Prometheus."
+          },
+          "id": 51
+        },
+        {
+          "type": "row",
           "title": "Correctness and result tuples",
           "collapsed": false,
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 56
+            "y": 71
           },
           "panels": [],
-          "id": 47
+          "id": 52
         },
         {
           "type": "timeseries",
@@ -2338,7 +2479,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 57
+            "y": 72
           },
           "options": {
             "legend": {
@@ -2351,12 +2492,12 @@ data:
               "sort": "desc"
             }
           },
-          "id": 48
+          "id": 53
         },
         {
           "type": "timeseries",
-          "title": "Status-code mismatches per second (source → target)",
-          "description": "Mismatched tuples per second by method and source → target status-code class (stacked); tuples without a source response are labelled as such.",
+          "title": "Status-code mismatches per graph period (source → target)",
+          "description": "Mismatched tuples counted in each graph interval by method and source → target status-code class (stacked); tuples without a source response are labelled as such.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -2364,13 +2505,13 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "label_replace(sum by (method, sourceStatusCode, targetStatusCode) (rate(tupleComparison_total{statusCodesMatch=\"false\"}[$__rate_interval])), \"sourceStatusCode\", \"no source response\", \"sourceStatusCode\", \"\")",
+              "expr": "label_replace(sum by (method, sourceStatusCode, targetStatusCode) (increase(tupleComparison_total{statusCodesMatch=\"false\"}[$__interval])), \"sourceStatusCode\", \"no source response\", \"sourceStatusCode\", \"\")",
               "legendFormat": "\u007b\u007bmethod\u007d\u007d \u007b\u007bsourceStatusCode\u007d\u007d → \u007b\u007btargetStatusCode\u007d\u007d"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "short",
               "min": 0,
               "custom": {
                 "stacking": {
@@ -2386,7 +2527,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 57
+            "y": 72
           },
           "options": {
             "legend": {
@@ -2399,7 +2540,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 49
+          "id": 54
         },
         {
           "type": "timeseries",
@@ -2434,7 +2575,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 57
+            "y": 72
           },
           "options": {
             "legend": {
@@ -2447,7 +2588,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 50
+          "id": 55
         },
         {
           "type": "timeseries",
@@ -2502,7 +2643,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 63
+            "y": 78
           },
           "options": {
             "legend": {
@@ -2515,7 +2656,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 51
+          "id": 56
         },
         {
           "type": "timeseries",
@@ -2553,7 +2694,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 63
+            "y": 78
           },
           "options": {
             "legend": {
@@ -2566,7 +2707,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 52
+          "id": 57
         },
         {
           "type": "timeseries",
@@ -2619,7 +2760,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 63
+            "y": 78
           },
           "options": {
             "legend": {
@@ -2632,7 +2773,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 53
+          "id": 58
         },
         {
           "type": "row",
@@ -2642,25 +2783,25 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 69
+            "y": 84
           },
           "panels": [],
-          "id": 54
+          "id": 59
         },
         {
           "type": "text",
           "title": "Source domain health (SOURCE_DOMAIN)",
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 0,
-            "y": 70
+            "y": 85
           },
           "options": {
             "mode": "markdown",
             "content": "This panel exists only on the CloudWatch dashboard: it reads AWS/ES domain metrics (CPUUtilization, JVMMemoryPressure, ThreadpoolWriteQueue, ThreadpoolWriteRejected, 5xx) for the source domain, which are not exported to Prometheus. Open the CloudWatch capture-replay dashboard and pick the domain there."
           },
-          "id": 55
+          "id": 60
         },
         {
           "type": "timeseries",
@@ -2685,10 +2826,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 6,
-            "y": 70
+            "y": 85
           },
           "options": {
             "legend": {
@@ -2701,7 +2842,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 56
+          "id": 61
         },
         {
           "type": "timeseries",
@@ -2726,10 +2867,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 12,
-            "y": 70
+            "y": 85
           },
           "options": {
             "legend": {
@@ -2742,7 +2883,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 57
+          "id": 62
         },
         {
           "type": "timeseries",
@@ -2767,10 +2908,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 6,
             "x": 18,
-            "y": 70
+            "y": 85
           },
           "options": {
             "legend": {
@@ -2783,7 +2924,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 58
+          "id": 63
         },
         {
           "type": "timeseries",
@@ -2851,10 +2992,10 @@ data:
             ]
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 8,
             "x": 0,
-            "y": 76
+            "y": 92
           },
           "options": {
             "legend": {
@@ -2867,12 +3008,12 @@ data:
               "sort": "desc"
             }
           },
-          "id": 59
+          "id": 64
         },
         {
           "type": "timeseries",
           "title": "Catch-up ETA to floor (hours)",
-          "description": "Hours for the 5-minute mean replay lag to reach the selected floor at the current 10-minute lag-reduction rate. Gaps are intentional when lag is at or below the floor or is not falling by more than 0.01 s/s. This is not a Kafka backlog drain time.",
+          "description": "Hours for the 5-minute mean replay lag to reach the selected floor at the current 10-minute lag-reduction rate; 0 when lag is already at or below the floor. Gaps are intentional while lag is above the floor and not falling by more than 0.01 s/s. This is not a Kafka backlog drain time.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -2880,7 +3021,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "((((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) - ${catchup_floor_seconds:raw}) / 3600) / (-deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]))) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) > ${catchup_floor_seconds:raw}) and on() (deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]) < -0.01)",
+              "expr": "(((((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) - ${catchup_floor_seconds:raw}) / 3600) / (-deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]))) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) > ${catchup_floor_seconds:raw}) and on() (deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]) < -0.01)) or on() (0 * (sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) <= ${catchup_floor_seconds:raw}))",
               "legendFormat": "Hours to floor at current reduction rate"
             }
           ],
@@ -2892,10 +3033,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 8,
             "x": 8,
-            "y": 76
+            "y": 92
           },
           "options": {
             "legend": {
@@ -2908,7 +3049,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 60
+          "id": 65
         },
         {
           "type": "timeseries",
@@ -2940,10 +3081,10 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 6,
+            "h": 7,
             "w": 8,
             "x": 16,
-            "y": 76
+            "y": 92
           },
           "options": {
             "legend": {
@@ -2956,7 +3097,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 61
+          "id": 66
         }
       ],
       "templating": {

@@ -224,10 +224,11 @@ def test_high_load_stress_uses_the_160k_two_hour_rig():
     assert case.K6_PARAMETERS == {
         "BULK_BATCH_SIZE": "1",
         "DOCUMENT_PADDING_BYTES": "1300",
-        "INDEX_NUMBER_OF_SHARDS": "200",
+        "INDEX_NUMBER_OF_SHARDS": "48",
+        "RAMP_UP_DURATION": "25m",
     }
     assert sum(int(rate) for rate, *_ in case.K6_LOAD) == 160_000
-    assert sum(parallelism for _, parallelism, *_ in case.K6_LOAD) == 196
+    assert sum(parallelism for _, parallelism, *_ in case.K6_LOAD) == 220
     assert max(parallelism for _, parallelism, *_ in case.K6_LOAD) <= 100
     assert case.K6_WORKFLOW_PARAMETERS == {
         "capture-proxy-pod-replicas": "128",
@@ -235,17 +236,25 @@ def test_high_load_stress_uses_the_160k_two_hour_rig():
         "kafka-node-pool-spec-overrides": (
             '{"resources":{"requests":{"cpu":"12","memory":"24Gi"},'
             '"limits":{"cpu":"12","memory":"24Gi"}},'
-            '"storage":{"type":"persistent-claim","size":"1Ti","deleteClaim":true}}'
+            '"storage":{"type":"persistent-claim","size":"3Ti","class":"kafka-gp3-provisioned","deleteClaim":true}}'
         ),
-        "traffic-topic-partitions": "480",
-        "replayer-pod-replicas": "162",
-        "speedup-factor": "1.5",
+        "traffic-topic-partitions": "512",
+        "replayer-pod-replicas": "64",
+        "speedup-factor": "1.1",
+        "capture-proxy-config-overrides": (
+            '{"resources":{"requests":{"cpu":"5000m","memory":"5000Mi"},'
+            '"limits":{"cpu":"5000m","memory":"5000Mi"}}}'
+        ),
         "replayer-config-overrides": (
-            '{"readyRequestsBufferPerThread":256,'
-            '"resources":{"requests":{"cpu":"3500m","memory":"7000Mi",'
-            '"ephemeral-storage":"2Gi"},"limits":{"cpu":"3500m","memory":"7000Mi"}}}'
+            '{"readyRequestsBufferPerThread":256,"maxConcurrentRequests":20000,'
+            '"resources":{"requests":{"cpu":"8000m","memory":"24Gi","ephemeral-storage":"2Gi"},'
+            '"limits":{"cpu":"12000m","memory":"24Gi"}}}'
         ),
     }
+    # Whole partitions per proxy and per replayer, so no pod carries a heavier share.
+    partitions = int(case.K6_WORKFLOW_PARAMETERS["traffic-topic-partitions"])
+    assert partitions % int(case.K6_WORKFLOW_PARAMETERS["capture-proxy-pod-replicas"]) == 0
+    assert partitions % int(case.K6_WORKFLOW_PARAMETERS["replayer-pod-replicas"]) == 0
     replayer_overrides = json.loads(
         case.K6_WORKFLOW_PARAMETERS["replayer-config-overrides"]
     )
@@ -259,20 +268,21 @@ def test_high_load_stress_uses_the_160k_two_hour_rig():
         },
         "storage": {
             "type": "persistent-claim",
-            "size": "1Ti",
+            "size": "3Ti",
+            "class": "kafka-gp3-provisioned",
             "deleteClaim": True,
         },
     }
     assert replayer_overrides["readyRequestsBufferPerThread"] == 256
     assert replayer_overrides["resources"] == {
         "requests": {
-            "cpu": "3500m",
-            "memory": "7000Mi",
+            "cpu": "8000m",
+            "memory": "24Gi",
             "ephemeral-storage": "2Gi",
         },
-        "limits": {"cpu": "3500m", "memory": "7000Mi"},
+        "limits": {"cpu": "12000m", "memory": "24Gi"},
     }
-    assert "maxConcurrentRequests" not in replayer_overrides
+    assert replayer_overrides["maxConcurrentRequests"] == 20000
     assert "numClientThreads" not in replayer_overrides
     assert "RETRY_ENABLED" not in case.K6_PARAMETERS
     assert "HTTP_REQ_FAILED_THRESHOLD" not in case.K6_PARAMETERS

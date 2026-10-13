@@ -21,6 +21,8 @@ spec:
         value: "20"
       - name: replayer-config-overrides
         value: "{}"
+      - name: capture-proxy-config-overrides
+        value: "{}"
       - name: capture-proxy-service-type
         value: "LoadBalancer"
       - name: capture-proxy-pod-replicas
@@ -143,6 +145,7 @@ spec:
             TUPLE_S3_BUCKET='{{inputs.parameters.tupleS3BucketName}}'
             OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otel-trace-collector-endpoint}}'
             REPLAYER_CONFIG_OVERRIDES='{{workflow.parameters.replayer-config-overrides}}'
+            CAPTURE_PROXY_CONFIG_OVERRIDES='{{workflow.parameters.capture-proxy-config-overrides}}'
             KAFKA_NODE_POOL_SPEC_OVERRIDES='{{workflow.parameters.kafka-node-pool-spec-overrides}}'
 
             # Transform source cluster config (same field renames as fullMigrationImportedClusters)
@@ -178,6 +181,7 @@ spec:
               --argjson trafficTopicPartitions '{{workflow.parameters.traffic-topic-partitions}}' \
               --argjson replayerPodReplicas '{{workflow.parameters.replayer-pod-replicas}}' \
               --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
+              --argjson captureProxyOverrides "$CAPTURE_PROXY_CONFIG_OVERRIDES" \
               '{
                 "skipApprovals": true,
                 "sourceClusters": { "source1": $source },
@@ -208,7 +212,7 @@ spec:
                         "serviceType": "{{workflow.parameters.capture-proxy-service-type}}"
                       } + (if $otelTraceCollectorEndpoint != "" then {
                         "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
-                      } else {} end))
+                      } else {} end) + $captureProxyOverrides)
                     }
                   },
                   "replayers": {

@@ -111,13 +111,17 @@ def text(md, x, y, w, h=1):
     return {"type": "text", "x": x, "y": y, "width": w, "height": h, "properties": {"markdown": md, "background": "transparent"}}
 
 
-def tuple_search(match=None):
-    """Both tupleComparison schemas: with sourceStatusCode and without it (source response missing)."""
+def tuple_search(match=None, period=60):
+    """Both tupleComparison schemas: with sourceStatusCode and without it (source response missing).
+
+    period=None leaves SEARCH's period unset, so each point covers the graph's own period.
+    """
     m = f" statusCodesMatch=\"{match}\"" if match else ""
+    p = f", {period}" if period else ""
     with_src = (f"SEARCH('{{{NS},OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode}} "
-                f"MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"{Q}\"{m}', 'Sum', 60)")
+                f"MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"{Q}\"{m}', 'Sum'{p})")
     no_src = (f"SEARCH('{{{NS},OTelLib,method,qualifier,statusCodesMatch,targetStatusCode}} "
-              f"MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"{Q}\"{m}', 'Sum', 60)")
+              f"MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"{Q}\"{m}', 'Sum'{p})")
     return with_src, no_src
 
 
@@ -130,10 +134,26 @@ def es(w, metric, stat, label, domain_var="TARGET_DOMAIN", scale=None, **opts):
 
 
 MIB = 1048576
+# Metric math keeps a source metric's unit, so a millisecond metric divided by 1000 would still be
+# labelled as milliseconds (4,200 s drawn as "4.2s"). Axes for rescaled durations drop the unit.
+SECONDS_AXIS = {"label": "seconds", "showUnits": False}
 
 # ----------------------------------------------------------------------------------------------
 # Widget catalogue.  Each entry builds a W; layouts below only decide placement.
 # ----------------------------------------------------------------------------------------------
+
+
+def catchup_eta(w):
+    """Hours until mean lag falls to the catch-up floor at its current 5-minute reduction rate.
+
+    0 while lag is at or below the floor (caught up); no value while lag is above the floor and not
+    shrinking by at least 0.01 s/s, when there is no meaningful ETA.
+    """
+    lag = w.m("lagBetweenSourceAndTargetRequests", "Average", period=300)
+    s = w.e(f"{lag} / 1000", "lag s", visible=False)
+    red = w.e(f"-1 * RATE({s})", "lag reduction s/s", visible=False)
+    return s, (f"IF({s} <= CATCHUP_FLOOR_SECONDS, 0, IF({red} > 0.01, "
+               f"(({s} - CATCHUP_FLOOR_SECONDS) / 3600) / {red}, 0/0))")
 
 
 def kpis():
@@ -149,6 +169,10 @@ def kpis():
     lag = w.unitless_mean("lagBetweenSourceAndTargetRequests")
     w.e(f"{lag} / 1000", "Mean lag (s)")
     out.append(w)
+    w = W("Catch-up ETA to floor (hours)", "singleValue", period=300)
+    _, eta = catchup_eta(w)
+    w.e(eta, "Hours to floor (0 = caught up)")
+    out.append(w)
     w = W("Actual speedup (5 min)", "singleValue", period=300)
     lag = w.unitless_mean("lagBetweenSourceAndTargetRequests", period=300)
     s = w.e(f"{lag} / 1000", "lag s", visible=False)
@@ -158,12 +182,6 @@ def kpis():
     a, b = tuple_search()
     ma, _ = tuple_search("true")
     w.e(f"100 * SUM({ma}) / (SUM({a}) + FILL(SUM({b}), 0))", "Match %")
-    out.append(w)
-    w = W("Pods reporting", "singleValue")
-    r = w.m("replayActiveContexts", "SampleCount")
-    w.e(f"{r} / PERIOD({r})", "Replayers")
-    p = w.m("captureConnectionsActive", "SampleCount", lib="captureProxy")
-    w.e(f"FILL({p}, 0) / PERIOD({p})", "Proxies")
     out.append(w)
     w = W("Target CPU / JVM pressure (max node %)", "singleValue")
     es(w, "CPUUtilization", "Maximum", "CPU %")
@@ -215,12 +233,9 @@ def flow_lag():
 
 
 def flow_eta():
-    w = W("Catch-up ETA to floor (hours)", period=300)
-    lag = w.m("lagBetweenSourceAndTargetRequests", "Average", period=300)
-    s = w.e(f"{lag} / 1000", "lag s", visible=False)
-    red = w.e(f"-1 * RATE({s})", "lag reduction s/s", visible=False)
-    w.e(f"IF({s} > CATCHUP_FLOOR_SECONDS, IF({red} > 0.01, (({s} - CATCHUP_FLOOR_SECONDS) / 3600) / {red}, 0/0), 0/0)",
-        "Hours to floor at current reduction rate")
+    w = W("Catch-up ETA to floor (hours)", period=300, yleft={"label": "hours", "showUnits": False, "min": 0})
+    _, eta = catchup_eta(w)
+    w.e(eta, "Hours to floor at current reduction rate (0 = caught up)")
     return w
 
 
@@ -352,7 +367,8 @@ def kafka_backlog():
 
 
 def kafka_commit_heads():
-    w = W("Commit-head age (seconds since broker append)", yright={"label": "partitions", "showUnits": False})
+    w = W("Commit-head age (seconds since broker append)", yleft=SECONDS_AXIS,
+          yright={"label": "partitions", "showUnits": False})
     w.e(f"{w.m('kafkaSourceOldestCommitHeadAge', 'Maximum')} / 1000", "Oldest head (any pod)")
     w.e(f"{w.m('kafkaSourceOldestCommitHeadAge', 'p50')} / 1000", "Oldest head per pod (p50 across pods)")
     st = w.m("kafkaSourceStaleCommitHeadPartitions", "Sum")
@@ -429,12 +445,9 @@ def intake_framing():
 
 
 def intake_age():
-    w = W("Oldest work (hottest pod, seconds)")
+    w = W("Oldest work (hottest pod, seconds)", yleft=SECONDS_AXIS)
     w.e(f"{w.m('replayOldestContextAge', 'Maximum')} / 1000", "Oldest context")
     w.e(f"{w.m('replayOldestKafkaRecordAge', 'Maximum')} / 1000", "Oldest Kafka record")
-    w.e(f"MAX(SEARCH('{{{NS},OTelLib,activity,qualifier}} MetricName=\"replayOldestContextAgeByActivity\" OTelLib=\"replayer\" "
-        f"qualifier=\"{Q}\"', 'Maximum', 60)) / 1000",
-        "Oldest by any activity")
     return w
 
 
@@ -456,7 +469,7 @@ def ops_by_type():
 
 # --- target ------------------------------------------------------------------------------------
 def target_latency():
-    w = W("Replayer → target latency (mean seconds)")
+    w = W("Replayer → target latency (mean seconds)", yleft=SECONDS_AXIS)
     w.avg("targetTransactionDuration", "Target transaction", scale=1000)
     w.avg("requestConnectingDuration", "Connect", scale=1000)
     w.avg("requestSendingDuration", "Send", scale=1000)
@@ -506,6 +519,51 @@ def source_domain():
     return w
 
 
+# --- fleet size ------------------------------------------------------------------------------
+POD_AXIS = {"label": "count", "showUnits": False, "min": 0}
+
+
+def pods_running(w, container, label):
+    """Pods with a cAdvisor sample this period: every series counts once, whatever its value.
+
+    Every pod ever scheduled leaves its own series and SEARCH returns at most 500, so this only suits
+    small, stable fleets such as the Kafka brokers; proxies and replayers churn into thousands.
+    """
+    return w.e(f"SUM(SEARCH('{{{NS},container,namespace,pod}} container=\"{container}\" namespace=\"ma\" "
+               f"MetricName=\"container_memory_working_set_bytes\"', 'Maximum', 60) * 0 + 1)", label)
+
+
+def pods_reporting(w, name, lib, label):
+    """Pods exporting application telemetry, from the 1 s export interval."""
+    c = w.m(name, "SampleCount", lib)
+    return w.e(f"FILL({c}, 0) / PERIOD({c})", label)
+
+
+def fleet_proxy():
+    w = W("Capture proxy pods and source domain nodes", yleft=POD_AXIS)
+    pods_reporting(w, "captureConnectionsActive", "captureProxy", "Proxy pods reporting telemetry")
+    es(w, "Nodes", "Maximum", "Source domain nodes (all roles)", domain_var="SOURCE_DOMAIN")
+    return w
+
+
+def fleet_kafka():
+    w = W("Kafka broker pods", yleft=POD_AXIS)
+    pods_running(w, "kafka", "Broker pods running")
+    return w
+
+
+def fleet_replayer():
+    w = W("Replayer pods", yleft=POD_AXIS)
+    pods_reporting(w, "replayActiveContexts", "replayer", "Replayer pods reporting telemetry")
+    return w
+
+
+def fleet_target():
+    w = W("Target domain nodes", yleft=POD_AXIS)
+    es(w, "Nodes", "Maximum", "Target domain nodes (all roles)")
+    return w
+
+
 # --- correctness -----------------------------------------------------------------------------
 def status_match_pct():
     w = W("Status-code match % (includes missing source responses)", yleft={"min": 0, "max": 100})
@@ -516,10 +574,13 @@ def status_match_pct():
 
 
 def status_mismatches():
-    w = W("Status-code mismatches per second (source → target)", stacked=True)
-    a, b = tuple_search("false")
-    w.e(f"{a} / 60", "${PROP('Dim.method')} ${PROP('Dim.sourceStatusCode')} → ${PROP('Dim.targetStatusCode')}")
-    w.e(f"{b} / 60", "${PROP('Dim.method')} no source response → ${PROP('Dim.targetStatusCode')}")
+    # A count per point rather than a rate: mismatches are sparse, and a per-second average of a few
+    # per minute reads as noise. Each point sums the graph's current period.
+    w = W("Status-code mismatches per graph period (source → target)", stacked=True,
+          yleft={"label": "mismatches", "showUnits": False})
+    a, b = tuple_search("false", period=None)
+    w.e(a, "${PROP('Dim.method')} ${PROP('Dim.sourceStatusCode')} → ${PROP('Dim.targetStatusCode')}")
+    w.e(b, "${PROP('Dim.method')} no source response → ${PROP('Dim.targetStatusCode')}")
     return w
 
 
@@ -540,7 +601,7 @@ def tuple_flow():
 
 
 def tuple_latency():
-    w = W("Tuple durability latency (seconds)")
+    w = W("Tuple durability latency (seconds)", yleft=SECONDS_AXIS)
     w.avg("tupleDurabilityWriteLatency", "Mean write latency", scale=1000)
     w.e(f"MAX(SEARCH('{{{NS},OTelLib,activity,qualifier}} MetricName=\"replayOldestContextAgeByActivity\" OTelLib=\"replayer\" "
         f"qualifier=\"{Q}\" activity=\"comparingResults\"', 'Maximum', 60)) / 1000",
@@ -590,9 +651,9 @@ def telemetry():
 
 NOTE = ("**How to read this dashboard.** Rates are fleet totals per second. Gauges marked *fleet* are time-averaged "
         "fleet totals; *hottest pod* is the single largest pod sample. Durations are means only: histogram "
-        "min/max/percentiles are not exported to CloudWatch. MiB = 1,048,576 bytes. *Pods reporting* is derived from "
-        "the 1 s export interval; a drop means pods stopped exporting, not that work stopped. Proxy panels are empty "
-        "when the capture proxy is scaled to 0.")
+        "min/max/percentiles are not exported to CloudWatch. MiB = 1,048,576 bytes. Pod counts *reporting telemetry* are "
+        "derived from the 1 s export interval; a drop means pods stopped exporting, not that work stopped. Proxy panels "
+        "are empty when the capture proxy is scaled to 0.")
 
 
 def layout_columns():
@@ -601,7 +662,7 @@ def layout_columns():
     ws.append(text(NOTE, 0, y, 24, 2))
     y += 2
     k = kpis()
-    widths = [3, 4, 3, 3, 3, 4, 4]
+    widths = [3, 4, 3, 3, 3, 4, 4]  # captured, replayed, lag, catch-up ETA, speedup, match %, target
     x = 0
     for w, wd in zip(k, widths):
         ws.append(w.widget(x, y, wd, 3))
@@ -625,11 +686,14 @@ def layout_columns():
         ("Faults", [proxy_errors, kafka_rebalance, fatal, target_domain]),
         ("Compute", [lambda: cadvisor("Capture proxy CPU and memory", "proxy"), kafka_brokers,
                      lambda: cadvisor("Replayer CPU and memory", "replayer"), kafka_poll]),
+        ("Fleet size", [fleet_proxy, fleet_kafka, fleet_replayer, fleet_target]),
     ]
-    for _, row in grid:
+    for name, row in grid:
+        # The backlog panels carry the longest legends.
+        h = 8 if name == "Backlog" else 7
         for i, b in enumerate(row):
-            ws.append(b().widget(i * 6, y, 6, 6))
-        y += 6
+            ws.append(b().widget(i * 6, y, 6, h))
+        y += h
     ws.append(text("## Correctness and result tuples", 0, y, 24))
     y += 1
     for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
@@ -641,11 +705,11 @@ def layout_columns():
     ws.append(text("## Source cluster and replayer internals", 0, y, 24))
     y += 1
     for i, b in enumerate([source_domain, contexts_by_activity, ops_by_type, resources_owned]):
-        ws.append(b().widget(i * 6, y, 6, 6))
-    y += 6
+        ws.append(b().widget(i * 6, y, 6, 7))
+    y += 7
     for i, b in enumerate([telemetry, flow_eta, intake_demand]):
-        ws.append(b().widget(i * 8, y, 8, 6))
-    y += 6
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
     return ws
 
 

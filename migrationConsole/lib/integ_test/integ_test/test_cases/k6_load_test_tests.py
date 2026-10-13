@@ -492,7 +492,12 @@ class Test0081CdcK6StressTest(Test0080CdcK6LoadTest):
 
 
 class Test0082CdcK6HighLoadStressTest(Test0080CdcK6LoadTest):
-    """Two-hour 160K-request/s stress run with approximately 2 KiB requests."""
+    """Two-hour 160K-request/s stress run with approximately 2 KiB requests.
+
+    k6 ramps to 160K requests/s over 25 minutes, so new source and target domains finish scaling
+    their load balancers before the measured two hours, then holds that rate for two hours. The
+    replayer runs at 1.1x, enough to absorb the start-up lag while replaying close to live.
+    """
 
     # The dedicated high-load environment benchmarks an Elasticsearch 7.10
     # source against an Amazon OpenSearch Service domain running the
@@ -514,21 +519,51 @@ class Test0082CdcK6HighLoadStressTest(Test0080CdcK6LoadTest):
                     "requests": {"cpu": "12", "memory": "24Gi"},
                     "limits": {"cpu": "12", "memory": "24Gi"},
                 },
+                # gp3's default 125 MB/s per volume saturates at this capture rate, and produce
+                # timeouts then make the proxies fail fast. The StorageClass provisions 500 MB/s
+                # and 8000 IOPS; it must exist in the cluster before the run, as in
+                # TrafficCapture/trafficLoadTest/k6Operator/kafka-storageclass.yaml.
+                # 2h25m at 160K requests/s keeps ~1.3 TB per broker under the 7-day retention
+                # (1 TiB filled after ~90 minutes at full rate).
                 "storage": {
                     "type": "persistent-claim",
-                    "size": "1Ti",
+                    "size": "3Ti",
+                    "class": "kafka-gp3-provisioned",
                     "deleteClaim": True,
                 },
             },
             separators=(",", ":"),
         ),
-        "traffic-topic-partitions": "480",
-        "replayer-pod-replicas": "162",
-        "speedup-factor": "1.5",
-        "replayer-config-overrides": (
-            '{"readyRequestsBufferPerThread":256,'
-            '"resources":{"requests":{"cpu":"3500m","memory":"7000Mi",'
-            '"ephemeral-storage":"2Gi"},"limits":{"cpu":"3500m","memory":"7000Mi"}}}'
+        # Four partitions per proxy. A partition count that the proxy count does not divide
+        # leaves some proxies with more partitions than others, and the replayer pods that own
+        # the busiest partitions fall behind.
+        "traffic-topic-partitions": "512",
+        # Eight partitions per replayer. Each pod reads Kafka on one intake thread, which
+        # saturates at about 4.2K requests/s for this workload. 1.1 x 160K over 64 pods is
+        # about 2.75K requests/s per pod.
+        "replayer-pod-replicas": "64",
+        "speedup-factor": "1.1",
+        # The proxy terminates TLS from k6 and opens TLS to the source; at ~137K requests/s the
+        # default 3.5 vCPU proxies were CPU-bound and k6 dropped iterations.
+        "capture-proxy-config-overrides": json.dumps(
+            {
+                "resources": {
+                    "requests": {"cpu": "5000m", "memory": "5000Mi"},
+                    "limits": {"cpu": "5000m", "memory": "5000Mi"},
+                },
+            },
+            separators=(",", ":"),
+        ),
+        "replayer-config-overrides": json.dumps(
+            {
+                "readyRequestsBufferPerThread": 256,
+                "maxConcurrentRequests": 20000,
+                "resources": {
+                    "requests": {"cpu": "8000m", "memory": "24Gi", "ephemeral-storage": "2Gi"},
+                    "limits": {"cpu": "12000m", "memory": "24Gi"},
+                },
+            },
+            separators=(",", ":"),
         ),
     }
     K6_PARAMETERS = {
@@ -537,14 +572,16 @@ class Test0082CdcK6HighLoadStressTest(Test0080CdcK6LoadTest):
         # target document rate above the requested 160K requests/second.
         "BULK_BATCH_SIZE": "1",
         "DOCUMENT_PADDING_BYTES": "1300",
-        # Exercise the full benchmark source and target fleets instead of concentrating
-        # the two-hour run on a small fraction of their data nodes.
-        "INDEX_NUMBER_OF_SHARDS": "200",
+        # One primary per data node on the 48-data-node benchmark source and target.
+        "INDEX_NUMBER_OF_SHARDS": "48",
+        "RAMP_UP_DURATION": "25m",
     }
     K6_LOAD = (
         # k6-operator validates parallelism against the initializer's inspected default
         # MaxVUs (100); runner environment overrides are not visible during that check.
+        # The pinned tester is held at that limit; the other two get 1.25x the runners of the
+        # first full run, which was runner-bound below 160K.
         ("123077", 100, "65536", "131072"),
-        ("30769", 64, "24576", "49152"),
-        ("6154", 32, "8192", "16384"),
+        ("30769", 80, "24576", "49152"),
+        ("6154", 40, "8192", "16384"),
     )

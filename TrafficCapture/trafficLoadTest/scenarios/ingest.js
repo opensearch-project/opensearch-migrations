@@ -17,6 +17,8 @@
  *   INGEST_MAX_VUS     — max VUs k6 may spin up to meet the rate
  *   DURATION           — test duration for constant-arrival-rate executor;
  *                        ignored when EXECUTOR=ramping-arrival-rate (stages define duration)
+ *   RAMP_UP_DURATION   — constant-arrival-rate only: when set, ramp linearly from 0 to
+ *                        INGEST_RATE over this long before holding INGEST_RATE for DURATION
  *   BULK_BATCH_SIZE    — documents per _bulk call
  *   DOCUMENT_PADDING_BYTES — additional string bytes placed in a mapped text field on each
  *                            generated document (default 0)
@@ -95,6 +97,7 @@ const CONNECTION_MODE     = CFG.CONNECTION_MODE           || 'pinned';
 const NO_CONNECTION_REUSE = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
 const LATENCY_THRESHOLDS_ENABLED = (CFG.LATENCY_THRESHOLDS_ENABLED || 'true') === 'true';
 const EXECUTOR            = CFG.EXECUTOR                 || 'constant-arrival-rate';
+const RAMP_UP_DURATION    = CFG.RAMP_UP_DURATION         || '';
 const RAMP_STAGES     = CFG.RAMP_STAGES
   ? JSON.parse(CFG.RAMP_STAGES)
   : [{ duration: DURATION, target: RATE }];
@@ -114,7 +117,7 @@ const docFns = { randomDocument, randomUpdateBody: docs.randomUpdateBody };
 const connParams = CONNECTION_MODE === 'spread' ? spread() : pinned();
 
 // ── Scenario config (built at init time from EXECUTOR env var) ─────────────
-const ingestScenario = EXECUTOR === 'ramping-arrival-rate'
+const ingestScenario = EXECUTOR === 'ramping-arrival-rate' || RAMP_UP_DURATION
   ? {
       executor: 'ramping-arrival-rate',
       startRate: 0,
@@ -122,7 +125,9 @@ const ingestScenario = EXECUTOR === 'ramping-arrival-rate'
       preAllocatedVUs: VUS,
       maxVUs: MAX_VUS,
       gracefulStop: GRACEFUL_STOP,
-      stages: RAMP_STAGES,
+      stages: EXECUTOR === 'ramping-arrival-rate'
+        ? RAMP_STAGES
+        : [{ duration: RAMP_UP_DURATION, target: RATE }, { duration: DURATION, target: RATE }],
     }
   : {
       executor: 'constant-arrival-rate',

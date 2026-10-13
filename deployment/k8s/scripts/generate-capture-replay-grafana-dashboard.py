@@ -51,8 +51,9 @@ LAG5 = ("(sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / "
         "sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)")
 SPEEDUP = f"1 - deriv({LAG5}[10m:1m])"
 FLOOR = "${catchup_floor_seconds:raw}"
-ETA = (f"((({LAG5} - {FLOOR}) / 3600) / (-deriv({LAG5}[10m:1m]))) and on() ({LAG5} > {FLOOR}) "
-       f"and on() (deriv({LAG5}[10m:1m]) < -0.01)")
+# 0 while lag is at or below the floor (caught up); no value while lag is above it and not falling.
+ETA = (f"(((({LAG5} - {FLOOR}) / 3600) / (-deriv({LAG5}[10m:1m]))) and on() ({LAG5} > {FLOOR}) "
+       f"and on() (deriv({LAG5}[10m:1m]) < -0.01)) or on() (0 * {LAG5} and on() ({LAG5} <= {FLOOR}))")
 TUPLES = rate("tupleComparison_total")
 TRUE_SEL = 'statusCodesMatch="true"'
 MATCH_PCT = "100 * " + rate("tupleComparison_total", TRUE_SEL) + " / " + TUPLES
@@ -135,6 +136,9 @@ def kpis():
           "stat", "ops").q(TUPLES, "Replayed tuples/s"),
         P("Mean replay lag (s)", "Windowed mean of lagBetweenSourceAndTargetRequests (sum/count rates), in seconds.",
           "stat", "s").q(mean("lagBetweenSourceAndTargetRequests_milliseconds", 1000), "Mean lag (s)"),
+        P("Catch-up ETA to floor (hours)", "Hours for the 5-minute mean replay lag to reach the selected floor at "
+                                           "the current lag-reduction rate; 0 when lag is already at or below it.",
+          "stat", "h").q(ETA, "Hours to floor (0 = caught up)"),
         P("Actual speedup (5 min)", "1 minus the 10-minute derivative of the 5-minute mean replay lag. Above "
                                     "1 means replay is gaining on real time; 1 is real time; below 1 means lag "
                                     "is growing.",
@@ -142,11 +146,6 @@ def kpis():
         P("Status-code match %", "Matching tuples divided by all tuples (including those without a source response), "
                                  "over the rate window.",
           "stat", "percent", mx=100).q(MATCH_PCT, "Match %"),
-        P("Pods reporting", "Distinct processes exporting replayer / proxy metrics." + STALE + " A drop means pods stopped exporting, "
-                                                                                               "not that work stopped.",
-          "stat", "short")
-        .q("count(count by (exported_instance) (replayActiveContexts_contexts))", "Replayers")
-        .q("count(count by (exported_instance) (captureConnectionsActive_connections)) or vector(0)", "Proxies"),
     ]
 
 
@@ -198,8 +197,8 @@ def flow_lag():
 def flow_eta():
     return (P("Catch-up ETA to floor (hours)",
               "Hours for the 5-minute mean replay lag to reach the selected floor at the current 10-minute lag-reduction "
-              "rate. Gaps are intentional when lag is at or below the floor or is not falling by more than 0.01 "
-              "s/s. This is not a Kafka backlog drain time.",
+              "rate; 0 when lag is already at or below the floor. Gaps are intentional while lag is above the floor "
+              "and not falling by more than 0.01 s/s. This is not a Kafka backlog drain time.",
               unit="h")
             .q(ETA, "Hours to floor at current reduction rate"))
 
@@ -379,11 +378,10 @@ def intake_framing():
 
 
 def intake_age():
-    return (P("Oldest work (hottest pod, seconds)", "Age of the oldest replay context, oldest held Kafka record, "
-                                                    "and oldest context of any activity on the hottest process." + STALE, unit="s")
+    return (P("Oldest work (hottest pod, seconds)", "Age of the oldest open replay context and of the oldest held "
+                                                    "Kafka record on the hottest process." + STALE, unit="s")
             .q("max(replayOldestContextAge_milliseconds) / 1000", "Oldest context")
-            .q("max(replayOldestKafkaRecordAge_milliseconds) / 1000", "Oldest Kafka record")
-            .q("max(replayOldestContextAgeByActivity_milliseconds) / 1000", "Oldest by any activity"))
+            .q("max(replayOldestKafkaRecordAge_milliseconds) / 1000", "Oldest Kafka record"))
 
 
 def contexts_by_activity():
@@ -439,13 +437,14 @@ def status_match_pct():
 
 
 def status_mismatches():
-    e = (f'label_replace(sum by (method, sourceStatusCode, targetStatusCode) (rate(tupleComparison_total{{statusCodesMatch="false"}}[{RI}])), '
+    e = ('label_replace(sum by (method, sourceStatusCode, targetStatusCode) (increase(tupleComparison_total{statusCodesMatch="false"}[$__interval])), '
          '"sourceStatusCode", "no source response", "sourceStatusCode", "")')
-    return (P("Status-code mismatches per second (source → target)", "Mismatched tuples per second by method "
-                                                                     "and source → target status-code class (stacked); "
-                                                                     "tuples without a source response are labelled "
-                                                                     "as such.",
-              unit="ops", stacked=True)
+    return (P("Status-code mismatches per graph period (source → target)", "Mismatched tuples counted in each "
+                                                                           "graph interval by method and source → "
+                                                                           "target status-code class (stacked); "
+                                                                           "tuples without a source response are "
+                                                                           "labelled as such.",
+              unit="short", stacked=True)
             .q(e, "{{method}} {{sourceStatusCode}} → {{targetStatusCode}}"))
 
 
@@ -503,6 +502,26 @@ def fatal():
     return p
 
 
+def pods(container):
+    return f"count(count by (pod) (container_memory_working_set_bytes{{{cadv(container)}}}))"
+
+
+def fleet_proxy():
+    return P("Capture proxy pods and source domain nodes", "Capture proxy pods with a cAdvisor sample. Source domain "
+                                                           "node counts are CloudWatch-only (AWS/ES Nodes).",
+             unit="short").q(pods("proxy"), "Proxy pods running")
+
+
+def fleet_kafka():
+    return P("Kafka broker pods", "Kafka broker pods with a cAdvisor sample.", unit="short").q(
+        pods("kafka"), "Broker pods running")
+
+
+def fleet_replayer():
+    return P("Replayer pods", "Replayer pods with a cAdvisor sample.", unit="short").q(
+        pods("replayer"), "Replayer pods running")
+
+
 NOTE = ("**How to read this dashboard.** Prometheus twin of the CloudWatch *capture-replay* dashboard, same layout. "
         "Rates are fleet totals per second. Gauges marked *fleet* are sums over per-process series (pod_uuid); "
         "*hottest pod* is the largest single process. Per-process series from restarted pods linger up to 5 minutes "
@@ -521,6 +540,7 @@ def layout_grid(ps, y):
         ("Faults", [proxy_errors(), kafka_rebalance(), fatal(), None]),
         ("Compute", [cadvisor("Capture proxy CPU and memory", "proxy"), kafka_brokers(),
                      cadvisor("Replayer CPU and memory", "replayer"), kafka_poll()]),
+        ("Fleet size", [fleet_proxy(), fleet_kafka(), fleet_replayer(), "target-nodes"]),
     ]
     for gi, (name, cells) in enumerate(grid):
         ps.append(row(f"{name} — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target", y))
@@ -529,13 +549,19 @@ def layout_grid(ps, y):
             for i, h in enumerate(["Capture proxy", "Kafka → replayer consumer", "Replayer intake", "Replayer → target"]):
                 ps.append(header(f"### {h}", i * 6, y, 6))
             y += 1
+        # The backlog panels carry the longest legends.
+        h = 8 if name == "Backlog" else 7
         for i, c in enumerate(cells):
             if c is None:
                 ps.append(text("Target domain health (TARGET_DOMAIN)",
-                               CW_ONLY.format(extra=", IndexingLatency", which="target"), i * 6, y, 6, 6))
+                               CW_ONLY.format(extra=", IndexingLatency", which="target"), i * 6, y, 6, h))
+            elif c == "target-nodes":
+                ps.append(text("Target domain nodes", "This panel exists only on the CloudWatch dashboard: it reads "
+                               "the AWS/ES Nodes metric for the target domain, which is not exported to Prometheus.",
+                               i * 6, y, 6, h))
             else:
-                ps.append(c.build(i * 6, y, 6, 6))
-        y += 6
+                ps.append(c.build(i * 6, y, 6, h))
+        y += h
     return y
 
 
@@ -565,13 +591,13 @@ def layout():
     y += 6
     ps.append(row("Source cluster and replayer internals", y))
     y += 1
-    ps.append(text("Source domain health (SOURCE_DOMAIN)", CW_ONLY.format(extra="", which="source"), 0, y, 6, 6))
+    ps.append(text("Source domain health (SOURCE_DOMAIN)", CW_ONLY.format(extra="", which="source"), 0, y, 6, 7))
     for i, b in enumerate([contexts_by_activity, ops_by_type, resources_owned], 1):
-        ps.append(b().build(i * 6, y, 6, 6))
-    y += 6
-    ps.append(cadvisor("OTel collector (telemetry pipeline) CPU and memory", "otel-collector").build(0, y, 8, 6))
-    ps.append(flow_eta().build(8, y, 8, 6))
-    ps.append(intake_demand().build(16, y, 8, 6))
+        ps.append(b().build(i * 6, y, 6, 7))
+    y += 7
+    ps.append(cadvisor("OTel collector (telemetry pipeline) CPU and memory", "otel-collector").build(0, y, 8, 7))
+    ps.append(flow_eta().build(8, y, 8, 7))
+    ps.append(intake_demand().build(16, y, 8, 7))
     return ps
 
 

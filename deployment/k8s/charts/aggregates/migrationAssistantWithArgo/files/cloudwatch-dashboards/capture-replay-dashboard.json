@@ -81,7 +81,7 @@
             "width": 24,
             "height": 2,
             "properties": {
-                "markdown": "**How to read this dashboard.** Rates are fleet totals per second. Gauges marked *fleet* are time-averaged fleet totals; *hottest pod* is the single largest pod sample. Durations are means only: histogram min/max/percentiles are not exported to CloudWatch. MiB = 1,048,576 bytes. *Pods reporting* is derived from the 1 s export interval; a drop means pods stopped exporting, not that work stopped. Proxy panels are empty when the capture proxy is scaled to 0.",
+                "markdown": "**How to read this dashboard.** Rates are fleet totals per second. Gauges marked *fleet* are time-averaged fleet totals; *hottest pod* is the single largest pod sample. Durations are means only: histogram min/max/percentiles are not exported to CloudWatch. MiB = 1,048,576 bytes. Pod counts *reporting telemetry* are derived from the 1 s export interval; a drop means pods stopped exporting, not that work stopped. Proxy panels are empty when the capture proxy is scaled to 0.",
                 "background": "transparent"
             }
         },
@@ -214,6 +214,61 @@
             "width": 3,
             "height": 3,
             "properties": {
+                "title": "Catch-up ETA to floor (hours)",
+                "view": "singleValue",
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "lagBetweenSourceAndTargetRequests",
+                        "OTelLib",
+                        "replayer",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Average",
+                            "visible": false,
+                            "period": 300
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / 1000",
+                            "label": "lag s",
+                            "id": "e2",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "-1 * RATE(e2)",
+                            "label": "lag reduction s/s",
+                            "id": "e3",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(e2 <= CATCHUP_FLOOR_SECONDS, 0, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3, 0/0))",
+                            "label": "Hours to floor (0 = caught up)",
+                            "id": "e4",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "sparkline": true
+            }
+        },
+        {
+            "type": "metric",
+            "x": 13,
+            "y": 2,
+            "width": 3,
+            "height": 3,
+            "properties": {
                 "title": "Actual speedup (5 min)",
                 "view": "singleValue",
                 "region": "placeholder-region",
@@ -278,9 +333,9 @@
         },
         {
             "type": "metric",
-            "x": 13,
+            "x": 16,
             "y": 2,
-            "width": 3,
+            "width": 4,
             "height": 3,
             "properties": {
                 "title": "Status-code match %",
@@ -294,65 +349,6 @@
                             "expression": "100 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0))",
                             "label": "Match %",
                             "id": "e1",
-                            "visible": true
-                        }
-                    ]
-                ],
-                "sparkline": true
-            }
-        },
-        {
-            "type": "metric",
-            "x": 16,
-            "y": 2,
-            "width": 4,
-            "height": 3,
-            "properties": {
-                "title": "Pods reporting",
-                "view": "singleValue",
-                "region": "placeholder-region",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        "OpenSearchMigrations",
-                        "replayActiveContexts",
-                        "OTelLib",
-                        "replayer",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m1",
-                            "stat": "SampleCount",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "m1 / PERIOD(m1)",
-                            "label": "Replayers",
-                            "id": "e2",
-                            "visible": true
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "captureConnectionsActive",
-                        "OTelLib",
-                        "captureProxy",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m3",
-                            "stat": "SampleCount",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "FILL(m3, 0) / PERIOD(m3)",
-                            "label": "Proxies",
-                            "id": "e4",
                             "visible": true
                         }
                     ]
@@ -796,7 +792,7 @@
             "x": 0,
             "y": 14,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Proxy → Kafka publishing",
                 "view": "timeSeries",
@@ -853,7 +849,7 @@
             "x": 6,
             "y": 14,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Replayer consumer: read vs committed (records/s)",
                 "view": "timeSeries",
@@ -920,7 +916,7 @@
             "x": 12,
             "y": 14,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Source response framing (per second)",
                 "view": "timeSeries",
@@ -1029,7 +1025,7 @@
             "x": 18,
             "y": 14,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Target connections",
                 "view": "timeSeries",
@@ -1159,9 +1155,9 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 20,
+            "y": 21,
             "width": 6,
-            "height": 6,
+            "height": 8,
             "properties": {
                 "title": "Proxy connections and writers",
                 "view": "timeSeries",
@@ -1268,9 +1264,9 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 20,
+            "y": 21,
             "width": 6,
-            "height": 6,
+            "height": 8,
             "properties": {
                 "title": "Kafka backlog behind the replayers (records)",
                 "view": "timeSeries",
@@ -1389,9 +1385,9 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 20,
+            "y": 21,
             "width": 6,
-            "height": 6,
+            "height": 8,
             "properties": {
                 "title": "Replayer in-flight work (fleet total)",
                 "view": "timeSeries",
@@ -1511,9 +1507,9 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 20,
+            "y": 21,
             "width": 6,
-            "height": 6,
+            "height": 8,
             "properties": {
                 "title": "Target permits and retries",
                 "view": "timeSeries",
@@ -1629,9 +1625,9 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 26,
+            "y": 29,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Proxy latency (mean ms)",
                 "view": "timeSeries",
@@ -1730,9 +1726,9 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 26,
+            "y": 29,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Commit-head age (seconds since broker append)",
                 "view": "timeSeries",
@@ -1807,6 +1803,10 @@
                     ]
                 ],
                 "yAxis": {
+                    "left": {
+                        "label": "seconds",
+                        "showUnits": false
+                    },
                     "right": {
                         "label": "partitions",
                         "showUnits": false
@@ -1817,9 +1817,9 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 26,
+            "y": 29,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Oldest work (hottest pod, seconds)",
                 "view": "timeSeries",
@@ -1869,24 +1869,22 @@
                             "id": "e4",
                             "visible": true
                         }
-                    ],
-                    [
-                        {
-                            "expression": "MAX(SEARCH('{OpenSearchMigrations,OTelLib,activity,qualifier} MetricName=\"replayOldestContextAgeByActivity\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Maximum', 60)) / 1000",
-                            "label": "Oldest by any activity",
-                            "id": "e5",
-                            "visible": true
-                        }
                     ]
-                ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "seconds",
+                        "showUnits": false
+                    }
+                }
             }
         },
         {
             "type": "metric",
             "x": 18,
-            "y": 26,
+            "y": 29,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Replayer → target latency (mean seconds)",
                 "view": "timeSeries",
@@ -2000,15 +1998,21 @@
                             "visible": true
                         }
                     ]
-                ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "seconds",
+                        "showUnits": false
+                    }
+                }
             }
         },
         {
             "type": "metric",
             "x": 0,
-            "y": 32,
+            "y": 36,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Proxy skew: client connections per pod",
                 "view": "timeSeries",
@@ -2107,9 +2111,9 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 32,
+            "y": 36,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Replayer skew: partitions owned per pod",
                 "view": "timeSeries",
@@ -2208,9 +2212,9 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 32,
+            "y": 36,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Replayer skew: Kafka records read per pod-second",
                 "view": "timeSeries",
@@ -2309,9 +2313,9 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 32,
+            "y": 36,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Replayer skew: active target permits per pod",
                 "view": "timeSeries",
@@ -2410,9 +2414,9 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 38,
+            "y": 43,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Proxy faults (per minute)",
                 "view": "timeSeries",
@@ -2556,9 +2560,9 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 38,
+            "y": 43,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Consumer-group churn (per minute)",
                 "view": "timeSeries",
@@ -2686,9 +2690,9 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 38,
+            "y": 43,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Replayer invariant and fatal failures (per minute)",
                 "view": "timeSeries",
@@ -2748,9 +2752,9 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 38,
+            "y": 43,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Target domain health (TARGET_DOMAIN)",
                 "view": "timeSeries",
@@ -2822,9 +2826,9 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 44,
+            "y": 50,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Capture proxy CPU and memory",
                 "view": "timeSeries",
@@ -2911,9 +2915,9 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 44,
+            "y": 50,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Kafka broker CPU and disk (EBS) throughput",
                 "view": "timeSeries",
@@ -2983,9 +2987,9 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 44,
+            "y": 50,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Replayer CPU and memory",
                 "view": "timeSeries",
@@ -3072,9 +3076,9 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 44,
+            "y": 50,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Kafka poll and commit timing (mean ms)",
                 "view": "timeSeries",
@@ -3150,9 +3154,171 @@
             }
         },
         {
+            "type": "metric",
+            "x": 0,
+            "y": 57,
+            "width": 6,
+            "height": 7,
+            "properties": {
+                "title": "Capture proxy pods and source domain nodes",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "captureConnectionsActive",
+                        "OTelLib",
+                        "captureProxy",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "SampleCount",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m1, 0) / PERIOD(m1)",
+                            "label": "Proxy pods reporting telemetry",
+                            "id": "e2",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"Nodes\" DomainName=\"SOURCE_DOMAIN\"', 'Maximum', 60))",
+                            "label": "Source domain nodes (all roles)",
+                            "id": "e3",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 6,
+            "y": 57,
+            "width": 6,
+            "height": 7,
+            "properties": {
+                "title": "Kafka broker pods",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} container=\"kafka\" namespace=\"ma\" MetricName=\"container_memory_working_set_bytes\"', 'Maximum', 60) * 0 + 1)",
+                            "label": "Broker pods running",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 12,
+            "y": 57,
+            "width": 6,
+            "height": 7,
+            "properties": {
+                "title": "Replayer pods",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "replayActiveContexts",
+                        "OTelLib",
+                        "replayer",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "SampleCount",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m1, 0) / PERIOD(m1)",
+                            "label": "Replayer pods reporting telemetry",
+                            "id": "e2",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 18,
+            "y": 57,
+            "width": 6,
+            "height": 7,
+            "properties": {
+                "title": "Target domain nodes",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"Nodes\" DomainName=\"TARGET_DOMAIN\"', 'Maximum', 60))",
+                            "label": "Target domain nodes (all roles)",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
             "type": "text",
             "x": 0,
-            "y": 50,
+            "y": 64,
             "width": 24,
             "height": 1,
             "properties": {
@@ -3163,7 +3329,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 51,
+            "y": 65,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3194,11 +3360,11 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 51,
+            "y": 65,
             "width": 8,
             "height": 6,
             "properties": {
-                "title": "Status-code mismatches per second (source → target)",
+                "title": "Status-code mismatches per graph period (source → target)",
                 "view": "timeSeries",
                 "stacked": true,
                 "region": "placeholder-region",
@@ -3207,7 +3373,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum', 60) / 60",
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum')",
                             "label": "${PROP('Dim.method')} ${PROP('Dim.sourceStatusCode')} → ${PROP('Dim.targetStatusCode')}",
                             "id": "e1",
                             "visible": true
@@ -3215,19 +3381,25 @@
                     ],
                     [
                         {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum', 60) / 60",
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum')",
                             "label": "${PROP('Dim.method')} no source response → ${PROP('Dim.targetStatusCode')}",
                             "id": "e2",
                             "visible": true
                         }
                     ]
-                ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "mismatches",
+                        "showUnits": false
+                    }
+                }
             }
         },
         {
             "type": "metric",
             "x": 16,
-            "y": 51,
+            "y": 65,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3252,7 +3424,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 57,
+            "y": 71,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3339,7 +3511,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 57,
+            "y": 71,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3379,13 +3551,19 @@
                             "visible": true
                         }
                     ]
-                ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "seconds",
+                        "showUnits": false
+                    }
+                }
             }
         },
         {
             "type": "metric",
             "x": 16,
-            "y": 57,
+            "y": 71,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3515,7 +3693,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 63,
+            "y": 77,
             "width": 24,
             "height": 1,
             "properties": {
@@ -3526,9 +3704,9 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 64,
+            "y": 78,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Source domain health (SOURCE_DOMAIN)",
                 "view": "timeSeries",
@@ -3592,9 +3770,9 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 64,
+            "y": 78,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Active contexts by activity (fleet total)",
                 "view": "timeSeries",
@@ -3617,9 +3795,9 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 64,
+            "y": 78,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Owner operations by type (fleet total)",
                 "view": "timeSeries",
@@ -3642,9 +3820,9 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 64,
+            "y": 78,
             "width": 6,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Replayer owned payload memory (fleet MiB)",
                 "view": "timeSeries",
@@ -3667,9 +3845,9 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 70,
+            "y": 85,
             "width": 8,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "OTel collector (telemetry pipeline) CPU and memory",
                 "view": "timeSeries",
@@ -3756,9 +3934,9 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 70,
+            "y": 85,
             "width": 8,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Catch-up ETA to floor (hours)",
                 "view": "timeSeries",
@@ -3799,21 +3977,28 @@
                     ],
                     [
                         {
-                            "expression": "IF(e2 > CATCHUP_FLOOR_SECONDS, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3, 0/0), 0/0)",
-                            "label": "Hours to floor at current reduction rate",
+                            "expression": "IF(e2 <= CATCHUP_FLOOR_SECONDS, 0, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3, 0/0))",
+                            "label": "Hours to floor at current reduction rate (0 = caught up)",
                             "id": "e4",
                             "visible": true
                         }
                     ]
-                ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "hours",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
             }
         },
         {
             "type": "metric",
             "x": 16,
-            "y": 70,
+            "y": 85,
             "width": 8,
-            "height": 6,
+            "height": 7,
             "properties": {
                 "title": "Intake demand (backpressure)",
                 "view": "timeSeries",

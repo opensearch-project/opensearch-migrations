@@ -737,6 +737,47 @@ def _consumer_group_max_lag(
     return max_lag if saw_row else None
 
 
+def _consumer_group_offsets(
+    group_name: Optional[str] = None,
+    probe_timeout_seconds: int = CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS,
+) -> Optional[dict]:
+    """Return {(topic, partition): (committed offset or None, log-end offset)} from the describe
+    table, or None if the group is missing, the describe failed, or no row parses.
+
+    A committed offset of `-` (nothing committed yet) maps to None.
+    """
+    out = _run_describe_consumer_group(group_name, probe_timeout_seconds)
+    if out is None:
+        return None
+    offsets = {}
+    for row in _iter_native_describe_rows(out):
+        try:
+            key = (row.get("TOPIC", ""), int(row.get("PARTITION", "-")))
+            end = int(row.get("LOG-END-OFFSET", "-"))
+        except ValueError:
+            return None
+        current_token = row.get("CURRENT-OFFSET", "-")
+        try:
+            current = None if current_token in ("-", "") else int(current_token)
+        except ValueError:
+            return None
+        offsets[key] = (current, end)
+    return offsets or None
+
+
+def _behind_snapshot(snapshot: dict, offsets: dict) -> Optional[int]:
+    """Largest number of records, on any partition, between its committed offset and its
+    log-end offset at snapshot time. None while any snapshot partition is missing or uncommitted.
+    """
+    worst = 0
+    for key, (_, snapshot_end) in snapshot.items():
+        current = offsets.get(key, (None, None))[0]
+        if current is None:
+            return None
+        worst = max(worst, snapshot_end - current)
+    return worst
+
+
 class ReplayLagDrainTimeout(AssertionError):
     """Raised when the replayer consumer-group fails to drain to the requested
     max-lag threshold within the configured timeout.
@@ -750,11 +791,15 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
                                        max_allowed_lag: int,
                                        timeout_seconds: int,
                                        interval_seconds: float = 3.0) -> tuple:
-    """Bounded poll until the group's max per-partition LAG drops to <=
-    `max_allowed_lag`. Returns (succeeded: bool, last_observed: Optional[int]).
+    """Bounded poll until every partition has committed to within `max_allowed_lag` records of the
+    log-end offset it had when the wait began. Returns (succeeded: bool, last_observed: Optional[int]),
+    where last_observed is that largest remaining gap.
 
-    LAG=`-` on any partition (no commit yet) keeps the wait polling until at
-    least one replayer commit lands.
+    Records produced after the wait begins do not count. Capture proxies keep appending heartbeat
+    records for as long as they run, so live LAG never settles on an otherwise drained replay; what
+    matters is that everything already captured when the check started has been committed.
+
+    An uncommitted partition (`-`) keeps the wait polling until at least one replayer commit lands.
 
     The replayer's in-order commit constraint (OffsetLifecycleTracker) can
     keep LAG=1 around well after every response landed on the target because
@@ -766,23 +811,35 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
     deadline = start + timeout_seconds
     attempt = 0
     last_observed: Optional[int] = None
+    snapshot: Optional[dict] = None
     display_name = group_name if group_name is not None else "<workflow-resolved>"
     while time.monotonic() < deadline:
         attempt += 1
-        observed = _consumer_group_max_lag(group_name)
+        offsets = _consumer_group_offsets(group_name)
+        if snapshot is None and offsets is not None:
+            snapshot = offsets
+            logger.info("[%s] Consumer group '%s': waiting for %d partition(s) to commit up to their "
+                        "log-end offsets as of now (%d records in total)",
+                        label, display_name, len(snapshot), sum(end for _, end in snapshot.values()))
+        observed = None if snapshot is None or offsets is None else _behind_snapshot(snapshot, offsets)
+        live_lag = None if offsets is None else max(
+            (end - (current if current is not None else 0) for current, end in offsets.values()), default=None)
         last_observed = observed
         elapsed = int(time.monotonic() - start)
-        # Log the LAG trajectory every poll so a slow/recovering drain (e.g. a
+        # Log the trajectory every poll so a slow/recovering drain (e.g. a
         # replayer pod evicted mid-run, cold-restarting, then re-draining its
         # backlog) is visible as it happens instead of only at success/timeout.
-        logger.info("[%s] Consumer group '%s' max LAG=%s (target <=%d) "
-                    "[probe %d, elapsed=%ds/%ds]",
+        logger.info("[%s] Consumer group '%s' max records behind start-of-check offsets=%s "
+                    "(target <=%d; live max LAG=%s) [probe %d, elapsed=%ds/%ds]",
                     label, display_name,
                     "<unparsed>" if observed is None else observed,
-                    max_allowed_lag, attempt, elapsed, timeout_seconds)
+                    max_allowed_lag,
+                    "<unparsed>" if live_lag is None else live_lag,
+                    attempt, elapsed, timeout_seconds)
         if observed is not None and observed <= max_allowed_lag:
-            logger.info("[%s] Consumer group '%s' drained to LAG=%d (<=%d) after %d probe(s)",
-                        label, display_name, observed, max_allowed_lag, attempt)
+            logger.info("[%s] Consumer group '%s' committed everything captured before the check "
+                        "(within %d record(s)) after %d probe(s)",
+                        label, display_name, max_allowed_lag, attempt)
             return True, observed
         time.sleep(interval_seconds)
     logger.warning(
@@ -912,8 +969,10 @@ def assert_replay_drained(label: str = "replay-end",
                           describe_timeout_seconds: int = 120,
                           dump_topic: Optional[str] = "capture-proxy",
                           dump_timeout_seconds: int = 300) -> None:
-    """Wait for the replayer consumer-group to drain to max per-partition
-    LAG <=`max_lag`, log the describe snapshot, and raise on timeout.
+    """Wait for the replayer consumer-group to commit, on every partition, to
+    within `max_lag` records of the log-end offset it had when the wait began;
+    log the describe snapshot, and raise on timeout. Records appended after the
+    wait begins (capture-proxy heartbeats, for instance) do not hold it open.
 
     Use at the post-verification checkpoint ([replay-end]). Without this
     assertion, `verify_clusters` happily passes when the target has the
