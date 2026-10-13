@@ -13,6 +13,8 @@ import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseObservation;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
@@ -385,6 +387,9 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
             segmentFieldNumber = TrafficObservation.READSEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = ReadSegmentObservation.DATA_FIELD_NUMBER;
+        } else if (captureFieldNumber == TrafficObservation.INTERIMRESPONSE_FIELD_NUMBER) {
+            segmentFieldNumber = TrafficObservation.INTERIMRESPONSESEGMENT_FIELD_NUMBER;
+            segmentDataFieldNumber = InterimResponseSegmentObservation.DATA_FIELD_NUMBER;
         } else {
             segmentFieldNumber = TrafficObservation.WRITESEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = WriteSegmentObservation.DATA_FIELD_NUMBER;
@@ -491,6 +496,16 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     @Override
     public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
         addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, WriteObservation.DATA_FIELD_NUMBER, timestamp, buffer);
+    }
+
+    @Override
+    public void addInterimResponseEvent(Instant timestamp, ByteBuf buffer) throws IOException {
+        addDataMessage(
+            TrafficObservation.INTERIMRESPONSE_FIELD_NUMBER,
+            InterimResponseObservation.DATA_FIELD_NUMBER,
+            timestamp,
+            buffer
+        );
     }
 
     @Override

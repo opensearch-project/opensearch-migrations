@@ -22,6 +22,8 @@ public interface IChannelConnectionCaptureListener<T> {
 
     default void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {}
 
+    default void addInterimResponseEvent(Instant timestamp, ByteBuf buffer) throws IOException {}
+
     default void addFlushEvent(Instant timestamp) throws IOException {}
 
     default void addChannelRegisteredEvent(Instant timestamp) throws IOException {}

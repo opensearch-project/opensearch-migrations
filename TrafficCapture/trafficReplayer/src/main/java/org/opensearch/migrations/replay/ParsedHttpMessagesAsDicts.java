@@ -49,6 +49,7 @@ public class ParsedHttpMessagesAsDicts {
 
     public final Optional<Map<String, Object>> sourceRequestOp;
     public final Optional<Map<String, Object>> sourceResponseOp;
+    public final List<Map<String, Object>> sourceInterimResponses;
     public final Optional<Map<String, Object>> targetRequestOp;
     public final List<Map<String, Object>> targetResponseList;
     public final IReplayContexts.ITupleHandlingContext context;
@@ -65,6 +66,7 @@ public class ParsedHttpMessagesAsDicts {
             tuple.context,
             getSourceRequestOp(tuple.context, sourcePairOp),
             getSourceResponseOp(tuple, sourcePairOp),
+            getSourceInterimResponses(tuple.context, sourcePairOp),
             getTargetRequestOp(tuple),
             getTargetResponseOp(tuple)
         );
@@ -72,7 +74,8 @@ public class ParsedHttpMessagesAsDicts {
 
     private static List<Map<String, Object>> getTargetResponseOp(SourceTargetCaptureTuple tuple) {
         return tuple.responseList.stream()
-            .map(r -> convertResponse(tuple.context, r.targetResponseData, r.targetResponseDuration))
+            .map(r -> convertResponse(tuple.context, r.targetResponseData, r.targetResponseDuration,
+                r.targetInterimResponseData))
             .collect(Collectors.toList());
     }
 
@@ -97,7 +100,8 @@ public class ParsedHttpMessagesAsDicts {
                         Duration.between(
                             tuple.sourcePair.requestData.getLastPacketTimestamp(),
                             tuple.sourcePair.responseData.getLastPacketTimestamp()
-                        )
+                        ),
+                        null
                     )
                 )
         );
@@ -114,19 +118,33 @@ public class ParsedHttpMessagesAsDicts {
         );
     }
 
+    private static List<Map<String, Object>> getSourceInterimResponses(
+        @NonNull IReplayContexts.ITupleHandlingContext context,
+        Optional<RequestResponsePacketPair> sourcePairOp
+    ) {
+        return sourcePairOp
+            .map(RequestResponsePacketPair::getInterimResponseData)
+            .stream()
+            .flatMap(List::stream)
+            .map(bytes -> convertResponse(context, List.of(bytes), null, null))
+            .collect(Collectors.toList());
+    }
+
     public ParsedHttpMessagesAsDicts(
         IReplayContexts.ITupleHandlingContext context,
         Optional<Map<String, Object>> sourceRequestOp1,
         Optional<Map<String, Object>> sourceResponseOp2,
-        Optional<Map<String, Object>> targetRequestOp3,
-        List<Map<String, Object>> targetResponseOps4
+        List<Map<String, Object>> sourceInterimResponses3,
+        Optional<Map<String, Object>> targetRequestOp4,
+        List<Map<String, Object>> targetResponseOps5
     ) {
         this.context = context;
         this.sourceRequestOp = sourceRequestOp1;
         this.sourceResponseOp = sourceResponseOp2;
-        this.targetRequestOp = targetRequestOp3;
-        this.targetResponseList = targetResponseOps4;
-        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps4);
+        this.sourceInterimResponses = sourceInterimResponses3;
+        this.targetRequestOp = targetRequestOp4;
+        this.targetResponseList = targetResponseOps5;
+        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps5);
     }
 
     /**
@@ -135,6 +153,9 @@ public class ParsedHttpMessagesAsDicts {
     public Map<String, Object> toTupleMap(SourceTargetCaptureTuple tuple) {
         var map = new LinkedHashMap<String, Object>();
         sourceRequestOp.ifPresent(r -> map.put("sourceRequest", r));
+        if (!sourceInterimResponses.isEmpty()) {
+            map.put("sourceInterimResponses", sourceInterimResponses);
+        }
         sourceResponseOp.ifPresent(r -> map.put("sourceResponse", r));
         targetRequestOp.ifPresent(r -> map.put("targetRequest", r));
         map.put("targetResponses", targetResponseList);
@@ -225,7 +246,8 @@ public class ParsedHttpMessagesAsDicts {
     private static Map<String, Object> convertResponse(
         @NonNull IReplayContexts.ITupleHandlingContext context,
         @NonNull List<byte[]> data,
-        Duration latency
+        Duration latency,
+        List<byte[]> interimResponseData
     ) {
         return makeSafeMap(context, () -> {
             try (var transformationCtx = context.getLogicalEnclosingScope().createTransformationContext();
@@ -247,7 +269,10 @@ public class ParsedHttpMessagesAsDicts {
                     map.put(HTTP_VERSION_KEY, message.protocol());
                     map.put(STATUS_CODE_KEY, Integer.parseInt(message.code()));
                     map.put("Reason-Phrase", message.reason());
-                    map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
+                    if (latency != null) {
+                        map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
+                    }
+                    addInterimResponsesIfPresent(context, map, interimResponseData);
                     context.setHttpVersion(message.protocol());
                     encodeBinaryPayloadIfExists(message);
                     if (!message.payload().isEmpty()) {
@@ -259,6 +284,19 @@ public class ParsedHttpMessagesAsDicts {
                 }
             }
         });
+    }
+
+    private static void addInterimResponsesIfPresent(
+        IReplayContexts.ITupleHandlingContext context,
+        Map<String, Object> map,
+        List<byte[]> interimResponseData
+    ) {
+        if (interimResponseData == null || interimResponseData.isEmpty()) {
+            return;
+        }
+        map.put("interimResponses", interimResponseData.stream()
+            .map(bytes -> convertResponse(context, List.of(bytes), null, null))
+            .collect(Collectors.toList()));
     }
 
     private static void encodeBinaryPayloadIfExists(HttpJsonMessageWithFaultingPayload message) {

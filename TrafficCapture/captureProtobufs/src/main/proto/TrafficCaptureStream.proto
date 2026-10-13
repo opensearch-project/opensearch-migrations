@@ -43,6 +43,15 @@ message EndOfMessageIndication {
 }
 message RequestIntentionallyDropped {}
 
+// HTTP/1.1 1xx interim responses (e.g. 100 Continue) seen during the request
+// phase. Captured for byte-fidelity but separate from the final response.
+message InterimResponseObservation {
+  bytes data = 1;
+}
+message InterimResponseSegmentObservation {
+  bytes data = 2;
+}
+
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
   oneof Capture {
@@ -64,6 +73,9 @@ message TrafficObservation {
     EndOfMessageIndication endOfMessageIndicator = 15;
 
     RequestIntentionallyDropped requestDropped = 16;
+
+    InterimResponseObservation interimResponse = 17;
+    InterimResponseSegmentObservation interimResponseSegment = 18;
   }
 }
 

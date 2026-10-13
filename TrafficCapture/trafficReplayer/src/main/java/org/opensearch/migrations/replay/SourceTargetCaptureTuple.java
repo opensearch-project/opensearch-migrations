@@ -24,6 +24,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     @Getter
     public static class Response {
         List<byte[]> targetResponseData;
+        List<byte[]> targetInterimResponseData;
         Throwable errorCause;
         Duration targetResponseDuration;
 
@@ -70,8 +71,11 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             transformedTargetRequestAndResponseList.getTransformationStatus();
         this.responseList = transformedTargetRequestAndResponseList == null ? List.of() :
             transformedTargetRequestAndResponseList.responses().stream()
-            .map(arr -> new Response(arr.packets.stream().map(AbstractMap.SimpleEntry::getValue)
-                .collect(Collectors.toList()), arr.error, arr.duration))
+            .map(arr -> new Response(
+                arr.packets.stream().map(AbstractMap.SimpleEntry::getValue).collect(Collectors.toList()),
+                arr.getInterimResponsePackets(),
+                arr.error,
+                arr.duration))
             .collect(Collectors.toList());
         this.topLevelErrorCause = topLevelErrorCause;
     }
