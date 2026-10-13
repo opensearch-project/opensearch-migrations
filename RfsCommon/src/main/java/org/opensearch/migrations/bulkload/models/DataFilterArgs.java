@@ -10,13 +10,12 @@ public class DataFilterArgs {
     public List<String> indexAllowlist = List.of();
 
     @Parameter(names = {
-        "--index-template-allowlist" }, description = ("Optional. List of legacy and composable index template"
-            + " names to migrate (e.g. 'posts_index_template1, posts_index_template2')."
-            + " Default: all non-system index templates"), required = false)
+        "--index-template-allowlist" }, description = ("Optional.  List of index template names to migrate"
+            + " (e.g. 'posts_index_template1, posts_index_template2').  Default: all non-system indices (e.g. those not starting with '.', created by plugins)"), required = false)
     public List<String> indexTemplateAllowlist = List.of();
 
     @Parameter(names = {
         "--component-template-allowlist" }, description = ("Optional. List of component template names to migrate"
-            + " (e.g. 'posts_template1, posts_template2'). Default: all non-system component templates"), required = false)
+            + " (e.g. 'posts_template1, posts_template2').  Default: all non-system indices (e.g. those not starting with '.', created by plugins)"), required = false)
     public List<String> componentTemplateAllowlist = List.of();
 }
