@@ -9,6 +9,7 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -18,7 +19,7 @@ import static org.mockito.Mockito.when;
 class SnapshotRepoProvider_ES_7_10Test {
 
     @Test
-    void indexesAreResolvedByIdOnceAndCachedPerSnapshot() {
+    void keepsOnlyMostRecentlyRequestedSnapshot() {
         var repoData = mock(SnapshotRepoData_ES_7_10.class);
         Map<String, SnapshotRepoData_ES_7_10.RawIndex> repositoryIndices = new LinkedHashMap<>();
         repositoryIndices.put(
@@ -35,21 +36,19 @@ class SnapshotRepoProvider_ES_7_10Test {
         snapshotIndices.put("id-2", "metadata-2");
         snapshotIndices.put("id-1", "metadata-1");
         when(repoData.getSnapshots()).thenReturn(List.of(
-            new SnapshotRepoData_ES_7_10.Snapshot(
-                "snapshot",
-                "snapshot-id",
-                1,
-                snapshotIndices,
-                "7.10.2"
-            )
+            new SnapshotRepoData_ES_7_10.Snapshot("snapshot", "snapshot-id", 1, snapshotIndices, "7.10.2"),
+            new SnapshotRepoData_ES_7_10.Snapshot("other", "other-id", 1, Map.of("id-1", "metadata-1"), "7.10.2")
         ));
 
         var provider = new TestProvider(repoData);
         var first = provider.getIndicesInSnapshot("snapshot");
         var second = provider.getIndicesInSnapshot("snapshot");
+        provider.getIndicesInSnapshot("other");
+        var reloaded = provider.getIndicesInSnapshot("snapshot");
 
         assertEquals(List.of("index-two", "index-one"), first.stream().map(i -> i.getName()).toList());
         assertSame(first, second);
+        assertNotSame(first, reloaded);
         verify(repoData, times(1)).getIndices();
     }
 

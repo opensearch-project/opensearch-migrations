@@ -6,9 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 
 import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -22,7 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_2_4 repoData;
-    private final Map<String, List<SnapshotRepo.Index>> indicesBySnapshotName = new HashMap<>();
+    private String cachedSnapshotName;
+    private List<SnapshotRepo.Index> cachedIndices;
 
     public SnapshotRepoProvider_ES_2_4(SourceRepo repo) {
         this.repo = repo;
@@ -45,8 +45,12 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     }
 
     @Override
-    public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        return indicesBySnapshotName.computeIfAbsent(snapshotName, this::loadIndicesInSnapshot);
+    public synchronized List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        if (cachedIndices == null || !Objects.equals(snapshotName, cachedSnapshotName)) {
+            cachedIndices = loadIndicesInSnapshot(snapshotName);
+            cachedSnapshotName = snapshotName;
+        }
+        return cachedIndices;
     }
 
     private List<SnapshotRepo.Index> loadIndicesInSnapshot(String snapshotName) {

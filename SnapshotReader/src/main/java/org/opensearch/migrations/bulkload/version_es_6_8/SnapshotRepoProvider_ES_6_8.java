@@ -1,9 +1,8 @@
 package org.opensearch.migrations.bulkload.version_es_6_8;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -12,7 +11,8 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_6_8 repoData = null;
-    private final Map<String, List<SnapshotRepo.Index>> indicesBySnapshotName = new HashMap<>();
+    private String cachedSnapshotName;
+    private List<SnapshotRepo.Index> cachedIndices;
 
     public SnapshotRepoProvider_ES_6_8(SourceRepo repo) {
         this.repo = repo;
@@ -35,8 +35,12 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
      * Scans the repository index list once, then caches the result for each requested snapshot.
      */
     @Override
-    public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        return indicesBySnapshotName.computeIfAbsent(snapshotName, this::loadIndicesInSnapshot);
+    public synchronized List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        if (cachedIndices == null || !Objects.equals(snapshotName, cachedSnapshotName)) {
+            cachedIndices = loadIndicesInSnapshot(snapshotName);
+            cachedSnapshotName = snapshotName;
+        }
+        return cachedIndices;
     }
 
     private List<SnapshotRepo.Index> loadIndicesInSnapshot(String snapshotName) {

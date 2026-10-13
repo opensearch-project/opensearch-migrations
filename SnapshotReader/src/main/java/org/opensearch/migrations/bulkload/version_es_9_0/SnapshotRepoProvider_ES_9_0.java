@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.InvalidSnapshotFormatException;
@@ -13,7 +14,8 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 public class SnapshotRepoProvider_ES_9_0 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_9_0 repoData = null;
-    private final Map<String, List<SnapshotRepo.Index>> indicesBySnapshotName = new HashMap<>();
+    private String cachedSnapshotName;
+    private List<SnapshotRepo.Index> cachedIndices;
     private Map<String, SnapshotRepo.Index> indicesById;
 
     public SnapshotRepoProvider_ES_9_0(SourceRepo repo) {
@@ -33,8 +35,12 @@ public class SnapshotRepoProvider_ES_9_0 implements SnapshotRepo.Provider {
     }
 
     @Override
-    public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
-        return indicesBySnapshotName.computeIfAbsent(snapshotName, this::loadIndicesInSnapshot);
+    public synchronized List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        if (cachedIndices == null || !Objects.equals(snapshotName, cachedSnapshotName)) {
+            cachedIndices = loadIndicesInSnapshot(snapshotName);
+            cachedSnapshotName = snapshotName;
+        }
+        return cachedIndices;
     }
 
     private List<SnapshotRepo.Index> loadIndicesInSnapshot(String snapshotName) {
