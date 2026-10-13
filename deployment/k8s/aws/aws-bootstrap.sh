@@ -1478,6 +1478,36 @@ ensure_auto_node_access_entry() {
     }
 }
 
+# DescribeCluster can still report ACTIVE before an asynchronous update starts, and becomes ACTIVE
+# again even if the update fails. Only the returned update ID identifies the operation we must wait
+# for: https://docs.aws.amazon.com/eks/latest/APIReference/API_UpdateClusterConfig.html
+wait_for_eks_config_update() {
+  local update_id="$1" status attempt
+  if [[ -z "$update_id" || "$update_id" == "None" ]]; then
+    echo "Error: EKS did not return an update ID." >&2
+    return 1
+  fi
+  echo "  Waiting for EKS configuration update ${update_id}..."
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    status=$(aws eks describe-update \
+      --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --update-id "$update_id" \
+      --region "${AWS_CFN_REGION}" --query 'update.status' --output text) || return 1
+    case "$status" in
+      Successful) return 0 ;;
+      InProgress) sleep 30 ;;
+      *)
+        echo "Error: EKS configuration update ${update_id} ended with status ${status}." >&2
+        aws eks describe-update \
+          --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --update-id "$update_id" \
+          --region "${AWS_CFN_REGION}" --output json >&2 || true
+        return 1
+        ;;
+    esac
+  done
+  echo "Error: Timed out waiting for EKS configuration update ${update_id} after 20 minutes." >&2
+  return 1
+}
+
 configure_tagged_auto_mode_compute() {
   echo ""
   echo "Configuring EKS Auto Mode to tag the resources it creates..."
@@ -1522,10 +1552,6 @@ configure_tagged_auto_mode_compute() {
   echo "  Node role:       $node_role_name"
   echo "  Subnets:         $subnet_ids_text"
   echo "  Security group:  $cluster_sg"
-
-  if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
-    enforce_tags_on_cluster_role_for_tests
-  fi
 
   # The NodeClass carries the tags; Auto Mode stamps them on the instance, its launch template,
   # its ENIs and its root/ephemeral volumes. The NodePool exists so that pods -- including the
@@ -1617,15 +1643,31 @@ EOF
     # A cluster with no built-in NodePools is expected to carry no compute-level node role -- the
     # role lives on the custom NodeClass applied above instead.
     # https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#_cluster_without_built_in_node_pools
-    aws eks update-cluster-config \
+    local update_id
+    update_id=$(aws eks update-cluster-config \
       --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
       --region "${AWS_CFN_REGION}" \
       --compute-config '{"enabled": true, "nodePools": []}' \
       --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
-      --storage-config '{"blockStorage":{"enabled": true}}' >/dev/null
-    echo "  Waiting for the cluster update to complete..."
-    aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
-    echo "  Built-in NodePools disabled; all compute now comes from ${AUTO_MODE_TAGGED_NODE_CLASS}."
+      --storage-config '{"blockStorage":{"enabled": true}}' \
+      --query 'update.id' --output text) || return 1
+    wait_for_eks_config_update "$update_id" || return 1
+  fi
+
+  # The default NodeClass can still issue untagged RunInstances validation requests while EKS
+  # removes the built-in compute resources. Wait for Kubernetes deletion too, including on a rerun
+  # that already sees nodePools=[] but interrupted the previous handoff. kubectl's delete waiter
+  # succeeds immediately for resources that are already absent.
+  echo "  Waiting for the built-in NodePools and default NodeClass to be removed..."
+  kubectl --context="${KUBE_CONTEXT}" wait --for=delete \
+    nodepool/system nodepool/general-purpose nodeclass/default --timeout=20m || return 1
+  echo "  Built-in compute removed; all compute now comes from ${AUTO_MODE_TAGGED_NODE_CLASS}."
+
+  # Enforce only after the untaggable default NodeClass is gone. Attaching the test policy earlier
+  # races its final validation calls and leaves historical IAM denials in the CloudTrail verdict,
+  # even when every subsequent workload uses the tagged NodeClass successfully.
+  if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
+    enforce_tags_on_cluster_role_for_tests
   fi
 }
 
