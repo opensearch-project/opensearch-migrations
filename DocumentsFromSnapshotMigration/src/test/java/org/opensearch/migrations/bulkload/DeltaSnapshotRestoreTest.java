@@ -271,7 +271,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
 
-            // Run second time reversing base and current snapshot
+            // Run second time reversing base and current snapshot.
             targetClusterOperations.delete("/.migrations_working_state");
             {
                 final var testDocMigrationContext = DocumentMigrationTestContext.factory()

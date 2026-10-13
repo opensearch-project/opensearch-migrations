@@ -145,11 +145,11 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
      * Verifies that offset commits are blocked until tuple futures complete.
      *
      * <p>Coordination is signal-driven throughout: the test waits on a
-     * {@link CountDownLatch} the sink counts down each time it accepts a tuple, then waits
-     * on a {@link CompletableFuture} that completes when the replay thread exits, and
-     * polls the source's commit cursor until it advances. The only timeouts are the
-     * method-level {@code @Timeout} and the {@link #awaitCursorAdvance} safety net —
-     * no tight inner deadline depends on CI scheduling fairness.
+     * {@link CountDownLatch} the sink counts down each time it accepts a tuple, polls
+     * the source's commit cursor until it advances, then checks the replay result
+     * through a {@link CompletableFuture} and joins the replay thread. The method-level
+     * {@code @Timeout} bounds the join without a tight inner deadline that depends
+     * on CI scheduling fairness.
      */
     @Test
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
@@ -175,9 +175,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
                  var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
-                // Run the replayer in a background thread. The future completes when the
-                // thread exits — that's the signal we use to assert "replay is done"
-                // instead of a Thread.join with a hard-coded deadline.
+                // Run the replayer in a background thread. The future reports the replay
+                // result; joining the thread below separately confirms it has exited.
                 var replayDone = new CompletableFuture<Void>();
                 var replayThread = new Thread(() -> {
                     try {
@@ -214,6 +213,9 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 // Wait for the replay loop to exit cleanly. Surface any exception
                 // that occurred inside the thread.
                 replayDone.get(1, TimeUnit.MINUTES);
+                // Completing the future can wake this thread before replayThread exits.
+                // The method-level @Timeout bounds the join.
+                replayThread.join();
                 Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
 
                 tr.shutdown(null).get();
