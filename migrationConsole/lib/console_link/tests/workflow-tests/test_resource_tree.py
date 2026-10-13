@@ -1,9 +1,11 @@
 """Tests for resource_tree.py — resource-centric tree building and formatting."""
 
 
+from rich.tree import Tree
+
 from console_link.workflow.resource_tree import (
     PHASE_SYMBOLS, ResourceNode,
-    _build_tree_from_raw, _nest_topics_under_kafka,
+    _build_tree_from_raw, _nest_topics_under_kafka, _render_resource,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
     mark_not_configured_groups,
@@ -347,6 +349,15 @@ class TestPhaseSymbols:
     # Approval gates are not rendered in the resource tree.
     RESOURCE_PHASES = ['Created', 'Pending', 'Ready', 'Completed', 'Deleting', 'Error']
 
-    def test_every_resource_phase_has_a_symbol(self):
-        missing = [p for p in self.RESOURCE_PHASES if p not in PHASE_SYMBOLS]
-        assert missing == []
+    def test_symbols_cover_exactly_the_resource_phases(self):
+        # 'Unknown' is the fallback for a resource with no status.phase.
+        assert set(PHASE_SYMBOLS) == set(self.RESOURCE_PHASES) | {'Unknown'}
+
+    def test_rendered_label_uses_phase_symbol(self):
+        unknown_symbol = PHASE_SYMBOLS['Unknown'][0]
+        for phase in self.RESOURCE_PHASES:
+            tree = Tree('root')
+            _render_resource(tree, make_resource(phase=phase), show_live_status=False)
+            label = str(tree.children[0].label)
+            assert PHASE_SYMBOLS[phase][0] in label, phase
+            assert unknown_symbol not in label, phase

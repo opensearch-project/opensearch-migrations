@@ -4,7 +4,7 @@ import pytest
 from textual.widgets import Tree
 
 from console_link.workflow.resource_tree import (
-    ResourceNode, ResourceGroup, ResourceSection,
+    PHASE_SYMBOLS, ResourceNode, ResourceGroup, ResourceSection,
 )
 from console_link.workflow.tui.resource_tree_state_manager import (
     ResourceTreeStateManager, RESOURCE_ID_PREFIX,
@@ -212,3 +212,11 @@ class TestIncrementalUpdate:
         ])
         mgr.rebuild(make_sections({'Backfill': [resource]}))
         assert 'pod-1' in observed_pods
+
+
+class TestResourceLabel:
+    def test_label_uses_phase_symbol(self):
+        for phase in ['Created', 'Pending', 'Ready', 'Completed', 'Deleting', 'Error']:
+            label = ResourceTreeStateManager._resource_label(make_resource('r', phase=phase))
+            assert PHASE_SYMBOLS[phase][0] in label, phase
+            assert PHASE_SYMBOLS['Unknown'][0] not in label, phase
