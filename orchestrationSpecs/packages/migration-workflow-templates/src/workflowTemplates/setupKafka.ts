@@ -135,6 +135,7 @@ function makeDeployKafkaNodePool(args: {
     ownerUid: BaseExpression<string>,
     workloadNodePoolName: BaseExpression<string>,
     workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }): Record<string, any> {
     const scheduling = expr.ternary(
         expr.isEmpty(args.workloadNodePoolName),
@@ -188,7 +189,7 @@ function makeDeployKafkaNodePool(args: {
                     template: expr.makeDict({
                         pod: expr.makeDict({
                             topologySpreadConstraints: expr.concatArrays(
-                                workloadZoneSpreadConstraints(args.workloadZoneSpread, KAFKA_POOL_SELECTOR_KEYS),
+                                workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, KAFKA_POOL_SELECTOR_KEYS),
                                 kafkaHostnameSpread(),
                             ),
                         }),
@@ -452,6 +453,7 @@ exit 1
                     ownerUid: b.inputs.ownerUid,
                     workloadNodePoolName: b.inputs.workloadNodePoolName,
                     workloadZoneSpread: b.inputs.workloadZoneSpread,
+                    workloadZoneSpreadExtras: b.inputs.workloadZoneSpreadExtras,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

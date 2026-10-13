@@ -1995,8 +1995,17 @@ TLS_HELM_FLAGS=""
 
 # Override custom nodepool when --use-general-node-pool is set
 NODEPOOL_HELM_FLAGS=""
+# The zone spread's minDomains comes from the number of zones the cluster's subnets cover, so a
+# workload fleet waits for capacity in every zone rather than filling the first zones to get nodes.
+cluster_zone_count=$(aws ec2 describe-subnets --region "${AWS_CFN_REGION}" \
+  --subnet-ids $(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'cluster.resourcesVpcConfig.subnetIds' --output text) \
+  --query 'Subnets[].AvailabilityZone' --output text 2>/dev/null | tr '\t' '\n' | sort -u | grep -c . || true)
+if [[ "${cluster_zone_count:-0}" -gt 1 ]]; then
+  NODEPOOL_HELM_FLAGS="--set workloadsNodePool.zoneCount=${cluster_zone_count}"
+fi
 if [[ "$use_general_node_pool" == "true" ]]; then
-  NODEPOOL_HELM_FLAGS="--set cluster.useCustomKarpenterNodePool=false"
+  NODEPOOL_HELM_FLAGS="${NODEPOOL_HELM_FLAGS} --set cluster.useCustomKarpenterNodePool=false"
 fi
 
 # For any PCA mode, ensure Pod Identity Association exists

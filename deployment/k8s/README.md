@@ -133,7 +133,9 @@ mirror at `localhost:5001`.
 
 The kind configs also label their nodes with `topology.kubernetes.io/zone`, as cloud providers do. The chart's
 `workloadsNodePool.zoneSpread` setting (`preferred` by default, `required` in `valuesEks.yaml`) spreads Kafka brokers,
-capture proxies and replayers across zones, and `required` cannot schedule onto nodes without that label. On minikube or
+capture proxies and replayers across zones, and `required` cannot schedule onto nodes without that label. Under
+`required`, `workloadsNodePool.zoneCount` (set by `aws-bootstrap.sh` from the cluster's subnets) becomes the spread's
+`minDomains`, so a fleet that starts before every zone has a node waits for one instead of filling the zones that do. On minikube or
 docker-desktop, label the nodes yourself before using `required`, e.g.
 `kubectl label nodes --all topology.kubernetes.io/zone=local-a`.
 

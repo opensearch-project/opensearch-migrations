@@ -15,6 +15,11 @@ function expectZoneSpreadFromProviderConfig(found: any) {
         value: "preferred",
         valueFrom: {configMapKeyRef: {name: "provider-config", key: "workloadZoneSpread"}},
     });
+    expect(found.inputs.parameters.find((parameter: any) => parameter.name === "workloadZoneSpreadExtras")).toEqual({
+        name: "workloadZoneSpreadExtras",
+        value: "{}",
+        valueFrom: {configMapKeyRef: {name: "provider-config", key: "workloadZoneSpreadConstraintExtras"}},
+    });
 }
 
 // The constraint is an Argo expression resolved at pod creation, so assert on the three policies it encodes.
@@ -26,6 +31,10 @@ function expectZoneSpreadExpression(expression: string, selectorKeys: string[]) 
     expect(expression).toContain(`"topologyKey", 'topology.kubernetes.io/zone'`);
     expect(expression).toContain(`"nodeTaintsPolicy", 'Honor'`);
     expect(expression).toContain(`"matchLabelKeys", ${JSON.stringify(selectorKeys)}`);
+    // minDomains (published by the chart from the cluster's zone count) only joins a required spread.
+    expect(expression).toContain(
+        "(inputs.parameters.workloadZoneSpread == 'required') ? (fromJSON(inputs.parameters.workloadZoneSpreadExtras)) : (sprig.dict())"
+    );
 }
 
 function topologySpreadLine(manifest: string): string {

@@ -38,17 +38,33 @@ export const WORKLOAD_ZONE_SPREAD_CONFIG_KEY = "workloadZoneSpread";
 export const ZONE_TOPOLOGY_KEY = "topology.kubernetes.io/zone";
 
 /**
+ * Extra fields for the zone spread constraint, as a JSON object. The Helm chart publishes
+ * {"minDomains": N} under "required" when it knows the cluster's zone count: without it the
+ * scheduler only counts zones that already have an eligible node, so a fleet that starts before
+ * every zone has capacity piles into the zones that do.
+ */
+export const WORKLOAD_ZONE_SPREAD_EXTRAS_CONFIG_KEY = "workloadZoneSpreadConstraintExtras";
+
+/**
  * Resolve the deployment-level zone spread policy at the template where a pod is created.
  *
  * The Helm chart publishes one of "required", "preferred" or "none". A missing key behaves as
  * "preferred", which balances across zones without ever blocking scheduling.
  */
-export function workloadZoneSpreadResolvedInput(): { workloadZoneSpread: InputParamDef<string, false> } {
+export function workloadZoneSpreadResolvedInput(): {
+    workloadZoneSpread: InputParamDef<string, false>,
+    workloadZoneSpreadExtras: InputParamDef<string, false>,
+} {
     return {
         workloadZoneSpread: defineParam({
             from: configMapKey(PROVIDER_CONFIG_MAP_NAME, WORKLOAD_ZONE_SPREAD_CONFIG_KEY),
             type: typeToken<string>(),
             expression: "preferred",
+        }),
+        workloadZoneSpreadExtras: defineParam({
+            from: configMapKey(PROVIDER_CONFIG_MAP_NAME, WORKLOAD_ZONE_SPREAD_EXTRAS_CONFIG_KEY),
+            type: typeToken<string>(),
+            expression: "{}",
         }),
     };
 }
@@ -63,12 +79,13 @@ export function workloadZoneSpreadResolvedInput(): { workloadZoneSpread: InputPa
  */
 export function workloadZoneSpreadConstraints(
     zoneSpread: BaseExpression<string>,
+    zoneSpreadExtras: BaseExpression<string>,
     matchLabelKeys: string[],
 ): BaseExpression<any> {
     return expr.ternary(
         expr.equals(zoneSpread, "none"),
         expr.literal([]),
-        expr.toArray(expr.makeDict({
+        expr.toArray(expr.mergeDicts(expr.makeDict({
             maxSkew: 1,
             topologyKey: ZONE_TOPOLOGY_KEY,
             whenUnsatisfiable: expr.ternary(
@@ -79,7 +96,11 @@ export function workloadZoneSpreadConstraints(
             nodeTaintsPolicy: "Honor",
             labelSelector: expr.makeDict({}),
             matchLabelKeys: expr.literal(matchLabelKeys),
-        })),
+        }), expr.ternary(
+            expr.equals(zoneSpread, "required"),
+            expr.stringToRecord(typeToken<{ minDomains?: number }>(), zoneSpreadExtras),
+            expr.makeDict({}),
+        ))),
     );
 }
 

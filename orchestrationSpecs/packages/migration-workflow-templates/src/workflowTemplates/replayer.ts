@@ -207,6 +207,7 @@ function getReplayerDeploymentManifest
     taskK8sLabel: BaseExpression<string>,
     workloadNodePoolName: BaseExpression<string>,
     workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }): Deployment {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const baseContainerDefinition = {
@@ -305,7 +306,7 @@ function getReplayerDeploymentManifest
                     nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
                     tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
                     topologySpreadConstraints: makeDirectTypeProxy(
-                        workloadZoneSpreadConstraints(args.workloadZoneSpread, [REPLAYER_SELECTOR_LABEL])
+                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, [REPLAYER_SELECTOR_LABEL])
                     ),
                     containers: [finalContainerDefinition.container],
                     volumes: finalContainerDefinition.volumes
@@ -389,6 +390,7 @@ function makeReplayerDeploymentDefinition(
             taskK8sLabel: inputs.taskK8sLabel,
             workloadNodePoolName: inputs.workloadNodePoolName,
             workloadZoneSpread: inputs.workloadZoneSpread,
+            workloadZoneSpreadExtras: inputs.workloadZoneSpreadExtras,
         })
     };
 }

@@ -127,6 +127,11 @@ workloadsNodePool:
   # A workflow configuration's kafka nodePoolSpecOverrides.template.pod.topologySpreadConstraints,
   # when set, replaces the generated Kafka constraints.
   zoneSpread: preferred
+  # Number of zones the cluster schedules into. Under "required" it becomes the spread's
+  # minDomains, so pods wait for a node in every zone instead of filling the zones that already
+  # have capacity when a fleet starts. 0 leaves minDomains unset. aws-bootstrap.sh sets it from
+  # the cluster's subnets.
+  zoneCount: 0
   name: general-work-pool
   architectures: []  # e.g. ["arm64"] for Graviton only.
   # With no capacity type, Auto Mode prioritizes reserved, then spot, then on-demand

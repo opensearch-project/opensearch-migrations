@@ -271,6 +271,7 @@ function makeProxyDeploymentManifest(args: {
     taskK8sLabel: BaseExpression<string>,
     workloadNodePoolName: BaseExpression<string>,
     workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }) {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const container: Record<string, any> = {
@@ -383,7 +384,7 @@ function makeProxyDeploymentManifest(args: {
                     nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
                     tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
                     topologySpreadConstraints: makeDirectTypeProxy(
-                        workloadZoneSpreadConstraints(args.workloadZoneSpread, ["migrations/proxy"])
+                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, ["migrations/proxy"])
                     ),
                     containers: [podConfig.container],
                     volumes: podConfig.volumes
@@ -544,6 +545,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     taskK8sLabel: b.inputs.taskK8sLabel,
                     workloadNodePoolName: b.inputs.workloadNodePoolName,
                     workloadZoneSpread: b.inputs.workloadZoneSpread,
+                    workloadZoneSpreadExtras: b.inputs.workloadZoneSpreadExtras,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -598,6 +600,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     taskK8sLabel: b.inputs.taskK8sLabel,
                     workloadNodePoolName: b.inputs.workloadNodePoolName,
                     workloadZoneSpread: b.inputs.workloadZoneSpread,
+                    workloadZoneSpreadExtras: b.inputs.workloadZoneSpreadExtras,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

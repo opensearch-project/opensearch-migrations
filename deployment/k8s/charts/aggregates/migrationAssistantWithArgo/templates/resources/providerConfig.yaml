@@ -52,4 +52,6 @@ data:
   {{- fail (printf "workloadsNodePool.zoneSpread must be required, preferred or none, got %q" $zoneSpread) }}
   {{- end }}
   workloadZoneSpread: {{ $zoneSpread | quote }}
+  {{- $zoneCount := .Values.workloadsNodePool.zoneCount | default 0 | int }}
+  workloadZoneSpreadConstraintExtras: {{ ternary (printf "{\"minDomains\":%d}" $zoneCount) "{}" (and (eq $zoneSpread "required") (gt $zoneCount 1)) | quote }}
   k6NodePoolName: {{ ternary .Values.workloadsNodePool.dedicatedPools.k6.name "" $nodePoolsEnabled | quote }}
