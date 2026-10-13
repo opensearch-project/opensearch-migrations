@@ -1,8 +1,6 @@
 package org.opensearch.migrations.bulkload.worker;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
@@ -71,47 +69,6 @@ class IndexRunnerTest {
         verify(metadataFactory).fromRepo("snapshot", "selected");
         verify(metadataFactory, never()).fromRepo("snapshot", "skipped-1");
         verify(metadataFactory, never()).fromRepo("snapshot", "skipped-2");
-    }
-
-    @Test
-    void reusesMetadataLoadedBySourcelessValidation() {
-        var selected = index("selected");
-        var provider = mock(SnapshotRepo.Provider.class);
-        doReturn(List.of(selected)).when(provider).getIndicesInSnapshot("snapshot");
-
-        var aliases = new ObjectMapper().createObjectNode();
-        var cachedMetadata = mock(IndexMetadata.class);
-        var copiedMetadata = mock(IndexMetadata.class);
-        when(cachedMetadata.getAliases()).thenReturn(aliases);
-        when(cachedMetadata.deepCopy()).thenReturn(copiedMetadata);
-
-        var metadataFactory = mock(IndexMetadata.Factory.class);
-        when(metadataFactory.getRepoDataProvider()).thenReturn(provider);
-        var transformer = mock(Transformer.class);
-        when(transformer.transformIndexMetadata(copiedMetadata)).thenReturn(List.of(copiedMetadata));
-        var indexCreator = mock(IndexCreator.class);
-        var awarenessAttributeSettings = new AwarenessAttributeSettings(false, 0);
-        when(indexCreator.create(
-            copiedMetadata,
-            MigrationMode.SIMULATE,
-            awarenessAttributeSettings,
-            null
-        )).thenReturn(CreationResult.builder().name("selected").build());
-
-        Map<String, IndexMetadata> cache = new HashMap<>();
-        cache.put("selected", cachedMetadata);
-        var results = new IndexRunner(
-            "snapshot",
-            metadataFactory,
-            indexCreator,
-            transformer,
-            List.of("selected"),
-            awarenessAttributeSettings,
-            cache
-        ).migrateIndices(MigrationMode.SIMULATE, null);
-
-        assertEquals(1, results.getIndexes().size());
-        verify(metadataFactory, never()).fromRepo("snapshot", "selected");
     }
 
     private static SnapshotRepo.Index index(String name) {

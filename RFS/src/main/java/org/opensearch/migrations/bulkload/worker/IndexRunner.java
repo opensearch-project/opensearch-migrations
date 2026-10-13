@@ -1,9 +1,7 @@
 package org.opensearch.migrations.bulkload.worker;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
@@ -29,26 +27,6 @@ public class IndexRunner {
     private final Transformer transformer;
     private final List<String> indexAllowlist;
     private final AwarenessAttributeSettings awarenessAttributeSettings;
-    private final Map<String, IndexMetadata> indexMetadataCache;
-
-    public IndexRunner(
-        String snapshotName,
-        IndexMetadata.Factory metadataFactory,
-        IndexCreator indexCreator,
-        Transformer transformer,
-        List<String> indexAllowlist,
-        AwarenessAttributeSettings awarenessAttributeSettings
-    ) {
-        this(
-            snapshotName,
-            metadataFactory,
-            indexCreator,
-            transformer,
-            indexAllowlist,
-            awarenessAttributeSettings,
-            new HashMap<>()
-        );
-    }
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
@@ -63,7 +41,7 @@ public class IndexRunner {
                 continue;
             }
 
-            var indexMetadata = getIndexMetadata(index.getName());
+            var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
             var creationResults = createIndex(index.getName(), indexMetadata, mode, context);
             creationResults.forEach(results::index);
 
@@ -78,13 +56,6 @@ public class IndexRunner {
         results.skippedIndexes(skippedIndexes);
         log.info("Selected {}/{} indices before reading index metadata", indices.size() - skippedIndexes, indices.size());
         return results.build();
-    }
-
-    private IndexMetadata getIndexMetadata(String indexName) {
-        return indexMetadataCache.computeIfAbsent(
-            indexName,
-            name -> metadataFactory.fromRepo(snapshotName, name)
-        );
     }
 
     private List<CreationResult> createIndex(

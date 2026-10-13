@@ -1,7 +1,6 @@
 package org.opensearch.migrations.commands;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 
@@ -11,7 +10,6 @@ import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
-import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerMapper;
@@ -42,7 +40,6 @@ public abstract class MigratorEvaluatorBase {
 
     protected final MigrateOrEvaluateArgs arguments;
     protected final ClusterReaderExtractor clusterReaderCliExtractor;
-    private final HashMap<String, IndexMetadata> indexMetadataCache = new HashMap<>();
 
     protected MigratorEvaluatorBase(MigrateOrEvaluateArgs arguments) {
         this.arguments = arguments;
@@ -141,7 +138,6 @@ public abstract class MigratorEvaluatorBase {
         items.componentTemplates(metadataResults.getComponentTemplates());
 
         if (metadataResults.fatalIssueCount() == 0) {
-            indexMetadataCache.clear();
             // Validate sourceless indices before proceeding with migration
             validateSourcelessIndices(clusters);
 
@@ -197,8 +193,7 @@ public abstract class MigratorEvaluatorBase {
             clusters.getTarget().getIndexCreator(),
             transformer,
             arguments.dataFilterArgs.indexAllowlist,
-            clusters.getTarget().getAwarenessAttributeSettings(),
-            indexMetadataCache
+            clusters.getTarget().getAwarenessAttributeSettings()
         );
         var indexResults = indexRunner.migrateIndices(mode, context.createIndexContext());
         log.info("Index copy complete.");
@@ -258,10 +253,7 @@ public abstract class MigratorEvaluatorBase {
                 continue;
             }
             try {
-                var indexMetadata = indexMetadataCache.computeIfAbsent(
-                    index.getName(),
-                    name -> metadataFactory.fromRepo(arguments.snapshotName, name)
-                );
+                var indexMetadata = metadataFactory.fromRepo(arguments.snapshotName, index.getName());
                 if (indexMetadata.needsSourceReconstruction()) {
                     sourcelessIndices.add(index.getName());
                 }
