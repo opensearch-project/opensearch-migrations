@@ -60,9 +60,15 @@ class MetadataRunnerTest {
         doReturn(false).when(client).hasIndexTemplate(anyString());
         doReturn(false).when(client).hasComponentTemplate(anyString());
 
-        var results = new MetadataRunner("snapshot", factory, creator, transformer)
-            .migrateMetadata(MigrationMode.SIMULATE, mock(IClusterMetadataContext.class));
+        var runner = new MetadataRunner("snapshot", factory, creator, transformer);
+        var selection = runner.selectTemplates();
+        var results = runner.migrateMetadata(
+            MigrationMode.SIMULATE,
+            mock(IClusterMetadataContext.class),
+            selection
+        );
 
+        verify(factory).fromRepo("snapshot");
         verify(transformer).transformGlobalMetadata(metadata);
         assertEquals(2, results.getLegacyTemplates().size());
         assertEquals(2, results.getIndexTemplates().size());
