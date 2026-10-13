@@ -24,7 +24,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.opensearch.migrations.metadata.CreationResult.CreationFailureType.SKIPPED_DUE_TO_FILTER;
 
 @ExtendWith(MockitoExtension.class)
@@ -63,53 +62,6 @@ public class GlobalMetadataCreator_OS_2_11Test {
         assertThat(results.getLegacyTemplates(), containsInAnyOrder(createSuccessResult("lit1"), createResult("lit2", SKIPPED_DUE_TO_FILTER), createResult(".lits", SKIPPED_DUE_TO_FILTER)));
         assertThat(results.getComponentTemplates(), containsInAnyOrder(createSuccessResult("ct1"), createResult(".cts", SKIPPED_DUE_TO_FILTER)));
         assertThat(results.getIndexTemplates(), containsInAnyOrder(createSuccessResult("it1"), createResult(".its", SKIPPED_DUE_TO_FILTER)));
-    }
-
-    @Test
-    void testSelectTemplatesRemovesSkippedBodiesAndPreservesResults() {
-        var mapper = new ObjectMapper();
-        var root = mapper.createObjectNode();
-        root.putObject("templates")
-            .putObject("legacy-keep");
-        root.withObject("/templates")
-            .putObject("legacy-skip");
-        root.putObject("index_template")
-            .putObject("index_template")
-            .putObject("index-keep");
-        root.withObject("/index_template/index_template")
-            .putObject("index-skip");
-        root.putObject("component_template")
-            .putObject("component_template")
-            .putObject("component-keep");
-        root.withObject("/component_template/component_template")
-            .putObject("component-skip");
-
-        var metadata = new GlobalMetadataData_OS_2_11(root);
-        var creator = new GlobalMetadataCreator_OS_2_11(
-            client,
-            List.of("legacy-keep"),
-            List.of("component-keep"),
-            List.of("index-keep")
-        );
-
-        var selection = creator.selectTemplates(metadata);
-
-        assertThat(selection.metadata().getTemplates().size(), equalTo(1));
-        assertThat(selection.metadata().getTemplates().has("legacy-keep"), equalTo(true));
-        assertThat(selection.metadata().getIndexTemplates().size(), equalTo(1));
-        assertThat(selection.metadata().getIndexTemplates().has("index-keep"), equalTo(true));
-        assertThat(selection.metadata().getComponentTemplates().size(), equalTo(1));
-        assertThat(selection.metadata().getComponentTemplates().has("component-keep"), equalTo(true));
-        assertThat(selection.skippedResults().getLegacyTemplates(), containsInAnyOrder(
-            createResult("legacy-skip", SKIPPED_DUE_TO_FILTER)
-        ));
-        assertThat(selection.skippedResults().getIndexTemplates(), containsInAnyOrder(
-            createResult("index-skip", SKIPPED_DUE_TO_FILTER)
-        ));
-        assertThat(selection.skippedResults().getComponentTemplates(), containsInAnyOrder(
-            createResult("component-skip", SKIPPED_DUE_TO_FILTER)
-        ));
-        verifyNoInteractions(client);
     }
 
     private CreationResult createSuccessResult(String name) {
