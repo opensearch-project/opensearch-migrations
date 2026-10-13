@@ -16,9 +16,11 @@ import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
+@AllArgsConstructor
 public class IndexRunner {
 
     private final String snapshotName;
@@ -46,24 +48,6 @@ public class IndexRunner {
             awarenessAttributeSettings,
             new HashMap<>()
         );
-    }
-
-    public IndexRunner(
-        String snapshotName,
-        IndexMetadata.Factory metadataFactory,
-        IndexCreator indexCreator,
-        Transformer transformer,
-        List<String> indexAllowlist,
-        AwarenessAttributeSettings awarenessAttributeSettings,
-        Map<String, IndexMetadata> indexMetadataCache
-    ) {
-        this.snapshotName = snapshotName;
-        this.metadataFactory = metadataFactory;
-        this.indexCreator = indexCreator;
-        this.transformer = transformer;
-        this.indexAllowlist = indexAllowlist;
-        this.awarenessAttributeSettings = awarenessAttributeSettings;
-        this.indexMetadataCache = indexMetadataCache;
     }
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {

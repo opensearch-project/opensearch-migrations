@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.version_es_6_8;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -14,7 +13,6 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_6_8 repoData = null;
     private final Map<String, List<SnapshotRepo.Index>> indicesBySnapshotName = new HashMap<>();
-    private Map<String, List<SnapshotRepo.Index>> indicesBySnapshotReference;
 
     public SnapshotRepoProvider_ES_6_8(SourceRepo repo) {
         this.repo = repo;
@@ -34,7 +32,7 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
 
     /**
      * Retrieves all indices that belong to the specified snapshot.
-     * Builds a snapshot-reference lookup once, then caches the result for each requested snapshot.
+     * Scans the repository index list once, then caches the result for each requested snapshot.
      */
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
@@ -43,49 +41,13 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
 
     private List<SnapshotRepo.Index> loadIndicesInSnapshot(String snapshotName) {
         return getSnapshotForName(snapshotName)
-            .map(this::getIndicesForSnapshot)
+            .map(snapshot -> getRepoData().getIndices().entrySet().stream()
+                .filter(entry -> entry.getValue().getSnapshots().stream().anyMatch(snapshot::isNameOrIdEqual))
+                .<SnapshotRepo.Index>map(
+                    entry -> new SnapshotRepoData_ES_6_8.Index(entry.getKey(), entry.getValue().getId())
+                )
+                .toList())
             .orElse(List.of());
-    }
-
-    private List<SnapshotRepo.Index> getIndicesForSnapshot(SnapshotRepo.Snapshot snapshot) {
-        var matchedByName = new LinkedHashMap<String, SnapshotRepo.Index>();
-        addMatches(matchedByName, snapshot.getName());
-        addMatches(matchedByName, snapshot.getId());
-        return List.copyOf(matchedByName.values());
-    }
-
-    private void addMatches(Map<String, SnapshotRepo.Index> matchedIndices, String snapshotReference) {
-        if (snapshotReference == null) {
-            return;
-        }
-        getIndicesBySnapshotReference().getOrDefault(snapshotReference, List.of())
-            .forEach(index -> matchedIndices.putIfAbsent(index.getName(), index));
-    }
-
-    private Map<String, List<SnapshotRepo.Index>> getIndicesBySnapshotReference() {
-        if (indicesBySnapshotReference == null) {
-            var lookup = new HashMap<String, List<SnapshotRepo.Index>>();
-            getRepoData().getIndices().forEach((indexName, rawIndex) -> {
-                var index = new SnapshotRepoData_ES_6_8.Index(indexName, rawIndex.getId());
-                for (var snapshotReference : rawIndex.getSnapshots()) {
-                    addReference(lookup, snapshotReference.getName(), index);
-                    addReference(lookup, snapshotReference.getId(), index);
-                }
-            });
-            lookup.replaceAll((key, indices) -> List.copyOf(indices));
-            indicesBySnapshotReference = lookup;
-        }
-        return indicesBySnapshotReference;
-    }
-
-    private static void addReference(
-        Map<String, List<SnapshotRepo.Index>> lookup,
-        String snapshotReference,
-        SnapshotRepo.Index index
-    ) {
-        if (snapshotReference != null) {
-            lookup.computeIfAbsent(snapshotReference, key -> new ArrayList<>()).add(index);
-        }
     }
 
     private Optional<? extends SnapshotRepo.Snapshot> getSnapshotForName(String snapshotName) {
