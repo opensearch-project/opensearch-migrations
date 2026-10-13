@@ -1,12 +1,13 @@
 package org.opensearch.migrations.bulkload.worker;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
-import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.transformers.IndexTransformationException;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
@@ -15,11 +16,9 @@ import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-@AllArgsConstructor
 public class IndexRunner {
 
     private final String snapshotName;
@@ -28,30 +27,62 @@ public class IndexRunner {
     private final Transformer transformer;
     private final List<String> indexAllowlist;
     private final AwarenessAttributeSettings awarenessAttributeSettings;
+    private final Map<String, IndexMetadata> indexMetadataCache;
+
+    public IndexRunner(
+        String snapshotName,
+        IndexMetadata.Factory metadataFactory,
+        IndexCreator indexCreator,
+        Transformer transformer,
+        List<String> indexAllowlist,
+        AwarenessAttributeSettings awarenessAttributeSettings
+    ) {
+        this(
+            snapshotName,
+            metadataFactory,
+            indexCreator,
+            transformer,
+            indexAllowlist,
+            awarenessAttributeSettings,
+            new HashMap<>()
+        );
+    }
+
+    public IndexRunner(
+        String snapshotName,
+        IndexMetadata.Factory metadataFactory,
+        IndexCreator indexCreator,
+        Transformer transformer,
+        List<String> indexAllowlist,
+        AwarenessAttributeSettings awarenessAttributeSettings,
+        Map<String, IndexMetadata> indexMetadataCache
+    ) {
+        this.snapshotName = snapshotName;
+        this.metadataFactory = metadataFactory;
+        this.indexCreator = indexCreator;
+        this.transformer = transformer;
+        this.indexAllowlist = indexAllowlist;
+        this.awarenessAttributeSettings = awarenessAttributeSettings;
+        this.indexMetadataCache = indexMetadataCache;
+    }
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
         var results = IndexMetadataResults.builder();
         var skipCreation = FilterScheme.filterByAllowList(indexAllowlist, FilterScheme.FilterContext.INDEX).negate();
+        var indices = repoDataProvider.getIndicesInSnapshot(snapshotName);
+        long skippedIndexes = 0;
 
-        for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
-            List<CreationResult> creationResults;
+        for (var index : indices) {
             if (skipCreation.test(index.getName())) {
-                log.atInfo()
-                        .setMessage("Index {} was not part of the allowlist and will not be migrated.")
-                        .addArgument(index.getName())
-                        .log();
-                creationResults = List.of(CreationResult.builder()
-                        .name(index.getName())
-                        .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
-                        .build());
-            } else {
-                creationResults = createIndex(index.getName(), mode, context);
+                skippedIndexes++;
+                continue;
             }
 
+            var indexMetadata = getIndexMetadata(index.getName());
+            var creationResults = createIndex(index.getName(), indexMetadata, mode, context);
             creationResults.forEach(results::index);
 
-            var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
             indexMetadata.getAliases().fieldNames().forEachRemaining(alias -> {
                 var aliasResult = CreationResult.builder().name(alias);
                 if (!creationResults.isEmpty()) {
@@ -60,11 +91,24 @@ public class IndexRunner {
                 results.alias(aliasResult.build());
             });
         }
+        results.skippedIndexes(skippedIndexes);
+        log.info("Selected {}/{} indices before reading index metadata", indices.size() - skippedIndexes, indices.size());
         return results.build();
     }
 
-    private List<CreationResult> createIndex(String indexName, MigrationMode mode, ICreateIndexContext context) {
-        var originalIndexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
+    private IndexMetadata getIndexMetadata(String indexName) {
+        return indexMetadataCache.computeIfAbsent(
+            indexName,
+            name -> metadataFactory.fromRepo(snapshotName, name)
+        );
+    }
+
+    private List<CreationResult> createIndex(
+        String indexName,
+        IndexMetadata originalIndexMetadata,
+        MigrationMode mode,
+        ICreateIndexContext context
+    ) {
         var indexMetadata = originalIndexMetadata.deepCopy();
         List<CreationResult> creationResults = new ArrayList<>();
         try {

@@ -1,7 +1,9 @@
 package org.opensearch.migrations.bulkload.version_es_9_0;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.InvalidSnapshotFormatException;
@@ -11,6 +13,8 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 public class SnapshotRepoProvider_ES_9_0 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_9_0 repoData = null;
+    private final Map<String, List<SnapshotRepo.Index>> indicesBySnapshotName = new HashMap<>();
+    private Map<String, SnapshotRepo.Index> indicesById;
 
     public SnapshotRepoProvider_ES_9_0(SourceRepo repo) {
         this.repo = repo;
@@ -30,6 +34,10 @@ public class SnapshotRepoProvider_ES_9_0 implements SnapshotRepo.Provider {
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        return indicesBySnapshotName.computeIfAbsent(snapshotName, this::loadIndicesInSnapshot);
+    }
+
+    private List<SnapshotRepo.Index> loadIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
         SnapshotRepoData_ES_9_0.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
             .filter(snapshot -> snapshotName.equals(snapshot.getName()))
@@ -41,14 +49,28 @@ public class SnapshotRepoProvider_ES_9_0 implements SnapshotRepo.Provider {
             if (indexMetadataLookup == null) {
                 throw new InvalidSnapshotFormatException();
             }
-            indexMetadataLookup.keySet().forEach(indexId ->
-                getRepoData().getIndices().forEach((indexName, rawIndex) -> {
-                    if (indexId.equals(rawIndex.getId())) {
-                        matchedIndices.add(SnapshotRepoData_ES_9_0.Index.fromRawIndex(indexName, rawIndex));
-                    }
-                }));
+            var indexLookup = getIndicesById();
+            indexMetadataLookup.keySet().forEach(indexId -> {
+                var index = indexLookup.get(indexId);
+                if (index != null) {
+                    matchedIndices.add(index);
+                }
+            });
         }
-        return matchedIndices;
+        return List.copyOf(matchedIndices);
+    }
+
+    private Map<String, SnapshotRepo.Index> getIndicesById() {
+        if (indicesById == null) {
+            indicesById = new HashMap<>();
+            getRepoData().getIndices().forEach((indexName, rawIndex) ->
+                indicesById.put(
+                    rawIndex.getId(),
+                    SnapshotRepoData_ES_9_0.Index.fromRawIndex(indexName, rawIndex)
+                )
+            );
+        }
+        return indicesById;
     }
 
     public String getSnapshotId(String snapshotName) {

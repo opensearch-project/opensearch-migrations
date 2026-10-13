@@ -39,6 +39,9 @@ public class Items implements JsonOutput {
     private final List<CreationResult> indexes;
     @NonNull
     private final List<CreationResult> aliases;
+    @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
+    @Builder.Default
+    private final long skippedIndexes = 0;
     private final String failureMessage;
     @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
     @Builder.Default
@@ -60,7 +63,7 @@ public class Items implements JsonOutput {
 
     public boolean isEmpty() {
         return indexTemplates.isEmpty() && componentTemplates.isEmpty()
-            && indexes.isEmpty() && aliases.isEmpty();
+            && indexes.isEmpty() && aliases.isEmpty() && skippedIndexes == 0;
     }
 
     public List<String> getAllErrors() {
@@ -92,25 +95,41 @@ public class Items implements JsonOutput {
         }
         appendSection(sb, "Index Templates", getIndexTemplates());
         appendSection(sb, "Component Templates", getComponentTemplates());
-        appendSection(sb, "Indexes", getIndexes());
+        appendSection(sb, "Indexes", getIndexes(), skippedIndexes);
         appendSection(sb, "Aliases", getAliases());
 
         return sb.toString();
     }
 
     private void appendSection(StringBuilder sb, String sectionTitle, List<CreationResult> items) {
+        appendSection(sb, sectionTitle, items, 0);
+    }
+
+    private void appendSection(
+        StringBuilder sb,
+        String sectionTitle,
+        List<CreationResult> items,
+        long skippedCount
+    ) {
         sb.append(Format.indentToLevel(1))
           .append(sectionTitle)
           .append(":")
           .append(System.lineSeparator());
 
-        if (items.isEmpty()) {
+        if (items.isEmpty() && skippedCount == 0) {
             sb.append(Format.indentToLevel(2))
                 .append(NONE_FOUND_MARKER)
                 .append(System.lineSeparator());
         } else {
             appendItems(sb, items);
             appendFailures(sb, items);
+            if (skippedCount > 0) {
+                sb.append(Format.indentToLevel(2))
+                    .append("WARN - ")
+                    .append(skippedCount)
+                    .append(skippedCount == 1 ? " index skipped due to filter" : " indexes skipped due to filter")
+                    .append(System.lineSeparator());
+            }
         }
         sb.append(System.lineSeparator());
     }
@@ -196,6 +215,7 @@ public class Items implements JsonOutput {
         buildArray("componentTemplates", componentTemplates, root);
         buildArray("indexes",          indexes,          root);
         buildArray("aliases",          aliases,          root);
+        root.put("skippedIndexes", skippedIndexes);
 
         if (failureMessage != null) {
             root.put("failureMessage", failureMessage);

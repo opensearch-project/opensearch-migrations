@@ -5,7 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -18,6 +20,7 @@ import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchCon
 public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_1_7 repoData;
+    private final Map<String, List<SnapshotRepo.Index>> indicesBySnapshotName = new HashMap<>();
 
     public SnapshotRepoProvider_ES_1_7(SourceRepo repo) {
         this.repo = repo;
@@ -51,6 +54,10 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
 
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        return indicesBySnapshotName.computeIfAbsent(snapshotName, this::loadIndicesInSnapshot);
+    }
+
+    private List<SnapshotRepo.Index> loadIndicesInSnapshot(String snapshotName) {
         Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
         List<SnapshotRepo.Index> result = new ArrayList<>();
 
@@ -71,7 +78,7 @@ public class SnapshotRepoProvider_ES_1_7 implements SnapshotRepoES17 {
             throw new IllegalStateException("Failed to read snap metadata for snapshot=" + snapshotName, e);
         }
 
-        return result;
+        return List.copyOf(result);
     }
 
     @Override

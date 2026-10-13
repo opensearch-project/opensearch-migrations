@@ -22,8 +22,10 @@ public class MetadataRunner {
     public GlobalMetadataCreatorResults migrateMetadata(MigrationMode mode, IClusterMetadataContext context) {
         log.info("Migrating the Templates...");
         var globalMetadata = metadataFactory.fromRepo(snapshotName);
-        var transformedRoot = transformer.transformGlobalMetadata(globalMetadata);
-        var results = metadataCreator.create(transformedRoot, mode, context);
+        var selection = metadataCreator.selectTemplates(globalMetadata);
+        var transformedRoot = transformer.transformGlobalMetadata(selection.metadata());
+        var createdResults = metadataCreator.create(transformedRoot, mode, context);
+        var results = selection.merge(createdResults);
         log.info("Templates migration complete");
         return results;
     }

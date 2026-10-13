@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,34 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
     private final List<String> componentTemplateAllowlist;
     private final List<String> indexTemplateAllowlist;
 
+    @Override
+    public TemplateSelection selectTemplates(GlobalMetadata metadata) {
+        var skippedLegacy = removeSkippedTemplates(
+            metadata.getTemplates(),
+            legacyTemplateAllowlist,
+            TemplateTypes.LEGACY_INDEX_TEMPLATE
+        );
+        var skippedComponents = removeSkippedTemplates(
+            metadata.getComponentTemplates(),
+            componentTemplateAllowlist,
+            TemplateTypes.COMPONENT_TEMPLATE
+        );
+        var skippedIndex = removeSkippedTemplates(
+            metadata.getIndexTemplates(),
+            indexTemplateAllowlist,
+            TemplateTypes.INDEX_TEMPLATE
+        );
+
+        return new TemplateSelection(
+            metadata,
+            GlobalMetadataCreatorResults.builder()
+                .legacyTemplates(skippedLegacy)
+                .componentTemplates(skippedComponents)
+                .indexTemplates(skippedIndex)
+                .build()
+        );
+    }
+
     public GlobalMetadataCreatorResults create(
         GlobalMetadata root,
         MigrationMode mode,
@@ -43,6 +72,45 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         results.componentTemplates(createComponentTemplates(root, mode, context));
         results.indexTemplates(createIndexTemplates(root, mode, context));
         return results.build();
+    }
+
+    private List<CreationResult> removeSkippedTemplates(
+        ObjectNode templates,
+        List<String> templateAllowlist,
+        TemplateTypes templateType
+    ) {
+        if (templates == null || templates.isEmpty()) {
+            return List.of();
+        }
+
+        var shouldKeep = FilterScheme.filterByAllowList(templateAllowlist, templateType.filterContext);
+        var skippedNames = new ArrayList<String>();
+        templates.fieldNames().forEachRemaining(name -> {
+            if (!shouldKeep.test(name)) {
+                skippedNames.add(name);
+            }
+        });
+
+        var skippedResults = new ArrayList<CreationResult>(skippedNames.size());
+        for (var name : skippedNames) {
+            templates.remove(name);
+            log.atInfo()
+                .setMessage("Template {} was skipped due to allowlist filter {}")
+                .addArgument(name)
+                .addArgument(templateAllowlist)
+                .log();
+            skippedResults.add(CreationResult.builder()
+                .name(name)
+                .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
+                .build());
+        }
+        log.info(
+            "Selected {}/{} {} entries before transformation",
+            templates.size(),
+            templates.size() + skippedNames.size(),
+            templateType
+        );
+        return skippedResults;
     }
 
     public List<CreationResult> createLegacyTemplates(GlobalMetadata metadata, MigrationMode mode, IClusterMetadataContext context) {
