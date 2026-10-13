@@ -505,7 +505,7 @@ For profiles, rates and SigV4 sources, see
 
 ## 6. Observe capture and replay
 
-This branch adds a full metric set for the proxy and replayer, matching CloudWatch and Grafana
+The proxy and replayer publish a full metric set, with matching CloudWatch and Grafana
 dashboards, and bounded `event=` log lines. The operator runbook is
 [`captureAndReplay/observabilityOperations.md`](../../../../../docs/captureAndReplay/observabilityOperations.md): full
 metric inventory, conservation checks, thresholds and decision trees. This section is the tour.
