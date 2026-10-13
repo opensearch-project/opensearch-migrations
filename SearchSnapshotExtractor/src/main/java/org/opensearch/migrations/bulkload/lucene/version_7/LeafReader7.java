@@ -204,6 +204,12 @@ public class LeafReader7 implements LuceneLeafReader {
     }
 
     @Override
+    public NumericValueReader openNumericValueReader(String fieldName) throws IOException {
+        NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
+        return docId -> dv != null && dv.advanceExact(docId) ? dv.longValue() : null;
+    }
+
+    @Override
     public Object getNumericValue(int docId, String fieldName) throws IOException {
         NumericDocValues dv = (cachedNumericDv != null)
             ? cachedNumericDv.get(fieldName)

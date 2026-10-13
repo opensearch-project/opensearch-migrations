@@ -18,7 +18,7 @@ import java.util.Objects;
  * @param source         the document body bytes, nullable for DELETE operations
  * @param operation      the operation type (UPSERT or DELETE), must not be null
  * @param hints          sink-specific routing hints (opaque to pipeline), never null
- * @param sourceMetadata source-specific diagnostic info (opaque to pipeline), never null
+ * @param sourceMetadata source-specific metadata for diagnostics and transformations (opaque to pipeline), never null
  */
 public record Document(
     String id,
@@ -33,6 +33,8 @@ public record Document(
 
     /** Well-known sourceMetadata keys for Lucene-based sources. */
     public static final String SOURCE_META_LUCENE_DOC_NUMBER = "luceneDocNumber";
+    /** Snapshot document version, as a decimal string to preserve 64-bit precision in JavaScript. */
+    public static final String SOURCE_META_VERSION = "_version";
 
     /** The type of document operation. */
     public enum Operation {
