@@ -558,6 +558,12 @@ impl<'r, R: CommandRunner> App<'r, R> {
         if cluster.is_empty() {
             return Err(Error::die("grant_eks_access: EKS_CLUSTER not resolved yet"));
         }
+        // The access policy lives in the principal's partition (aws, aws-cn,
+        // aws-iso-e, ...); a hard-coded `arn:aws:` is rejected outside commercial.
+        let policy_arn = format!(
+            "arn:{}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy",
+            crate::util::partition_of(&arn)
+        );
         ui::step(&format!("Configuring EKS access for {arn}"));
         let exists = self
             .runner
@@ -602,7 +608,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
                 "--principal-arn",
                 &arn,
                 "--policy-arn",
-                "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy",
+                &policy_arn,
                 "--access-scope",
                 "type=cluster",
                 "--region",
@@ -1504,7 +1510,31 @@ mod tests {
         app.grant_eks_access().unwrap();
         assert!(r.any_call_contains("create-access-entry"));
         assert!(r.any_call_contains("associate-access-policy --cluster-name migration-eks-x"));
-        assert!(r.any_call_contains("AmazonEKSClusterAdminPolicy"));
+        assert!(r.any_call_contains(
+            "--policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+        ));
+    }
+
+    #[test]
+    fn grant_eks_access_uses_the_principal_partition() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = MockRunner::new()
+            .stub("aws", &["describe-access-entry"], 0, "")
+            .stub("aws", &["associate-access-policy"], 0, "");
+        let app = {
+            let mut a = App::load(env_in(dir.path()), &r).unwrap();
+            a.state.set("AWS_REGION", "cn-northwest-1");
+            a.state.set("EKS_CLUSTER", "migration-eks-x");
+            a.state
+                .set("EKS_ACCESS_PRINCIPAL_ARN", "arn:aws-cn:iam::1:role/Admin");
+            a
+        };
+        app.grant_eks_access().unwrap();
+        assert!(!r.any_call_contains("create-access-entry"));
+        assert!(r.any_call_contains(
+            "--policy-arn arn:aws-cn:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+        ));
+        assert!(!r.any_call_contains("arn:aws:eks::"));
     }
 
     #[test]
