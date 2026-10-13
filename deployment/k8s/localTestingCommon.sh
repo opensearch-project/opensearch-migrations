@@ -147,8 +147,8 @@ deploy_local_charts() {
     print_step "Installing local source and target test clusters"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
       --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard" \
-      --set "source.imageTag=${image_tag}"
+      -f charts/aggregates/testClusters/values.yaml \
+      -f charts/aggregates/testClusters/valuesOss.yaml
   else
     echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
     print_step "Installing Migration Assistant chart"
@@ -160,7 +160,9 @@ deploy_local_charts() {
 
     print_step "Installing local source and target test clusters"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-      --wait --timeout 10m
+      --wait --timeout 10m \
+      -f charts/aggregates/testClusters/values.yaml \
+      -f charts/aggregates/testClusters/valuesOss.yaml
   fi
 
   run_named_hook "${POST_TC_INSTALL_HOOK:-}"

@@ -1,8 +1,9 @@
 {{- /*
 nginx front end for the Elasticsearch source: TLS and HTTP basic auth for an image that has
 neither (elasticsearch-oss). nginx runs as a sidecar in the Elasticsearch pod, listens on the
-chart's httpPort, and proxies to Elasticsearch on loopback (see valuesEksOss.yaml). This template
-renders only the supporting objects: the nginx config, the password file and the certificate.
+chart's httpPort, and proxies to Elasticsearch on loopback (see valuesOss.yaml and
+valuesEks.yaml). This template renders only the supporting objects: the nginx config, the
+password file and the certificate.
 */ -}}
 {{- if .Values.nginxFrontend.enabled }}
 {{- $fe := .Values.nginxFrontend }}

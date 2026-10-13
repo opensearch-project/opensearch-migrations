@@ -51,45 +51,50 @@ The `valuesSolrSourceEks.yaml` overlay layers on top of `valuesSolrSource.yaml`:
 - Removes explicit S3 credentials (SDK auto-discovers from Pod Identity)
 - Adds tolerations for the dedicated search node pool
 
-## Open-source Elasticsearch source on EKS
+## Open-source Elasticsearch source
 
-`valuesEksOss.yaml` replaces `valuesEks.yaml` with a source built only from published open-source
-parts: `elasticsearch-oss:7.10.2` (Apache-2.0), the `repository-s3` plugin installed at startup,
-and an nginx sidecar for HTTPS (cert-manager, `migrations-ca`) and basic auth (`admin:admin`).
-Elasticsearch listens only on loopback; nginx is the only way in.
+`valuesOss.yaml` (local, kind) and `valuesEks.yaml` (EKS) run an Elasticsearch source built only
+from published open-source parts: `elasticsearch-oss:7.10.2` (Apache-2.0), the `repository-s3`
+plugin installed at startup, and an nginx sidecar for HTTPS (cert-manager, `migrations-ca`) and
+basic auth (`admin:admin`). Elasticsearch listens only on loopback; nginx is the only way in.
+Clients use `https://elasticsearch-master:9200` with `-u admin:admin`, as with the SearchGuard
+image this replaces on Kubernetes (the Docker Compose solution still uses it).
 
 ```bash
-helm upgrade --install tc . -n ma -f values.yaml -f valuesEksOss.yaml \
+# Local / kind: snapshots go to the Migration Assistant's localstack
+helm upgrade --install tc . -n ma -f values.yaml -f valuesOss.yaml
+
+# EKS: snapshots go to S3 with the pod's Pod Identity credentials
+helm upgrade --install tc . -n ma -f values.yaml -f valuesEks.yaml \
   --set conditionalPackageInstalls.target=false
-./verifyOssSource.sh --bucket <bucket> --region <region>   # TLS, auth, S3 snapshot and restore
+
+# Check either one end to end: TLS, auth, S3 snapshot and restore
+./verifyOssSource.sh --bucket <bucket> --region <region>     # add --skip-s3-listing for localstack
 ```
 
-Snapshots reach S3 through a sidecar that copies the pod's Pod Identity credentials into the
-Elasticsearch keystore every minute. The plugin's bundled AWS SDK (1.11.749) can't use Pod
-Identity itself, and the overlay's header explains why the variables don't need to be unset.
-`ignorePodIdentityPostRenderer/` still unsets them for the SearchGuard image (Helm 3 takes the
-script path; Helm 4 takes the plugin name after `helm plugin install` of that directory).
+On EKS, a sidecar copies the pod's Pod Identity credentials into the Elasticsearch keystore every
+minute. The plugin's bundled AWS SDK (1.11.749) can't use Pod Identity itself; the header of
+`valuesEks.yaml` explains why the Pod Identity variables don't need to be unset.
 
 ## No-Auth Mode
 
-Both `values.yaml` and `valuesEks.yaml` leave HTTPS + basic-auth turned on
-(SearchGuard on the ES source, the security plugin on the OS target). For
-developer workflows that want to exercise the migration paths against an
-anonymous, plain-HTTP pair of clusters, layer on the no-auth presets:
+The open-source source can drop TLS and auth so that clients use plain
+`curl http://elasticsearch-master:9200/`, with no `-u` and no `-k`:
 
 ```bash
-# Local / kind / in-cluster dev
-helm install tc . -f values.yaml -f valuesNoAuth.yaml
+# Local / kind
+helm upgrade --install tc . -n ma -f values.yaml -f valuesOss.yaml \
+  --set nginxFrontend.basicAuth.enabled=false --set nginxFrontend.tls.enabled=false \
+  --set source.podAnnotations.testclusters/nginx-frontend=plain
 
-# EKS (layer AFTER valuesEks.yaml)
-helm install tc . -f values.yaml -f valuesEks.yaml -f valuesEksNoAuth.yaml
+# EKS (layer AFTER valuesEks.yaml; also disables the OS target's security plugin)
+helm upgrade --install tc . -n ma -f values.yaml -f valuesEks.yaml -f valuesEksNoAuth.yaml
 ```
 
-With these overlays active, the clusters are reachable with `curl
-http://elasticsearch-master:9200/` and `curl
-http://opensearch-cluster-master:9200/` — no `-u`, no `-k`. Configure the
-workflow session's `sourceClusters` / `targetClusters` with the matching
-`http://...` endpoints and omit `authConfig` entirely.
+`valuesNoAuth.yaml` is the equivalent for the SearchGuard image (the `values.yaml` default),
+disabling SearchGuard on the ES source and the security plugin on the OS target. Configure the
+workflow session's `sourceClusters` / `targetClusters` with the matching `http://...` endpoints
+and omit `authConfig` entirely.
 
 ## S3 Snapshot Support
 

@@ -72,7 +72,6 @@ ignore_checks=false
 push_images_to_ecr=true
 ma_images_source=""
 skip_setting_k8s_context=false
-skip_test_images=false
 with_load_test_images=false
 image_tag="latest"
 kubectl_context=""
@@ -116,7 +115,8 @@ while [[ $# -gt 0 ]]; do
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     --kubectl-context) kubectl_context="$2"; shift 2 ;;
-    --skip-test-images) skip_test_images=true; shift 1 ;;
+    # Accepted for older callers; the EKS build never includes test-only images now.
+    --skip-test-images) shift 1 ;;
     --with-load-test-images) with_load_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
@@ -205,7 +205,6 @@ while [[ $# -gt 0 ]]; do
       echo "                                            to every kubectl/helm command, or set the context yourself."
       echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
       echo "                                            Useful for CI systems that need a predictable context name."
-      echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
       echo "  --with-load-test-images                   Also build the load-test runner and patched operator images."
       echo "                                            They are not part of the standard image set. Only the k6"
       echo "                                            load-test cases (Test008x) need them. Requires --build."
@@ -1935,8 +1934,9 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  skip_test_arg=""
-  [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
+  # Test-only images (the SearchGuard Elasticsearch used by the Docker Compose and ECS solutions)
+  # are never needed on EKS: the testClusters source there uses the public elasticsearch-oss image.
+  skip_test_arg="-PskipTestImages=true"
 
   "$base_dir/gradlew" -p "$base_dir" ${BUILD_TARGETS} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
     || { echo "Image build failed, retrying in 10s..."; sleep 10; \

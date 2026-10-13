@@ -17,7 +17,7 @@ nodeClassName: default
 #   - m6i.2xlarge
 
 # nginx front end for an Elasticsearch image without built-in security (elasticsearch-oss).
-# Rendered by templates/nginxFrontend.yaml; wired into the source pod by valuesEksOss.yaml.
+# Rendered by templates/nginxFrontend.yaml; wired into the source pod by valuesOss.yaml (local) and valuesEks.yaml (EKS).
 nginxFrontend:
   enabled: false
   name: source-nginx
