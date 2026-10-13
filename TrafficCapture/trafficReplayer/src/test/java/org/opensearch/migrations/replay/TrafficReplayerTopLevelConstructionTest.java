@@ -1222,9 +1222,10 @@ class TrafficReplayerTopLevelConstructionTest {
                 () -> Assertions.assertEquals(1, harness.targetFactoryCounts.get(connectionId)),
                 () -> Assertions.assertEquals(2, harness.durableRequestIds.size()),
                 () -> Assertions.assertEquals(2, targetRequests.get()),
-                () -> Assertions.assertEquals(
-                    2,
-                    harness.metric(IReplayContexts.MetricNames.CONNECTIONS_OPENED),
+                // At least, not exactly: the server's read timeout also closes a fresh socket that a slow
+                // runner hasn't written to yet, and the replayer then correctly retries on another one.
+                () -> Assertions.assertTrue(
+                    harness.metric(IReplayContexts.MetricNames.CONNECTIONS_OPENED) >= 2,
                     "the target idle timeout must force the later request onto a second socket"
                 ),
                 () -> Assertions.assertTrue(
