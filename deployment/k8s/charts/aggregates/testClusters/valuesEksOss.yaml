@@ -1,0 +1,232 @@
+# Open-source Elasticsearch source for EKS: elasticsearch-oss 7.10.2 (Apache-2.0) behind an nginx
+# sidecar (BSD-2) for TLS and basic auth, with the repository-s3 plugin (Apache-2.0) writing
+# snapshots to S3 with Pod Identity credentials. Nothing here is built by this repository.
+#
+# Layer this after values.yaml, INSTEAD of valuesEks.yaml:
+#
+#   TC=deployment/k8s/charts/aggregates/testClusters
+#   helm upgrade --install tc $TC -n ma -f $TC/values.yaml -f $TC/valuesEksOss.yaml \
+#     --set conditionalPackageInstalls.target=false
+#
+# Requires cert-manager and a CA issuer (the Migration Assistant chart provides ClusterIssuer
+# migrations-ca), the Pod Identity association for the service account below, and outbound
+# internet access for the image pulls and the plugin download. Check a deployment with
+# verifyOssSource.sh.
+#
+# One pod holds everything:
+#   init  install-plugins      installs repository-s3 into an emptyDir mounted at plugins/
+#   init  init-es-keystore     creates an empty keystore in a shared emptyDir
+#   main  elasticsearch        HTTP on 127.0.0.1:9201 only; transport as usual
+#   side  nginx                listens on 9200 (the Services' port): TLS + basic auth -> 127.0.0.1:9201
+#   side  refresh-s3-keystore  copies Pod Identity credentials into the keystore, then reloads them
+#
+# Why the keystore sidecar: ES 7.10's repository-s3 bundles AWS SDK 1.11.749, which cannot use
+# EKS Pod Identity. When the keystore has no s3.client.default credentials, the plugin falls back
+# to the SDK's default chain, which rejects the Pod Identity endpoint ("The full URI
+# (http://169.254.170.23/v1/credentials) ... has an invalid host. Host can only be one of
+# [localhost, 127.0.0.1]"), or, with the Pod Identity variables unset, reaches instance metadata
+# and gets 401. Explicit keystore credentials take precedence over both, so the sidecar fetches
+# them from the Pod Identity agent and keeps the keystore current. The Pod Identity variables can
+# stay in the elasticsearch container: they are only consulted when the keystore is empty, and
+# unsetting them (ignorePodIdentityPostRenderer/) changes the error, not the outcome.
+
+useDedicatedKarpenterPool: true
+
+nginxFrontend:
+  enabled: true
+
+source:
+  image: docker.elastic.co/elasticsearch/elasticsearch-oss
+  imageTag: "7.10.2"
+  protocol: https
+
+  # The chart's credentials Secret sets ELASTIC_PASSWORD, which makes the stock entrypoint add an
+  # X-Pack bootstrap.password to the keystore. OSS has no X-Pack; nginx does the authentication.
+  secret:
+    enabled: false
+
+  rbac:
+    # The Migration Assistant deployment associates this service account with its Pod Identity
+    # role, which can read and write the migration S3 bucket.
+    serviceAccountName: "migration-console-access-role"
+
+  tolerations:
+    - key: dedicated-search
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: karpenter.sh/nodepool
+              operator: In
+              values: ["dedicated-search-pool"]
+
+  # Set to a regional endpoint (for example s3.us-east-2.amazonaws.com) for isolated VPCs.
+  extraEnvs:
+    - name: S3_CLIENT_ENDPOINT
+      value: ""
+
+  esConfig:
+    elasticsearch.yml: |
+      cluster.name: "docker-cluster"
+      network.host: 0.0.0.0
+      # Only nginx, in the same pod, can reach the HTTP API.
+      http.host: 127.0.0.1
+      http.port: 9201
+      discovery.type: single-node
+      cluster.routing.allocation.disk.threshold_enabled: false
+      s3.client.default.endpoint: ${S3_CLIENT_ENDPOINT:}
+
+  readinessProbe:
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9201/_cluster/health)
+          [[ "${STATUS}" == "200" ]]
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:9201/_cluster/health?timeout=5s")
+          [[ "${STATUS}" == "200" ]]
+
+  extraVolumes:
+    - name: es-plugins
+      emptyDir: {}
+    - name: es-keystore
+      emptyDir: {}
+    - name: nginx-tmp
+      emptyDir: {}
+    - name: nginx-conf
+      configMap:
+        name: source-nginx-conf
+    - name: nginx-auth
+      secret:
+        secretName: source-nginx-auth
+    - name: nginx-tls
+      secret:
+        secretName: source-nginx-tls
+  extraVolumeMounts:
+    - name: es-plugins
+      mountPath: /usr/share/elasticsearch/plugins
+    - name: es-keystore
+      mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+      subPath: elasticsearch.keystore
+
+  extraInitContainers:
+    - name: install-plugins
+      image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          if [[ -d /usr/share/elasticsearch/plugins/repository-s3 ]]; then
+            echo "repository-s3 already installed"
+            exit 0
+          fi
+          bin/elasticsearch-plugin install --batch repository-s3
+      volumeMounts:
+        - name: es-plugins
+          mountPath: /usr/share/elasticsearch/plugins
+    - name: init-es-keystore
+      image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          if [[ -s /keystore/elasticsearch.keystore ]]; then
+            echo "Keystore already exists; skipping create"
+            exit 0
+          fi
+          TMP_CONF="$(mktemp -d)"
+          export ES_PATH_CONF="$TMP_CONF"
+          bin/elasticsearch-keystore create
+          cp "$ES_PATH_CONF/elasticsearch.keystore" /keystore/elasticsearch.keystore
+          chmod 0600 /keystore/elasticsearch.keystore
+          rm -rf "$TMP_CONF"
+      volumeMounts:
+        - name: es-keystore
+          mountPath: /keystore
+
+  extraContainers:
+    - name: nginx
+      image: public.ecr.aws/nginx/nginx:1.30-alpine
+      # Listens on 9200, which the chart already declares on the elasticsearch container.
+      readinessProbe:
+        tcpSocket:
+          port: 9200
+        periodSeconds: 10
+      volumeMounts:
+        - name: nginx-tmp
+          mountPath: /tmp
+        - name: nginx-conf
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: nginx-auth
+          mountPath: /etc/nginx/auth
+          readOnly: true
+        - name: nginx-tls
+          mountPath: /etc/nginx/tls
+          readOnly: true
+    - name: refresh-s3-keystore
+      image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+      command: ["/bin/bash", "-ec"]
+      env:
+        - name: REFRESH_SECONDS
+          value: "60"
+      args:
+        - |
+          set -euo pipefail
+
+          # This container keeps the Pod Identity variables (only the elasticsearch container's
+          # are unset) and uses them to fetch credentials for the keystore.
+          : "${AWS_CONTAINER_CREDENTIALS_FULL_URI:?missing; is the service account associated with a Pod Identity role?}"
+          : "${AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE:?missing}"
+
+          ES_URL="http://127.0.0.1:9201"
+          while true; do
+            TOKEN="$(cat "$AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")"
+            JSON="$(curl -sS -H "Authorization: $TOKEN" "$AWS_CONTAINER_CREDENTIALS_FULL_URI")"
+
+            AK="$(echo "$JSON" | sed -n 's/.*"AccessKeyId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+            SK="$(echo "$JSON" | sed -n 's/.*"SecretAccessKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+            ST="$(echo "$JSON" | sed -n 's/.*"Token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+            if [[ -z "$AK" || -z "$SK" || -z "$ST" ]]; then
+              echo "Failed to parse Pod Identity credentials response" >&2
+              sleep 10
+              continue
+            fi
+
+            # Edit a copy, then swap it in.
+            TMP_CONF="$(mktemp -d)"
+            export ES_PATH_CONF="$TMP_CONF"
+            cp /usr/share/elasticsearch/config/elasticsearch.keystore "$ES_PATH_CONF/elasticsearch.keystore" || true
+            echo -n "$AK" | bin/elasticsearch-keystore add -f -x s3.client.default.access_key
+            echo -n "$SK" | bin/elasticsearch-keystore add -f -x s3.client.default.secret_key
+            echo -n "$ST" | bin/elasticsearch-keystore add -f -x s3.client.default.session_token
+            cp "$ES_PATH_CONF/elasticsearch.keystore" /usr/share/elasticsearch/config/elasticsearch.keystore
+            chmod 0600 /usr/share/elasticsearch/config/elasticsearch.keystore
+            rm -rf "$TMP_CONF"
+
+            until curl -sS -o /dev/null "$ES_URL"; do sleep 2; done
+            curl -sS -X POST "$ES_URL/_nodes/reload_secure_settings" >/dev/null || true
+            echo "Reloaded S3 credentials into the keystore"
+            sleep "$REFRESH_SECONDS"
+          done
+      volumeMounts:
+        - name: es-keystore
+          mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+          subPath: elasticsearch.keystore

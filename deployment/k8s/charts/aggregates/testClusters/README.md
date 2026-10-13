@@ -51,6 +51,25 @@ The `valuesSolrSourceEks.yaml` overlay layers on top of `valuesSolrSource.yaml`:
 - Removes explicit S3 credentials (SDK auto-discovers from Pod Identity)
 - Adds tolerations for the dedicated search node pool
 
+## Open-source Elasticsearch source on EKS
+
+`valuesEksOss.yaml` replaces `valuesEks.yaml` with a source built only from published open-source
+parts: `elasticsearch-oss:7.10.2` (Apache-2.0), the `repository-s3` plugin installed at startup,
+and an nginx sidecar for HTTPS (cert-manager, `migrations-ca`) and basic auth (`admin:admin`).
+Elasticsearch listens only on loopback; nginx is the only way in.
+
+```bash
+helm upgrade --install tc . -n ma -f values.yaml -f valuesEksOss.yaml \
+  --set conditionalPackageInstalls.target=false
+./verifyOssSource.sh --bucket <bucket> --region <region>   # TLS, auth, S3 snapshot and restore
+```
+
+Snapshots reach S3 through a sidecar that copies the pod's Pod Identity credentials into the
+Elasticsearch keystore every minute. The plugin's bundled AWS SDK (1.11.749) can't use Pod
+Identity itself, and the overlay's header explains why the variables don't need to be unset.
+`ignorePodIdentityPostRenderer/` still unsets them for the SearchGuard image (Helm 3 takes the
+script path; Helm 4 takes the plugin name after `helm plugin install` of that directory).
+
 ## No-Auth Mode
 
 Both `values.yaml` and `valuesEks.yaml` leave HTTPS + basic-auth turned on

@@ -2,7 +2,7 @@
 
 This walkthrough takes a new team member from an empty AWS account to a running live migration:
 
-1. Deploy Migration Assistant (MA) on EKS, built from your checkout.
+1. Deploy the released Migration Assistant (MA) on EKS.
 2. Create a self-managed Elasticsearch 7.10 source.
 3. Create a target: an Amazon OpenSearch Service domain, or an OpenSearch Serverless collection.
 4. Pre-load the source with OpenSearch Benchmark, then configure and submit a migration: snapshot
@@ -46,8 +46,10 @@ cd "$(git rev-parse --show-toplevel)"
 
 - AWS CLI v2. The credentials must be able to create CloudFormation, EKS, ECR, IAM, VPC and
   OpenSearch resources.
-- Java 21, Docker with the Buildx plugin, `kubectl`, `helm` and `jq`. These are needed to build the
-  images from source.
+- `kubectl`, `helm` (3.x) and `jq`.
+- A checkout of this repository, for the sample configs and the test-cluster chart. Nothing is
+  built from it; to deploy your own changes, see the
+  [developer workflow](../../README.md#build-and-deploy-the-current-checkout).
 - Node.js 20+ and the AWS CDK CLI (`npm install -g aws-cdk`). These are only for the target
   cluster script in section 3.
 - A shell on macOS or Linux.
@@ -62,8 +64,9 @@ For background on what you are deploying, see:
 
 ## 2. Deploy Migration Assistant on EKS
 
-This builds every image, the chart and the CloudWatch dashboards from your checkout, pushes the
-images to a new private ECR repository, and installs the chart.
+This deploys the latest Migration Assistant release: it creates the CloudFormation stack (VPC, EKS
+Auto Mode cluster, IAM roles), installs the release's Helm chart, and pulls the release's images
+straight from ECR Public.
 
 ```bash
 ./deployment/k8s/aws/aws-bootstrap.sh \
@@ -71,8 +74,7 @@ images to a new private ECR repository, and installs the chart.
   --stack-name "$STACK_NAME" \
   --stage "$STAGE" \
   --region "$AWS_REGION" \
-  --build \
-  --base-dir "$(pwd)" \
+  --use-public-images \
   --helm-values deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/helm-values-observability.yaml \
   --skip-console-exec
 ```
@@ -82,9 +84,9 @@ images to a new private ECR repository, and installs the chart.
   `--deploy-import-vpc-cfn --vpc-id ... --subnet-ids ...`.
 - **`--helm-values .../helm-values-observability.yaml`** turns on Grafana, which EKS leaves off by
   default. Omit it if CloudWatch is enough for you.
-- **Test images.** Don't pass `--skip-test-images`. Option A in section 3 needs the
-  `elasticsearch_searchguard` test image that this build produces.
-- **k6 images.** Add `--with-load-test-images` if you want to use k6 in section 5.
+- **`--use-public-images`** skips mirroring the images into a private ECR repository, which saves
+  time and needs only the NAT gateway's outbound access. Leave it off for isolated VPCs.
+- **`--version <tag>`** pins a release instead of the latest.
 
 The script sets your kubectl context to the new cluster. When it finishes:
 
@@ -99,7 +101,7 @@ Load the stack's exports into your shell. Later steps use them.
 eval "$(aws cloudformation list-exports \
   --query "Exports[?starts_with(Name,'MigrationsExportString') && contains(Name,'-${STAGE}-')].Value" \
   --output text)"
-echo "$VPC_ID $EKS_CLUSTER_SECURITY_GROUP $MIGRATIONS_ECR_REGISTRY $MIGRATIONS_EKS_CLUSTER_NAME"
+echo "$VPC_ID $EKS_CLUSTER_SECURITY_GROUP $MIGRATIONS_EKS_CLUSTER_NAME"
 export MA_POD_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT}:role/${MIGRATIONS_EKS_CLUSTER_NAME}-migrations-role"
 ```
 
@@ -114,24 +116,40 @@ target's access policy must allow it.
 
 #### Option A (recommended for a first run): in-cluster Elasticsearch on EKS
 
-The [`testClusters`](../../../charts/aggregates/testClusters) chart runs a single-node
-ES 7.10.2 with SearchGuard. It serves HTTPS with demo certificates and basic auth `admin:admin`.
-`valuesEks.yaml` places it on its own on-demand NodePool and gives it S3 access, so snapshots work.
+The [`testClusters`](../../../charts/aggregates/testClusters) chart with
+[`valuesEksOss.yaml`](../../../charts/aggregates/testClusters/valuesEksOss.yaml) runs a single-node
+Elasticsearch 7.10.2 built only from open-source parts that this repository doesn't build:
+
+| Piece | Licence | Role |
+|---|---|---|
+| `elasticsearch-oss:7.10.2` | Apache-2.0 | The source, the last Apache-licensed Elasticsearch |
+| `repository-s3` plugin | Apache-2.0 | Snapshots to S3; installed by an init container at startup |
+| nginx (`public.ecr.aws/nginx/nginx`) | BSD-2 | HTTPS and basic auth (`admin:admin`) in front of Elasticsearch |
+| cert-manager (installed by MA) | Apache-2.0 | nginx's certificate, from MA's `migrations-ca` issuer |
+
+Everything runs in one pod. Elasticsearch listens only on loopback, so the only way in is through
+nginx. A sidecar copies the pod's Pod Identity credentials into the Elasticsearch keystore every
+minute, which is how `repository-s3` writes snapshots to MA's bucket. The overlay explains why the
+plugin can't use Pod Identity directly.
 
 Install only the source half of the chart:
 
 ```bash
-ES_IMAGE="${MIGRATIONS_ECR_REGISTRY}:migrations_elasticsearch_searchguard_latest"
-helm dependency update deployment/k8s/charts/aggregates/testClusters
-helm upgrade --install tc deployment/k8s/charts/aggregates/testClusters -n ma \
-  -f deployment/k8s/charts/aggregates/testClusters/values.yaml \
-  -f deployment/k8s/charts/aggregates/testClusters/valuesEks.yaml \
+TC=deployment/k8s/charts/aggregates/testClusters
+helm dependency update $TC
+helm upgrade --install tc $TC -n ma \
+  -f $TC/values.yaml -f $TC/valuesEksOss.yaml \
   --set conditionalPackageInstalls.target=false \
-  --set source.image="${MIGRATIONS_ECR_REGISTRY}" \
-  --set "source.extraInitContainers[0].image=${ES_IMAGE}" \
-  --set "source.extraContainers[0].image=${ES_IMAGE}" \
   --wait --timeout 15m
-kubectl -n ma get pods -l app=elasticsearch-master
+kubectl -n ma get pods -l app=elasticsearch-master        # 3/3 Running
+```
+
+Optionally, check it end to end. The script tests TLS and auth, then takes, restores and repeats
+an S3 snapshot with the pod's credentials:
+
+```bash
+BUCKET=$(kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}')
+$TC/verifyOssSource.sh --bucket "$BUCKET" --region "$AWS_REGION"
 ```
 
 MA reaches this source at `https://elasticsearch-master-headless:9200`. That address is already
@@ -140,15 +158,15 @@ in the sample configs.
 - **Size.** The chart is deliberately small and ephemeral: one node, a 512 MB heap, no durable
   storage. It suits functional runs at tens or hundreds of requests per second. For more load,
   raise `source.esJavaOpts` and `source.resources`, or use option B.
-- **Node pool.** `valuesEks.yaml` creates a `dedicated-search-pool` NodePool on the built-in
-  `default` NodeClass. If you bootstrapped with `--tags` or `--disable-general-purpose-pool`, add
+- **Internet access.** The images come from `docker.elastic.co` and ECR Public, and the plugin
+  from `artifacts.elastic.co`. The nodes need outbound internet, which the create-VPC deployment's
+  NAT gateway provides; nothing is reachable from outside.
+- **Node pool.** The overlay creates a `dedicated-search-pool` NodePool on the built-in `default`
+  NodeClass. If you bootstrapped with `--tags` or `--disable-general-purpose-pool`, add
   `--set nodeClassName=<the MA release's aws.nodeClassName>`.
-- **Image tags.** `aws-bootstrap.sh --build` tags images `latest` unless you pass `--image-tag`.
-  If you passed it, change the `_latest` suffix above to match.
-- **No auth.** For a plain-HTTP source without auth, add
-  `-f deployment/k8s/charts/aggregates/testClusters/valuesEksNoAuth.yaml` after `valuesEks.yaml`.
-  Then use `http://elasticsearch-master-headless:9200` and delete `authConfig` from the source in
-  section 4. Leave the key out entirely: `authConfig: {}` fails validation.
+- **No auth.** For a source without auth, add `--set nginxFrontend.basicAuth.enabled=false`, then
+  delete `authConfig` from the source in section 4. Leave the key out entirely: `authConfig: {}`
+  fails validation.
 
 #### Option B: your own Elasticsearch on EC2
 
@@ -485,7 +503,9 @@ curl --cacert migrations-ca.crt -u admin:admin "https://<nlb-host>:9201/_cluster
 
 The NLB is internal, so clients must run inside MA's VPC or a network peered with it.
 
-**Sustained load with k6.** This needs `--with-load-test-images` at bootstrap.
+**Sustained load with k6.** The k6 runner image isn't published with releases, so this needs a
+deployment that built it (`aws-bootstrap.sh --build --with-load-test-images`; see the developer
+workflow).
 
 ```bash
 deployment/k8s/installK6Chart.sh install --namespace ma

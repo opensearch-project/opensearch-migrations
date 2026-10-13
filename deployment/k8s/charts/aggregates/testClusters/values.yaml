@@ -16,6 +16,32 @@ nodeClassName: default
 # nodePoolInstanceTypes:
 #   - m6i.2xlarge
 
+# nginx front end for an Elasticsearch image without built-in security (elasticsearch-oss).
+# Rendered by templates/nginxFrontend.yaml; wired into the source pod by valuesEksOss.yaml.
+nginxFrontend:
+  enabled: false
+  name: source-nginx
+  listenPort: 9200          # the chart's httpPort, so the source Services route to nginx
+  upstreamPort: 9201        # Elasticsearch's http.port, bound to 127.0.0.1
+  clientMaxBodySize: 200m
+  accessLog: false
+  basicAuth:
+    enabled: true
+    username: admin
+    password: admin
+  tls:
+    enabled: true
+    # Services the certificate must cover (short names; namespace forms are added).
+    serviceNames:
+      - elasticsearch-master
+      - elasticsearch-master-headless
+    certManager:
+      enabled: true
+      # The Migration Assistant chart creates this CA issuer.
+      issuerRef:
+        kind: ClusterIssuer
+        name: migrations-ca
+
 source:
   http:
     tls:

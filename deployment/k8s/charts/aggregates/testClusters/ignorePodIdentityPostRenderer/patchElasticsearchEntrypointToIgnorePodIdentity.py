@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# patchElasticsearchEntrypointToIgnorePodIdentity.sh
+# patchElasticsearchEntrypointToIgnorePodIdentity.py: Helm post-renderer; see plugin.yaml beside it.
 
 import sys
 import os
@@ -7,6 +7,21 @@ import json
 import subprocess
 import tempfile
 import re
+
+
+# Image ENTRYPOINT + CMD for a container that sets neither command nor args (case 3 below).
+# The stock Elastic images (elasticsearch, elasticsearch-oss) start with
+# docker-entrypoint.sh eswrapper. The searchguard-wrapped custom image built from
+# TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard/Dockerfile
+# uses /usr/local/bin/entrypoint.sh, which execs bin/elasticsearch.
+STOCK_ELASTIC_ENTRYPOINT = "/usr/local/bin/docker-entrypoint.sh eswrapper"
+CUSTOM_IMAGE_ENTRYPOINT = "/usr/local/bin/entrypoint.sh"
+
+
+def default_entrypoint_for_image(image):
+    if image.startswith("docker.elastic.co/elasticsearch/"):
+        return STOCK_ELASTIC_ENTRYPOINT
+    return CUSTOM_IMAGE_ENTRYPOINT
 
 
 def is_target_statefulset(doc):
@@ -43,11 +58,19 @@ def main():
                     f.write(doc)
                     temp_file = f.name
 
+                # A pure YAML-to-JSON conversion. `kubectl create --dry-run=client` is NOT one: it
+                # needs a reachable API server for discovery, and it stamps the current context's
+                # namespace onto the object, which sent the StatefulSet to the wrong namespace
+                # whenever that context's namespace wasn't the release namespace.
+                # `patch --local` with an empty patch reads only the file, and an empty
+                # KUBECONFIG guarantees no cluster is consulted.
                 result = subprocess.run(
-                    ['kubectl', 'create', '--dry-run=client', '-f', temp_file, '-o', 'json'],
+                    ['kubectl', 'patch', '--local', '-f', temp_file,
+                     '--type', 'merge', '-p', '{}', '-o', 'json'],
                     capture_output=True,
                     text=True,
-                    check=True
+                    check=True,
+                    env={**os.environ, 'KUBECONFIG': os.devnull},
                 )
 
                 manifest = json.loads(result.stdout)
@@ -90,18 +113,13 @@ def main():
                         f"exec {' '.join(original_command)}"
                     ]
 
-                # Case 3: Container has neither - use the image's ENTRYPOINT.
-                # The searchguard-wrapped elasticsearch image (the only image this
-                # chart deploys as "source") defines ENTRYPOINT as
-                # /usr/local/bin/entrypoint.sh, which execs bin/elasticsearch.
-                # See TrafficCapture/dockerSolution/src/main/docker/
-                # elasticsearchWithSearchGuard/Dockerfile.
+                # Case 3: Container has neither - start the image's own ENTRYPOINT and CMD.
                 else:
                     container['command'] = ['sh', '-c']
                     container['args'] = [
                         "unset AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE\n"
                         "unset AWS_CONTAINER_CREDENTIALS_FULL_URI\n"
-                        "exec /usr/local/bin/entrypoint.sh"
+                        f"exec {default_entrypoint_for_image(container.get('image', ''))}"
                     ]
 
             # Output as JSON directly
