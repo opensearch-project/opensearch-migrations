@@ -112,8 +112,8 @@ public abstract class OpenSearchClient {
      * client is long-lived and processes many work items over its lifetime, so the bootstrap
      * calls this at the start of each work item. The id is the canonical
      * {@code IWorkCoordinator.WorkItemAndDuration.WorkItem#toString()} form
-     * ({@code base64url(index)__shard__startingDocId}), so a failed document stream record round-trips back to the
-     * exact work item that produced it.
+     * ({@code base64url(index).base64url(partition).base64url(cursor)}), so a failed document stream
+     * record round-trips back to the exact work item that produced it.
      */
     public void setFailedDocumentStreamWorkItem(String workItemId) {
         this.failedDocumentStreamWorkItemId = workItemId;

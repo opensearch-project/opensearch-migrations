@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
@@ -221,62 +222,82 @@ public interface IWorkCoordinator extends AutoCloseable {
             return v.onAcquiredWork(this);
         }
 
+        /**
+         * A unit of leasable work: one partition of one collection, resuming after a cursor.
+         *
+         * <p>The partition carries the name the source gave it, not an ordinal into a list another
+         * process would have to re-derive in the same order. The cursor is opaque.
+         */
         @EqualsAndHashCode
         @Getter
         public static class WorkItem implements Serializable {
-            private static final String SEPARATOR = "__";
+            /**
+             * Separator between the three encoded segments. Outside the base64url alphabet
+             * ({@code A-Z a-z 0-9 - _}), so no segment can contain it. {@code __} would not do:
+             * base64url can start or end with {@code _}, making {@code "a_"+"__"+"_b"} and
+             * {@code "a"+"__"+"__b"} both render as {@code a____b}.
+             */
+            private static final String SEPARATOR = ".";
+            private static final Pattern SEPARATOR_PATTERN = Pattern.compile(Pattern.quote(SEPARATOR));
             private static final String SHARD_SETUP_SENTINEL = "shard_setup";
-            private static final Base64.Encoder INDEX_NAME_ENCODER = Base64.getUrlEncoder().withoutPadding();
-            private static final Base64.Decoder INDEX_NAME_DECODER = Base64.getUrlDecoder();
+            private static final Base64.Encoder SEGMENT_ENCODER = Base64.getUrlEncoder().withoutPadding();
+            private static final Base64.Decoder SEGMENT_DECODER = Base64.getUrlDecoder();
 
             String indexName;
-            Integer shardNumber;
-            Long startingDocId;
+            String partitionName;
+            /** Opaque source cursor to resume after; null means start at the beginning. */
+            String cursor;
 
-            public WorkItem(String indexName, Integer shardNumber, Long startingDocId) {
+            public WorkItem(String indexName, String partitionName, String cursor) {
                 this.indexName = indexName;
-                this.shardNumber = shardNumber;
-                this.startingDocId = startingDocId;
+                this.partitionName = partitionName;
+                this.cursor = cursor;
             }
 
             /**
-             * Serializes this work item to the id string stored in the work-coordination index.
-             * The index name is base64url-encoded (no padding) so it cannot collide with the
-             * {@link #SEPARATOR} regardless of what characters the source index name contains
-             * (see opensearch-project/opensearch-migrations#2880).  The {@code shard_setup}
-             * sentinel is preserved verbatim so existing bootstrap logic is unaffected.
+             * Serializes this work item to the id string stored in the work-coordination index as
+             * {@code base64url(indexName).base64url(partitionName).base64url(cursor)}.
+             *
+             * <p>All three segments are encoded: each is an arbitrary string, so none can be
+             * trusted to avoid the separator. The {@code shard_setup} sentinel is preserved
+             * verbatim so existing bootstrap logic is unaffected.
              */
             @Override
             public String toString() {
-                if (SHARD_SETUP_SENTINEL.equals(indexName) && shardNumber == null && startingDocId == null) {
+                if (SHARD_SETUP_SENTINEL.equals(indexName) && partitionName == null && cursor == null) {
                     return SHARD_SETUP_SENTINEL;
                 }
-                var name = INDEX_NAME_ENCODER.encodeToString(indexName.getBytes(StandardCharsets.UTF_8));
-                if (shardNumber != null) {
-                    name += SEPARATOR + shardNumber;
+                return encode(indexName) + SEPARATOR + encode(partitionName) + SEPARATOR + encode(cursor);
+            }
+
+            private static String encode(String segment) {
+                return segment == null ? "" : SEGMENT_ENCODER.encodeToString(segment.getBytes(StandardCharsets.UTF_8));
+            }
+
+            private static String decode(String segment, String input, String label) {
+                if (segment.isEmpty()) {
+                    return null;
                 }
-                if (startingDocId != null) {
-                    name += SEPARATOR + startingDocId;
+                try {
+                    return new String(SEGMENT_DECODER.decode(segment), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("Illegal work item: '" + input
+                            + "' (" + label + " segment is not valid base64url)", e);
                 }
-                return name;
             }
 
             public static WorkItem valueFromWorkItemString(String input) {
                 if (SHARD_SETUP_SENTINEL.equals(input)) {
                     return new WorkItem(input, null, null);
                 }
-                var components = input.split(SEPARATOR + "+");
+                var components = SEPARATOR_PATTERN.split(input, -1);
                 if (components.length != 3) {
                     throw new IllegalArgumentException("Illegal work item: '" + input + "'");
                 }
-                final String indexName;
-                try {
-                    indexName = new String(INDEX_NAME_DECODER.decode(components[0]), StandardCharsets.UTF_8);
-                } catch (IllegalArgumentException e) {
-                    throw new IllegalArgumentException("Illegal work item: '" + input
-                            + "' (index name segment is not valid base64url)", e);
-                }
-                return new WorkItem(indexName, Integer.parseInt(components[1]), Long.parseLong(components[2]));
+                return new WorkItem(
+                    decode(components[0], input, "index name"),
+                    decode(components[1], input, "partition name"),
+                    decode(components[2], input, "cursor"));
             }
         }
     }

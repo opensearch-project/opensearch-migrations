@@ -193,7 +193,7 @@ class SolrBackupSourceTest {
         try (var mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
             mockedFiles.when(() -> Files.list(indexDir)).thenThrow(new IOException("simulated I/O error"));
 
-            var ex = assertThrows(SolrBackupReadException.class, () -> source.readDocuments(partition, 0));
+            var ex = assertThrows(SolrBackupReadException.class, () -> source.readDocuments(partition, null));
             assertThat(ex, instanceOf(SnapshotReadFailure.class));
             assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("Failed to list directory"));
             assertThat("the underlying IOException is preserved", ex.getCause(), instanceOf(IOException.class));
@@ -252,7 +252,7 @@ class SolrBackupSourceTest {
         var partition = source.listPartitions("test").get(0);
 
         var ex = assertThrows(IllegalArgumentException.class,
-            () -> source.readDocuments(partition, 0));
+            () -> source.readDocuments(partition, null));
         assertThat(ex.getMessage().contains("Unsupported Solr major version"), equalTo(true));
     }
 
@@ -263,7 +263,7 @@ class SolrBackupSourceTest {
         var source = new SolrBackupSource(tempDir, "test", emptySchema(), 7);
         var mappedPartition = new SolrShardPartition("test", "shard1", tempDir, java.util.Map.of("segments_1", "uuid"));
 
-        StepVerifier.create(source.readDocuments(mappedPartition, 0))
+        StepVerifier.create(source.readDocuments(mappedPartition, null))
             .expectErrorMatches(t -> t instanceof IllegalStateException
                 && t.getMessage().contains("incremental")
                 && t.getMessage().contains("Solr 7"))
@@ -286,7 +286,7 @@ class SolrBackupSourceTest {
         var partition = source.listPartitions("test").get(0);
 
         var ex = assertThrows(SolrBackupReadException.class,
-            () -> source.readDocuments(partition, 0));
+            () -> source.readDocuments(partition, null));
         assertThat(ex, instanceOf(SnapshotReadFailure.class));
         assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("SOLR-9091"));
         assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("commitName"));
@@ -303,7 +303,7 @@ class SolrBackupSourceTest {
         var source = new SolrBackupSource(indexDir, "test", emptySchema(), solrMajor);
         var partition = source.listPartitions("test").get(0);
 
-        StepVerifier.create(source.readDocuments(partition, 0)).verifyComplete();
+        StepVerifier.create(source.readDocuments(partition, null)).verifyComplete();
     }
 
     @ParameterizedTest(name = "Solr {0}")
@@ -315,7 +315,7 @@ class SolrBackupSourceTest {
         var source = new SolrBackupSource(indexDir, "test", emptySchema(), solrMajor);
         var partition = source.listPartitions("test").get(0);
 
-        StepVerifier.create(source.readDocuments(partition, 0))
+        StepVerifier.create(source.readDocuments(partition, null))
             .expectNextCount(3)
             .verifyComplete();
     }
@@ -329,7 +329,7 @@ class SolrBackupSourceTest {
         var partition = new SolrShardPartition("test", "shard1", indexDir, mapping);
 
         var ex = assertThrows(SolrBackupReadException.class,
-            () -> source.readDocuments(partition, 0));
+            () -> source.readDocuments(partition, null));
         assertThat(ex, instanceOf(SnapshotReadFailure.class));
         assertThat(ex.getMessage(), org.hamcrest.Matchers.containsString("SOLR-9091"));
     }
@@ -343,7 +343,7 @@ class SolrBackupSourceTest {
         var source = new SolrBackupSource(tempDir, "test", emptySchema(), 9);
         var partition = new SolrShardPartition("test", "shard1", indexDir, mapping);
 
-        StepVerifier.create(source.readDocuments(partition, 0)).verifyComplete();
+        StepVerifier.create(source.readDocuments(partition, null)).verifyComplete();
     }
 
     @Test
@@ -354,7 +354,7 @@ class SolrBackupSourceTest {
         var source = new SolrBackupSource(tempDir, "test", emptySchema(), 9);
         var partition = new SolrShardPartition("test", "shard1", indexDir, mapping);
 
-        StepVerifier.create(source.readDocuments(partition, 0))
+        StepVerifier.create(source.readDocuments(partition, null))
             .expectNextCount(3)
             .verifyComplete();
     }

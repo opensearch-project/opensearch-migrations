@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
@@ -120,28 +121,26 @@ public class DocumentMigrationPipeline {
     /**
      * Migrate all documents for a single partition from source to sink.
      *
-     * @param partition         the partition to migrate
-     * @param collectionName    the target collection name
-     * @param startingDocOffset the document offset to resume from (0 for start)
+     * @param partition      the partition to migrate
+     * @param collectionName the target collection name
+     * @param startingCursor the source cursor to resume after (null to start at the beginning)
      * @return a Flux of progress cursors, one per batch written
      */
-    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingDocOffset) {
-        final long[] cumulativeOffset = { startingDocOffset };
+    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, String startingCursor) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
-            return source.readDocuments(partition, startingDocOffset)
+            return source.readDocuments(partition, startingCursor)
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
                     return sink.writeBatch(collectionName, batch)
                         .map(result -> {
-                            cumulativeOffset[0] += result.docsInBatch();
                             totalDocs.addAndGet(result.docsInBatch());
                             totalBytes.addAndGet(result.bytesInBatch());
                             return new ProgressCursor(
                                 partition,
-                                cumulativeOffset[0],
+                                result.cursorAfter(),
                                 result.docsInBatch(),
                                 result.bytesInBatch()
                             );
@@ -168,7 +167,7 @@ public class DocumentMigrationPipeline {
             .thenMany(
                 Flux.fromIterable(partitions)
                     .flatMap(
-                        partition -> migratePartition(partition, collectionName, 0),
+                        partition -> migratePartition(partition, collectionName, null),
                         partitionConcurrency
                     )
             );
@@ -187,7 +186,7 @@ public class DocumentMigrationPipeline {
     /**
      * Batching predicate that groups documents by count and byte size.
      */
-    static class BatchPredicate implements java.util.function.Predicate<Document> {
+    static class BatchPredicate implements java.util.function.Predicate<PositionedDocument> {
         private final int maxDocs;
         private final long maxBytes;
         private int currentCount;
@@ -199,9 +198,9 @@ public class DocumentMigrationPipeline {
         }
 
         @Override
-        public boolean test(Document doc) {
+        public boolean test(PositionedDocument positioned) {
             currentCount++;
-            currentBytes += doc.sourceLength();
+            currentBytes += positioned.document().sourceLength();
 
             if (currentCount >= maxDocs || currentBytes >= maxBytes) {
                 currentCount = 0;
