@@ -1,0 +1,57 @@
+# Quick start: self-managed Elasticsearch 7.10 -> Amazon OpenSearch Serverless collection, capture and replay.
+# Walkthrough: docs/quickStartSelfManagedEsToAmazonOpenSearch.md
+#
+# Replace every <...> placeholder before running `workflow configure edit --stdin < this-file`.
+# The source endpoint below is the in-cluster testClusters chart; for an EC2 source, use its
+# load balancer or node address instead.
+
+skipApprovals: true
+
+# Capture and replay only. See the guide for the optional snapshot + backfill block.
+snapshotMigrationConfigs: []
+
+sourceClusters:
+  source:
+    endpoint: "https://elasticsearch-master-headless:9200"
+    version: "ES 7.10.2"
+    allowInsecure: true          # testClusters uses SearchGuard demo certificates
+    authConfig:
+      basic:
+        secretName: source-creds # create with: workflow configure credentials create source-creds
+
+targetClusters:
+  target:
+    endpoint: "<COLLECTION_ENDPOINT>"      # e.g. https://abc123xyz.us-east-2.aoss.amazonaws.com
+    authConfig:
+      sigv4:
+        region: "<REGION>"
+        service: aoss
+
+kafkaClusterConfiguration:
+  default:
+    autoCreate:
+      topicSpecOverrides:
+        # Must be at least the proxy podReplicas + 1 (one slot for the rolling-update surge pod).
+        partitions: 4
+
+traffic:
+  proxies:
+    capture-proxy:
+      source: source
+      proxyConfig:
+        listenPort: 9201
+        podReplicas: 2
+        # serviceType defaults to LoadBalancer (an internal NLB). TLS defaults to a cert-manager
+        # certificate from the migrations-ca issuer; set `tls: {mode: plaintext}` for plain HTTP.
+
+  replayers:
+    replay1:
+      fromCapturedTraffic: capture-proxy
+      toTarget: target
+      replayerConfig:
+        podReplicas: 2
+        speedupFactor: 1.1
+        # Source/target comparison tuples. BUCKET_NAME from:
+        #   kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}'
+        tupleS3Bucket: "<TUPLE_BUCKET>"
+        tupleS3Region: "<REGION>"

@@ -1,0 +1,11 @@
+# Quick start: extra Helm values for aws-bootstrap.sh --helm-values.
+# Walkthrough: docs/quickStartSelfManagedEsToAmazonOpenSearch.md
+#
+# EKS turns Grafana off by default (valuesEks.yaml). The chart still renders the "Capture and Replay
+# Observability" dashboard ConfigMap, so enabling the kube-prometheus-stack Grafana is all that is
+# needed for its sidecar to load that dashboard against the in-cluster Prometheus.
+charts:
+  kube-prometheus-stack:
+    values:
+      grafana:
+        enabled: true
