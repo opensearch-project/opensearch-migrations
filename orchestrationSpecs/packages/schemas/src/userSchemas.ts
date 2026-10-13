@@ -1918,7 +1918,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         const topicName = proxyConfig.kafkaTopic || proxyName;
                         ctx.addIssue({
                             code: z.ZodIssueCode.custom,
-                            message: `Kafka topic '${topicName}' on cluster '${effectiveKafkaRef}' has ${partitionCount} partition(s), but capture proxy '${proxyName}' with ${proxyCount} pod replica(s) requires at least ${requiredPartitionCount} partition(s) for one-pod rolling surge.`,
+                            message: `Kafka topic '${topicName}' on cluster '${effectiveKafkaRef}' has ${partitionCount} partition(s), but capture proxy '${proxyName}' with ${proxyCount} pod replica(s) requires at least ${requiredPartitionCount} partition(s) so a rolling update always has a spare writer partition.`,
                             path: [
                                 'kafkaClusterConfiguration',
                                 effectiveKafkaRef,

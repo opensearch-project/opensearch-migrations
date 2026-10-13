@@ -5,7 +5,8 @@ usage: generate-capture-replay-grafana-dashboard.py <grafanaDashboard.yaml>
 Writes the chart's templates/resources/grafanaDashboard.yaml. Panels, titles and layout mirror
 generate-capture-replay-dashboard.py; change both together and regenerate rather than hand-editing either output.
 """
-import json, sys
+import json
+import sys
 
 DS = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
 MIB = 1048576
@@ -122,19 +123,27 @@ CW_ONLY = ("This panel exists only on the CloudWatch dashboard: it reads AWS/ES 
            "capture-replay dashboard and pick the domain there.")
 
 # ---------------------------------------------------------------------------------------------
+
+
 def kpis():
     return [
-        P("Captured requests/s", "Fully parsed HTTP requests observed by the capture proxy, fleet total per second. Empty when the proxy is scaled to 0.",
+        P("Captured requests/s", "Fully parsed HTTP requests observed by the capture proxy, fleet total per second. "
+                                 "Empty when the proxy is scaled to 0.",
           "stat", "reqps").q(rate("fullRequest_count_total"), "Captured req/s"),
-        P("Replayed tuples/s", "Source/target tuples compared by the replayers (tupleComparison), fleet total per second, including tuples whose source response is missing.",
+        P("Replayed tuples/s", "Source/target tuples compared by the replayers (tupleComparison), fleet total "
+                               "per second, including tuples whose source response is missing.",
           "stat", "ops").q(TUPLES, "Replayed tuples/s"),
         P("Mean replay lag (s)", "Windowed mean of lagBetweenSourceAndTargetRequests (sum/count rates), in seconds.",
           "stat", "s").q(mean("lagBetweenSourceAndTargetRequests_milliseconds", 1000), "Mean lag (s)"),
-        P("Actual speedup (5 min)", "1 minus the 10-minute derivative of the 5-minute mean replay lag. Above 1 means replay is gaining on real time; 1 is real time; below 1 means lag is growing.",
+        P("Actual speedup (5 min)", "1 minus the 10-minute derivative of the 5-minute mean replay lag. Above "
+                                    "1 means replay is gaining on real time; 1 is real time; below 1 means lag "
+                                    "is growing.",
           "stat", "short", mn=None).q(SPEEDUP, "Speedup"),
-        P("Status-code match %", "Matching tuples divided by all tuples (including those without a source response), over the rate window.",
+        P("Status-code match %", "Matching tuples divided by all tuples (including those without a source response), "
+                                 "over the rate window.",
           "stat", "percent", mx=100).q(MATCH_PCT, "Match %"),
-        P("Pods reporting", "Distinct processes exporting replayer / proxy metrics." + STALE + " A drop means pods stopped exporting, not that work stopped.",
+        P("Pods reporting", "Distinct processes exporting replayer / proxy metrics." + STALE + " A drop means pods stopped exporting, "
+                                                                                               "not that work stopped.",
           "stat", "short")
         .q("count(count by (exported_instance) (replayActiveContexts_contexts))", "Replayers")
         .q("count(count by (exported_instance) (captureConnectionsActive_connections)) or vector(0)", "Proxies"),
@@ -143,12 +152,14 @@ def kpis():
 
 def kpi_target_text(x, y, w, h):
     return text("Target CPU / JVM pressure (max node %)",
-                "CloudWatch-only: AWS/ES `CPUUtilization` / `JVMMemoryPressure` for the target domain are not in Prometheus.",
+                "CloudWatch-only: AWS/ES `CPUUtilization` / `JVMMemoryPressure` for the target domain are not "
+                "in Prometheus.",
                 x, y, w, h)
 
 
 def flow_requests():
-    return (P("Requests through the pipeline (per second)", "Fleet-total per-second rates at each stage, from capture to tuple comparison.", unit="ops")
+    return (P("Requests through the pipeline (per second)", "Fleet-total per-second rates at each stage, from "
+                                                            "capture to tuple comparison.", unit="ops")
             .q(rate("fullRequest_count_total"), "Proxy requests captured/s")
             .q(rate("capturePublishingRecordsAccepted_records_total"), "Proxy Kafka records published/s")
             .q(rate("kafkaSourceRecordsRead_records_total"), "Replayer Kafka records read/s")
@@ -157,8 +168,12 @@ def flow_requests():
 
 
 def flow_bytes():
-    q = lambda m: f"{rate(m)} / {MIB}"
-    return (P("Bytes through the pipeline (MiB/s)", "Application-observed bytes at each stage, MiB = 1,048,576 bytes. The CloudWatch version also plots the capture NLB's ProcessedBytes, which has no Prometheus source.",
+
+    def q(m):
+        return f"{rate(m)} / {MIB}"
+    return (P("Bytes through the pipeline (MiB/s)", "Application-observed bytes at each stage, MiB = 1,048,576 "
+                                                    "bytes. The CloudWatch version also plots the capture NLB's "
+                                                    "ProcessedBytes, which has no Prometheus source.",
               unit="suffix: MiB/s")
             .q(q("bytesRead_bytes_total"), "Proxy request bytes (client → proxy)")
             .q(q("bytesWritten_bytes_total"), "Proxy response bytes (proxy → client)")
@@ -170,7 +185,8 @@ def flow_bytes():
 
 def flow_lag():
     return (P("Replay lag, schedule slip and speedup",
-              "Windowed mean replay lag and schedule slip (histogram sum/count rates) with the selected catch-up floor; p95 lag from buckets." + TOPB +
+              "Windowed mean replay lag and schedule slip (histogram sum/count rates) with the selected catch-up "
+              "floor; p95 lag from buckets." + TOPB +
               " Right axis: 1 minus the 10-minute derivative of the 5-minute mean lag (speedup ×).", unit="s", runit="short", mn=None)
             .q(mean("lagBetweenSourceAndTargetRequests_milliseconds", 1000), "Mean replay lag (s)")
             .q(p95("lagBetweenSourceAndTargetRequests_milliseconds", 1000), "p95 replay lag (s)")
@@ -181,7 +197,9 @@ def flow_lag():
 
 def flow_eta():
     return (P("Catch-up ETA to floor (hours)",
-              "Hours for the 5-minute mean replay lag to reach the selected floor at the current 10-minute lag-reduction rate. Gaps are intentional when lag is at or below the floor or is not falling by more than 0.01 s/s. This is not a Kafka backlog drain time.",
+              "Hours for the 5-minute mean replay lag to reach the selected floor at the current 10-minute lag-reduction "
+              "rate. Gaps are intentional when lag is at or below the floor or is not falling by more than 0.01 "
+              "s/s. This is not a Kafka backlog drain time.",
               unit="h")
             .q(ETA, "Hours to floor at current reduction rate"))
 
@@ -189,7 +207,8 @@ def flow_eta():
 # --- capture proxy ---
 def proxy_publish():
     g = "capturePublishingRecordsAwaitingAcknowledgement_records"
-    return (P("Proxy → Kafka publishing", "Records accepted by the Kafka producer and acknowledged by Kafka, per second; right axis: records awaiting acknowledgement." + STALE,
+    return (P("Proxy → Kafka publishing", "Records accepted by the Kafka producer and acknowledged by Kafka, "
+                                          "per second; right axis: records awaiting acknowledgement." + STALE,
               unit="ops", runit="short")
             .q(rate("capturePublishingRecordsAccepted_records_total"), "Records accepted/s")
             .q(rate("capturePublishingCompletions_records_total", 'outcome="acknowledged"'), "Acknowledged/s")
@@ -198,7 +217,8 @@ def proxy_publish():
 
 
 def proxy_latency():
-    return (P("Proxy latency (mean ms)", "Windowed means (histogram sum/count rates) plus p95 of Kafka publish → ack." + TOPB, unit="ms")
+    return (P("Proxy latency (mean ms)", "Windowed means (histogram sum/count rates) plus p95 of Kafka publish "
+                                         "→ ack." + TOPB, unit="ms")
             .q(mean("gatheringRequestDuration_milliseconds"), "Gather request")
             .q(mean("gatheringResponseDuration_milliseconds"), "Gather response (source latency)")
             .q(mean("kafkaCommitDuration_milliseconds"), "Kafka publish → ack")
@@ -206,7 +226,9 @@ def proxy_latency():
 
 
 def proxy_connections():
-    return (P("Proxy connections and writers", "Fleet totals of client connections and writer routing state, the hottest pod's connections, and connection closes per second by reason." + STALE, unit="short")
+    return (P("Proxy connections and writers", "Fleet totals of client connections and writer routing state, "
+                                               "the hottest pod's connections, and connection closes per second "
+                                               "by reason." + STALE, unit="short")
             .q("sum(captureConnectionsActive_connections)", "Client connections (fleet)")
             .q(hottest("captureConnectionsActive_connections"), "Client connections (hottest pod)")
             .q("sum(captureWritersActive_writers)", "Active writers (fleet)")
@@ -215,7 +237,8 @@ def proxy_connections():
 
 
 def proxy_errors():
-    p = P("Proxy faults (per minute)", "Fault counter increases per minute (rate × 60); zero when a counter has never incremented.", unit="short")
+    p = P("Proxy faults (per minute)", "Fault counter increases per minute (rate × 60); zero when a counter has "
+                                       "never incremented.", unit="short")
     for m, lab in [("capturePublisherFailures_failures_total", "Publisher failures"),
                    ("captureWritesRejected_writes_total", "Writes rejected"),
                    ("captureHeartbeatDeadlineViolations_violations_total", "Heartbeat deadline violations"),
@@ -230,7 +253,9 @@ def proxy_errors():
 
 def cadvisor(title, container):
     sel = cadv(container)
-    return (P(title, f"cAdvisor metrics for container \"{container}\" in $namespace (OTel-collector re-export only, so nothing is double counted). Right axis: working-set bytes, average and hottest pod.",
+    return (P(title, f"cAdvisor metrics for container \"{container}\" in $namespace (OTel-collector re-export "
+                     "only, so nothing is double counted). Right axis: working-set bytes, average and hottest "
+                     "pod.",
               unit="short", runit="bytes")
             .q(f"sum(rate(container_cpu_usage_seconds_total{{{sel}}}[{RI}]))", "CPU cores (fleet)")
             .q(f"avg(sum by (pod) (container_memory_working_set_bytes{{{sel}}}))", "Working set (avg pod)", right=True)
@@ -239,7 +264,8 @@ def cadvisor(title, container):
 
 # --- kafka ---
 def kafka_consume():
-    return (P("Replayer consumer: read vs committed (records/s)", "Kafka records read and committed by the replayers, and commit resolutions by outcome, per second.", unit="ops")
+    return (P("Replayer consumer: read vs committed (records/s)", "Kafka records read and committed by the replayers, "
+                                                                  "and commit resolutions by outcome, per second.", unit="ops")
             .q(rate("kafkaSourceRecordsRead_records_total"), "Read/s")
             .q(rate("kafkaSourceRecordsCommitted_records_total"), "Committed/s")
             .q(f"sum by (outcome) (rate(kafkaSourceCommitResolutions_events_total[{RI}]))", "Commit resolutions/s {{outcome}}"))
@@ -247,10 +273,13 @@ def kafka_consume():
 
 def kafka_backlog():
     return (P("Kafka backlog behind the replayers (records)",
-              "Unread lag = end offset minus position over each replayer's assigned partitions (kafkaSourceConsumerLag), summed across the fleet; uncommitted backlog adds records the replayers hold but have not committed. Right axis: assigned partitions whose lag is unknown." + STALE,
+              "Unread lag = end offset minus position over each replayer's assigned partitions (kafkaSourceConsumerLag), "
+              "summed across the fleet; uncommitted backlog adds records the replayers hold but have not committed. "
+              "Right axis: assigned partitions whose lag is unknown." + STALE,
               unit="short", runit="short")
             .q("sum(kafkaSourceConsumerLag_records)", "Unread lag (fleet)")
-            .q("sum(kafkaSourceConsumerLag_records) + sum(kafkaSourceRecordsOutstanding_records)", "Uncommitted backlog = unread + held (fleet)")
+            .q("sum(kafkaSourceConsumerLag_records) + sum(kafkaSourceRecordsOutstanding_records)", "Uncommitted backlog = unread + "
+                                                                                                   "held (fleet)")
             .q("max(kafkaSourceMaxPartitionLag_records)", "Largest single-partition lag")
             .q("sum(kafkaSourceLagUnknownPartitions_partitions)", "Partitions with unknown lag", right=True))
 
@@ -258,7 +287,8 @@ def kafka_backlog():
 def kafka_commit_heads():
     g = "kafkaSourceOldestCommitHeadAge_milliseconds"
     return (P("Commit-head age (seconds since broker append)",
-              "Age of the oldest uncommitted commit head on any partition (max) and the median across replayer processes; right axis: partitions whose head has been held for more than 5 minutes." + STALE,
+              "Age of the oldest uncommitted commit head on any partition (max) and the median across replayer "
+              "processes; right axis: partitions whose head has been held for more than 5 minutes." + STALE,
               unit="s", runit="short")
             .q(f"max({g}) / 1000", "Oldest head (any pod)")
             .q(f"quantile(0.5, max by (exported_instance) ({g})) / 1000", "Oldest head per pod (p50 across pods)")
@@ -266,7 +296,8 @@ def kafka_commit_heads():
 
 
 def kafka_rebalance():
-    p = P("Consumer-group churn (per minute)", "Consumer-group churn counter increases per minute (rate × 60), plus the fleet total of commit-uncertain partitions (gauge)." + STALE, unit="short")
+    p = P("Consumer-group churn (per minute)", "Consumer-group churn counter increases per minute (rate × 60), "
+                                               "plus the fleet total of commit-uncertain partitions (gauge)." + STALE, unit="short")
     for m, lab in [("rebalanceCallbackCount_total", "Rebalance callbacks"),
                    ("kafkaSourceGenerationsRetired_total", "Generations retired"),
                    ("kafkaSourceRevocationsReachingDeadline_total", "Revocations reaching deadline"),
@@ -278,7 +309,8 @@ def kafka_rebalance():
 
 
 def kafka_poll():
-    return (P("Kafka poll and commit timing (mean ms)", "Windowed means (histogram sum/count rates) plus p95 poll duration." + TOPB, unit="ms")
+    return (P("Kafka poll and commit timing (mean ms)", "Windowed means (histogram sum/count rates) plus p95 "
+                                                        "poll duration." + TOPB, unit="ms")
             .q(mean("kafkaPollDuration_milliseconds"), "Poll")
             .q(p95("kafkaPollDuration_milliseconds"), "Poll p95")
             .q(mean("commitDuration_milliseconds"), "Commit")
@@ -289,7 +321,8 @@ def kafka_brokers():
     w = f'sum by (pod, device) (rate(container_fs_writes_bytes_total{{{cadv("kafka")}}}[{RI}]))'
     r = f'sum by (pod, device) (rate(container_fs_reads_bytes_total{{{cadv("kafka")}}}[{RI}]))'
     return (P("Kafka broker CPU and disk (EBS) throughput",
-              "Broker CPU cores (fleet) and cAdvisor filesystem throughput for the kafka containers; right axis MiB/s, fleet totals and the busiest (pod, device) volume.",
+              "Broker CPU cores (fleet) and cAdvisor filesystem throughput for the kafka containers; right axis "
+              "MiB/s, fleet totals and the busiest (pod, device) volume.",
               unit="short", runit="suffix: MiB/s")
             .q(f"sum(rate(container_cpu_usage_seconds_total{{{cadv('kafka')}}}[{RI}]))", "CPU cores (fleet)")
             .q(f"sum({w}) / {MIB}", "Disk writes (fleet)", right=True)
@@ -336,7 +369,8 @@ def intake_demand():
 
 
 def intake_framing():
-    return (P("Source response framing (per second)", "How captured source requests/responses were reconstituted and framed, per second.", unit="ops")
+    return (P("Source response framing (per second)", "How captured source requests/responses were reconstituted "
+                                                      "and framed, per second.", unit="ops")
             .q(rate("replayIntakeRequestsReconstituted_requests_total"), "Requests reconstituted")
             .q(rate("replayIntakeResponsesProvenComplete_responses_total"), "Responses proven complete")
             .q(rate("replayIntakeResponsesUnprovenComplete_responses_total"), "Responses unproven complete")
@@ -345,7 +379,8 @@ def intake_framing():
 
 
 def intake_age():
-    return (P("Oldest work (hottest pod, seconds)", "Age of the oldest replay context, oldest held Kafka record, and oldest context of any activity on the hottest process." + STALE, unit="s")
+    return (P("Oldest work (hottest pod, seconds)", "Age of the oldest replay context, oldest held Kafka record, "
+                                                    "and oldest context of any activity on the hottest process." + STALE, unit="s")
             .q("max(replayOldestContextAge_milliseconds) / 1000", "Oldest context")
             .q("max(replayOldestKafkaRecordAge_milliseconds) / 1000", "Oldest Kafka record")
             .q("max(replayOldestContextAgeByActivity_milliseconds) / 1000", "Oldest by any activity"))
@@ -357,13 +392,15 @@ def contexts_by_activity():
 
 
 def ops_by_type():
-    return (P("Owner operations by type (fleet total)", "Fleet total of active owner operations by operation type." + STALE, unit="short")
+    return (P("Owner operations by type (fleet total)", "Fleet total of active owner operations by operation "
+                                                        "type." + STALE, unit="short")
             .q("sum by (operationType) (replayActiveOwnerOperationsByType_operations)", "{{operationType}}"))
 
 
 # --- target ---
 def target_latency():
-    p = P("Replayer → target latency (mean seconds)", "Windowed means (histogram sum/count rates) of each target-request phase, plus p95 target transaction." + TOPB, unit="s")
+    p = P("Replayer → target latency (mean seconds)", "Windowed means (histogram sum/count rates) of each target-request "
+                                                      "phase, plus p95 target transaction." + TOPB, unit="s")
     p.q(mean("targetTransactionDuration_milliseconds", 1000), "Target transaction")
     p.q(p95("targetTransactionDuration_milliseconds", 1000), "Target transaction p95")
     for h, lab in [("requestConnectingDuration", "Connect"), ("requestSendingDuration", "Send"),
@@ -373,7 +410,8 @@ def target_latency():
 
 
 def target_connections():
-    return (P("Target connections", "Open target connections (fleet total gauge); right axis: connection lifecycle events per second." + STALE, unit="short", runit="ops")
+    return (P("Target connections", "Open target connections (fleet total gauge); right axis: connection lifecycle "
+                                    "events per second." + STALE, unit="short", runit="ops")
             .q("sum(activeTargetConnections)", "Open target connections (fleet)")
             .q(rate("connectionsOpened_total"), "Opened/s", right=True)
             .q(rate("connectionsClosedCount_total"), "Closed/s", right=True)
@@ -382,7 +420,9 @@ def target_connections():
 
 
 def target_permits():
-    return (P("Target permits and retries", "Active and pending target-attempt permits (fleet totals); right axis: retries, exhausted retries and attempts without a response, per second." + STALE,
+    return (P("Target permits and retries", "Active and pending target-attempt permits (fleet totals); right "
+                                            "axis: retries, exhausted retries and attempts without a response, "
+                                            "per second." + STALE,
               unit="short", runit="ops")
             .q("sum(targetAttemptPermitsActive_permits)", "Permits active (fleet)")
             .q("sum(targetAttemptPermitAcquisitionsPending_requests)", "Permits pending (fleet)")
@@ -393,14 +433,18 @@ def target_permits():
 
 # --- correctness ---
 def status_match_pct():
-    return (P("Status-code match % (includes missing source responses)", "Matching tuples divided by all tuples, including tuples without a source response.", unit="percent", mx=100)
+    return (P("Status-code match % (includes missing source responses)", "Matching tuples divided by all tuples, "
+                                                                         "including tuples without a source response.", unit="percent", mx=100)
             .q(MATCH_PCT, "Match %"))
 
 
 def status_mismatches():
     e = (f'label_replace(sum by (method, sourceStatusCode, targetStatusCode) (rate(tupleComparison_total{{statusCodesMatch="false"}}[{RI}])), '
          '"sourceStatusCode", "no source response", "sourceStatusCode", "")')
-    return (P("Status-code mismatches per second (source → target)", "Mismatched tuples per second by method and source → target status-code class (stacked); tuples without a source response are labelled as such.",
+    return (P("Status-code mismatches per second (source → target)", "Mismatched tuples per second by method "
+                                                                     "and source → target status-code class (stacked); "
+                                                                     "tuples without a source response are labelled "
+                                                                     "as such.",
               unit="ops", stacked=True)
             .q(e, "{{method}} {{sourceStatusCode}} → {{targetStatusCode}}"))
 
@@ -412,21 +456,26 @@ def status_matches():
 
 # --- tuples ---
 def tuple_flow():
-    return (P("Tuple durability (S3)", "Tuple writes accepted and made durable per second; right axis: writes pending (fleet total)." + STALE, unit="ops", runit="short")
+    return (P("Tuple durability (S3)", "Tuple writes accepted and made durable per second; right axis: writes "
+                                       "pending (fleet total)." + STALE, unit="ops", runit="short")
             .q(rate("tupleDurabilityWritesAccepted_writes_total"), "Accepted/s")
             .q(rate("tupleDurabilityWritesDurable_writes_total"), "Durable/s")
             .q("sum(tupleDurabilityWritesPending_writes)", "Pending (fleet)", right=True))
 
 
 def tuple_latency():
-    return (P("Tuple durability latency (seconds)", "Windowed mean and p95 tuple write latency, and the oldest context still comparing results (pending tuple) on the hottest process." + TOPB, unit="s")
+    return (P("Tuple durability latency (seconds)", "Windowed mean and p95 tuple write latency, and the oldest "
+                                                    "context still comparing results (pending tuple) on the hottest "
+                                                    "process." + TOPB, unit="s")
             .q(mean("tupleDurabilityWriteLatency_milliseconds", 1000), "Mean write latency")
             .q(p95("tupleDurabilityWriteLatency_milliseconds", 1000), "p95 write latency")
-            .q('max(replayOldestContextAgeByActivity_milliseconds{activity="comparingResults"}) / 1000', "Oldest pending tuple (hottest pod)"))
+            .q('max(replayOldestContextAgeByActivity_milliseconds{activity="comparingResults"}) / 1000', "Oldest pending tuple (hottest "
+                                                                                                         "pod)"))
 
 
 def tuple_errors():
-    p = P("Tuple / S3 faults (per minute)", "Tuple and S3 fault counter increases per minute (rate × 60); zero when a counter has never incremented.", unit="short")
+    p = P("Tuple / S3 faults (per minute)", "Tuple and S3 fault counter increases per minute (rate × 60); zero "
+                                            "when a counter has never incremented.", unit="short")
     for m, lab in [("tupleSinkUploadRetryAttempts_retries_total", "S3 upload retries"),
                    ("tupleSinkUploadRecoveries_objects_total", "S3 upload recoveries"),
                    ("tupleDurabilityRetries_retries_total", "Outer tuple retries"),
@@ -438,12 +487,14 @@ def tuple_errors():
 
 
 def resources_owned():
-    return (P("Replayer owned payload memory (fleet MiB)", "Fleet total of payload bytes owned by replayer resources, by resource type." + STALE, unit="bytes")
+    return (P("Replayer owned payload memory (fleet MiB)", "Fleet total of payload bytes owned by replayer resources, "
+                                                           "by resource type." + STALE, unit="bytes")
             .q("sum by (resourceType) (resourceOwnedBytes_bytes)", "{{resourceType}}"))
 
 
 def fatal():
-    p = P("Replayer invariant and fatal failures (per minute)", "Fatal / safety counter increases per minute (rate × 60); zero when a counter has never incremented.", unit="short")
+    p = P("Replayer invariant and fatal failures (per minute)", "Fatal / safety counter increases per minute "
+                                                                "(rate × 60); zero when a counter has never incremented.", unit="short")
     for m, lab in [("replayFatalFailures_failures_total", "Fatal failures"),
                    ("replayIntakeCaptureProtocolViolations_violations_total", "Capture protocol violations"),
                    ("resourceOwnershipInvariantFailures_failures_total", "Ownership invariant failures"),
@@ -460,17 +511,7 @@ NOTE = ("**How to read this dashboard.** Prometheus twin of the CloudWatch *capt
         "panels are CloudWatch-only. Proxy panels are empty when the capture proxy is scaled to 0.")
 
 
-def layout():
-    ps, y = [], 0
-    ps.append(text("", NOTE, 0, y, 24, 2)); y += 2
-    x = 0
-    for p, wd in zip(kpis(), [3, 4, 3, 3, 3, 4]):
-        ps.append(p.build(x, y, wd, 3)); x += wd
-    ps.append(kpi_target_text(x, y, 4, 3)); y += 3
-    ps.append(row("End-to-end flow", y)); y += 1
-    for i, b in enumerate([flow_requests, flow_bytes, flow_lag]):
-        ps.append(b().build(i * 8, y, 8, 7))
-    y += 7
+def layout_grid(ps, y):
     sk = skews()
     grid = [
         ("Throughput", [proxy_publish(), kafka_consume(), intake_framing(), target_connections()]),
@@ -482,7 +523,8 @@ def layout():
                      cadvisor("Replayer CPU and memory", "replayer"), kafka_poll()]),
     ]
     for gi, (name, cells) in enumerate(grid):
-        ps.append(row(f"{name} — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target", y)); y += 1
+        ps.append(row(f"{name} — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target", y))
+        y += 1
         if gi == 0:
             for i, h in enumerate(["Capture proxy", "Kafka → replayer consumer", "Replayer intake", "Replayer → target"]):
                 ps.append(header(f"### {h}", i * 6, y, 6))
@@ -494,14 +536,35 @@ def layout():
             else:
                 ps.append(c.build(i * 6, y, 6, 6))
         y += 6
-    ps.append(row("Correctness and result tuples", y)); y += 1
+    return y
+
+
+def layout():
+    ps, y = [], 0
+    ps.append(text("", NOTE, 0, y, 24, 2))
+    y += 2
+    x = 0
+    for p, wd in zip(kpis(), [3, 4, 3, 3, 3, 4]):
+        ps.append(p.build(x, y, wd, 3))
+        x += wd
+    ps.append(kpi_target_text(x, y, 4, 3))
+    y += 3
+    ps.append(row("End-to-end flow", y))
+    y += 1
+    for i, b in enumerate([flow_requests, flow_bytes, flow_lag]):
+        ps.append(b().build(i * 8, y, 8, 7))
+    y += 7
+    y = layout_grid(ps, y)
+    ps.append(row("Correctness and result tuples", y))
+    y += 1
     for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
         ps.append(b().build(i * 8, y, 8, 6))
     y += 6
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
         ps.append(b().build(i * 8, y, 8, 6))
     y += 6
-    ps.append(row("Source cluster and replayer internals", y)); y += 1
+    ps.append(row("Source cluster and replayer internals", y))
+    y += 1
     ps.append(text("Source domain health (SOURCE_DOMAIN)", CW_ONLY.format(extra="", which="source"), 0, y, 6, 6))
     for i, b in enumerate([contexts_by_activity, ops_by_type, resources_owned], 1):
         ps.append(b().build(i * 6, y, 6, 6))
@@ -540,7 +603,7 @@ def main(out):
     # Helm would treat {{ }} as template actions; Grafana legend placeholders are unicode-escaped instead.
     body = body.replace("{{", "\\u007b\\u007b").replace("}}", "\\u007d\\u007d")
     json.loads(body)
-    indented = "\n".join(("    " + l) if l else l for l in body.splitlines())
+    indented = "\n".join(("    " + line) if line else line for line in body.splitlines())
     head = ("{{- if .Values.metrics.enabled }}\napiVersion: v1\nkind: ConfigMap\nmetadata:\n"
             "  name: capture-replay-observability-dashboard\n  labels:\n    grafana_dashboard: \"1\"\ndata:\n"
             "  capture-replay-observability.json: |\n")

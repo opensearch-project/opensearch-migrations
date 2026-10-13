@@ -39,9 +39,11 @@ public final class TestLogAppender extends AbstractAppender implements AutoClose
         );
         logger = (org.apache.logging.log4j.core.Logger) LogManager.getLogger(loggerName);
         previousLevel = logger.getLevel();
-        logger.setLevel(Level.ALL);
         start();
+        // Adding an appender gives the logger its own LoggerConfig and refreshes every logger from configuration,
+        // which would discard a level set before it; raise the level only once the appender is in place.
         logger.addAppender(this);
+        logger.setLevel(Level.ALL);
     }
 
     @Override

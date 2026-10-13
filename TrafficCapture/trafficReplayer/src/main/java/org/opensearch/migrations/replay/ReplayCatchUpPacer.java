@@ -34,6 +34,8 @@ import org.apache.kafka.common.TopicPartition;
 public final class ReplayCatchUpPacer {
     public static final double DEFAULT_CATCH_UP_FACTOR = 2.0;
 
+    // The warnings target compiler-generated members of this private anchor value.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     private record Anchor(long generationSequence, Instant anchorInstant, Instant anchorScheduledTime) {}
 
     private final double catchUpFactor;

@@ -59,6 +59,8 @@ public class S3TupleSink implements TupleSink {
     // shutdown), preserving the explicit IllegalStateException behavior from the accept-after-close fix.
     private final AtomicBoolean closeRequested = new AtomicBoolean();
 
+    // The warnings target compiler-generated members of this private queue entry.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     private record QueuedTask(Runnable task, CompletableFuture<Void> futureToFailOnReject) {}
 
     // Callers enqueue and wake the worker only when no drain is pending, so a busy worker takes a

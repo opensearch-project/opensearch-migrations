@@ -76,6 +76,13 @@ public final class ObservedRecordCommitQueue {
         }
     }
 
+    private static RecordState stateOf(Entry entry) {
+        if (entry.commitIneligible) {
+            return RecordState.COMMIT_INELIGIBLE;
+        }
+        return entry.completed ? RecordState.PROCESSING_COMPLETE : RecordState.PROCESSING;
+    }
+
     private final PartitionGenerationId generation;
     private final OwnerThreadGuard ownerThreadGuard =
         new OwnerThreadGuard("observed record commit queue");
@@ -235,12 +242,7 @@ public final class ObservedRecordCommitQueue {
         ownerThreadGuard.requireOwnerThread();
         var head = observedRecords.peekFirst();
         var states = new LinkedHashMap<KafkaRecordId, RecordState>();
-        observedRecords.forEach(entry -> states.put(
-            entry.recordId,
-            entry.commitIneligible
-                ? RecordState.COMMIT_INELIGIBLE
-                : entry.completed ? RecordState.PROCESSING_COMPLETE : RecordState.PROCESSING
-        ));
+        observedRecords.forEach(entry -> states.put(entry.recordId, stateOf(entry)));
         return new Snapshot(
             generation,
             observedRecords.size(),

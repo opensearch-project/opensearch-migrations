@@ -170,15 +170,36 @@
                         "MA_QUALIFIER",
                         {
                             "id": "m1",
-                            "stat": "Average",
+                            "stat": "Sum",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "lagBetweenSourceAndTargetRequests",
+                        "OTelLib",
+                        "replayer",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "SampleCount",
                             "visible": false
                         }
                     ],
                     [
                         {
-                            "expression": "m1 / 1000",
+                            "expression": "m1 / m2",
+                            "label": "lagBetweenSourceAndTargetRequests mean",
+                            "id": "e3",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e3 / 1000",
                             "label": "Mean lag (s)",
-                            "id": "e2",
+                            "id": "e4",
                             "visible": true
                         }
                     ]
@@ -208,24 +229,46 @@
                         "MA_QUALIFIER",
                         {
                             "id": "m1",
-                            "stat": "Average",
+                            "stat": "Sum",
+                            "visible": false,
+                            "period": 300
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "lagBetweenSourceAndTargetRequests",
+                        "OTelLib",
+                        "replayer",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "SampleCount",
                             "visible": false,
                             "period": 300
                         }
                     ],
                     [
                         {
-                            "expression": "m1 / 1000",
-                            "label": "lag s",
-                            "id": "e2",
+                            "expression": "m1 / m2",
+                            "label": "lagBetweenSourceAndTargetRequests mean",
+                            "id": "e3",
                             "visible": false
                         }
                     ],
                     [
                         {
-                            "expression": "IF(DIFF_TIME(e2) > PERIOD(e2), 0/0, 1 - RATE(e2))",
+                            "expression": "e3 / 1000",
+                            "label": "lag s",
+                            "id": "e4",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(DIFF_TIME(e4) > PERIOD(e4), 0/0, 1 - RATE(e4))",
                             "label": "Speedup",
-                            "id": "e3",
+                            "id": "e5",
                             "visible": true
                         }
                     ]

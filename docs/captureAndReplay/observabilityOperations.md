@@ -273,8 +273,10 @@ jitter or a controller-side join-rate limit. For large fleet increases, raise th
 replica count in batches and wait for assignments to stabilize before the next
 batch. During the ramp, require the degraded gauge to return to zero, retry-attempt
 growth to stop, and broker coordinator and storage saturation signals to remain
-healthy. Cooperative sticky assignment limits partition movement after membership
-changes, but does not remove the initial join/coordinator burst.
+healthy. The quiet-window assignor keeps surviving workers' partitions and defers a
+full rebalance until membership stops growing for `kafkaQuietWindowMs`, so new
+replicas stay idle during a ramp; it does not remove the initial join/coordinator
+burst.
 
 Per-attempt target failures, retry exhaustion, source-connection expiration, and
 positive-byte post-response-boundary observations can scale with workload volume

@@ -327,6 +327,8 @@ public class ReplayerProcessExitTest {
             "--tuple-max-per-file", "1",
             "--tuple-max-buffer-seconds", "1",
             "--speedup-factor", "10",
+            // A fresh group waits one quiet window before its first assignment; the default minute outlasts the run.
+            "--kafka-quiet-window-ms", "2000",
         };
 
         log.info("Launching replayer: {}", Arrays.toString(args));

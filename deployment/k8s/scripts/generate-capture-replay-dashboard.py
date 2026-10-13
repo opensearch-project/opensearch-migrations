@@ -70,6 +70,18 @@ class W:
             out.append(self.e(mx, f"{label} (hottest pod)", **opts))
         return out
 
+    def unitless_mean(self, name, lib="replayer", period=None):
+        """The mean of a histogram as a unitless series.
+
+        CloudWatch carries the source metric's unit (e.g. Milliseconds) through metric math, and
+        single-value tiles then auto-scale a rescaled value as if it were still in that unit. Dividing
+        Sum by the unit-free SampleCount yields the same mean without a unit.
+        """
+        extra = {"period": period} if period else {}
+        total = self.m(name, "Sum", lib, **extra)
+        count = self.m(name, "SampleCount", lib, **extra)
+        return self.e(f"{total} / {count}", f"{name} mean", visible=False)
+
     def avg(self, name, label, lib="replayer", scale=1, **opts):
         a = self.m(name, "Average", lib)
         return self.e(a if scale == 1 else f"{a} / {scale}", label, **opts)
@@ -134,10 +146,11 @@ def kpis():
     w.e(f"(SUM({a}) + FILL(SUM({b}), 0)) / 60", "Replayed tuples/s")
     out.append(w)
     w = W("Mean replay lag (s)", "singleValue")
-    w.avg("lagBetweenSourceAndTargetRequests", "Mean lag (s)", scale=1000)
+    lag = w.unitless_mean("lagBetweenSourceAndTargetRequests")
+    w.e(f"{lag} / 1000", "Mean lag (s)")
     out.append(w)
     w = W("Actual speedup (5 min)", "singleValue", period=300)
-    lag = w.m("lagBetweenSourceAndTargetRequests", "Average", period=300)
+    lag = w.unitless_mean("lagBetweenSourceAndTargetRequests", period=300)
     s = w.e(f"{lag} / 1000", "lag s", visible=False)
     w.e(f"IF(DIFF_TIME({s}) > PERIOD({s}), 0/0, 1 - RATE({s}))", "Speedup")
     out.append(w)
@@ -162,7 +175,8 @@ def kpis():
 def flow_requests():
     w = W("Requests through the pipeline (per second)")
     w.rate("fullRequest", "Proxy requests captured/s", lib="captureProxy")
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,recordKind}} MetricName=\"capturePublishingRecordsAccepted\" OTelLib=\"captureProxy\" qualifier=\"{Q}\"', 'Sum', 60)) / 60",
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,recordKind}} MetricName=\"capturePublishingRecordsAccepted\" OTelLib=\"captureProxy\" "
+        f"qualifier=\"{Q}\"', 'Sum', 60)) / 60",
         "Proxy Kafka records published/s")
     w.rate("kafkaSourceRecordsRead", "Replayer Kafka records read/s")
     w.rate("targetTransactionCount", "Replayer target transactions/s")
@@ -173,11 +187,13 @@ def flow_requests():
 
 def flow_bytes():
     w = W("Bytes through the pipeline (MiB/s)")
-    w.e(f"SUM(SEARCH('{{AWS/NetworkELB,LoadBalancer}} MetricName=\"ProcessedBytes\" capturep', 'Sum', 60)) / 60 / {MIB}",
+    w.e(f"SUM(SEARCH('{{AWS/NetworkELB,LoadBalancer}} MetricName=\"ProcessedBytes\" capturep', 'Sum', 60)) / 60 "
+        f"/ {MIB}",
         "Capture NLB processed (both directions)")
     w.rate("bytesRead", "Proxy request bytes (client → proxy)", lib="captureProxy", scale=MIB)
     w.rate("bytesWritten", "Proxy response bytes (proxy → client)", lib="captureProxy", scale=MIB)
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,recordKind}} MetricName=\"capturePublishingBytesAccepted\" OTelLib=\"captureProxy\" qualifier=\"{Q}\"', 'Sum', 60)) / 60 / {MIB}",
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,recordKind}} MetricName=\"capturePublishingBytesAccepted\" OTelLib=\"captureProxy\" "
+        f"qualifier=\"{Q}\"', 'Sum', 60)) / 60 / {MIB}",
         "Proxy → Kafka published")
     w.rate("kafkaBytesRead", "Kafka → replayer read", scale=MIB)
     w.rate("bytesWrittenToTarget", "Replayer → target requests", scale=MIB)
@@ -189,7 +205,7 @@ def flow_lag():
     w = W("Replay lag, schedule slip and speedup", period=60,
           yleft={"label": "seconds", "showUnits": False}, yright={"label": "speedup ×", "showUnits": False})
     lag = w.m("lagBetweenSourceAndTargetRequests", "Average")
-    s = w.e(f"{lag} / 1000", "Mean replay lag (s)")
+    w.e(f"{lag} / 1000", "Mean replay lag (s)")
     w.avg("scheduleLag", "Mean schedule slip (s)", scale=1000)
     w.e("TIME_SERIES(CATCHUP_FLOOR_SECONDS)", "Catch-up floor (s)", color="#7f7f7f")
     lag5 = w.m("lagBetweenSourceAndTargetRequests", "Average", period=300)
@@ -211,11 +227,16 @@ def flow_eta():
 # --- capture proxy ---------------------------------------------------------------------------
 def proxy_publish():
     w = W("Proxy → Kafka publishing", yright={"label": "awaiting ack", "showUnits": False})
-    sr = lambda n, st: f"SUM(SEARCH('{{{NS},OTelLib,qualifier,recordKind}} MetricName=\"{n}\" OTelLib=\"captureProxy\" qualifier=\"{Q}\"', '{st}', 60))"
+
+    def sr(n, st):
+        return (f"SUM(SEARCH('{{{NS},OTelLib,qualifier,recordKind}} MetricName=\"{n}\" OTelLib=\"captureProxy\" "
+                f"qualifier=\"{Q}\"', '{st}', 60))")
     w.e(f"{sr('capturePublishingRecordsAccepted', 'Sum')} / 60", "Records accepted/s")
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,outcome,qualifier,recordKind}} MetricName=\"capturePublishingCompletions\" OTelLib=\"captureProxy\" qualifier=\"{Q}\" outcome=\"acknowledged\"', 'Sum', 60)) / 60", "Acknowledged/s")
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,outcome,qualifier,recordKind}} MetricName=\"capturePublishingCompletions\" "
+        f"OTelLib=\"captureProxy\" qualifier=\"{Q}\" outcome=\"acknowledged\"', 'Sum', 60)) / 60", "Acknowledged/s")
     w.e(f"{sr('capturePublishingRecordsAwaitingAcknowledgement', 'Sum')} / 60", "Records awaiting ack (fleet)", yAxis="right")
-    w.e(f"{sr('capturePublishingRecordsAwaitingAcknowledgement', 'Maximum')}", "Records awaiting ack (hottest pod)", yAxis="right")
+    w.e(f"{sr('capturePublishingRecordsAwaitingAcknowledgement', 'Maximum')}", "Records awaiting ack (hottest "
+                                                                               "pod)", yAxis="right")
     return w
 
 
@@ -245,14 +266,17 @@ def proxy_errors():
                    ("gatheringResponseExceptionCount", "Source response exceptions"),
                    ("kafkaCommitExceptionCount", "Kafka commit exceptions")]:
         if lab is None:
-            w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,reason}} MetricName=\"{n}\" OTelLib=\"captureProxy\" qualifier=\"{Q}\"', 'Sum', 60))",
+            w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,reason}} MetricName=\"{n}\" OTelLib=\"captureProxy\" qualifier=\"{Q}\"', "
+                "'Sum', 60))",
                 "Publisher failures")
         else:
             s = w.m(n, "Sum", "captureProxy")
             w.e(f"FILL({s}, 0)", lab)
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,outcome,qualifier,recordKind}} MetricName=\"capturePublishingCompletions\" OTelLib=\"captureProxy\" qualifier=\"{Q}\" outcome=\"failed\"', 'Sum', 60))",
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,outcome,qualifier,recordKind}} MetricName=\"capturePublishingCompletions\" "
+        f"OTelLib=\"captureProxy\" qualifier=\"{Q}\" outcome=\"failed\"', 'Sum', 60))",
         "Failed publications")
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,captureActivationId,mode,processId,qualifier,sourceForwardingContinued}} MetricName=\"captureGapActive\" OTelLib=\"captureProxy\" qualifier=\"{Q}\"', 'Maximum', 60))",
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,captureActivationId,mode,processId,qualifier,sourceForwardingContinued}} "
+        f"MetricName=\"captureGapActive\" OTelLib=\"captureProxy\" qualifier=\"{Q}\"', 'Maximum', 60))",
         "Processes with an active capture gap")
     return w
 
@@ -296,7 +320,8 @@ def kafka_rebalance():
                    ("kafkaSourceRecordsCancelled", "Records cancelled")]:
         s = w.m(n, "Sum")
         w.e(f"FILL({s}, 0)", lab)
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,cause,qualifier}} MetricName=\"kafkaSourceRecordsAbandonedAtRevocation\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60))",
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,cause,qualifier}} MetricName=\"kafkaSourceRecordsAbandonedAtRevocation\" "
+        f"OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60))",
         "Records abandoned at revocation")
     u = w.m("replayKafkaCommitUncertainPartitions", "Sum")
     w.e(f"FILL({u}, 0) / PERIOD({u})", "Commit-uncertain partitions (fleet)")
@@ -407,21 +432,24 @@ def intake_age():
     w = W("Oldest work (hottest pod, seconds)")
     w.e(f"{w.m('replayOldestContextAge', 'Maximum')} / 1000", "Oldest context")
     w.e(f"{w.m('replayOldestKafkaRecordAge', 'Maximum')} / 1000", "Oldest Kafka record")
-    w.e(f"MAX(SEARCH('{{{NS},OTelLib,activity,qualifier}} MetricName=\"replayOldestContextAgeByActivity\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Maximum', 60)) / 1000",
+    w.e(f"MAX(SEARCH('{{{NS},OTelLib,activity,qualifier}} MetricName=\"replayOldestContextAgeByActivity\" OTelLib=\"replayer\" "
+        f"qualifier=\"{Q}\"', 'Maximum', 60)) / 1000",
         "Oldest by any activity")
     return w
 
 
 def contexts_by_activity():
     w = W("Active contexts by activity (fleet total)")
-    w.e(f"SEARCH('{{{NS},OTelLib,activity,qualifier}} MetricName=\"replayActiveContextsByActivity\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60) / 60",
+    w.e(f"SEARCH('{{{NS},OTelLib,activity,qualifier}} MetricName=\"replayActiveContextsByActivity\" OTelLib=\"replayer\" "
+        f"qualifier=\"{Q}\"', 'Sum', 60) / 60",
         "${PROP('Dim.activity')}")
     return w
 
 
 def ops_by_type():
     w = W("Owner operations by type (fleet total)")
-    w.e(f"SEARCH('{{{NS},OTelLib,operationType,qualifier}} MetricName=\"replayActiveOwnerOperationsByType\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60) / 60",
+    w.e(f"SEARCH('{{{NS},OTelLib,operationType,qualifier}} MetricName=\"replayActiveOwnerOperationsByType\" OTelLib=\"replayer\" "
+        f"qualifier=\"{Q}\"', 'Sum', 60) / 60",
         "${PROP('Dim.operationType')}")
     return w
 
@@ -514,7 +542,8 @@ def tuple_flow():
 def tuple_latency():
     w = W("Tuple durability latency (seconds)")
     w.avg("tupleDurabilityWriteLatency", "Mean write latency", scale=1000)
-    w.e(f"MAX(SEARCH('{{{NS},OTelLib,activity,qualifier}} MetricName=\"replayOldestContextAgeByActivity\" OTelLib=\"replayer\" qualifier=\"{Q}\" activity=\"comparingResults\"', 'Maximum', 60)) / 1000",
+    w.e(f"MAX(SEARCH('{{{NS},OTelLib,activity,qualifier}} MetricName=\"replayOldestContextAgeByActivity\" OTelLib=\"replayer\" "
+        f"qualifier=\"{Q}\" activity=\"comparingResults\"', 'Maximum', 60)) / 1000",
         "Oldest pending tuple (hottest pod)")
     return w
 
@@ -525,7 +554,8 @@ def tuple_errors():
                    ("tupleDurabilityRetries", "Outer tuple retries"), ("tupleDurabilityWritesCancelled", "Writes cancelled")]:
         s = w.m(n, "Sum")
         w.e(f"FILL({s}, 0)", lab)
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,failureReason,qualifier}} MetricName=\"tupleDurabilityTerminalFailures\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60))",
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,failureReason,qualifier}} MetricName=\"tupleDurabilityTerminalFailures\" "
+        f"OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60))",
         "Terminal failures")
     r = w.m("tupleSinkUploadsRetrying", "Sum")
     w.e(f"FILL({r}, 0) / PERIOD({r})", "S3 objects awaiting retry (fleet, now)")
@@ -535,16 +565,20 @@ def tuple_errors():
 # --- process safety --------------------------------------------------------------------------
 def resources_owned():
     w = W("Replayer owned payload memory (fleet MiB)")
-    w.e(f"SEARCH('{{{NS},OTelLib,qualifier,resourceType}} MetricName=\"resourceOwnedBytes\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60) / 60 / {MIB}",
+    w.e(f"SEARCH('{{{NS},OTelLib,qualifier,resourceType}} MetricName=\"resourceOwnedBytes\" OTelLib=\"replayer\" "
+        f"qualifier=\"{Q}\"', 'Sum', 60) / 60 / {MIB}",
         "${PROP('Dim.resourceType')}")
     return w
 
 
 def fatal():
     w = W("Replayer invariant and fatal failures (per minute)")
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,reason}} MetricName=\"replayFatalFailures\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60))", "Fatal failures")
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier}} MetricName=\"replayIntakeCaptureProtocolViolations\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60))", "Capture protocol violations")
-    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,resourceType}} MetricName=\"resourceOwnershipInvariantFailures\" OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60))", "Ownership invariant failures")
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,reason}} MetricName=\"replayFatalFailures\" OTelLib=\"replayer\" "
+        f"qualifier=\"{Q}\"', 'Sum', 60))", "Fatal failures")
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier}} MetricName=\"replayIntakeCaptureProtocolViolations\" OTelLib=\"replayer\" "
+        f"qualifier=\"{Q}\"', 'Sum', 60))", "Capture protocol violations")
+    w.e(f"SUM(SEARCH('{{{NS},OTelLib,qualifier,resourceType}} MetricName=\"resourceOwnershipInvariantFailures\" "
+        f"OTelLib=\"replayer\" qualifier=\"{Q}\"', 'Sum', 60))", "Ownership invariant failures")
     s = w.m("replayIntakeStaleGenerationInputsIgnored", "Sum", dims=None)
     w.e(f"FILL({s}, 0)", "Stale-generation inputs ignored")
     return w
@@ -564,19 +598,25 @@ NOTE = ("**How to read this dashboard.** Rates are fleet totals per second. Gaug
 def layout_columns():
     """Stage per column (proxy | Kafka | replayer | target); each row compares one signal type across stages."""
     ws, y = [], 0
-    ws.append(text(NOTE, 0, y, 24, 2)); y += 2
+    ws.append(text(NOTE, 0, y, 24, 2))
+    y += 2
     k = kpis()
     widths = [3, 4, 3, 3, 3, 4, 4]
     x = 0
     for w, wd in zip(k, widths):
-        ws.append(w.widget(x, y, wd, 3)); x += wd
+        ws.append(w.widget(x, y, wd, 3))
+        x += wd
     y += 3
-    ws.append(text("## End-to-end flow", 0, y, 24)); y += 1
+    ws.append(text("## End-to-end flow", 0, y, 24))
+    y += 1
     for i, b in enumerate([flow_requests, flow_bytes, flow_lag]):
         ws.append(b().widget(i * 8, y, 8, 7))
     y += 7
-    ws.append(text("### Capture proxy", 0, y, 6)); ws.append(text("### Kafka → replayer consumer", 6, y, 6))
-    ws.append(text("### Replayer intake", 12, y, 6)); ws.append(text("### Replayer → target", 18, y, 6)); y += 1
+    ws.append(text("### Capture proxy", 0, y, 6))
+    ws.append(text("### Kafka → replayer consumer", 6, y, 6))
+    ws.append(text("### Replayer intake", 12, y, 6))
+    ws.append(text("### Replayer → target", 18, y, 6))
+    y += 1
     grid = [
         ("Throughput", [proxy_publish, kafka_consume, intake_framing, target_connections]),
         ("Backlog", [proxy_connections, kafka_backlog, intake_population, target_permits]),
@@ -590,14 +630,16 @@ def layout_columns():
         for i, b in enumerate(row):
             ws.append(b().widget(i * 6, y, 6, 6))
         y += 6
-    ws.append(text("## Correctness and result tuples", 0, y, 24)); y += 1
+    ws.append(text("## Correctness and result tuples", 0, y, 24))
+    y += 1
     for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
         ws.append(b().widget(i * 8, y, 8, 6))
     y += 6
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
         ws.append(b().widget(i * 8, y, 8, 6))
     y += 6
-    ws.append(text("## Source cluster and replayer internals", 0, y, 24)); y += 1
+    ws.append(text("## Source cluster and replayer internals", 0, y, 24))
+    y += 1
     for i, b in enumerate([source_domain, contexts_by_activity, ops_by_type, resources_owned]):
         ws.append(b().widget(i * 6, y, 6, 6))
     y += 6

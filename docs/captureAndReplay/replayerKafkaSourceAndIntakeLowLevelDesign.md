@@ -307,6 +307,12 @@ trade-off is made; later sections rely on it rather than restating it.
 
 ### 5.2 Assignment
 
+Which partitions a replayer receives, and when, is decided by the group's partition assignor. The
+replayer's default is the quiet-window assignor described in
+[Kafka Quiet-Window Assignor](replayerKafkaQuietWindowAssignorDesign.md). Its leader asks the
+owner loop, through `AssignorControl`, to call `enforceRebalance()` when a quiet-window deadline
+is due. Everything in this section applies equally to any cooperative assignor's result.
+
 Kafka does not preserve pause state across an assignment change. During
 `onPartitionsAssigned`, before Kafka may fetch from the resulting assignment,
 `KafkaSourceOwner` pauses every partition in `consumer.assignment()`.
@@ -837,7 +843,8 @@ early response completion.
 
 The capture observation containing a framed boundary remains intact as raw response evidence.
 Source output in later observations before the next request is ignored for that completed response,
-emits one WARN followed by DEBUG detail and bounded metrics, and creates no record association.
+emits bounded metrics plus a DEBUG `source_response_post_boundary_observation` event (TRACE for
+zero-byte observations), and creates no record association.
 This is a source-protocol anomaly rather than a capture-protocol violation; ordinary capture can
 faithfully record bytes emitted by a broken or hostile source.
 

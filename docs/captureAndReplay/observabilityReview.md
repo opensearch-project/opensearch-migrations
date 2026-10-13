@@ -8,8 +8,8 @@ Scope is observability only: logs, metrics, traces. Not correctness, not perform
   `dcf88fc9688cd6a8cb257d75873692a4b7839195`)
 - **Current verification base:** `upstream/main` at
   `1f39f539041df8fc8628d59540c802c9ca52be73`; branch HEAD
-  `7346ed974dca8e617e438be930bcef1d52380f43` plus the current remediation
-  working tree
+  `7346ed974` (pre-squash) plus the current remediation working tree; both are
+  carried in PR commit `2a1a1bb87` ("Restore capture/replay operational observability")
 - **Historical size reviewed:** 188 commits, 458 files, ~66.9k insertions /
   ~26.7k deletions
 - **Reviewed:** 2026-10-05
@@ -47,11 +47,12 @@ Scope is observability only: logs, metrics, traces. Not correctness, not perform
 ## Current remediation status
 
 The original findings are retained below as historical observations from the review
-baseline. They are not statements about the current production object graph. Commit
-`7346ed974` supplied the main remediation; the current working tree adds the
-second-opinion follow-ups for exact context membership, inner S3 retry observability,
-final gauge sampling, owner-operation type visibility, corrected operator surfaces
-and no-alert policy hardening.
+baseline. They are not statements about the current production object graph.
+Pre-squash commit `7346ed974` (carried in `2a1a1bb87`) supplied the main
+remediation; the current working tree adds the second-opinion follow-ups for
+exact context membership, inner S3 retry observability, final gauge sampling,
+owner-operation type visibility, corrected operator surfaces and no-alert policy
+hardening.
 
 | Finding | Current status | Production evidence and verification |
 |---|---|---|
@@ -138,7 +139,7 @@ state the current result.
 |---|---|
 | Severity | High |
 | Area | Replayer / buffer ownership |
-| Status | Remediated in `7346ed974`; production wiring and tests verified above. |
+| Status | Remediated in `2a1a1bb87`; production wiring and tests verified above. |
 
 At the historical review baseline, `ResourceOwnershipMetrics` had zero references
 outside its own class declaration and constructor — not even a test. The only way to
@@ -170,7 +171,7 @@ so `trackOwnership` is called on the real path.
 |---|---|
 | Severity | Low–Medium — misleading and unnecessary, but no production signal is lost |
 | Area | Replayer / owner-local asynchronous obligations |
-| Status | Remediated in `7346ed974`; registry behavior preserved and tested. |
+| Status | Remediated in `2a1a1bb87`; registry behavior preserved and tested. |
 
 At the historical review baseline, `OutstandingOperationRegistry` and `CountHook`
 should not have been judged as one feature.
@@ -270,7 +271,7 @@ boundary; do not patch or replace `CountHook`.
 |---|---|
 | Severity | High |
 | Area | Replayer / logging config |
-| Status | Remediated in `7346ed974`; dual-route test verified above. |
+| Status | Remediated in `2a1a1bb87`; dual-route test verified above. |
 
 The baseline registry-backed `ActiveContextMonitor` was the branch's only periodic
 stall detector. Its WARN output went to the `AllActiveWorkMonitor` logger, which was
@@ -302,7 +303,7 @@ Suggested fix: send monitor output to both `ReplayerLogFile` and the dedicated
 |---|---|
 | Severity | Medium — cheap now, breaking later |
 | Area | Replayer / metric names |
-| Status | Remediated in `7346ed974`; adapter and deployment tests verified above. |
+| Status | Remediated in `2a1a1bb87`; adapter and deployment tests verified above. |
 
 At the historical review baseline, `KafkaCommitStateMetrics` used unprefixed
 `snake_case`. Every other new metrics class used prefixed `camelCase`.
@@ -335,7 +336,7 @@ convention explicitly and migrate the others. Either way, write the convention d
 |---|---|
 | Severity | Medium |
 | Area | Replayer / request outcomes |
-| Status | Remediated in `7346ed974`; production names corrected in current surfaces. |
+| Status | Remediated in `2a1a1bb87`; production names corrected in current surfaces. |
 
 At the historical review baseline, `NoTargetResponseKind` — `READ_TIMEOUT`,
 `TRANSPORT_FAILURE`, `MISSING_HTTP_RESPONSE` — was produced in
@@ -371,7 +372,7 @@ attribute on the existing `tupleComparison` counter or on a new
 |---|---|
 | Severity | **High** for `CaptureRoutingState`, Medium for the rest |
 | Area | Capture proxy / Kafka offloader |
-| Status | Remediated in `7346ed974`; capture behavior tests verified above. |
+| Status | Remediated in `2a1a1bb87`; capture behavior tests verified above. |
 
 Unlike the replayer owners — which get count, duration and exception metrics free
 from span open/close — the capture-side state machines created no contexts at the
@@ -414,7 +415,7 @@ Evidence:
 |---|---|
 | Severity | Medium |
 | Area | Capture proxy / netty handler |
-| Status | Remediated in `7346ed974`; bounded reason metrics/events are tested. |
+| Status | Remediated in `2a1a1bb87`; bounded reason metrics/events are tested. |
 
 At the historical review baseline, `IncompleteRequestLimits` violations and
 max-connection-duration closes logged at WARN and closed the channel. There was no
@@ -443,7 +444,7 @@ by limit kind (bounded: `assemblyDuration`, `headerBytes`, `totalBytes`,
 |---|---|
 | Severity | Medium |
 | Area | Docs |
-| Status | Remediated in `7346ed974` plus current operator-surface corrections. |
+| Status | Remediated in `2a1a1bb87` plus current operator-surface corrections. |
 
 At the historical review baseline, no document enumerated the new metrics, their
 units, their attributes, or which ones were expected to return to zero.
@@ -486,7 +487,7 @@ See the [metric inventory](#appendix-a--new-metric-inventory) below as raw mater
 |---|---|
 | Severity | High — production lost context-level stall diagnosis |
 | Area | Replayer / context monitoring and logging |
-| Status | Remediated in `7346ed974`; exact-membership follow-up is in the current working tree. |
+| Status | Remediated in `2a1a1bb87`; exact-membership follow-up is in the current working tree. |
 
 Found while answering "why does `CountHook` exist?" (`O-2`).
 
@@ -676,7 +677,7 @@ Worth preserving explicitly so none of it gets refactored away:
 |---|---|
 | Severity | High |
 | Area | Capture and replay / logging |
-| Status | Remediated in `7346ed974` plus current S3 retry events; live gameday pending. |
+| Status | Remediated in `2a1a1bb87` plus current S3 retry events; live gameday pending. |
 
 At the historical review baseline, the drop in log sites was a material finding
 under the operating assumption that production traces may be disabled and logs are
@@ -825,8 +826,8 @@ Recommended default: keep the restart-scoped instance ID in logs and the OTel
 resource, but do not make it an implicit CloudWatch dimension on every fleet metric.
 
 Execution checkpoint (2026-10-06): upstream commit `a5705abb8` landed the
-`service.instance.id` metric-resource change and was incorporated through merge
-commit `a3275f79a` before telemetry wiring changed. The EKS application-metric
+`service.instance.id` metric-resource change and was incorporated through an `upstream/main` merge
+into this branch before telemetry wiring changed. The EKS application-metric
 pipeline removes `service.instance.id` before `resource_to_telemetry_conversion`;
 The console OTel pipeline test enforces that fleet-cardinality safeguard.
 `deployment/k8s:verifyCaptureReplayObservability` separately smoke-tests the rendered

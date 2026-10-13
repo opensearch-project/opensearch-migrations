@@ -4,41 +4,51 @@
 
 The Helm templates remain authoritative.  This check renders local and EKS
 variants, verifies that runtime cleanup precedes child-chart uninstall, and
-confirms that EKS install/delete operations consume the same rendered ACK
-Dashboard manifest.  It intentionally does not duplicate Dashboard names or
+confirms that EKS install/delete operations consume the same mounted ACK
+Dashboard manifest ConfigMap.  It intentionally does not duplicate Dashboard names or
 child-chart inventories.
 """
 
-import base64
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 
-APPLY_PAYLOAD = re.compile(
-    r"echo '([A-Za-z0-9+/=]+)' \| base64 -d \| kubectl apply -f -"
+DASHBOARD_MANIFESTS = "/dashboards/dashboards.yaml"
+APPLY_MANIFESTS = re.compile(r"kubectl apply -f " + re.escape(DASHBOARD_MANIFESTS))
+DELETE_MANIFESTS = re.compile(
+    r"kubectl delete -f " + re.escape(DASHBOARD_MANIFESTS) + r" --ignore-not-found --wait=true --timeout=\d+s"
 )
-DELETE_PAYLOAD = re.compile(
-    r"echo '([A-Za-z0-9+/=]+)' \|\s*"
-    r"base64 -d \|\s*"
-    r"kubectl delete -f - --ignore-not-found --wait=true --timeout=\d+s"
-)
+# Phase 1 keeps the S3 endpoint chart alive: the bucket-deletion hook runs after it, at a later weight.
+PHASE_ONE_UNINSTALL = "uninstall_all_charts_except fluent-bit localstack"
+
+# The lowest Kubernetes version the chart supports (Chart.yaml kubeVersion).
+KUBE_VERSION = "1.35.0"
+
+
+def rendered_documents(rendered):
+    """Split a multi-document helm template render into its YAML documents."""
+    return re.split(r"^---\s*$", rendered, flags=re.MULTILINE)
 
 
 def fail(message):
     raise RuntimeError(message)
 
 
-def render(chart, variant, *extra):
+def render(helm, chart, variant, *extra):
     result = subprocess.run(
         [
-            "helm",
+            helm,
             "template",
             f"uninstall-verification-{variant}",
             str(chart),
             "--namespace",
             "ma",
+            # Offline renders otherwise assume the client's built-in Kubernetes version, which for older Helm
+            # releases predates the chart's kubeVersion constraint.
+            "--kube-version",
+            KUBE_VERSION,
             *extra,
         ],
         stdout=subprocess.PIPE,
@@ -51,12 +61,12 @@ def render(chart, variant, *extra):
 
 
 def pre_delete_job(rendered, variant):
-    documents = re.split(r"^---\s*$", rendered, flags=re.MULTILINE)
+    documents = rendered_documents(rendered)
     matches = [
         document
         for document in documents
-        if 'name: uninstall-verification-' + variant + '-helm-uninstaller' in document
-        and '"helm.sh/hook": pre-delete' in document
+        if 'name: uninstall-verification-' + variant + '-helm-uninstaller' in document and
+        '"helm.sh/hook": pre-delete' in document
     ]
     if len(matches) != 1:
         fail(f"{variant} render has {len(matches)} pre-delete uninstall Jobs")
@@ -64,15 +74,26 @@ def pre_delete_job(rendered, variant):
 
 
 def named_pre_delete_job(rendered, name, variant):
-    documents = re.split(r"^---\s*$", rendered, flags=re.MULTILINE)
+    documents = rendered_documents(rendered)
     matches = [
         document
         for document in documents
-        if re.search(rf"(?m)^\s*name:\s*{re.escape(name)}\s*$", document)
-        and '"helm.sh/hook": pre-delete' in document
+        if re.search(rf"(?m)^\s*name:\s*{re.escape(name)}\s*$", document) and
+        '"helm.sh/hook": pre-delete' in document
     ]
     if len(matches) != 1:
         fail(f"{variant} render has {len(matches)} pre-delete Jobs named {name}")
+    return matches[0]
+
+
+def named_pre_install_job(rendered, name):
+    matches = [
+        document
+        for document in rendered_documents(rendered)
+        if f"name: {name}" in document and re.search(r'"helm\.sh/hook":\s*pre-install', document)
+    ]
+    if len(matches) != 1:
+        fail(f"Expected one rendered pre-install Job named {name}; found {len(matches)}")
     return matches[0]
 
 
@@ -109,16 +130,23 @@ def standalone_call_offset(script, name):
     return match.start()
 
 
-def dashboard_payloads(pattern, rendered):
-    payloads = []
-    for encoded in pattern.findall(rendered):
-        try:
-            decoded = base64.b64decode(encoded, validate=True).decode()
-        except (ValueError, UnicodeDecodeError) as error:
-            fail(f"Rendered Dashboard payload is invalid base64: {error}")
-        if re.search(r"^\s*kind:\s*Dashboard\s*$", decoded, re.MULTILINE):
-            payloads.append(decoded)
-    return payloads
+def manifest_config_map(rendered, variant):
+    documents = [
+        document
+        for document in rendered_documents(rendered)
+        if re.search(r"^kind:\s*ConfigMap\s*$", document, re.MULTILINE) and
+        f"name: uninstall-verification-{variant}-cloudwatch-dashboard-manifests" in document
+    ]
+    if len(documents) != 1:
+        fail(f"{variant} render has {len(documents)} Dashboard manifest ConfigMaps; expected one")
+    return documents[0]
+
+
+def mounts_dashboard_manifests(job, variant):
+    return (
+        f"name: uninstall-verification-{variant}-cloudwatch-dashboard-manifests" in job and
+        "mountPath: /dashboards" in job
+    )
 
 
 def validate_runtime_cleanup(job, variant):
@@ -173,7 +201,7 @@ def validate_runtime_cleanup(job, variant):
     )
     prepare_offset = standalone_call_offset(job, "prepare_release_for_uninstall")
     uninstall_offset = standalone_call_offset(
-        job, "uninstall_all_charts_except fluent-bit"
+        job, PHASE_ONE_UNINSTALL
     )
     if prepare_offset >= uninstall_offset:
         fail(f"{variant} pre-delete Job uninstalls child charts before runtime cleanup")
@@ -198,14 +226,38 @@ def validate_s3_cleanup(job, variant):
         )
 
 
+def validate_dashboard_manifest_reuse(rendered, jobs):
+    if DELETE_MANIFESTS.search(jobs["local"]):
+        fail("Local uninstall unexpectedly deletes ACK Dashboard resources")
+    installer = named_pre_install_job(rendered["eks"], "uninstall-verification-eks-dependency-installer")
+    if not APPLY_MANIFESTS.search(installer) or not DELETE_MANIFESTS.search(jobs["eks"]):
+        fail(f"EKS install and uninstall must apply and delete the mounted {DASHBOARD_MANIFESTS}")
+    for job, description in ((installer, "installer"), (jobs["eks"], "pre-delete cleanup")):
+        if not mounts_dashboard_manifests(job, "eks"):
+            fail(f"EKS {description} Job does not mount the Dashboard manifest ConfigMap")
+    config_map = manifest_config_map(rendered["eks"], "eks")
+    hooks = re.search(r'"helm\.sh/hook":\s*(\S+)', config_map)
+    if not hooks or not {"pre-install", "pre-delete"} <= set(hooks.group(1).split(",")):
+        fail("EKS Dashboard manifest ConfigMap must exist for both install and pre-delete hooks")
+    weight = hook_weight(config_map, "Dashboard manifest ConfigMap")
+    if weight >= min(hook_weight(installer, "installer"), hook_weight(jobs["eks"], "pre-delete cleanup")):
+        fail("EKS Dashboard manifest ConfigMap is created after a Job that mounts it")
+
+
 def main():
-    if len(sys.argv) != 2:
-        fail("Usage: verify-helm-uninstall-teardown.py CHART_DIRECTORY")
-    chart = Path(sys.argv[1]).resolve()
+    args = sys.argv[1:]
+    # The Gradle task passes the pinned Helm client it resolved; default to helm on the PATH.
+    helm = "helm"
+    if len(args) == 3 and args[1] == "--helm":
+        helm = args[2]
+    elif len(args) != 1:
+        fail("Usage: verify-helm-uninstall-teardown.py CHART_DIRECTORY [--helm HELM_EXECUTABLE]")
+    chart = Path(args[0]).resolve()
 
     rendered = {
-        "local": render(chart, "local"),
+        "local": render(helm, chart, "local"),
         "eks": render(
+            helm,
             chart,
             "eks",
             "--values",
@@ -238,18 +290,7 @@ def main():
             )
         validate_s3_cleanup(bucket_job, variant)
 
-    if dashboard_payloads(DELETE_PAYLOAD, jobs["local"]):
-        fail("Local uninstall unexpectedly deletes ACK Dashboard resources")
-    apply_payloads = dashboard_payloads(APPLY_PAYLOAD, rendered["eks"])
-    delete_payloads = dashboard_payloads(DELETE_PAYLOAD, jobs["eks"])
-    if len(apply_payloads) != 1 or len(delete_payloads) != 1:
-        fail(
-            "EKS render must contain one chart-defined Dashboard manifest "
-            f"for apply and delete; found apply={len(apply_payloads)}, "
-            f"delete={len(delete_payloads)}"
-        )
-    if apply_payloads[0] != delete_payloads[0]:
-        fail("EKS install and uninstall use different ACK Dashboard manifests")
+    validate_dashboard_manifest_reuse(rendered, jobs)
 
     print("Validated local/EKS pre-delete teardown and ACK Dashboard manifest reuse")
 

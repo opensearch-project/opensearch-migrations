@@ -723,7 +723,7 @@ or record associations to a later request.
 When HTTP framing completes a final response, replay intake retains the entire capture observation
 that contained the boundary and completes without waiting for later connection activity. Additional
 source-write observations before the next request are ignored for that completed response and create
-no record work. They emit bounded anomaly metrics, one WARN, and DEBUG repeats rather than entering
+no record work. They emit bounded anomaly metrics and DEBUG (TRACE for zero bytes) evidence rather than entering
 the capture-protocol-fatal path: the proxy can correctly capture invalid bytes from a broken source.
 
 `CaptureCapabilityProbe` is inert. It creates no writer, partition, connection, heartbeat,

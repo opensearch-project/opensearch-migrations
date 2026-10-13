@@ -31,6 +31,7 @@ import lombok.NonNull;
 public final class TupleDurabilityMetrics implements TupleWriter.Metrics {
     public static final AttributeKey<String> FAILURE_REASON_ATTRIBUTE =
         AttributeKey.stringKey("failureReason");
+    private static final String WRITES_UNIT = "writes";
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -55,11 +56,11 @@ public final class TupleDurabilityMetrics implements TupleWriter.Metrics {
     public TupleDurabilityMetrics(@NonNull Meter meter) {
         writesAccepted = meter.counterBuilder(MetricNames.WRITES_ACCEPTED)
             .setDescription("Logical tuple writes accepted by the tuple writer API")
-            .setUnit("writes")
+            .setUnit(WRITES_UNIT)
             .build();
         writesPending = meter.upDownCounterBuilder(MetricNames.WRITES_PENDING)
             .setDescription("Accepted logical tuple writes without a terminal outcome")
-            .setUnit("writes")
+            .setUnit(WRITES_UNIT)
             .build();
         retries = meter.counterBuilder(MetricNames.RETRIES)
             .setDescription("Physical tuple write retries successfully scheduled")
@@ -67,15 +68,15 @@ public final class TupleDurabilityMetrics implements TupleWriter.Metrics {
             .build();
         terminalFailures = meter.counterBuilder(MetricNames.TERMINAL_FAILURES)
             .setDescription("Logical tuple writes that ended in a fatal writer failure")
-            .setUnit("writes")
+            .setUnit(WRITES_UNIT)
             .build();
         writesDurable = meter.counterBuilder(MetricNames.WRITES_DURABLE)
             .setDescription("Logical tuple writes completed durably, including intentional drops")
-            .setUnit("writes")
+            .setUnit(WRITES_UNIT)
             .build();
         writesCancelled = meter.counterBuilder(MetricNames.WRITES_CANCELLED)
             .setDescription("Logical tuple writes cancelled before durability")
-            .setUnit("writes")
+            .setUnit(WRITES_UNIT)
             .build();
         writeLatency = meter.histogramBuilder(MetricNames.WRITE_LATENCY)
                     .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS)

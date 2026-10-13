@@ -31,6 +31,7 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
     public static final AttributeKey<String> FAILURE_CLASS_ATTRIBUTE =
         AttributeKey.stringKey("failure_class");
     private static final String RECORDS_UNIT = "records";
+    private static final String PARTITIONS_UNIT = "partitions";
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -133,7 +134,7 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
         assignedPartitions = meter.gaugeBuilder(MetricNames.ASSIGNED_PARTITIONS)
             .ofLongs()
             .setDescription("Kafka partitions this replayer currently owns")
-            .setUnit("partitions")
+            .setUnit(PARTITIONS_UNIT)
             .build();
         consumerLag = meter.gaugeBuilder(MetricNames.CONSUMER_LAG)
             .ofLongs()
@@ -148,7 +149,7 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
         lagUnknownPartitions = meter.gaugeBuilder(MetricNames.LAG_UNKNOWN_PARTITIONS)
             .ofLongs()
             .setDescription("Owned partitions without a fetch response yet, excluded from the lag gauges")
-            .setUnit("partitions")
+            .setUnit(PARTITIONS_UNIT)
             .build();
         oldestCommitHeadAge = meter.gaugeBuilder(MetricNames.OLDEST_COMMIT_HEAD_AGE)
             .ofLongs()
@@ -158,7 +159,7 @@ public final class KafkaCommitStateMetrics implements KafkaSourceOwner.Metrics {
         staleCommitHeadPartitions = meter.gaugeBuilder(MetricNames.STALE_COMMIT_HEAD_PARTITIONS)
             .ofLongs()
             .setDescription("Owned partitions whose commit head has been held longer than the stale threshold")
-            .setUnit("partitions")
+            .setUnit(PARTITIONS_UNIT)
             .build();
     }
 

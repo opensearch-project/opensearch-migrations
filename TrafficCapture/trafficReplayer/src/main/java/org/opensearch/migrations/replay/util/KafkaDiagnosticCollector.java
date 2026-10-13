@@ -20,6 +20,8 @@ import lombok.NonNull;
  * Joins a context-owned Kafka record identity to Kafka owner state through immutable publications only.
  */
 public final class KafkaDiagnosticCollector {
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     public record Snapshot(
         long uncertainPartitionCount,
         @NonNull Optional<KafkaSourceOwner.RecordDiagnostic> oldestRecord

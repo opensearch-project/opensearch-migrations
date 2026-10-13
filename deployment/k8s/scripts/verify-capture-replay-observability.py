@@ -11,7 +11,6 @@ tests that define them. The Gradle verification only proves that:
   valid, substituted JSON bodies.
 """
 
-import base64
 import json
 import re
 import subprocess
@@ -19,13 +18,15 @@ import sys
 from pathlib import Path
 
 
-BASE64_APPLY = re.compile(
-    r"^\s*echo '([A-Za-z0-9+/=]+)' \| base64 -d \| kubectl apply -f -\s*$",
-    re.MULTILINE,
-)
+DASHBOARD_MANIFESTS = "/dashboards/dashboards.yaml"
+# A single exec argument is limited to 128 KiB (MAX_ARG_STRLEN); keep the inlined Job scripts well under it.
+MAX_SCRIPT_BYTES = 96 * 1024
 UNRESOLVED_PLACEHOLDER = re.compile(
     r"placeholder-(?:region|stage|qualifier|account-id)"
 )
+
+# The lowest Kubernetes version the chart supports (Chart.yaml kubeVersion).
+KUBE_VERSION = "1.35.0"
 
 
 def fail(message):
@@ -41,47 +42,62 @@ def parse_json(text, name):
 
 def literal_blocks(text, key):
     """Extract YAML literal-block values without adding a YAML dependency."""
-    marker = re.compile(r"^(\s*)" + re.escape(key) + r":\s*\|[-+]?\s*$")
+    return _literal_blocks(text, re.compile(r"^(\s*)" + re.escape(key) + r":\s*\|[-+]?\s*$"), key)
+
+
+def script_blocks(text):
+    """The literal-block list items (``- |``) that carry the rendered Job shell scripts."""
+    return _literal_blocks(text, re.compile(r"^(\s*)- \|[-+]?\s*$"), "script")
+
+
+def _literal_blocks(text, marker, key):
     lines = text.splitlines()
     blocks = []
     index = 0
     while index < len(lines):
         match = marker.match(lines[index])
         index += 1
-        if not match:
-            continue
-        marker_indent = len(match.group(1))
-        content_indent = None
-        content = []
-        while index < len(lines):
-            line = lines[index]
-            if not line.strip():
-                content.append("")
-                index += 1
-                continue
+        if match:
+            block, index = _collect_block(lines, index, len(match.group(1)), key)
+            blocks.append(block)
+    return blocks
+
+
+def _collect_block(lines, index, marker_indent, key):
+    content_indent = None
+    content = []
+    while index < len(lines):
+        line = lines[index]
+        if line.strip():
             indentation = len(line) - len(line.lstrip(" "))
             if indentation <= marker_indent:
                 break
             content_indent = content_indent if content_indent is not None else indentation
             if indentation < content_indent:
                 fail(f"Rendered {key} block has inconsistent indentation")
-            content.append(line[content_indent:])
-            index += 1
-        if content_indent is None:
-            fail(f"Rendered {key} block is empty")
-        blocks.append("\n".join(content).rstrip("\n"))
-    return blocks
+            line = line[content_indent:]
+        else:
+            line = ""
+        content.append(line)
+        index += 1
+    if content_indent is None:
+        fail(f"Rendered {key} block is empty")
+    return "\n".join(content).rstrip("\n"), index
 
 
-def render(chart, variant, *extra):
+def render(helm, chart, variant, *extra):
     result = subprocess.run(
         [
-            "helm",
+            helm,
             "template",
             f"capture-replay-dashboard-wiring-{variant}",
             str(chart),
             "--namespace",
             "ma",
+            # Offline renders otherwise assume the client's built-in Kubernetes version, which for older Helm
+            # releases predates the chart's kubeVersion constraint.
+            "--kube-version",
+            KUBE_VERSION,
             *extra,
         ],
         stdout=subprocess.PIPE,
@@ -93,14 +109,27 @@ def render(chart, variant, *extra):
     return result.stdout
 
 
-def apply_payloads(rendered):
-    payloads = []
-    for encoded in BASE64_APPLY.findall(rendered):
-        try:
-            payloads.append(base64.b64decode(encoded, validate=True).decode())
-        except (ValueError, UnicodeDecodeError) as error:
-            fail(f"EKS render has an invalid base64 apply payload: {error}")
-    return payloads
+def mounted_dashboard_manifests(rendered):
+    """The Dashboard CRs the installer applies, from the hook ConfigMap its Job mounts."""
+    if not re.search(r"^\s*name:\s*\S+-cloudwatch-dashboard-manifests\s*$", rendered, re.MULTILINE):
+        fail("EKS render is missing the cloudwatch-dashboard-manifests ConfigMap")
+    if f"kubectl apply -f {DASHBOARD_MANIFESTS}" not in rendered:
+        fail(f"EKS child installer does not apply {DASHBOARD_MANIFESTS}")
+    if f"kubectl delete -f {DASHBOARD_MANIFESTS}" not in rendered:
+        fail(f"EKS pre-delete cleanup does not delete {DASHBOARD_MANIFESTS}")
+    manifests = literal_blocks(rendered, "dashboards.yaml")
+    if len(manifests) != 1:
+        fail(f"EKS render has {len(manifests)} dashboard manifest blocks; expected one")
+    return manifests
+
+
+def validate_script_sizes(rendered, variant):
+    largest = max((len(block.encode()) for block in script_blocks(rendered)), default=0)
+    if largest > MAX_SCRIPT_BYTES:
+        fail(
+            f"{variant} render has a {largest}-byte Job script; scripts are a single exec argument, "
+            f"which Linux limits to 128 KiB, so keep them under {MAX_SCRIPT_BYTES} bytes"
+        )
 
 
 def dashboard_documents(artifacts):
@@ -111,8 +140,8 @@ def dashboard_documents(artifacts):
                     r"^\s*apiVersion:\s*cloudwatch\.services\.k8s\.aws/",
                     document,
                     re.MULTILINE,
-                )
-                and re.search(
+                ) and
+                re.search(
                     r"^\s*kind:\s*Dashboard\s*$", document, re.MULTILINE
                 )
             ):
@@ -167,10 +196,7 @@ def validate_grafana(rendered, variant):
 
 
 def validate_ack(rendered):
-    payloads = apply_payloads(rendered)
-    if not payloads:
-        fail("EKS render does not apply any manifests through the child installer")
-    dashboards = list(dashboard_documents([rendered, *payloads]))
+    dashboards = list(dashboard_documents(mounted_dashboard_manifests(rendered)))
     capture_replay = []
     for document in dashboards:
         name = dashboard_name(document)
@@ -188,11 +214,17 @@ def validate_ack(rendered):
 
 
 def main():
-    if len(sys.argv) != 2:
-        fail("Usage: verify-capture-replay-observability.py CHART_DIRECTORY")
-    chart = Path(sys.argv[1]).resolve()
-    local = render(chart, "local")
+    args = sys.argv[1:]
+    # The Gradle task passes the pinned Helm client it resolved; default to helm on the PATH.
+    helm = "helm"
+    if len(args) == 3 and args[1] == "--helm":
+        helm = args[2]
+    elif len(args) != 1:
+        fail("Usage: verify-capture-replay-observability.py CHART_DIRECTORY [--helm HELM_EXECUTABLE]")
+    chart = Path(args[0]).resolve()
+    local = render(helm, chart, "local")
     eks = render(
+        helm,
         chart,
         "eks",
         "--values",
@@ -206,6 +238,8 @@ def main():
     )
     validate_grafana(local, "local")
     validate_grafana(eks, "EKS")
+    validate_script_sizes(local, "local")
+    validate_script_sizes(eks, "EKS")
     ack_count = validate_ack(eks)
     print(
         "Dashboard wiring smoke test passed: "

@@ -79,6 +79,8 @@ public final class ProcessSupervisor {
         }
     }
 
+    // The warnings target compiler-generated members of this public fatal-signal contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record FatalSignal(
         @NonNull Reason reason,
         @NonNull String owner,
@@ -204,6 +206,8 @@ public final class ProcessSupervisor {
         return Optional.ofNullable(firstFatal.get());
     }
 
+    // The fatal path records every secondary Throwable so no failure can skip the remaining exit steps.
+    @SuppressWarnings("java:S1181")
     private void stopNewInput(FatalSignal signal) {
         try {
             inputStopper.stopNewInput(signal);
@@ -212,6 +216,8 @@ public final class ProcessSupervisor {
         }
     }
 
+    // The fatal path records every secondary Throwable so no failure can skip the remaining diagnostics.
+    @SuppressWarnings("java:S1181")
     private void writeDiagnostics(FatalSignal signal) {
         try {
             metrics.fatalFailure(signal.reason());
@@ -265,6 +271,8 @@ public final class ProcessSupervisor {
         }
     }
 
+    // Runtime.halt must still run when diagnostic output fails with any Throwable.
+    @SuppressWarnings("java:S1181")
     private void watchdogExpired(FatalSignal signal) {
         try {
             errorStream.println(

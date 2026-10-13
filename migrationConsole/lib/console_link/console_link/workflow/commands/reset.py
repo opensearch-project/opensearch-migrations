@@ -1025,6 +1025,32 @@ def _reset_by_resource_name(ctx, path, namespace, cascade, include_proxies, dele
     _warn_target_indexes_remain(targets)
 
 
+def _reset_all_resources(ctx, resources, namespace, include_proxies, delete_storage, delete_output_artifacts):
+    """Delete every listed migration resource for ``workflow reset --all``."""
+    delete_targets, protected_proxy_names = _prune_ancestors_of_protected_proxies(
+        resources, include_proxies
+    )
+    if not include_proxies and protected_proxy_names:
+        proxy_names = ", ".join(sorted(f"captureproxy.{n}" for n in protected_proxy_names))
+        click.echo(f"Keeping protected proxies alive: {proxy_names}")
+        click.echo("Use --include-proxies to delete them.")
+
+    kafka_names = [name for plural, name, _, _ in delete_targets if plural == 'kafkaclusters']
+    if not delete_storage:
+        _handle_kafka_storage(namespace, kafka_names, False)
+
+    if delete_targets and not _delete_targets(delete_targets, namespace, delete_output_artifacts):
+        ctx.exit(ExitCode.FAILURE.value)
+        return
+
+    if delete_storage:
+        # Delete retained Kafka storage only after the broker workload has released it.
+        _handle_kafka_storage(namespace, kafka_names, True)
+
+    _warn_target_indexes_remain(delete_targets)
+    click.echo("Done.")
+
+
 @click.command(name="reset")
 @click.argument('names', nargs=-1, metavar='NAME', shell_complete=_get_resource_completions)
 @click.option('--list', 'list_resources', is_flag=True, default=False, help='List migration resources and exit')
@@ -1091,28 +1117,9 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
             click.echo("Use 'workflow submit' to replace the Argo workflow without deleting migration resources.")
             return
 
-        delete_targets, protected_proxy_names = _prune_ancestors_of_protected_proxies(
-            resources, include_proxies
+        _reset_all_resources(
+            ctx, resources, namespace, include_proxies, delete_storage, not keep_output_artifacts
         )
-        if not include_proxies and protected_proxy_names:
-            proxy_names = ", ".join(sorted(f"captureproxy.{n}" for n in protected_proxy_names))
-            click.echo(f"Keeping protected proxies alive: {proxy_names}")
-            click.echo("Use --include-proxies to delete them.")
-
-        kafka_names = [name for plural, name, _, _ in delete_targets if plural == 'kafkaclusters']
-        if not delete_storage:
-            _handle_kafka_storage(namespace, kafka_names, False)
-
-        if delete_targets and not _delete_targets(delete_targets, namespace, not keep_output_artifacts):
-            ctx.exit(ExitCode.FAILURE.value)
-            return
-
-        if delete_storage:
-            # Delete retained Kafka storage only after the broker workload has released it.
-            _handle_kafka_storage(namespace, kafka_names, True)
-
-        _warn_target_indexes_remain(delete_targets)
-        click.echo("Done.")
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)

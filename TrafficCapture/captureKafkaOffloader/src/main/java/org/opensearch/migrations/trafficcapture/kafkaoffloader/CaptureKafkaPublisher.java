@@ -350,8 +350,8 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
             return thread;
         });
         acknowledgementDeadlineExecutor.setRemoveOnCancelPolicy(true);
-        writeGate.addTerminalFailureListener(failure ->
-            failPublisher(failure, classifyFailure(failure))
+        writeGate.addTerminalFailureListener(terminalFailure ->
+            failPublisher(terminalFailure, classifyFailure(terminalFailure))
         );
         executor.scheduleWithFixedDelay(
             this::reportHealthSafely,
@@ -692,9 +692,9 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
                 requireBrokerTimestamp(metadata, "heartbeat"),
                 heartbeatExpirationInterval
             );
-        } catch (RuntimeException failure) {
-            reportBrokerTimeViolation(lane.writerPartition, failure);
-            throw failure;
+        } catch (RuntimeException brokerTimeFailure) {
+            reportBrokerTimeViolation(lane.writerPartition, brokerTimeFailure);
+            throw brokerTimeFailure;
         }
         lane.heartbeatInFlight = false;
         if (lane.status == PublisherLaneStatus.OPEN) {
@@ -824,12 +824,14 @@ public class CaptureKafkaPublisher implements CaptureRoutingGenerationPublisher,
         return result;
     }
 
+    // Any Throwable escaping this fixed-delay task would silently cancel every later health report.
+    @SuppressWarnings("java:S1181")
     private void reportHealthSafely() {
         try {
             reportHealth();
-        } catch (Throwable failure) {
+        } catch (Throwable healthReportFailure) {
             log.atError()
-                .setCause(failure)
+                .setCause(healthReportFailure)
                 .setMessage("event=capture_health_report_failed")
                 .log();
         }

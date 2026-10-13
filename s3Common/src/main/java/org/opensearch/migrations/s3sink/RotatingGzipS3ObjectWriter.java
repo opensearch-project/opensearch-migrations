@@ -96,6 +96,8 @@ public class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         default void retryTerminated(UploadRetryTermination termination) {}
     }
 
+    // The warnings target compiler-generated members of this public listener contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record UploadRetryFailure(
         String bucket,
         String key,
@@ -107,6 +109,8 @@ public class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         boolean writerBecameDegraded
     ) {}
 
+    // The warnings target compiler-generated members of this public listener contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record UploadRetryRecovery(
         String bucket,
         String key,
@@ -116,6 +120,8 @@ public class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         boolean writerRecovered
     ) {}
 
+    // The warnings target compiler-generated members of this public listener contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record UploadRetryTermination(
         String bucket,
         String key,
@@ -431,89 +437,115 @@ public class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         }
         upload.whenComplete((response, error) -> {
             if (error == null) {
-                deleteFile(file);
-                activeUploads.decrementAndGet();
-                if (attempt > 1) {
-                    var retryingObjectCount = retryingUploads.decrementAndGet();
-                    notifyUploadRecovered(
-                        new UploadRetryRecovery(
-                            bucket,
-                            key,
-                            attempt,
-                            attempt - 1,
-                            retryingObjectCount,
-                            retryingObjectCount == 0
-                        )
-                    );
-                }
-                // A successful upload is durable, so drop it from the gating set immediately to avoid
-                // unbounded growth between flushes. A terminal FAILURE is intentionally left in the set
-                // so the next flush() observes it once (the fail-fast gating contract).
-                outstandingUploads.remove(objectFuture);
-                objectFuture.complete(null);
+                onUploadSucceeded(key, file, objectFuture, attempt);
                 return;
             }
             boolean outOfAttempts = maxUploadAttempts > 0 && attempt >= maxUploadAttempts;
             if (outOfAttempts) {
-                if (attempt > 1) {
-                    var retryingObjectCount = retryingUploads.decrementAndGet();
-                    notifyRetryTerminated(
-                        new UploadRetryTermination(
-                            bucket,
-                            key,
-                            attempt,
-                            unwrap(error),
-                            retryingObjectCount
-                        )
-                    );
-                }
-                log.atError().setCause(error).setMessage(
-                        "Failed to upload object to s3://{}/{} after {} attempt(s); giving up")
-                    .addArgument(bucket).addArgument(key).addArgument(attempt).log();
-                deleteFile(file);
-                activeUploads.decrementAndGet();
-                objectFuture.completeExceptionally(unwrap(error));
+                onUploadAttemptsExhausted(key, file, objectFuture, attempt, error);
                 return;
             }
-            var firstFailureForObject = attempt == 1;
-            var retryingObjectCount = firstFailureForObject
-                ? retryingUploads.incrementAndGet()
-                : retryingUploads.get();
-            notifyRetryScheduled(
-                new UploadRetryFailure(
-                    bucket,
-                    key,
-                    attempt,
-                    uploadRetryDelay,
-                    unwrap(error),
-                    retryingObjectCount,
-                    firstFailureForObject,
-                    firstFailureForObject && retryingObjectCount == 1
-                )
-            );
-            try {
-                uploadScheduler.schedule(
-                    () -> uploadWithRetries(key, file, objectFuture, attempt + 1),
-                    uploadRetryDelay.toMillis(), TimeUnit.MILLISECONDS);
-            } catch (Exception schedulingError) {
-                // Scheduler already shut down (post-close) — surface the original failure.
-                var remainingRetryingObjects = retryingUploads.decrementAndGet();
-                notifyRetryTerminated(
-                    new UploadRetryTermination(
-                        bucket,
-                        key,
-                        attempt,
-                        unwrap(error),
-                        remainingRetryingObjects
-                    )
-                );
-                deleteFile(file);
-                activeUploads.decrementAndGet();
-                objectFuture.completeExceptionally(unwrap(error));
-            }
+            scheduleUploadRetry(key, file, objectFuture, attempt, error);
         });
     }
 
+    private void onUploadSucceeded(String key, Path file, CompletableFuture<Void> objectFuture, int attempt) {
+        deleteFile(file);
+        activeUploads.decrementAndGet();
+        if (attempt > 1) {
+            var retryingObjectCount = retryingUploads.decrementAndGet();
+            notifyUploadRecovered(
+                new UploadRetryRecovery(
+                    bucket,
+                    key,
+                    attempt,
+                    attempt - 1,
+                    retryingObjectCount,
+                    retryingObjectCount == 0
+                )
+            );
+        }
+        // A successful upload is durable, so drop it from the gating set immediately to avoid
+        // unbounded growth between flushes. A terminal FAILURE is intentionally left in the set
+        // so the next flush() observes it once (the fail-fast gating contract).
+        outstandingUploads.remove(objectFuture);
+        objectFuture.complete(null);
+    }
+
+    private void onUploadAttemptsExhausted(
+        String key,
+        Path file,
+        CompletableFuture<Void> objectFuture,
+        int attempt,
+        Throwable error
+    ) {
+        if (attempt > 1) {
+            var retryingObjectCount = retryingUploads.decrementAndGet();
+            notifyRetryTerminated(
+                new UploadRetryTermination(
+                    bucket,
+                    key,
+                    attempt,
+                    unwrap(error),
+                    retryingObjectCount
+                )
+            );
+        }
+        log.atError().setCause(error).setMessage(
+                "Failed to upload object to s3://{}/{} after {} attempt(s); giving up")
+            .addArgument(bucket).addArgument(key).addArgument(attempt).log();
+        deleteFile(file);
+        activeUploads.decrementAndGet();
+        objectFuture.completeExceptionally(unwrap(error));
+    }
+
+    private void scheduleUploadRetry(
+        String key,
+        Path file,
+        CompletableFuture<Void> objectFuture,
+        int attempt,
+        Throwable error
+    ) {
+        var firstFailureForObject = attempt == 1;
+        var retryingObjectCount = firstFailureForObject
+            ? retryingUploads.incrementAndGet()
+            : retryingUploads.get();
+        notifyRetryScheduled(
+            new UploadRetryFailure(
+                bucket,
+                key,
+                attempt,
+                uploadRetryDelay,
+                unwrap(error),
+                retryingObjectCount,
+                firstFailureForObject,
+                firstFailureForObject && retryingObjectCount == 1
+            )
+        );
+        try {
+            uploadScheduler.schedule(
+                () -> uploadWithRetries(key, file, objectFuture, attempt + 1),
+                uploadRetryDelay.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (Exception schedulingError) {
+            // Scheduler already shut down (post-close) — surface the original failure.
+            var remainingRetryingObjects = retryingUploads.decrementAndGet();
+            notifyRetryTerminated(
+                new UploadRetryTermination(
+                    bucket,
+                    key,
+                    attempt,
+                    unwrap(error),
+                    remainingRetryingObjects
+                )
+            );
+            deleteFile(file);
+            activeUploads.decrementAndGet();
+            objectFuture.completeExceptionally(unwrap(error));
+        }
+    }
+
+    // Any observer Throwable is contained so it cannot strand the object's upload future or counters.
+    @SuppressWarnings("java:S1181")
     private void notifyRetryScheduled(UploadRetryFailure failure) {
         try {
             uploadRetryObserver.retryScheduled(failure);
@@ -525,6 +557,8 @@ public class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         }
     }
 
+    // Any observer Throwable is contained so it cannot strand the object's upload future or counters.
+    @SuppressWarnings("java:S1181")
     private void notifyUploadRecovered(UploadRetryRecovery recovery) {
         try {
             uploadRetryObserver.uploadRecovered(recovery);
@@ -536,6 +570,8 @@ public class RotatingGzipS3ObjectWriter<T> implements AutoCloseable {
         }
     }
 
+    // Any observer Throwable is contained so it cannot strand the object's upload future or counters.
+    @SuppressWarnings("java:S1181")
     private void notifyRetryTerminated(UploadRetryTermination termination) {
         try {
             uploadRetryObserver.retryTerminated(termination);

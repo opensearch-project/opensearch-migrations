@@ -1265,8 +1265,8 @@ class TestRenderedChartMatchesTheValues:
             for parameter in child["spec"]["arguments"]["parameters"]
         }
         assert (
-            child_parameters["DOCUMENT_ID_PREFIX"]
-            == "{{workflow.name}}-{{inputs.parameters.name}}"
+            child_parameters["DOCUMENT_ID_PREFIX"] ==
+            "{{workflow.name}}-{{inputs.parameters.name}}"
         )
 
     def test_connection_mode_suite_renders_index_shard_input(self):

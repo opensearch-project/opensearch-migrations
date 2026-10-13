@@ -53,6 +53,8 @@ public final class CapturePublishingMetrics {
         AttributeKey.stringKey("transition");
     public static final AttributeKey<String> REASON =
         AttributeKey.stringKey("reason");
+    private static final String RECORDS_UNIT = "records";
+    private static final String WRITERS_UNIT = "writers";
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -98,7 +100,7 @@ public final class CapturePublishingMetrics {
     public CapturePublishingMetrics(@NonNull Meter meter) {
         recordsAccepted = meter.counterBuilder(MetricNames.RECORDS_ACCEPTED)
             .setDescription("Capture records accepted by the Kafka producer boundary")
-            .setUnit("records")
+            .setUnit(RECORDS_UNIT)
             .build();
         bytesAccepted = meter.counterBuilder(MetricNames.BYTES_ACCEPTED)
             .setDescription("Capture payload bytes accepted by the Kafka producer boundary")
@@ -106,12 +108,12 @@ public final class CapturePublishingMetrics {
             .build();
         completions = meter.counterBuilder(MetricNames.COMPLETIONS)
             .setDescription("Terminal outcomes for accepted capture publications")
-            .setUnit("records")
+            .setUnit(RECORDS_UNIT)
             .build();
         recordsAwaitingAcknowledgement =
             meter.upDownCounterBuilder(MetricNames.RECORDS_AWAITING_ACKNOWLEDGEMENT)
                 .setDescription("Accepted capture records awaiting Kafka acknowledgement")
-                .setUnit("records")
+                .setUnit(RECORDS_UNIT)
                 .build();
         bytesAwaitingAcknowledgement =
             meter.upDownCounterBuilder(MetricNames.BYTES_AWAITING_ACKNOWLEDGEMENT)
@@ -120,11 +122,11 @@ public final class CapturePublishingMetrics {
                 .build();
         heartbeatSubmissions = meter.counterBuilder(MetricNames.HEARTBEAT_SUBMISSIONS)
             .setDescription("Writer-partition heartbeat records accepted for publication")
-            .setUnit("records")
+            .setUnit(RECORDS_UNIT)
             .build();
         heartbeatAcknowledgements = meter.counterBuilder(MetricNames.HEARTBEAT_ACKNOWLEDGEMENTS)
             .setDescription("Writer-partition heartbeat acknowledgements accepted")
-            .setUnit("records")
+            .setUnit(RECORDS_UNIT)
             .build();
         heartbeatDeadlineViolations =
             meter.counterBuilder(MetricNames.HEARTBEAT_DEADLINE_VIOLATIONS)
@@ -141,15 +143,15 @@ public final class CapturePublishingMetrics {
             .build();
         writersActive = meter.upDownCounterBuilder(MetricNames.WRITERS_ACTIVE)
             .setDescription("Writer-partition lanes in the active routing generation")
-            .setUnit("writers")
+            .setUnit(WRITERS_UNIT)
             .build();
         writersDraining = meter.upDownCounterBuilder(MetricNames.WRITERS_DRAINING)
             .setDescription("Superseded writer-partition lanes draining existing connections")
-            .setUnit("writers")
+            .setUnit(WRITERS_UNIT)
             .build();
         writersRetired = meter.counterBuilder(MetricNames.WRITERS_RETIRED)
             .setDescription("Writer-partition lanes retired after draining")
-            .setUnit("writers")
+            .setUnit(WRITERS_UNIT)
             .build();
         writeGateTransitions = meter.counterBuilder(MetricNames.WRITE_GATE_TRANSITIONS)
             .setDescription("Irreversible transitions that close the capture Kafka write gate")

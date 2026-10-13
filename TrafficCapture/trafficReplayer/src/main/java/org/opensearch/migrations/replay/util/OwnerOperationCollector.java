@@ -28,11 +28,15 @@ public final class OwnerOperationCollector {
     public static final Duration DEFAULT_LONG_RUNNING_THRESHOLD = Duration.ofSeconds(30);
     public static final int MAX_LONG_RUNNING_DETAILS = 16;
 
+    // The warning targets compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings("java:S1186")
     public record Detail(
         @NonNull OutstandingOperationRegistry.Snapshot operation,
         @NonNull Duration elapsed
     ) {}
 
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     public record Snapshot(
         @NonNull Instant observedAt,
         int activeCount,
@@ -107,7 +111,10 @@ public final class OwnerOperationCollector {
     }
 
     private static Duration elapsed(OutstandingOperationRegistry.Snapshot snapshot, Instant now) {
-        var duration = Duration.between(snapshot.startTime(), now);
-        return duration.isNegative() ? Duration.ZERO : duration;
+        var elapsed = Duration.between(snapshot.startTime(), now);
+        if (elapsed.isNegative()) {
+            return Duration.ZERO;
+        }
+        return elapsed;
     }
 }

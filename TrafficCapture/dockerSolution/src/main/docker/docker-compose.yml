@@ -87,6 +87,9 @@ services:
     command:
       - "--speedup-factor"
       - "2"
+      # One replayer joins a fresh group here; the default one-minute startup quiet window only delays the first assignment.
+      - "--kafka-quiet-window-ms"
+      - "5000"
       - "--target-uri"
       - "https://opensearchtarget:9200"
       - "--target-username"

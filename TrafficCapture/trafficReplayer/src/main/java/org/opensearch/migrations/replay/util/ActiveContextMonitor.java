@@ -41,6 +41,8 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
 
     private static final Logger ACTIVE_WORK_LOGGER = LoggerFactory.getLogger(ACTIVE_WORK_LOGGER_NAME);
 
+    // The warnings target compiler-generated members of this public report contract.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     public record Report(
         @NonNull ContextActivityCollector.Snapshot contexts,
         @NonNull OwnerOperationCollector.Snapshot ownerOperations,
@@ -143,6 +145,8 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
     }
 
     @Override
+    // Any Throwable escaping this fixed-rate task would silently cancel every later sample.
+    @SuppressWarnings("java:S1181")
     public void run() {
         synchronized (collectionLock) {
             if (closed.get()) {
@@ -163,7 +167,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
             contexts.oldestKafkaRecord().map(ContextActivityCollector.OldestKafkaRecord::recordId)
         );
         var report = new Report(contexts, owners, kafka, finalSample);
-        metrics.record(contexts, owners, kafka);
+        metrics.recordSample(contexts, owners, kafka);
         reporter.accept(report);
         return report;
     }
@@ -194,35 +198,35 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
             activityOverThreshold,
             owners.activeCount(),
             owners.longRunningCount(),
-            oldestRecord.map(record -> record.age().toMillis()).orElse(0L),
+            oldestRecord.map(kafkaRecord -> kafkaRecord.age().toMillis()).orElse(0L),
             kafka.uncertainPartitionCount(),
             report.finalSample()
         );
 
-        oldestRecord.ifPresent(record -> {
-            var generation = record.recordId().generation();
+        oldestRecord.ifPresent(kafkaRecord -> {
+            var generation = kafkaRecord.recordId().generation();
             ACTIVE_WORK_LOGGER.info(
                 "event=replay_oldest_record topic={} partition={} generation={} offset={} age_ms={} "
                     + "active_descendants={} kafka_state={}",
                 generation.topicPartition().topic(),
                 generation.topicPartition().partition(),
                 generation.localSequence(),
-                record.recordId().offset(),
-                record.age().toMillis(),
-                record.descendantCount(),
+                kafkaRecord.recordId().offset(),
+                kafkaRecord.age().toMillis(),
+                kafkaRecord.descendantCount(),
                 kafka.oldestRecord().map(diagnostic -> diagnostic.state().name()).orElse("UNKNOWN")
             );
-            if (record.age().compareTo(ContextActivityCollector.DEFAULT_AGE_THRESHOLD) >= 0) {
+            if (kafkaRecord.age().compareTo(ContextActivityCollector.DEFAULT_AGE_THRESHOLD) >= 0) {
                 ACTIVE_WORK_LOGGER.warn(
                     "event=replay_stall_detected kind=kafka_record topic={} partition={} generation={} "
                         + "offset={} age_ms={} descendant_count={} descendants={} kafka_state={}",
                     generation.topicPartition().topic(),
                     generation.topicPartition().partition(),
                     generation.localSequence(),
-                    record.recordId().offset(),
-                    record.age().toMillis(),
-                    record.descendantCount(),
-                    record.descendants(),
+                    kafkaRecord.recordId().offset(),
+                    kafkaRecord.age().toMillis(),
+                    kafkaRecord.descendantCount(),
+                    kafkaRecord.descendants(),
                     kafka.oldestRecord().map(diagnostic -> diagnostic.state().name()).orElse("UNKNOWN")
                 );
             }
@@ -282,7 +286,7 @@ public final class ActiveContextMonitor implements Runnable, AutoCloseable {
             final Report report;
             try {
                 report = collectAndReport(true);
-            } catch (Throwable failure) {
+            } catch (Exception failure) {
                 throw new IllegalStateException(
                     "failed to collect final replay activity state after orderly drain",
                     failure

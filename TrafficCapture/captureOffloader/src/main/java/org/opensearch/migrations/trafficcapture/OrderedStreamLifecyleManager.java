@@ -7,6 +7,8 @@ import java.util.function.Function;
 public abstract class OrderedStreamLifecyleManager<T> implements StreamLifecycleManager<T> {
     CompletableFuture<T> futureForLastClose = CompletableFuture.completedFuture(null);
 
+    // Every kickoff Throwable must still release the holder and fail this link of the ordered close chain.
+    @SuppressWarnings("java:S1181")
     public CompletableFuture<T> closeStream(CodedOutputStreamHolder outputStreamHolder, int index) {
         futureForLastClose = futureForLastClose.handle((ignored, priorFailure) -> {
             if (priorFailure != null) {

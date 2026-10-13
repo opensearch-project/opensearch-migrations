@@ -1160,7 +1160,11 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     void sourceActivityDoesNotExtendTheMaximumConnectionDuration() throws Exception {
         try (var rootContext = new TestRootContext()) {
             var offloader = new DelayedFinalAcknowledgementOffloader();
-            var channel = new EmbeddedChannel(
+            // Freeze the clock before the handler schedules its connection deadline, so real time spent on a
+            // slow runner cannot close the connection before the test writes to it.
+            var channel = new EmbeddedChannel();
+            channel.freezeTime();
+            channel.pipeline().addLast(
                 new ConditionallyReliableLoggingHttpHandler(
                     rootContext,
                     "node",

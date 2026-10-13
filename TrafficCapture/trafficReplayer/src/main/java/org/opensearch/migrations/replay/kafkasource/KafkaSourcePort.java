@@ -141,6 +141,8 @@ public interface KafkaSourcePort {
      * contiguously and durably replayed record. The adapter stores that timestamp in Kafka's offset metadata,
      * allowing diagnostics to measure temporal replay backlog without fetching record payloads.</p>
      */
+    // The warning targets the compact canonical constructor of this port contract.
+    @SuppressWarnings("java:S100")
     record CommitPoint(long nextPosition, long replayedThroughLogAppendTimeMillis) {
         public CommitPoint {
             if (nextPosition < 0) {
@@ -201,6 +203,8 @@ public interface KafkaSourcePort {
     }
 
     /** One commit outcome together with its bounded operational failure classification. */
+    // The warning targets the compact canonical constructor of this port contract.
+    @SuppressWarnings("java:S100")
     record CommitResult(
         @NonNull CommitOutcome outcome,
         @NonNull CommitFailureClass failureClass

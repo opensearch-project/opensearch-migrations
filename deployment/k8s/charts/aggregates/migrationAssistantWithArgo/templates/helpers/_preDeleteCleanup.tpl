@@ -138,13 +138,9 @@ ${_group_resources}"
 }
 
 {{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
-{{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
-{{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
-{{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}
+# Mounted from the cloudwatch-dashboard-manifests hook ConfigMap; see cloudwatchDashboardManifests.yaml.
 delete_rendered_cloudwatch_dashboards() {
-  echo '{{ include "cloudwatch.dashboardCRs" (dict "region" $region "account" $account "stage" $stage "root" $) | b64enc }}' |
-    base64 -d |
-    kubectl delete -f - --ignore-not-found --wait=true --timeout=90s
+  kubectl delete -f /dashboards/dashboards.yaml --ignore-not-found --wait=true --timeout=90s
 }
 
 delete_release_cloudwatch_dashboards() {

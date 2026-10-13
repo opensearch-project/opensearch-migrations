@@ -97,6 +97,63 @@ tasks.register('testCaptureReplayGamedayScript', Exec) {
     commandLine 'bash', layout.projectDirectory.file('scripts/capture-replay-gameday.sh').asFile, 'self-test'
 }
 
+// The verification tasks below render the chart with `helm template`. Rather than requiring a local install, resolve
+// a pinned Helm release through Gradle, as the node plugin does for Node, so it is downloaded once into the Gradle
+// cache and works offline afterward. The version matches migrationConsole/Dockerfile, whose Jobs run the chart.
+def helmClientVersion = '3.14.0'
+def helmOs = System.getProperty('os.name').toLowerCase(Locale.ROOT).with {
+    it.contains('mac') ? 'darwin' : it.contains('windows') ? 'windows' : 'linux'
+}
+def helmArch = System.getProperty('os.arch').toLowerCase(Locale.ROOT).with {
+    it in ['aarch64', 'arm64'] ? 'arm64' : it in ['amd64', 'x86_64'] ? 'amd64' : it
+}
+def helmArchiveExtension = helmOs == 'windows' ? 'zip' : 'tar.gz'
+def helmExecutableName = helmOs == 'windows' ? 'helm.exe' : 'helm'
+
+repositories {
+    ivy {
+        name = 'helmReleases'
+        // Overridable for environments that mirror get.helm.sh.
+        url = providers.environmentVariable('HELM_DISTRIBUTION_URL')
+                .orElse(providers.gradleProperty('helmDistributionUrl'))
+                .orElse('https://get.helm.sh')
+                .get()
+        patternLayout { artifact 'helm-v[revision]-[classifier].[ext]' }
+        metadataSources { artifact() }
+        content { includeModule('sh.helm', 'helm') }
+    }
+}
+
+configurations {
+    helmClient {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    helmClient "sh.helm:helm:${helmClientVersion}:${helmOs}-${helmArch}@${helmArchiveExtension}"
+}
+
+def helmClientDir = layout.buildDirectory.dir('helm-client')
+def helmExecutable = helmClientDir.map { it.file(helmExecutableName) }
+
+tasks.register('installHelmClient', Sync) {
+    description = "Unpacks the pinned Helm ${helmClientVersion} client used by the chart verification tasks"
+    group = 'helm'
+    def archives = configurations.helmClient
+    from({
+        def archive = archives.singleFile
+        helmArchiveExtension == 'zip' ? zipTree(archive) : tarTree(archive)
+    }) {
+        include "**/${helmExecutableName}"
+        eachFile { it.relativePath = new RelativePath(true, it.name) }
+        filePermissions { unix('rwxr-xr-x') }
+    }
+    includeEmptyDirs = false
+    into helmClientDir
+}
+
 tasks.register('verifyCaptureReplayObservability', Exec) {
     description = 'Smoke-tests Grafana and ACK dashboard wiring through the Helm chart'
     group = 'verification'
@@ -105,8 +162,11 @@ tasks.register('verifyCaptureReplayObservability', Exec) {
             layout.projectDirectory.file(
                     'scripts/verify-capture-replay-observability.py'
             ).asFile,
-            chartSourceDir.asFile
+            chartSourceDir.asFile,
+            '--helm',
+            helmExecutable.get().asFile
     )
+    dependsOn 'installHelmClient'
 }
 
 tasks.register('verifyHelmUninstallTeardown', Exec) {
@@ -115,8 +175,11 @@ tasks.register('verifyHelmUninstallTeardown', Exec) {
     commandLine(
             'python3',
             layout.projectDirectory.file('scripts/verify-helm-uninstall-teardown.py').asFile,
-            chartSourceDir.asFile
+            chartSourceDir.asFile,
+            '--helm',
+            helmExecutable.get().asFile
     )
+    dependsOn 'installHelmClient'
 }
 
 tasks.named('check') {

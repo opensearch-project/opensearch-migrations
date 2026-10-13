@@ -103,9 +103,9 @@ def retained_data_volumes(instances):
         for mapping in instance.get("BlockDeviceMappings", []):
             ebs = mapping.get("Ebs", {})
             if (
-                mapping.get("DeviceName") != root_device
-                and not ebs.get("DeleteOnTermination", False)
-                and ebs.get("VolumeId")
+                mapping.get("DeviceName") != root_device and
+                not ebs.get("DeleteOnTermination", False) and
+                ebs.get("VolumeId")
             ):
                 volumes.append(ebs["VolumeId"])
     return volumes

@@ -26,6 +26,8 @@ public final class ReplayActivityMetrics {
     public static final AttributeKey<String> ACTIVITY_ATTRIBUTE = AttributeKey.stringKey("activity");
     public static final AttributeKey<String> OPERATION_TYPE_ATTRIBUTE =
         AttributeKey.stringKey("operationType");
+    private static final String CONTEXTS_UNIT = "contexts";
+    private static final String OPERATIONS_UNIT = "operations";
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -65,7 +67,7 @@ public final class ReplayActivityMetrics {
         activeContexts = meter.gaugeBuilder(MetricNames.ACTIVE_CONTEXTS)
             .ofLongs()
             .setDescription("Open replay contexts across all activity types")
-            .setUnit("contexts")
+            .setUnit(CONTEXTS_UNIT)
             .build();
         oldestContextAge = meter.gaugeBuilder(MetricNames.OLDEST_CONTEXT_AGE)
             .ofLongs()
@@ -75,7 +77,7 @@ public final class ReplayActivityMetrics {
         activeContextsByActivity = meter.gaugeBuilder(MetricNames.ACTIVE_CONTEXTS_BY_ACTIVITY)
             .ofLongs()
             .setDescription("Open replay contexts by bounded activity type")
-            .setUnit("contexts")
+            .setUnit(CONTEXTS_UNIT)
             .build();
         oldestContextAgeByActivity = meter.gaugeBuilder(MetricNames.OLDEST_CONTEXT_AGE_BY_ACTIVITY)
             .ofLongs()
@@ -86,23 +88,23 @@ public final class ReplayActivityMetrics {
             meter.gaugeBuilder(MetricNames.OVER_THRESHOLD_CONTEXTS_BY_ACTIVITY)
                 .ofLongs()
                 .setDescription("Open replay contexts older than the activity threshold")
-                .setUnit("contexts")
+                .setUnit(CONTEXTS_UNIT)
                 .build();
         activeOwnerOperations = meter.gaugeBuilder(MetricNames.ACTIVE_OWNER_OPERATIONS)
             .ofLongs()
             .setDescription("Outstanding owner-local operations across replay owners")
-            .setUnit("operations")
+            .setUnit(OPERATIONS_UNIT)
             .build();
         longRunningOwnerOperations = meter.gaugeBuilder(MetricNames.LONG_RUNNING_OWNER_OPERATIONS)
             .ofLongs()
             .setDescription("Outstanding owner-local operations older than the reporting threshold")
-            .setUnit("operations")
+            .setUnit(OPERATIONS_UNIT)
             .build();
         activeOwnerOperationsByType =
             meter.gaugeBuilder(MetricNames.ACTIVE_OWNER_OPERATIONS_BY_TYPE)
                 .ofLongs()
                 .setDescription("Outstanding owner-local operations by bounded operation type")
-                .setUnit("operations")
+                .setUnit(OPERATIONS_UNIT)
                 .build();
         longRunningOwnerOperationsByType =
             meter.gaugeBuilder(MetricNames.LONG_RUNNING_OWNER_OPERATIONS_BY_TYPE)
@@ -110,7 +112,7 @@ public final class ReplayActivityMetrics {
                 .setDescription(
                     "Outstanding owner-local operations older than the reporting threshold by bounded operation type"
                 )
-                .setUnit("operations")
+                .setUnit(OPERATIONS_UNIT)
                 .build();
         oldestKafkaRecordAge = meter.gaugeBuilder(MetricNames.OLDEST_KAFKA_RECORD_AGE)
             .ofLongs()
@@ -125,7 +127,7 @@ public final class ReplayActivityMetrics {
                 .build();
     }
 
-    public void record(
+    public void recordSample(
         @NonNull ContextActivityCollector.Snapshot contexts,
         @NonNull OwnerOperationCollector.Snapshot ownerOperations,
         @NonNull KafkaDiagnosticCollector.Snapshot kafka
@@ -152,7 +154,7 @@ public final class ReplayActivityMetrics {
             );
         }
         oldestKafkaRecordAge.set(
-            contexts.oldestKafkaRecord().map(record -> record.age().toMillis()).orElse(0L)
+            contexts.oldestKafkaRecord().map(oldestRecord -> oldestRecord.age().toMillis()).orElse(0L)
         );
         kafkaCommitUncertainPartitions.set(kafka.uncertainPartitionCount());
     }

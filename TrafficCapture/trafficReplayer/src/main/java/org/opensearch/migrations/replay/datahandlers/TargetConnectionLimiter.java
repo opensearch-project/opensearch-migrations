@@ -52,6 +52,8 @@ public final class TargetConnectionLimiter {
     private static final double BURST_SECONDS = 0.1;
 
     /** Identifies one reserved connect so its outcome is credited to the epoch it was started in. */
+    // The warnings target compiler-generated members of this public reservation contract.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     public record Reservation(long delayNanos, long epoch) {}
 
     /** Admits every connect immediately and records nothing. */
@@ -81,7 +83,9 @@ public final class TargetConnectionLimiter {
     }
 
     public TargetConnectionLimiter(double initialRatePerSecond, @NonNull LongSupplier nanoTime) {
-        if (!(initialRatePerSecond >= MINIMUM_RATE) || initialRatePerSecond > MAXIMUM_RATE) {
+        if (Double.isNaN(initialRatePerSecond)
+            || initialRatePerSecond < MINIMUM_RATE
+            || initialRatePerSecond > MAXIMUM_RATE) {
             throw new IllegalArgumentException(
                 "initial connection rate must be between " + MINIMUM_RATE + " and " + MAXIMUM_RATE
             );

@@ -48,6 +48,8 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.kafka.KafkaConsumerProperties;
 import org.opensearch.migrations.replay.kafka.ProxyWrittenTopic;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
+import org.opensearch.migrations.replay.kafkasource.assignor.AssignorControl;
+import org.opensearch.migrations.replay.kafkasource.assignor.QuietWindowAssignor;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
@@ -112,6 +114,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class TrafficReplayerTopLevelConstructionTest {
+    /** Short enough for the assignment waits below, and longer than the default revocation grace. */
+    private static final long TEST_QUIET_WINDOW_MS = 2_000;
     private static final TopicPartition TOPIC_PARTITION = new TopicPartition("traffic", 0);
 
     @Test
@@ -367,6 +371,12 @@ class TrafficReplayerTopLevelConstructionTest {
                 null
             );
             kafkaProperties.setProperty(ConsumerConfig.CLIENT_ID_CONFIG, clientId);
+            // Wired exactly as production does: the assignor's rebalance requests reach the owner through this
+            // shared control, and a fresh group waits one quiet window before its first assignment.
+            var assignorControl = new AssignorControl();
+            kafkaProperties.put(QuietWindowAssignor.CONTROL_CONFIG, assignorControl);
+            kafkaProperties.put(QuietWindowAssignor.QUIET_MILLIS_CONFIG, TEST_QUIET_WINDOW_MS);
+            parameters.kafkaQuietWindowMs = TEST_QUIET_WINDOW_MS;
             var consumer = new KafkaConsumer<String, byte[]>(kafkaProperties);
             var targetEventLoops = new NioEventLoopGroup(
                 1,
@@ -399,7 +409,8 @@ class TrafficReplayerTopLevelConstructionTest {
                         ignored -> {},
                         () -> {},
                         System.err
-                    )
+                    ),
+                    assignorControl
                 );
                 var live = new LiveDeployedReplayer(deployed, telemetry, clientId);
                 live.thread.start();
@@ -1054,13 +1065,9 @@ class TrafficReplayerTopLevelConstructionTest {
                     ),
                     "both requests must reuse one target socket"
                 );
-                Assertions.assertEquals(
-                    1,
-                    InMemoryInstrumentationBundle.getMetricValueOrZero(
-                        telemetry.getFinishedMetrics(),
-                        IReplayContexts.MetricNames.CONNECTIONS_CLOSED
-                    )
-                );
+                // The socket's close is recorded when its channel goes inactive, which can trail the close
+                // future -- a TLS close_notify adds a round trip -- so wait for it rather than reading once.
+                awaitMetricValue(telemetry, IReplayContexts.MetricNames.CONNECTIONS_CLOSED, 1);
                 Assertions.assertEquals(
                     0,
                     InMemoryInstrumentationBundle.getMetricValueOrZero(
@@ -2002,6 +2009,20 @@ class TrafficReplayerTopLevelConstructionTest {
             latch.await(15, TimeUnit.SECONDS),
             description + " did not complete before timeout"
         );
+    }
+
+    private static void awaitMetricValue(
+        InMemoryInstrumentationBundle telemetry,
+        String metricName,
+        long expected
+    ) throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        long value = InMemoryInstrumentationBundle.getMetricValueOrZero(telemetry.getFinishedMetrics(), metricName);
+        while (value != expected && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+            value = InMemoryInstrumentationBundle.getMetricValueOrZero(telemetry.getFinishedMetrics(), metricName);
+        }
+        Assertions.assertEquals(expected, value, metricName);
     }
 
     private static SimpleHttpResponse okResponse() {

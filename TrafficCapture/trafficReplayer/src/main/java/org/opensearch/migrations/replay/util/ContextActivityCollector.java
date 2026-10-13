@@ -40,12 +40,16 @@ public final class ContextActivityCollector {
     public static final int MAX_OLD_CONTEXT_DETAILS = 16;
     public static final int MAX_DESCENDANT_DETAILS = 16;
 
+    // The warnings target compiler-generated members of this private activity descriptor.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     private record KnownActivity(
         Class<? extends IScopedInstrumentationAttributes> type,
         String name,
         Duration threshold
     ) {}
 
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     public record ActivitySummary(
         @NonNull String activity,
         long activeCount,
@@ -54,12 +58,16 @@ public final class ContextActivityCollector {
         @NonNull Duration threshold
     ) {}
 
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record ContextIdentity(
         @NonNull Optional<KafkaRecordId> kafkaRecordId,
         @NonNull Optional<ConnectionProcessingId> connectionProcessingId,
         @NonNull Optional<ReplayRequestId> replayRequestId
     ) {}
 
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record ContextDetail(
         @NonNull String activity,
         @NonNull Duration age,
@@ -67,6 +75,8 @@ public final class ContextActivityCollector {
         @NonNull ContextIdentity identity
     ) {}
 
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     public record OldestKafkaRecord(
         @NonNull KafkaRecordId recordId,
         @NonNull Duration age,
@@ -74,6 +84,8 @@ public final class ContextActivityCollector {
         @NonNull List<ContextDetail> descendants
     ) {}
 
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     public record Snapshot(
         @NonNull Instant observedAt,
         long totalActiveContexts,
@@ -184,31 +196,58 @@ public final class ContextActivityCollector {
     public Snapshot collect(boolean includeOldestRecordDescendants) {
         var now = clock.instant();
         var activities = new LinkedHashMap<String, ActivitySummary>();
-        KNOWN_ACTIVITIES.forEach(known -> {
-            var cutoff = now.minus(known.threshold());
-            long activeCount = 0;
-            long overThreshold = 0;
-            var oldestAge = Duration.ZERO;
-            var stillOverThreshold = true;
-            for (var iterator = byActivityTracker.getOldestActiveScopes(scopeClass(known.type())).iterator();
-                 iterator.hasNext();) {
-                var context = iterator.next();
-                if (activeCount++ == 0) {
-                    oldestAge = age(context, now);
-                }
+        KNOWN_ACTIVITIES.forEach(known -> activities.put(known.name(), summarizeActivity(known, now)));
+
+        var oldContextScan = scanOldContexts(now);
+
+        var oldestRecord = globalTracker.getActiveScopesByAge()
+            .filter(IReplayContexts.IKafkaRecordContext.class::isInstance)
+            .map(IReplayContexts.IKafkaRecordContext.class::cast)
+            .findFirst()
+            .map(recordContext -> describeOldestKafkaRecord(recordContext, now, includeOldestRecordDescendants));
+
+        return new Snapshot(
+            now,
+            globalTracker.size(),
+            oldContextScan.globallyOldest() == null ? Duration.ZERO : age(oldContextScan.globallyOldest(), now),
+            Map.copyOf(activities),
+            List.copyOf(oldContextScan.oldContexts()),
+            oldContextScan.oldContextCount(),
+            oldestRecord
+        );
+    }
+
+    private ActivitySummary summarizeActivity(KnownActivity known, Instant now) {
+        var cutoff = now.minus(known.threshold());
+        long activeCount = 0;
+        long overThreshold = 0;
+        var oldestAge = Duration.ZERO;
+        var stillOverThreshold = true;
+        for (var iterator = byActivityTracker.getOldestActiveScopes(scopeClass(known.type())).iterator();
+             iterator.hasNext();) {
+            var context = iterator.next();
+            if (activeCount++ == 0) {
+                oldestAge = age(context, now);
+            }
+            if (stillOverThreshold) {
+                stillOverThreshold = !context.getStartTimeInstant().isAfter(cutoff);
                 if (stillOverThreshold) {
-                    stillOverThreshold = !context.getStartTimeInstant().isAfter(cutoff);
-                    if (stillOverThreshold) {
-                        overThreshold++;
-                    }
+                    overThreshold++;
                 }
             }
-            activities.put(
-                known.name(),
-                new ActivitySummary(known.name(), activeCount, oldestAge, overThreshold, known.threshold())
-            );
-        });
+        }
+        return new ActivitySummary(known.name(), activeCount, oldestAge, overThreshold, known.threshold());
+    }
 
+    // The warnings target compiler-generated members of this private scan result.
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
+    private record OldContextScan(
+        IScopedInstrumentationAttributes globallyOldest,
+        List<ContextDetail> oldContexts,
+        long oldContextCount
+    ) {}
+
+    private OldContextScan scanOldContexts(Instant now) {
         var oldContexts = new ArrayList<ContextDetail>();
         long oldContextCount = 0;
         var youngestPossiblyOld = now.minus(MINIMUM_AGE_THRESHOLD);
@@ -221,46 +260,36 @@ public final class ContextActivityCollector {
             if (context.getStartTimeInstant().isAfter(youngestPossiblyOld)) {
                 break;
             }
-            if (age(context, now).compareTo(thresholdFor(context)) < 0) {
-                continue;
-            }
-            oldContextCount++;
-            if (oldContexts.size() < MAX_OLD_CONTEXT_DETAILS) {
-                oldContexts.add(detail(context, now));
+            if (age(context, now).compareTo(thresholdFor(context)) >= 0) {
+                oldContextCount++;
+                if (oldContexts.size() < MAX_OLD_CONTEXT_DETAILS) {
+                    oldContexts.add(detail(context, now));
+                }
             }
         }
+        return new OldContextScan(globallyOldest, oldContexts, oldContextCount);
+    }
 
-        var oldestRecordContext = globalTracker.getActiveScopesByAge()
-            .filter(IReplayContexts.IKafkaRecordContext.class::isInstance)
-            .map(IReplayContexts.IKafkaRecordContext.class::cast)
-            .findFirst();
-        var oldestRecord = oldestRecordContext.map(record -> {
-            if (!includeOldestRecordDescendants) {
-                return new OldestKafkaRecord(record.getRecordId(), age(record, now), 0, List.of());
-            }
-            var descendants = globalTracker.getActiveScopesByAge()
-                .filter(context -> context != record)
-                .filter(context -> hasAncestor(context, record))
-                .toList();
-            return new OldestKafkaRecord(
-                record.getRecordId(),
-                age(record, now),
-                descendants.size(),
-                descendants.stream()
-                    .limit(MAX_DESCENDANT_DETAILS)
-                    .map(context -> detail(context, now))
-                    .toList()
-            );
-        });
-
-        return new Snapshot(
-            now,
-            globalTracker.size(),
-            globallyOldest == null ? Duration.ZERO : age(globallyOldest, now),
-            Map.copyOf(activities),
-            List.copyOf(oldContexts),
-            oldContextCount,
-            oldestRecord
+    private OldestKafkaRecord describeOldestKafkaRecord(
+        IReplayContexts.IKafkaRecordContext recordContext,
+        Instant now,
+        boolean includeDescendants
+    ) {
+        if (!includeDescendants) {
+            return new OldestKafkaRecord(recordContext.getRecordId(), age(recordContext, now), 0, List.of());
+        }
+        var descendants = globalTracker.getActiveScopesByAge()
+            .filter(context -> context != recordContext)
+            .filter(context -> hasAncestor(context, recordContext))
+            .toList();
+        return new OldestKafkaRecord(
+            recordContext.getRecordId(),
+            age(recordContext, now),
+            descendants.size(),
+            descendants.stream()
+                .limit(MAX_DESCENDANT_DETAILS)
+                .map(context -> detail(context, now))
+                .toList()
         );
     }
 
@@ -299,8 +328,8 @@ public final class ContextActivityCollector {
         ReplayRequestId requestId = null;
         IScopedInstrumentationAttributes current = context;
         while (current != null) {
-            if (recordId == null && current instanceof IReplayContexts.IKafkaRecordContext record) {
-                recordId = record.getRecordId();
+            if (recordId == null && current instanceof IReplayContexts.IKafkaRecordContext recordContext) {
+                recordId = recordContext.getRecordId();
             }
             if (connectionId == null && current instanceof IReplayContexts.IConnectionContext connection) {
                 connectionId = connection.getConnectionProcessingId();

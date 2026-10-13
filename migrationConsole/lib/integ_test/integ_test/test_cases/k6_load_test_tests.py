@@ -38,8 +38,8 @@ logger = logging.getLogger(__name__)
 # The ingest scenario still uses the nyc_taxis schema; each test gets a fresh index name.
 K6_INDEX_PREFIX = "k6-nyc-taxis"
 K6_INDEX_MAPPING_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "resources/nyc_taxis_mapping.json"
+    Path(__file__).resolve().parents[1] /
+    "resources/nyc_taxis_mapping.json"
 )
 K6_TESTERS = (
     ("pinned", {}),
@@ -152,11 +152,11 @@ def _deployment_has_test_capacity(deployment) -> bool:
     desired = deployment.spec.replicas or 0
     required = max(1, math.ceil(desired * K6_TEST_FLEET_READY_FRACTION))
     return (
-        desired > 0
-        and (deployment.status.observed_generation or 0) >= (deployment.metadata.generation or 0)
-        and (deployment.status.updated_replicas or 0) >= required
-        and (deployment.status.ready_replicas or 0) >= required
-        and (deployment.status.available_replicas or 0) >= required
+        desired > 0 and
+        (deployment.status.observed_generation or 0) >= (deployment.metadata.generation or 0) and
+        (deployment.status.updated_replicas or 0) >= required and
+        (deployment.status.ready_replicas or 0) >= required and
+        (deployment.status.available_replicas or 0) >= required
     )
 
 
@@ -206,8 +206,8 @@ def wait_for_k6_test_fleet_capacity(
             for fleet_name, deployments in fleets.items()
         }
         if all(
-            deployments
-            and all(_deployment_has_test_capacity(deployment) for deployment in deployments)
+            deployments and
+            all(_deployment_has_test_capacity(deployment) for deployment in deployments)
             for deployments in fleets.values()
         ):
             logger.info(

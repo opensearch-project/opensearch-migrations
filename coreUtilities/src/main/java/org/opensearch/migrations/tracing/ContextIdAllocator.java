@@ -10,6 +10,9 @@ final class ContextIdAllocator {
 
     private final int blockSize;
     private final AtomicLong nextBlockStart;
+    // Each thread's cursor must outlive every call so its reserved block is consumed rather than abandoned;
+    // the cursor holds only two longs, so retaining it for the thread's lifetime pins nothing else.
+    @SuppressWarnings("java:S5164")
     private final ThreadLocal<BlockCursor> localBlock = ThreadLocal.withInitial(BlockCursor::new);
 
     ContextIdAllocator() {

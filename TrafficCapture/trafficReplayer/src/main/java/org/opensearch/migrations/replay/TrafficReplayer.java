@@ -541,30 +541,7 @@ public class TrafficReplayer {
                     "--kafka-quiet-window-ms must be greater than --cancellation-grace-ms"
                 );
             }
-            if (targetRetryMaxDelayMs < TargetRetryPacing.DEFAULT_INITIAL_DELAY.toMillis()) {
-                throw new ParameterException(
-                    "--target-retry-max-delay-ms must be at least "
-                        + TargetRetryPacing.DEFAULT_INITIAL_DELAY.toMillis()
-                );
-            }
-            if (!(targetRetryBudgetRatio >= 0) || Double.isInfinite(targetRetryBudgetRatio)) {
-                throw new ParameterException("--target-retry-budget-ratio must be a finite non-negative value");
-            }
-            if (!(targetRetryBudgetFloorPerSecond > 0) || Double.isInfinite(targetRetryBudgetFloorPerSecond)) {
-                throw new ParameterException("--target-retry-budget-floor-per-second must be finite and positive");
-            }
-            if (targetConnectionInitialRate != 0
-                && !(targetConnectionInitialRate >= TargetConnectionLimiter.MINIMUM_INITIAL_RATE
-                    && targetConnectionInitialRate <= TargetConnectionLimiter.MAXIMUM_INITIAL_RATE)) {
-                throw new ParameterException(
-                    "--target-connection-initial-rate must be 0 or between "
-                        + TargetConnectionLimiter.MINIMUM_INITIAL_RATE + " and "
-                        + TargetConnectionLimiter.MAXIMUM_INITIAL_RATE
-                );
-            }
-            if (catchUpFactor != 0 && !(catchUpFactor > 1) || Double.isInfinite(catchUpFactor)) {
-                throw new ParameterException("--catch-up-factor must be 0 or a finite value greater than 1");
-            }
+            validateTargetPacing();
             if (heartbeatExpirationIntervalSeconds <= 0) {
                 throw new ParameterException(
                     "--heartbeat-expiration-interval-seconds must be positive"
@@ -587,6 +564,36 @@ public class TrafficReplayer {
             }
             if (speedupFactor <= 0.0 || !Double.isFinite(speedupFactor)) {
                 throw new ParameterException("--speedup-factor must be a finite positive value");
+            }
+        }
+
+        // Each check rejects NaN explicitly because a bare range comparison would let it through.
+        private void validateTargetPacing() {
+            if (targetRetryMaxDelayMs < TargetRetryPacing.DEFAULT_INITIAL_DELAY.toMillis()) {
+                throw new ParameterException(
+                    "--target-retry-max-delay-ms must be at least "
+                        + TargetRetryPacing.DEFAULT_INITIAL_DELAY.toMillis()
+                );
+            }
+            if (!Double.isFinite(targetRetryBudgetRatio) || targetRetryBudgetRatio < 0) {
+                throw new ParameterException("--target-retry-budget-ratio must be a finite non-negative value");
+            }
+            if (!Double.isFinite(targetRetryBudgetFloorPerSecond) || targetRetryBudgetFloorPerSecond <= 0) {
+                throw new ParameterException("--target-retry-budget-floor-per-second must be finite and positive");
+            }
+            if (targetConnectionInitialRate != 0
+                && (Double.isNaN(targetConnectionInitialRate)
+                    || targetConnectionInitialRate < TargetConnectionLimiter.MINIMUM_INITIAL_RATE
+                    || targetConnectionInitialRate > TargetConnectionLimiter.MAXIMUM_INITIAL_RATE)) {
+                throw new ParameterException(
+                    "--target-connection-initial-rate must be 0 or between "
+                        + TargetConnectionLimiter.MINIMUM_INITIAL_RATE + " and "
+                        + TargetConnectionLimiter.MAXIMUM_INITIAL_RATE
+                );
+            }
+            if (Double.isInfinite(catchUpFactor)
+                || (catchUpFactor != 0 && (Double.isNaN(catchUpFactor) || catchUpFactor <= 1))) {
+                throw new ParameterException("--catch-up-factor must be 0 or a finite value greater than 1");
             }
         }
 

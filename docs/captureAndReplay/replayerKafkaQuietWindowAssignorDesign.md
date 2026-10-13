@@ -1,7 +1,9 @@
 # Kafka Quiet-Window Assignor
 
-**Status:** proposal; not implemented; simpler alternative to
-[Stability-Window Cooperative Assignor](replayerKafkaStabilityWindowAssignorDesign.md)
+**Status:** implemented by `QuietWindowAssignor` and `AssignorControl` in
+`TrafficCapture/trafficReplayer/.../kafkasource/assignor`; the replayer's default
+`partition.assignment.strategy` (a user Kafka property file may still override it). This is a
+simpler alternative to the stability-window cooperative assignor proposal (not checked in).
 **Date:** 2026-10-10
 
 ## Goal
@@ -297,10 +299,16 @@ Commit and revocation behavior is unchanged and defined by
 - Conflicting ownership claims resolve by planner generation; the loser's partition becomes
   unowned, never double-owned.
 
-## Initial implementation scope
+## Implementation scope
 
 - Wrap Kafka's cooperative-sticky planner for target computation and generation metadata;
   advertise only the cooperative protocol and apply the withhold-moves step in the wrapper.
 - Assume all replay workers subscribe to the same topics with equal partition weight; fall back to
   the planner's plain behavior (or refuse) for heterogeneous subscriptions.
-- `Q` and the poll-loop deadline plumbing (`assignorControl`) are the only new configuration.
+- `Q` is the only new user-facing configuration: workflow key `kafkaQuietWindowMs` and CLI flag
+  `--kafka-quiet-window-ms` (default 60000), forwarded to the consumer as
+  `quietwindow.assignor.quiet.ms`. The replayer rejects a value that does not exceed
+  `cancellationGraceMs`.
+- `followUpGrace` is an internal consumer property (`quietwindow.assignor.followup.grace.ms`,
+  default `Q`) that is not exposed by the CLI or workflow schema. The poll-loop deadline plumbing
+  (`assignorControl`) is internal wiring, not configuration.
