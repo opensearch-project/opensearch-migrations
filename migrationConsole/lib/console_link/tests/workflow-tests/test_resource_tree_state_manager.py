@@ -13,7 +13,7 @@ from console_link.workflow.tui.resource_tree_state_manager import (
 
 # --- Helpers ---
 
-def make_resource(name, plural='snapshotmigrations', phase='Running', spec=None, status=None,
+def make_resource(name, plural='snapshotmigrations', phase='Pending', spec=None, status=None,
                   depends_on=None, workflow_progress=None):
     return ResourceNode(
         name=name, plural=plural, phase=phase,
@@ -130,7 +130,7 @@ class TestIncrementalUpdate:
 
     def test_update_detects_phase_change(self, tree_and_manager):
         tree, mgr = tree_and_manager
-        resource = make_resource('snap-1', 'datasnapshots', 'Running')
+        resource = make_resource('snap-1', 'datasnapshots', 'Pending')
         mgr.rebuild(make_sections({'Snapshot': [resource]}))
         # Change phase
         updated = make_resource('snap-1', 'datasnapshots', 'Completed')

@@ -32,7 +32,10 @@ PHASE_SYMBOLS = {
     'Succeeded': ('✓', 'green'),
     'Running': ('▶', 'yellow'),
     'Pending': ('○', 'cyan'),
+    'Created': ('○', 'cyan'),
+    # Old name for Created; CRs stored before the phase rename may still carry it.
     'Initialized': ('○', 'cyan'),
+    'Deleting': ('⊘', 'yellow'),
     'Failed': ('✗', 'red'),
     'Error': ('✗', 'red'),
     'Skipped': ('~', 'dim'),
