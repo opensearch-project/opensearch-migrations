@@ -159,12 +159,7 @@ public abstract class MigratorEvaluatorBase {
         return items.build();
     }
 
-    private GlobalMetadataCreatorResults migrateGlobalMetadata(
-        MigrationMode mode,
-        MetadataRunner metadataRunner,
-        TemplateSelection templateSelection,
-        RootMetadataMigrationContext context
-    ) {
+    private GlobalMetadataCreatorResults migrateGlobalMetadata(MigrationMode mode, MetadataRunner metadataRunner, TemplateSelection templateSelection, RootMetadataMigrationContext context) {
         var metadataResults = metadataRunner.migrateMetadata(
             mode,
             context.createMetadataMigrationContext(),

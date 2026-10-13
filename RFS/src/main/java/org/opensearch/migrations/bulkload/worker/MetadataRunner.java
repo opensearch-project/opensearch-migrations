@@ -29,11 +29,7 @@ public class MetadataRunner {
         return metadataCreator.selectTemplates(globalMetadata);
     }
 
-    public GlobalMetadataCreatorResults migrateMetadata(
-        MigrationMode mode,
-        IClusterMetadataContext context,
-        TemplateSelection selection
-    ) {
+    public GlobalMetadataCreatorResults migrateMetadata(MigrationMode mode, IClusterMetadataContext context, TemplateSelection selection) {
         log.info("Migrating the Templates...");
         var transformedRoot = transformer.transformGlobalMetadata(selection.metadata());
         var createdResults = metadataCreator.create(transformedRoot, mode, context);
