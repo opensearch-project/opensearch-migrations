@@ -32,6 +32,15 @@ public class ScopedWorkCoordinator {
         IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException {
+        return ensurePhaseCompletion(workItemIdSupplier, visitor, contextSupplier, () -> null);
+    }
+
+    public <T> T ensurePhaseCompletion(
+        WorkItemGetter workItemIdSupplier,
+        IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier,
+        Supplier<WorkItemDocCounts> docCountsSupplier
+    ) throws IOException, InterruptedException {
         var acquisitionResult = workItemIdSupplier.tryAcquire(workCoordinator);
         return acquisitionResult.visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T>() {
             @Override
@@ -66,7 +75,12 @@ public class ScopedWorkCoordinator {
                     T result = visitor.onAcquiredWork(workItem);
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("Finished onAcquiredWork for work item: {} in {} ms", workItemId, duration);
-                    workCoordinator.completeWorkItem(workItemId, contextSupplier);
+                    var docCounts = docCountsSupplier.get();
+                    if (docCounts != null) {
+                        workCoordinator.completeWorkItem(workItemId, docCounts, contextSupplier);
+                    } else {
+                        workCoordinator.completeWorkItem(workItemId, contextSupplier);
+                    }
                     log.info("Marked work item {} as completed and released lease", workItemId);
                     leaseExpireTrigger.markWorkAsCompleted(workItemId);
                     return result;

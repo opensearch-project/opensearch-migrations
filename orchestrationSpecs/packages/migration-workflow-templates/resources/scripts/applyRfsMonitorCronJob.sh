@@ -165,7 +165,9 @@ seed_status_patch="$(jq -nc \
             shardsTotal:0,
             shardsMigrated:0,
             shardsInProgress:0,
-            shardsWaiting:0
+            shardsWaiting:0,
+            docsSucceeded:null,
+            docsFailed:null
         }
     }}}')"
 kubectl patch snapshotmigration "$SNAPSHOT_MIGRATION_NAME" \

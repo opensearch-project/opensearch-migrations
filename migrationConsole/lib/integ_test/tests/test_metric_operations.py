@@ -172,8 +172,9 @@ def test_cloudwatch_workflow_assertion_prefers_backfill_completion_metrics():
         assert_cloudwatch_capture_replay_metrics_for_workflow_run(attempts=1)
 
     candidates = has_recent_data.call_args[0][1]
-    assert candidates[:3] == [
+    assert candidates[:4] == [
         ("pipelineDocsMigrated", {"qualifier": "eksint-p1039", "OTelLib": "documentMigration"}),
+        ("pipelineDocsSucceeded", {"qualifier": "eksint-p1039", "OTelLib": "documentMigration"}),
         ("pipelineBytesMigrated", {"qualifier": "eksint-p1039", "OTelLib": "documentMigration"}),
         ("bytesSent", {"qualifier": "eksint-p1039", "OTelLib": "documentMigration"}),
     ]

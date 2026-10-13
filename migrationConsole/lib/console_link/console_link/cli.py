@@ -975,12 +975,29 @@ def backfill_failed_document_stream_location_cmd(migration):
     help="Count distinct failed documents in the current session's failed document stream "
          "(de-duplicated by index + document id, since the failed document stream is at-least-once).")
 @click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
-def backfill_failed_document_stream_count_cmd(migration):
+@click.option('--by', 'group_by', default=None, type=click.Choice(failed_document_stream_.COUNT_BY_FIELDS),
+              help='Break the count down by this record field, e.g. --by failureType.')
+@click.pass_obj
+def backfill_failed_document_stream_count_cmd(ctx, migration, group_by):
     try:
         cfg = failed_document_stream_.load_config(migration_override=migration)
     except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
         raise click.ClickException(str(e))
-    click.echo(str(failed_document_stream_.count(cfg)))
+    if group_by is None:
+        total = failed_document_stream_.count(cfg)
+        click.echo(json.dumps({"count": total}) if ctx.json else str(total))
+        return
+    counts = failed_document_stream_.count_by(cfg, group_by)
+    if ctx.json:
+        click.echo(json.dumps({"by": group_by, "counts": counts, "total": sum(counts.values())}))
+        return
+    if not counts:
+        click.echo("(no failed document stream records for this session)")
+        return
+    width = max(len(k) for k in counts)
+    for key, n in counts.items():
+        click.echo(f"{key:<{width}}  {n}")
+    click.echo(f"{'total':<{width}}  {sum(counts.values())}")
 
 
 @failed_document_stream_group.command(name="list", help="List failed document records in stable order.")

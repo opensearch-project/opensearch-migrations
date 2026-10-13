@@ -438,43 +438,57 @@ def format_live_status(resource: ResourceNode):
     return None
 
 
-def _format_backfill_status(backfill: Dict[str, Any]):
-    summary = backfill.get('summary') or {}
-    parts = []
-    details = []
-    phase = backfill.get('phase')
-    if phase:
-        details.append(f"phase: {phase}")
-    pct = summary.get('percentageCompleted')
-    if pct is not None:
-        parts.append(f"{pct:.0f}%")
+def _backfill_shard_status(summary: Dict[str, Any], parts: list, details: list):
     shards_total = summary.get('shardsTotal')
     shards_migrated = summary.get('shardsMigrated')
     if shards_total is not None:
         parts.append(f"shards {shards_migrated or 0}/{shards_total}")
         details.append(f"shards migrated: {shards_migrated or 0}/{shards_total}")
-    shards_in_progress = summary.get('shardsInProgress')
-    if shards_in_progress:
-        details.append(f"shards in progress: {shards_in_progress}")
-    shards_waiting = summary.get('shardsWaiting')
-    if shards_waiting:
-        details.append(f"shards waiting: {shards_waiting}")
+    if summary.get('shardsInProgress'):
+        details.append(f"shards in progress: {summary['shardsInProgress']}")
+    if summary.get('shardsWaiting'):
+        details.append(f"shards waiting: {summary['shardsWaiting']}")
+
+
+def _backfill_doc_counts(summary: Dict[str, Any], parts: list, details: list):
+    docs_succeeded = summary.get('docsSucceeded')
+    docs_failed = summary.get('docsFailed')
+    if docs_succeeded is None and docs_failed is None:
+        return
+    parts.append(f"docs {docs_succeeded or 0:,} succeeded / {docs_failed or 0:,} failed")
+    if docs_succeeded is not None:
+        details.append(f"docs succeeded: {docs_succeeded:,}")
+    if docs_failed is not None:
+        details.append(f"docs failed: {docs_failed:,}")
+
+
+def _backfill_eta(summary: Dict[str, Any], parts: list, details: list):
     eta_ms = summary.get('etaMs')
-    if eta_ms:
-        secs = int(eta_ms / 1000)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        parts.append(f"ETA {h}h {m}m {s}s")
-        details.append(f"ETA: {h}h {m}m {s}s")
-    started = summary.get('started')
-    if started:
-        details.append(f"started: {started}")
-    finished = summary.get('finished')
-    if finished:
-        details.append(f"finished: {finished}")
-    updated_at = backfill.get('updatedAt')
-    if updated_at:
-        details.append(f"updated at: {updated_at}")
+    if not eta_ms:
+        return
+    m, s = divmod(int(eta_ms / 1000), 60)
+    h, m = divmod(m, 60)
+    parts.append(f"ETA {h}h {m}m {s}s")
+    details.append(f"ETA: {h}h {m}m {s}s")
+
+
+def _format_backfill_status(backfill: Dict[str, Any]):
+    summary = backfill.get('summary') or {}
+    parts = []
+    details = []
+    if backfill.get('phase'):
+        details.append(f"phase: {backfill['phase']}")
+    pct = summary.get('percentageCompleted')
+    if pct is not None:
+        parts.append(f"{pct:.0f}%")
+    _backfill_shard_status(summary, parts, details)
+    _backfill_doc_counts(summary, parts, details)
+    _backfill_eta(summary, parts, details)
+    for label, key in (("started", 'started'), ("finished", 'finished')):
+        if summary.get(key):
+            details.append(f"{label}: {summary[key]}")
+    if backfill.get('updatedAt'):
+        details.append(f"updated at: {backfill['updatedAt']}")
     if parts:
         return f"Backfill status: {', '.join(parts)}", details
     return None

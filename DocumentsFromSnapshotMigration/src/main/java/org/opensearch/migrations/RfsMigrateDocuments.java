@@ -1136,7 +1136,7 @@ public class RfsMigrateDocuments {
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, failedDocumentStreamWatermark);
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemId, successorWorkItem, 1, contextSupplier
+                workItemId, successorWorkItem, 1, null, failedDocumentStreamWatermark.getDocCounts(), contextSupplier
         );
         cleanShutdownCompleted.set(true);
     }
@@ -1244,6 +1244,7 @@ public class RfsMigrateDocuments {
                             successorWorkItemIds,
                             successorNextAcquisitionLeaseExponent,
                             workItemAndDuration.getLeaseExpirationTime(),
+                            progressCursor.getDocCounts(),
                             contextSupplier
                     );
                 }

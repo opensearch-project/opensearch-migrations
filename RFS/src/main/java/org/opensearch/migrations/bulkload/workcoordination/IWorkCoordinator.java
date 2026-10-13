@@ -104,6 +104,20 @@ public interface IWorkCoordinator extends AutoCloseable {
     ) throws IOException, InterruptedException;
 
     /**
+     * Same as {@link #completeWorkItem(String, Supplier)}, additionally persisting the document outcomes
+     * for this work item's committed range on the work-item document.  The counts are only written by
+     * the same update that marks the item complete, which only succeeds for the current lease holder,
+     * so they are recorded at most once per work item.
+     */
+    default void completeWorkItem(
+        String workItemId,
+        WorkItemDocCounts docCounts,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException {
+        completeWorkItem(workItemId, contextSupplier);
+    }
+
+    /**
      * Release the lease on a work item without marking it complete, so that another worker can
      * pick it up immediately.  Intended for the case where the current worker is shutting down
      * before any progress (i.e. no checkpoint cursor) has been made on the item — staying on the
@@ -142,6 +156,24 @@ public interface IWorkCoordinator extends AutoCloseable {
         Instant deadline,
         Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException;
+
+    /**
+     * Same as {@link #createSuccessorWorkItemsAndMarkComplete(String, List, int, Instant, Supplier)},
+     * additionally persisting the document outcomes for the parent's committed range (see
+     * {@link #completeWorkItem(String, WorkItemDocCounts, Supplier)}).  {@code deadline} may be null.
+     */
+    @SuppressWarnings("java:S107")
+    default void createSuccessorWorkItemsAndMarkComplete(
+        String workItemId,
+        List<String> successorWorkItemIds,
+        int initialNextAcquisitionLeaseExponent,
+        Instant deadline,
+        WorkItemDocCounts docCounts,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException {
+        createSuccessorWorkItemsAndMarkComplete(workItemId, successorWorkItemIds,
+            initialNextAcquisitionLeaseExponent, deadline, contextSupplier);
+    }
 
     /**
      * @return the number of items that are not yet complete.  This will include items with and without claimed leases.

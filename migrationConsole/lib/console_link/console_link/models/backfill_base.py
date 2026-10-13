@@ -99,6 +99,14 @@ class BackfillOverallStatus(BaseModel):
     shard_complete: Optional[int] = None
     shard_in_progress: Optional[int] = None
     shard_waiting: Optional[int] = None
+    docs_succeeded: Optional[int] = Field(
+        default=None,
+        description="Documents successfully indexed, summed over completed work items"
+    )
+    docs_failed: Optional[int] = Field(
+        default=None,
+        description="Documents that failed with a non-retryable error, summed over completed work items"
+    )
 
     @field_serializer('started', 'finished')
     def serialize_datetime(self, dt: Optional[datetime]) -> str | None:

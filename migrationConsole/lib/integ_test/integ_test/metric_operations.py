@@ -206,6 +206,7 @@ def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
     )
     app_metric_candidates = [
         ("pipelineDocsMigrated", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
+        ("pipelineDocsSucceeded", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
         ("pipelineBytesMigrated", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
         ("bytesSent", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
         ("kafkaCommitCount", {"qualifier": qualifier, "OTelLib": "replayer"}),

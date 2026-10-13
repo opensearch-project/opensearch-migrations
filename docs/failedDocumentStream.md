@@ -84,6 +84,8 @@ In JSON mode (`console --json backfill status --deep-check`) it adds `failed_doc
   "shard_complete": 40,
   "shard_in_progress": 0,
   "shard_waiting": 0,
+  "docs_succeeded": 1249873,
+  "docs_failed": 127,
   "failed_document_stream_location": "s3://my-bucket/rfs-failed-document-stream/session=abc-123/",
   "failed_documents_present": true
 }

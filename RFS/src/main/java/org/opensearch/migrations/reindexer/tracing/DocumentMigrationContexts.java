@@ -9,6 +9,8 @@ import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
@@ -122,6 +124,7 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
     }
 
     class DocumentReindexContext extends BaseDocumentMigrationContext implements IDocumentReindexContext {
+        public static final AttributeKey<String> FAILURE_TYPE_ATTR = AttributeKey.stringKey(AttributeNames.FAILURE_TYPE);
 
         protected DocumentReindexContext(RootDocumentMigrationContext rootScope) {
             super(rootScope);
@@ -143,13 +146,19 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
             public final LongCounter docsMigrated;
             public final LongCounter bytesMigrated;
             public final LongCounter pipelineErrors;
+            public final LongCounter docsSucceeded;
+            public final LongCounter docsFailed;
+
+            private static final String COUNT_UNIT = "count";
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, fromActivityName(activityName));
                 shardDuration = meter.histogramBuilder(MetricNames.SHARD_DURATION).setUnit("ms").build();
-                docsMigrated = meter.counterBuilder(MetricNames.DOCS_MIGRATED).setUnit("count").build();
+                docsMigrated = meter.counterBuilder(MetricNames.DOCS_MIGRATED).setUnit(COUNT_UNIT).build();
                 bytesMigrated = meter.counterBuilder(MetricNames.BYTES_MIGRATED).setUnit("bytes").build();
-                pipelineErrors = meter.counterBuilder(MetricNames.PIPELINE_ERRORS).setUnit("count").build();
+                pipelineErrors = meter.counterBuilder(MetricNames.PIPELINE_ERRORS).setUnit(COUNT_UNIT).build();
+                docsSucceeded = meter.counterBuilder(MetricNames.DOCS_SUCCEEDED).setUnit(COUNT_UNIT).build();
+                docsFailed = meter.counterBuilder(MetricNames.DOCS_FAILED).setUnit(COUNT_UNIT).build();
             }
         }
 
@@ -182,6 +191,17 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         @Override
         public void recordPipelineError() {
             meterIncrementEvent(getMetrics().pipelineErrors);
+        }
+
+        @Override
+        public void recordDocsSucceeded(long count) {
+            meterIncrementEvent(getMetrics().docsSucceeded, count);
+        }
+
+        @Override
+        public void recordDocsFailed(String failureType, long count) {
+            meterIncrementEvent(getMetrics().docsFailed, count,
+                Attributes.builder().put(FAILURE_TYPE_ATTR, failureType));
         }
 
         @Override

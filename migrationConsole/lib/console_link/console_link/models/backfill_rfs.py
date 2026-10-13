@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 
 import requests
@@ -23,6 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 WORKING_STATE_INDEX = ".migrations_working_state"
+JSON_HEADERS = {"Content-Type": "application/json"}
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
@@ -303,8 +304,14 @@ def get_detailed_status(target_cluster: Cluster, session_name: str,
         f"Total shards: {values.shard_total}\n"
         f"Completed shards: {values.shard_complete}\n"
         f"In progress shards: {values.shard_in_progress}\n"
-        f"Waiting shards: {values.shard_waiting}"
+        f"Waiting shards: {values.shard_waiting}\n"
+        f"Documents succeeded (completed work items): {_format_optional_count(values.docs_succeeded)}\n"
+        f"Documents failed (completed work items): {_format_optional_count(values.docs_failed)}"
     )
+
+
+def _format_optional_count(value: Optional[int]) -> str:
+    return "N/A" if value is None else str(value)
 
 
 def _format_duration_ms(millis: float) -> str:
@@ -348,7 +355,7 @@ def _get_max_completed_epoch(cluster, index_name: str) -> Optional[int]:
         resp = cluster.call_api(
             f"/{index_name}/_search",
             data=json.dumps(body),
-            headers={"Content-Type": "application/json"},
+            headers=JSON_HEADERS,
         )
         aggs = resp.json().get("aggregations", {})
         val = aggs.get("max_completed", {}).get("value")
@@ -450,6 +457,9 @@ def get_detailed_status_obj(target_cluster: Cluster,
                                                                                  active_workers,
                                                                                  has_failed_documents)
 
+    docs_succeeded, docs_failed = parse_doc_counts_response(generate_doc_counts_query(), target_cluster,
+                                                            index_to_check)
+
     return BackfillOverallStatus(
         status=status,
         percentage_completed=percentage_completed,
@@ -460,6 +470,8 @@ def get_detailed_status_obj(target_cluster: Cluster,
         shard_complete=counts.completed,
         shard_in_progress=counts.in_progress,
         shard_waiting=counts.unclaimed,
+        docs_succeeded=docs_succeeded,
+        docs_failed=docs_failed,
     )
 
 
@@ -543,6 +555,26 @@ def generate_shard_setup_query():
     return {"query": {"match": {"_id": "shard_setup"}}}
 
 
+DOCS_SUCCEEDED_FIELD = "docsSucceeded"
+DOCS_FAILED_FIELD = "docsFailed"
+
+
+def generate_doc_counts_query():
+    """Sum the per-work-item document counts that RFS workers persist when a work item completes.
+    Each work item (including a parent that handed off to successors) only covers its own range,
+    so summing across completed items gives a total with no double counting.  Items from older
+    runs lack these fields and contribute 0."""
+    return {
+        "size": 0,
+        "query": {"bool": {"must": [{"exists": {"field": "completedAt"}}],
+                           "must_not": [{"match": {"_id": "shard_setup"}}]}},
+        "aggs": {
+            DOCS_SUCCEEDED_FIELD: {"sum": {"field": DOCS_SUCCEEDED_FIELD}},
+            DOCS_FAILED_FIELD: {"sum": {"field": DOCS_FAILED_FIELD}},
+        },
+    }
+
+
 def perform_archive(target_cluster: Cluster,
                     deployment_status: DeploymentStatus,
                     archive_dir_path: str = None,
@@ -614,7 +646,7 @@ def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: 
     try:
         logger.debug(f"Creating request: /{index_name}/_search; {query}")
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
         return None
@@ -629,11 +661,31 @@ def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: 
     return None
 
 
+def parse_doc_counts_response(query: dict, cluster: Cluster,
+                              index_name: str) -> Tuple[Optional[int], Optional[int]]:
+    """Return (docs_succeeded, docs_failed) from the sum aggregations, or (None, None) on any failure."""
+    try:
+        response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
+                                    headers=JSON_HEADERS)
+        aggs = response.json().get("aggregations", {})
+        return (_sum_agg_value(aggs, DOCS_SUCCEEDED_FIELD), _sum_agg_value(aggs, DOCS_FAILED_FIELD))
+    except Exception as e:
+        logger.warning(f"Failed to get document counts from {index_name}: {e}")
+        return None, None
+
+
+def _sum_agg_value(aggs: dict, name: str) -> Optional[int]:
+    value = aggs.get(name, {}).get("value")
+    if isinstance(value, (int, float)):
+        return int(value)
+    return None
+
+
 def parse_shard_setup_response(query: dict, cluster: Cluster, index_name: str) -> bool:
     """Check if shard_setup document has completedAt field set"""
     try:
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
         body = response.json()
         hits = body.get('hits', {}).get('hits', [])
         if hits:

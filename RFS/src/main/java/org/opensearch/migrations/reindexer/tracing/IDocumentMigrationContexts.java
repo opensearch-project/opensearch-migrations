@@ -21,6 +21,14 @@ public interface IDocumentMigrationContexts {
         public static final String DOCS_MIGRATED = "pipelineDocsMigrated";
         public static final String BYTES_MIGRATED = "pipelineBytesMigrated";
         public static final String PIPELINE_ERRORS = "pipelineErrors";
+        public static final String DOCS_SUCCEEDED = "pipelineDocsSucceeded";
+        public static final String DOCS_FAILED = "pipelineDocsFailed";
+    }
+
+    class AttributeNames {
+        private AttributeNames() {}
+
+        public static final String FAILURE_TYPE = "failureType";
     }
 
     interface IShardSetupAttemptContext extends IScopedInstrumentationAttributes {
@@ -59,6 +67,12 @@ public interface IDocumentMigrationContexts {
         void recordBytesMigrated(long count);
 
         void recordPipelineError();
+
+        /** Bulk items acknowledged by the target (including allowlisted errors) in a committed batch. */
+        void recordDocsSucceeded(long count);
+
+        /** Bulk items that failed terminally (non-retryable) in a committed batch, by bulk error type. */
+        void recordDocsFailed(String failureType, long count);
 
     }
 }

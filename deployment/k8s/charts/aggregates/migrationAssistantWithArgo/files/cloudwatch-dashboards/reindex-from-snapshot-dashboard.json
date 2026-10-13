@@ -277,6 +277,57 @@
             "type": "metric",
             "properties": {
                 "metrics": [
+                    [ "OpenSearchMigrations", "pipelineDocsSucceeded", "qualifier", "MA_QUALIFIER", "OTelLib", "documentMigration", { "region": "REGION", "label": "Succeeded - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}", "id": "m1", "color": "#2ca02c" } ],
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,failureType} MetricName=\"pipelineDocsFailed\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))", "label": "Failed - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}", "id": "e1", "region": "REGION", "color": "#d62728" } ]
+                ],
+                "period": 60,
+                "region": "REGION",
+                "stacked": false,
+                "title": "RFS Documents Succeeded / Failed",
+                "view": "timeSeries",
+                "stat": "Sum",
+                "yAxis": {
+                    "left": {
+                        "label": "Documents",
+                        "min": 0,
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 34,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SEARCH('{OpenSearchMigrations,OTelLib,qualifier,failureType} MetricName=\"pipelineDocsFailed\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)", "label": "${PROP('Dim.failureType')}", "id": "e1", "region": "REGION" } ]
+                ],
+                "period": 60,
+                "region": "REGION",
+                "stacked": false,
+                "title": "RFS Failed Documents by Failure Type",
+                "view": "timeSeries",
+                "stat": "Sum",
+                "yAxis": {
+                    "left": {
+                        "label": "Documents",
+                        "min": 0,
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "height": 8,
+            "width": 12,
+            "y": 42,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
                     [ "OpenSearchMigrations", "container_cpu_usage_seconds_total", "container", "bulk-loader", "namespace", "ma", { "stat": "Sum", "region": "REGION", "id": "m1", "visible": false } ],
                     [ { "expression": "m1 / PERIOD(m1)", "label": "CPU (cores)", "id": "e1", "region": "REGION", "color": "#1f77b4" } ]
                 ],
@@ -297,7 +348,7 @@
         {
             "height": 8,
             "width": 12,
-            "y": 34,
+            "y": 42,
             "x": 12,
             "type": "metric",
             "properties": {

@@ -11,7 +11,9 @@ from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.step_state import StepStateWithPause
 from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
-                                              WorkingIndexDoesntExist, compute_dervived_values)
+                                              WorkingIndexDoesntExist, compute_dervived_values,
+                                              generate_doc_counts_query, get_detailed_status,
+                                              get_detailed_status_obj, parse_doc_counts_response)
 from console_link.models.ecs_service import ECSService
 from console_link.models.factories import UnsupportedBackfillTypeError, get_backfill
 from console_link.models.utils import DeploymentStatus
@@ -445,3 +447,107 @@ class TestComputeDerivedValues:
             self.mock_cluster, self.test_index, 10, 5, started_epoch, True, has_failed_documents=True
         )
         assert status == StepStateWithPause.RUNNING
+
+
+class TestDocCounts:
+    """Succeeded/failed document totals summed from completed work items in the working state index."""
+
+    INDEX = ".migrations_working_state"
+
+    @staticmethod
+    def _response(body):
+        response = MagicMock()
+        response.json.return_value = body
+        return response
+
+    def _fake_cluster(self, doc_counts_body=None, doc_counts_error=None):
+        """A target cluster whose working state index reports all work items completed."""
+        def call_api(path, method=HttpMethod.GET, data=None, headers=None, **kwargs):
+            if path == f"/{self.INDEX}":
+                return self._response({})
+            if path == f"/{self.INDEX}/_doc/shard_setup":
+                return self._response({"_source": {"completedAt": 1_000_000_000}})
+            query = json.loads(data) if data else {}
+            aggs = query.get("aggs", {})
+            if "docsSucceeded" in aggs:
+                if doc_counts_error is not None:
+                    raise doc_counts_error
+                return self._response(doc_counts_body)
+            if "max_completed" in aggs:
+                return self._response({"aggregations": {"max_completed": {"value": 1_000_003_600}}})
+            if "unique_pair_count" in aggs:
+                return self._response({"hits": {"total": {"value": 4}, "hits": []}})
+            if query.get("query") == {"match": {"_id": "shard_setup"}}:
+                return self._response({"hits": {"hits": [{"_source": {"completedAt": 1_000_000_000}}]}})
+            raise AssertionError(f"Unexpected call: {path} {data}")
+
+        cluster = MagicMock()
+        cluster.call_api.side_effect = call_api
+        return cluster
+
+    def test_query_sums_counts_over_completed_work_items_only(self):
+        query = generate_doc_counts_query()
+        assert query["size"] == 0
+        assert query["query"] == {"bool": {"must": [{"exists": {"field": "completedAt"}}],
+                                           "must_not": [{"match": {"_id": "shard_setup"}}]}}
+        assert query["aggs"] == {"docsSucceeded": {"sum": {"field": "docsSucceeded"}},
+                                 "docsFailed": {"sum": {"field": "docsFailed"}}}
+
+    def test_parse_returns_totals(self):
+        cluster = self._fake_cluster({"aggregations": {"docsSucceeded": {"value": 180.0},
+                                                       "docsFailed": {"value": 5.0}}})
+        assert parse_doc_counts_response(generate_doc_counts_query(), cluster, self.INDEX) == (180, 5)
+
+    def test_parse_returns_none_when_aggregations_missing(self):
+        cluster = self._fake_cluster({"hits": {"total": {"value": 0}, "hits": []}})
+        assert parse_doc_counts_response(generate_doc_counts_query(), cluster, self.INDEX) == (None, None)
+
+    def test_parse_returns_none_when_query_fails(self):
+        cluster = self._fake_cluster(doc_counts_error=requests.exceptions.ConnectionError("boom"))
+        assert parse_doc_counts_response(generate_doc_counts_query(), cluster, self.INDEX) == (None, None)
+
+    def test_detailed_status_obj_includes_totals(self):
+        cluster = self._fake_cluster({"aggregations": {"docsSucceeded": {"value": 180.0},
+                                                       "docsFailed": {"value": 5.0}}})
+        status = get_detailed_status_obj(cluster)
+        assert status.status == StepStateWithPause.COMPLETED
+        assert status.docs_succeeded == 180
+        assert status.docs_failed == 5
+        dumped = status.model_dump(mode="json")
+        assert dumped["docs_succeeded"] == 180
+        assert dumped["docs_failed"] == 5
+
+    def test_detailed_status_obj_older_run_reports_zero(self):
+        # Sum aggregations over a field no work item has return 0.
+        cluster = self._fake_cluster({"aggregations": {"docsSucceeded": {"value": 0.0},
+                                                       "docsFailed": {"value": 0.0}}})
+        status = get_detailed_status_obj(cluster)
+        assert status.docs_succeeded == 0
+        assert status.docs_failed == 0
+
+    def test_detailed_status_obj_survives_doc_count_query_failure(self):
+        cluster = self._fake_cluster(doc_counts_error=requests.exceptions.ConnectionError("boom"))
+        status = get_detailed_status_obj(cluster)
+        assert status.status == StepStateWithPause.COMPLETED
+        assert status.shard_total == 4
+        assert status.docs_succeeded is None
+        assert status.docs_failed is None
+
+    def test_detailed_status_obj_initializing_leaves_totals_unset(self, mocker):
+        mocker.patch('console_link.models.backfill_rfs.parse_shard_setup_response', return_value=False)
+        status = get_detailed_status_obj(self._fake_cluster())
+        assert status.docs_succeeded is None
+        assert status.docs_failed is None
+
+    def test_detailed_status_text_includes_totals(self):
+        cluster = self._fake_cluster({"aggregations": {"docsSucceeded": {"value": 180.0},
+                                                       "docsFailed": {"value": 5.0}}})
+        text = get_detailed_status(cluster, session_name=None)
+        assert "Documents succeeded (completed work items): 180" in text
+        assert "Documents failed (completed work items): 5" in text
+
+    def test_detailed_status_text_shows_na_when_totals_unavailable(self):
+        cluster = self._fake_cluster(doc_counts_error=requests.exceptions.ConnectionError("boom"))
+        text = get_detailed_status(cluster, session_name=None)
+        assert "Documents succeeded (completed work items): N/A" in text
+        assert "Documents failed (completed work items): N/A" in text
