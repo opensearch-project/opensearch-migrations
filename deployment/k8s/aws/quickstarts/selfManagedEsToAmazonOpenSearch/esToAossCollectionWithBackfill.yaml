@@ -1,22 +1,12 @@
 # Quick start: self-managed Elasticsearch 7.10 -> Amazon OpenSearch Serverless collection:
 # snapshot + metadata + backfill of existing data, then capture and replay of live traffic.
-# Walkthrough: docs/quickStartSelfManagedEsToAmazonOpenSearch.md
+# Walkthrough: README.md in this directory
 #
 # Replace every <...> placeholder before running `workflow configure edit --stdin < this-file`.
 # The source endpoint below is the in-cluster testClusters chart; for an EC2 source, use its
 # load balancer or node address instead.
 
 skipApprovals: true
-
-# One snapshot of the source, migrated to the target as metadata (index settings and mappings)
-# followed by a document backfill (Reindex-From-Snapshot workers).
-snapshotMigrationConfigs:
-  - fromSource: source
-    toTarget: target
-    perSnapshotConfig:
-      snap1:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
 
 sourceClusters:
   source:
@@ -44,6 +34,16 @@ targetClusters:
       sigv4:
         region: "<REGION>"
         service: aoss
+
+# One snapshot of the source, migrated to the target as metadata (index settings and mappings)
+# followed by a document backfill (Reindex-From-Snapshot workers).
+snapshotMigrationConfigs:
+  - fromSource: source
+    toTarget: target
+    perSnapshotConfig:
+      snap1:
+        - metadataMigrationConfig: {}
+          documentBackfillConfig: {}
 
 kafkaClusterConfiguration:
   default:

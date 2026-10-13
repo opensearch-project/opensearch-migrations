@@ -68,6 +68,11 @@ The Rust CLI is the operator-oriented entry point. Developers who need to
 build and deploy the currently checked-out source should use
 `aws-bootstrap.sh` directly, as described below.
 
+For an end-to-end walkthrough that builds from source, creates a self-managed
+Elasticsearch source and an Amazon OpenSearch Service domain or Serverless
+collection target, runs a backfill plus capture and replay, and observes it, see
+[Quick start: self-managed Elasticsearch to Amazon OpenSearch](quickstarts/selfManagedEsToAmazonOpenSearch/README.md).
+
 ## Build and deploy the current checkout
 
 The repository's `aws-bootstrap.sh` workflow builds the CloudFormation

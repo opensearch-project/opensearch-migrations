@@ -18,6 +18,7 @@
   - [Roadmap](#roadmap)
   - [User Guide Documentation](#user-guide-documentation)
   - [Getting Started](#getting-started)
+    - [Quick starts](#quick-starts)
     - [Local Deployment](#local-deployment)
     - [AWS Deployment](#aws-deployment)
     - [GCP Deployment](#gcp-deployment)
@@ -156,6 +157,16 @@ For upcoming features, enhancements, and priorities, check out the [OpenSearch M
 User guide documentation is available in the [OpenSearch Migration Assistant documentation](https://docs.opensearch.org/latest/migration-assistant/).
 
 ## Getting Started
+
+### Quick starts
+
+Each quick start is a self-contained walkthrough, from nothing to a running migration you can
+watch, with the configs it uses kept next to it.
+
+| Quick start | Platform | Migration | Builds from source |
+|---|---|---|---|
+| [Local Kubernetes with kind](deployment/k8s/quickstart.md) | Your laptop | Test ES source and OpenSearch target, in-cluster | Yes |
+| [Self-managed Elasticsearch to Amazon OpenSearch](deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/README.md) | AWS (EKS) | ES 7.10 to an OpenSearch Service domain or Serverless collection: backfill, capture and replay, observability | Yes |
 
 ### Local Deployment
 
