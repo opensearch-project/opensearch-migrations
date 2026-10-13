@@ -47,10 +47,10 @@ jobs:
       - uses: ./.github/actions/setup-env
 
       - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
 
       - name: Set up Buildx builder (BuildKit)
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
         with:
           driver: docker-container
           buildkitd-flags: --debug
@@ -144,37 +144,37 @@ jobs:
           deployment/k8s/aws/assemble-bootstrap.sh
 
       - name: Upload source archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: source-archive
           path: opensearch-migrations-source.tar.gz
 
       - name: Upload Maven build archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: maven-build
           path: opensearch-migrations-build.tar.gz
 
       - name: Upload CFN templates
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: cfn-templates
           path: deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json
 
       - name: Upload Helm chart
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: helm-chart
           path: deployment/k8s/build/helm-package/migration-assistant-${{ inputs.version }}.tgz
 
       - name: Upload aws-bootstrap.sh
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: aws-bootstrap
           path: deployment/k8s/aws/dist/aws-bootstrap.sh
 
       - name: Upload Docker images
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: docker-images
           path: docker-images/*.tar.gz
