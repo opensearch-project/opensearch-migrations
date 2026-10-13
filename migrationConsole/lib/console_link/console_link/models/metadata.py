@@ -7,7 +7,8 @@ from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.cluster import AuthMethod, Cluster, NoTargetClusterDefinedError
 from console_link.models.schema_tools import list_schema
-from console_link.models.snapshot import GcsSnapshot, S3Snapshot, Snapshot, FileSystemSnapshot
+from console_link.models.snapshot import (GcsSnapshot, S3Snapshot, S3_ADDRESSING_STYLES, Snapshot,
+                                          FileSystemSnapshot, s3_repo_env)
 
 logger = logging.getLogger(__name__)
 MAX_FILENAME_LEN = 255
@@ -30,6 +31,7 @@ FROM_SNAPSHOT_SCHEMA = {
             'schema': {
                 'repo_uri': {'type': 'string', 'required': True},
                 'aws_region': {'type': 'string', 'required': True},
+                'addressing_style': {'type': 'string', 'required': False, 'allowed': S3_ADDRESSING_STYLES},
             }
         },
         "fs": {
@@ -157,6 +159,7 @@ class Metadata:
         elif self._snapshot_location == 's3':
             self._s3_uri = from_snapshot["s3"]["repo_uri"]
             self._aws_region = from_snapshot["s3"]["aws_region"]
+            self._s3_addressing_style = from_snapshot["s3"].get("addressing_style") or None
         else:
             self._gcs_uri = from_snapshot["gcs"]["repo_uri"]
             self._gcs_endpoint = from_snapshot["gcs"].get("endpoint")
@@ -167,6 +170,7 @@ class Metadata:
         self._s3_uri = snapshot.s3_repo_uri
         self._aws_region = snapshot.s3_region
         self._s3_endpoint = snapshot.s3_endpoint
+        self._s3_addressing_style = snapshot.s3_addressing_style
 
     def _init_from_fs_snapshot(self, snapshot: FileSystemSnapshot) -> None:
         self._snapshot_name = snapshot.snapshot_name
@@ -288,8 +292,10 @@ class Metadata:
         # Extra args might not be represented with dictionary, so convert args to list and append commands
         self._append_args(command_args, extra_args)
 
+        env = s3_repo_env(self._s3_addressing_style) if self._snapshot_location == 's3' else None
         command_runner = CommandRunner(command_base, command_args,
-                                       sensitive_fields=["--target-password"])
+                                       sensitive_fields=["--target-password"],
+                                       env=env)
         logger.info(f"Migrating metadata with command: {' '.join(command_runner.sanitized_command())}")
         try:
             return command_runner.run(print_on_error=True)

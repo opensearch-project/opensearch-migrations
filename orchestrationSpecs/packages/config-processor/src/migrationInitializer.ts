@@ -92,6 +92,7 @@ export class MigrationInitializer {
             throw new Error("Migration run number is required when generating migration resources.");
         }
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
+        const s3RepoSettingsConfigMaps = this.generateS3RepoSettingsConfigMaps(workflows);
         const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
         const customMigrationResources = this.generateCustomMigrationResources(
             workflows,
@@ -105,6 +106,7 @@ export class MigrationInitializer {
             workflows,
             resolvedMigrationResources,
             concurrencyConfigMaps,
+            s3RepoSettingsConfigMaps,
             customMigrationResources,
             warnings
         };
@@ -129,7 +131,10 @@ export class MigrationInitializer {
         await fs.mkdir(resourcesDir, { recursive: true });
 
         const allItems = bundle.customMigrationResources.items || [];
-        const configMapItems = bundle.concurrencyConfigMaps.items || [];
+        const configMapItems = [
+            ...(bundle.concurrencyConfigMaps.items || []),
+            ...(bundle.s3RepoSettingsConfigMaps?.items || []),
+        ];
 
         type ResourceEntry = {
             file: string;
@@ -303,6 +308,43 @@ export class MigrationInitializer {
                     ...semaphoreData
                 }
             }]
+        };
+    }
+
+    /**
+     * One ConfigMap per s3:// snapshot repo with the S3 client env vars the repo sets. Keys whose
+     * value is empty are left out: pods read each key through an optional configMapKeyRef, and an
+     * env var that is present but empty (e.g. AWS_ENDPOINT_URL_S3="") breaks the AWS SDKs. The region
+     * is not included: the Java S3 clients take it from --s3-region, and Java SDK v2 doesn't read
+     * AWS_DEFAULT_REGION anyway.
+     */
+    private generateS3RepoSettingsConfigMaps(workflows: WorkflowConfig) {
+        type Repo = SnapshotItemConfig["repo"];
+        const repos: Repo[] = [
+            ...((workflows.snapshots ?? []) as SnapshotConfig[])
+                .flatMap(snapshot => (snapshot.createSnapshotConfig as SnapshotItemConfig[]).map(item => item.repo)),
+            ...((workflows.snapshotMigrations ?? []) as SnapshotMigrationConfig[])
+                .map(migration => migration.snapshotConfig.repoConfig),
+        ];
+        const byName = new Map<string, Record<string, string>>();
+        for (const repo of repos) {
+            if (!repo?.s3SettingsConfigMapName || byName.has(repo.s3SettingsConfigMapName)) {
+                continue;
+            }
+            const data: Record<string, string> = {};
+            if (repo.endpoint) data.AWS_ENDPOINT_URL_S3 = repo.endpoint;
+            if (repo.s3AddressingStyle) data.AWS_S3_ADDRESSING_STYLE = repo.s3AddressingStyle;
+            byName.set(repo.s3SettingsConfigMapName, data);
+        }
+        return {
+            apiVersion: 'v1',
+            kind: 'List',
+            items: [...byName.entries()].map(([name, data]) => ({
+                apiVersion: 'v1',
+                kind: 'ConfigMap',
+                metadata: { name },
+                data,
+            }))
         };
     }
 

@@ -22,6 +22,7 @@ import java.util.regex.Pattern;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.aws.S3RepoCredentials;
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
@@ -31,6 +32,7 @@ import org.opensearch.migrations.bulkload.common.GcsUri;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.S3AddressingStyle;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
@@ -82,6 +84,8 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.MDC;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 
@@ -981,17 +985,23 @@ public class RfsMigrateDocuments {
         log.atInfo().setMessage("failed document stream config: region={} bucket={}")
             .addArgument(region).addArgument(bucket).log();
 
-        var s3ClientBuilder = S3AsyncClient.builder()
-            .region(Region.of(region));
         // Mirror the region fallback above: if no failed-document-stream-specific endpoint was resolved,
         // fall back to the snapshot's --s3-endpoint so custom-S3 (LocalStack/MinIO) uploads don't silently
         // go to the default AWS endpoint while snapshot reads use the override.
         var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
             ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
             : arguments.endpoint;
-        if (endpoint != null && !endpoint.isBlank()) {
+        var s3ClientBuilder = S3AsyncClient.builder()
+            .region(Region.of(region))
+            .credentialsProvider(failedDocumentStreamCredentials(endpoint, arguments.endpoint));
+        boolean hasEndpoint = endpoint != null && !endpoint.isBlank();
+        if (hasEndpoint) {
             s3ClientBuilder.endpointOverride(URI.create(endpoint));
         }
+        // Same default as S3Repo (snapshot reads): path-style whenever a custom endpoint is set, unless the
+        // repo's s3AddressingStyle says otherwise. Otherwise MinIO-style stores would read path-style but
+        // upload failed documents to bucket.host.
+        s3ClientBuilder.forcePathStyle(S3AddressingStyle.forcePathStyle(hasEndpoint));
         var s3Client = s3ClientBuilder.build();
 
         return S3FailedDocumentStreamSink.builder()
@@ -1003,6 +1013,27 @@ public class RfsMigrateDocuments {
             .uploader(S3FailedDocumentStreamSink.s3ClientUploader(s3Client))
             .maxBufferBytes(arguments.failedDocumentStreamArgs.failedDocumentStreamMaxBufferBytes)
             .build();
+    }
+
+    /**
+     * The repo's Secret keys are only valid for the store the snapshot lives in. When the failed document
+     * stream goes to a different endpoint (e.g. a MinIO repo with the stream on AWS S3), sending those keys
+     * gets 403s, the flush fails and the work item never completes, so use the pod's own AWS identity there.
+     */
+    static AwsCredentialsProvider failedDocumentStreamCredentials(String failedDocumentStreamEndpoint,
+                                                                  String repoEndpoint) {
+        return isSameS3Endpoint(failedDocumentStreamEndpoint, repoEndpoint)
+            ? S3RepoCredentials.provider()
+            : DefaultCredentialsProvider.builder().build();
+    }
+
+    /** Null or blank means the default AWS endpoint; otherwise compared ignoring case and trailing slashes. */
+    static boolean isSameS3Endpoint(String a, String b) {
+        return normalizeS3Endpoint(a).equalsIgnoreCase(normalizeS3Endpoint(b));
+    }
+
+    private static String normalizeS3Endpoint(String endpoint) {
+        return endpoint == null ? "" : endpoint.trim().replaceAll("/+$", "");
     }
 
     /**

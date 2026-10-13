@@ -3,6 +3,7 @@ import pytest
 import re
 from requests.models import Response, HTTPError
 import logging
+import os
 import subprocess
 
 from console_link.models.command_runner import CommandRunner, CommandRunnerError
@@ -456,6 +457,85 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+
+
+def test_s3_snapshot_create_exports_addressing_style_to_create_snapshot(mocker):
+    config = {
+        "snapshot_name": "reindex_from_snapshot",
+        "s3": {
+            "repo_uri": "s3://my-bucket",
+            "aws_region": "us-east-1",
+            "endpoint": "http://minio:9000",
+            "addressing_style": "virtual",
+        },
+    }
+    snapshot = S3Snapshot(config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock = mocker.patch("subprocess.run")
+    snapshot.create()
+
+    env = mock.call_args.kwargs["env"]
+    assert env["AWS_S3_ADDRESSING_STYLE"] == "virtual"
+    # Layered over the console's environment, not replacing it (credentials, PATH, etc.).
+    assert env["PATH"] == os.environ["PATH"]
+
+
+@pytest.mark.parametrize("addressing_style", ["", None])
+def test_s3_snapshot_without_addressing_style_inherits_environment(mocker, addressing_style):
+    s3 = {"repo_uri": "s3://my-bucket", "aws_region": "us-east-1"}
+    if addressing_style is not None:
+        s3["addressing_style"] = addressing_style
+    snapshot = S3Snapshot({"snapshot_name": "reindex_from_snapshot", "s3": s3},
+                          create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock = mocker.patch("subprocess.run")
+    snapshot.create()
+
+    assert "env" not in mock.call_args.kwargs
+
+
+def test_s3_snapshot_create_passes_mounted_credentials_dir(mocker, monkeypatch, tmp_path):
+    monkeypatch.delenv("S3_REPO_CREDENTIALS_DIR", raising=False)
+    monkeypatch.setattr("console_link.models.snapshot.S3_REPO_CREDENTIALS_MOUNT_PATH", str(tmp_path))
+    snapshot = S3Snapshot({"snapshot_name": "reindex_from_snapshot",
+                           "s3": {"repo_uri": "s3://my-bucket", "aws_region": "us-east-1"}},
+                          create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock = mocker.patch("subprocess.run")
+    snapshot.create()
+
+    env = mock.call_args.kwargs["env"]
+    assert env["S3_REPO_CREDENTIALS_DIR"] == str(tmp_path)
+    assert "AWS_S3_ADDRESSING_STYLE" not in env
+
+
+def test_s3_snapshot_create_leaves_existing_credentials_dir_to_inheritance(mocker, monkeypatch, tmp_path):
+    monkeypatch.setenv("S3_REPO_CREDENTIALS_DIR", "/elsewhere")
+    monkeypatch.setattr("console_link.models.snapshot.S3_REPO_CREDENTIALS_MOUNT_PATH", str(tmp_path))
+    snapshot = S3Snapshot({"snapshot_name": "reindex_from_snapshot",
+                           "s3": {"repo_uri": "s3://my-bucket", "aws_region": "us-east-1"}},
+                          create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock = mocker.patch("subprocess.run")
+    snapshot.create()
+
+    assert "env" not in mock.call_args.kwargs
+
+
+def test_s3_snapshot_rejects_unknown_addressing_style():
+    with pytest.raises(ValueError) as excinfo:
+        S3Snapshot({"snapshot_name": "reindex_from_snapshot",
+                    "s3": {"repo_uri": "s3://my-bucket", "aws_region": "us-east-1", "addressing_style": "auto"}},
+                   create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+    assert "addressing_style" in str(excinfo.value.args[1])
 
 
 def test_solr_s3_snapshot_uses_configured_collections_and_mode(monkeypatch):

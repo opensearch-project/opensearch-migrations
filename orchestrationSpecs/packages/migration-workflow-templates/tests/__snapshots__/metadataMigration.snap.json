@@ -95,10 +95,6 @@
         "container": {
           "env": [
             {
-              "name": "AWS_SHARED_CREDENTIALS_FILE",
-              "value": "{{=((sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))) ? ('/config/credentials/configuration') : (''))}}"
-            },
-            {
               "name": "JDK_JAVA_OPTIONS",
               "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.metadataMigrationConfig))}}"
             },
@@ -118,6 +114,30 @@
                 "secretKeyRef": {
                   "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))))}}",
                   "key": "password",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "S3_REPO_CREDENTIALS_DIR",
+              "value": "/config/s3-repo-credentials"
+            },
+            {
+              "name": "AWS_ENDPOINT_URL_S3",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('repoConfig', 's3SettingsConfigMapName', '', fromJSON(inputs.parameters.snapshotConfig)))) ? ('empty') : (sprig.dig('repoConfig', 's3SettingsConfigMapName', '', fromJSON(inputs.parameters.snapshotConfig))))}}",
+                  "key": "AWS_ENDPOINT_URL_S3",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "AWS_S3_ADDRESSING_STYLE",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('repoConfig', 's3SettingsConfigMapName', '', fromJSON(inputs.parameters.snapshotConfig)))) ? ('empty') : (sprig.dig('repoConfig', 's3SettingsConfigMapName', '', fromJSON(inputs.parameters.snapshotConfig))))}}",
+                  "key": "AWS_S3_ADDRESSING_STYLE",
                   "optional": true
                 }
               }
@@ -147,7 +167,7 @@
             "karpenter.sh/do-not-disrupt": "true"
           }
         },
-        "podSpecPatch": "{{=toJSON(sprig.dict(\"volumes\", sprig.concat([sprig.dict(\"name\", 'test-creds', \"configMap\", sprig.dict(\"name\", 'localstack-test-creds', \"optional\", true))], sprig.dig('fileSourceVolumes', [], fromJSON(inputs.parameters.metadataMigrationConfig))), \"containers\", [sprig.dict(\"name\", 'main', \"volumeMounts\", sprig.concat([sprig.dict(\"name\", 'test-creds', \"mountPath\", '/config/credentials', \"readOnly\", true)], sprig.dig('fileSourceVolumeMounts', [], fromJSON(inputs.parameters.metadataMigrationConfig))), \"resources\", fromJSON(inputs.parameters.metadataMigrationConfig)['resources'])]))}}",
+        "podSpecPatch": "{{=toJSON(sprig.dict(\"volumes\", sprig.concat([sprig.dict(\"name\", 's3-repo-credentials', \"secret\", sprig.dict(\"secretName\", ((0 == len(sprig.dig('repoConfig', 's3CredentialsSecretName', '', fromJSON(inputs.parameters.snapshotConfig)))) ? ('empty') : (sprig.dig('repoConfig', 's3CredentialsSecretName', '', fromJSON(inputs.parameters.snapshotConfig)))), \"optional\", true))], sprig.dig('fileSourceVolumes', [], fromJSON(inputs.parameters.metadataMigrationConfig))), \"containers\", [sprig.dict(\"name\", 'main', \"volumeMounts\", sprig.concat([sprig.dict(\"name\", 's3-repo-credentials', \"mountPath\", '/config/s3-repo-credentials', \"readOnly\", true)], sprig.dig('fileSourceVolumeMounts', [], fromJSON(inputs.parameters.metadataMigrationConfig))), \"resources\", fromJSON(inputs.parameters.metadataMigrationConfig)['resources'])]))}}",
         "retryStrategy": {
           "limit": "3",
           "retryPolicy": "OnError",
