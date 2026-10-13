@@ -242,16 +242,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             TransformedTargetRequestAndResponseList summary,
             Exception requestFailure
         ) {
-            try (var tupleHandlingContext = httpContext.createTupleContext()) {
-                if (!writeTupleOutput(httpContext, tupleHandlingContext, rrPair, summary, requestFailure)) {
-                    return;
+            try {
+                try (var tupleHandlingContext = httpContext.createTupleContext()) {
+                    if (!writeTupleOutput(httpContext, tupleHandlingContext, rrPair, summary, requestFailure)) {
+                        return;
+                    }
                 }
-            }
-            // Count the final outcome once per request (not per retry)
-            countFinalOutcome(summary, requestFailure);
-            recordTargetResponseCodes(summary);
-            if (tupleWriter == null) {
-                commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                countFinalOutcome(summary, requestFailure);
+                recordTargetResponseCodes(summary);
+            } finally {
+                if (tupleWriter == null) {
+                    commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                }
             }
         }
 
@@ -572,6 +574,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             if (stopReadingRef.get()) {
                 break;
             }
+            var readStart = System.nanoTime();
             this.nextChunkFutureRef.set(
                 trafficChunkStream.readNextTrafficStreamChunk(topLevelContext::createReadChunkContext)
             );
@@ -588,6 +591,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     throw ex.getCause();
                 }
             }
+            warnIfReadWasSlow(readStart, trafficStreams);
             if (log.isDebugEnabled()) {
                 Optional.of(
                     trafficStreams.stream()
@@ -601,15 +605,48 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .addArgument(trafficStreams::size)
                 .log();
             var batchStart = System.nanoTime();
-            trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
-            var batchDurationMs = (System.nanoTime() - batchStart) / 1_000_000;
-            if (batchDurationMs > 5_000) {
-                log.atWarn().setMessage("Batch processing took {}ms ({} records). " +
-                        "This delays the next Kafka poll. max.poll.interval.ms may be at risk.")
-                    .addArgument(batchDurationMs)
-                    .addArgument(trafficStreams::size)
-                    .log();
+            for (var ts : trafficStreams) {
+                acceptWithTimingDiagnostic(trafficToHttpTransactionAccumulator, ts);
             }
+            warnIfBatchWasSlow(batchStart, trafficStreams);
+        }
+    }
+
+    private void warnIfReadWasSlow(long readStartNanos, List<ITrafficStreamWithKey> trafficStreams) {
+        var readDurationMs = (System.nanoTime() - readStartNanos) / 1_000_000;
+        if (readDurationMs > 5_000) {
+            log.atWarn().setMessage("readNextTrafficStreamChunk blocked for {}ms ({} records returned). " +
+                    "This indicates readGate/backpressure delay.")
+                .addArgument(readDurationMs)
+                .addArgument(trafficStreams::size)
+                .log();
+        }
+    }
+
+    private static void acceptWithTimingDiagnostic(
+        CapturedTrafficToHttpTransactionAccumulator accumulator, ITrafficStreamWithKey ts
+    ) {
+        var recordStart = System.nanoTime();
+        accumulator.accept(ts);
+        var recordDurationMs = (System.nanoTime() - recordStart) / 1_000_000;
+        if (recordDurationMs > 2_000) {
+            log.atWarn().setMessage("Single record accept() took {}ms — conn={} subStreams={} key={}")
+                .addArgument(recordDurationMs)
+                .addArgument(ts.getStream()::getConnectionId)
+                .addArgument(ts.getStream()::getSubStreamCount)
+                .addArgument(() -> ts.getKey().toString())
+                .log();
+        }
+    }
+
+    private void warnIfBatchWasSlow(long batchStartNanos, List<ITrafficStreamWithKey> trafficStreams) {
+        var batchDurationMs = (System.nanoTime() - batchStartNanos) / 1_000_000;
+        if (batchDurationMs > 5_000) {
+            log.atWarn().setMessage("Batch processing took {}ms ({} records). " +
+                    "This delays the next Kafka poll. max.poll.interval.ms may be at risk.")
+                .addArgument(batchDurationMs)
+                .addArgument(trafficStreams::size)
+                .log();
         }
     }
 

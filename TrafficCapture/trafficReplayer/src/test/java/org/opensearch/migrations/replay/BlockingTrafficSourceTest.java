@@ -73,6 +73,52 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         Assertions.assertInstanceOf(EOFException.class, exception.getCause());
     }
 
+    /**
+     * Verify that BlockingTrafficSource delegates onNetworkConnectionClosed and
+     * onConnectionAccumulationComplete to the underlying source.
+     */
+    @Test
+    void blockingTrafficSource_delegatesLifecycleCallbacks() throws Exception {
+        var delegatingSource = new DelegationTrackingSource(rootContext, 10);
+        var blockingSource = new BlockingTrafficSource(delegatingSource, Duration.ofMillis(10));
+
+        blockingSource.onNetworkConnectionClosed("test-conn", 5, 3);
+        Assertions.assertEquals(1, delegatingSource.networkClosedCalls.get(),
+            "onNetworkConnectionClosed must be delegated to underlying source");
+        Assertions.assertEquals("test-conn:5:3", delegatingSource.lastNetworkClosedArgs,
+            "Delegation must pass exact arguments");
+
+        var mockKey = PojoTrafficStreamKeyAndContext.build(
+            TrafficStream.newBuilder().setConnectionId("c").setNumberOfThisLastChunk(0).build(),
+            rootContext::createTrafficStreamContextForTest);
+        blockingSource.onConnectionAccumulationComplete(mockKey);
+        Assertions.assertEquals(1, delegatingSource.accumulationCompleteCalls.get(),
+            "onConnectionAccumulationComplete must be delegated to underlying source");
+
+        blockingSource.close();
+    }
+
+    private static class DelegationTrackingSource extends TestTrafficCaptureSource {
+        final AtomicInteger networkClosedCalls = new AtomicInteger();
+        final AtomicInteger accumulationCompleteCalls = new AtomicInteger();
+        volatile String lastNetworkClosedArgs;
+
+        DelegationTrackingSource(TestContext rootContext, int nStreams) {
+            super(rootContext, nStreams);
+        }
+
+        @Override
+        public void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {
+            networkClosedCalls.incrementAndGet();
+            lastNetworkClosedArgs = connectionId + ":" + sessionNumber + ":" + generation;
+        }
+
+        @Override
+        public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+            accumulationCompleteCalls.incrementAndGet();
+        }
+    }
+
     private static class TestTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         int nStreamsToCreate;
         AtomicInteger counter = new AtomicInteger();

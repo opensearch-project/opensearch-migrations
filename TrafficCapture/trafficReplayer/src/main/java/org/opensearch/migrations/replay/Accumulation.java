@@ -47,7 +47,7 @@ public class Accumulation {
     State state;
     AtomicInteger numberOfResets;
     int startingSourceRequestIndex;
-    private boolean hasBeenExpired;
+    private volatile boolean hasBeenExpired;
     final int sourceGeneration;
     /** True when this connection was mid-flight during a partition reassignment (resumed). */
     final boolean isResumedConnection;
