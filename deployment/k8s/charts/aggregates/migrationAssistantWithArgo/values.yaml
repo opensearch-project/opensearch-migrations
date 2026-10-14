@@ -872,7 +872,9 @@ charts:
           limits:   { cpu: 500m, memory: 256Mi }
         sidecar:
           image:
-            tag: 1.30.11
+            # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
+            # localhost:80. 2.14.1 loads them (checked on kind and EKS).
+            tag: 2.14.1
           dashboards:
             resources:
               requests: { cpu: 50m, memory: 100Mi }
