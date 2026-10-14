@@ -314,6 +314,10 @@ class RegistryImageBuildUtils {
                                 // Extract just the tag portion for Jib's tags list
                                 def formattedTag = versionDest.toString().split(":")[-1]
                                 tagList.add("${formattedTag}${suffix}".toString())
+                                // Single-arch builds also carry the unsuffixed version tag, as the
+                                // BuildKit images do, so a local deployment of <image>:<version>
+                                // (e.g. LOCAL_IMAGE_TAG) finds the Jib images too.
+                                if (targetArch != "multi") tagList.add(formattedTag.toString())
                             }
                             if (tagList) tags = tagList
                         }
