@@ -49,8 +49,8 @@ cd "$(git rev-parse --show-toplevel)"
 - `kubectl`, `helm` (3.x) and `jq`.
 - A checkout of this repository, for the sample configs and the test-cluster chart.
 - Only to build the images yourself (section 2, option B): Java 21 and Docker with Buildx.
-- Node.js 20+ and the AWS CDK CLI (`npm install -g aws-cdk`). These are only for the target
-  cluster script in section 3.
+- Node.js 18+ and npm, only for the target cluster script in section 3. It installs its own AWS
+  CDK.
 - A shell on macOS or Linux.
 
 For background on what you are deploying, see:
@@ -361,7 +361,8 @@ kubectl -n ma exec -i migration-console-0 -- workflow configure edit --stdin < /
 kubectl -n ma exec -it migration-console-0 -- bash
 ```
 
-`configure edit` validates the config as it saves it and prints any errors.
+`configure edit` validates the config as it saves it and prints any errors. Until you create the
+credentials below, it also lists `source-creds` as missing and exits non-zero; that's expected.
 
 Inside the console:
 
@@ -740,8 +741,14 @@ console kafka describe-consumer-group                   # LAG ≈ 0 when replay 
 ```
 
 - **Result tuples.** One tuple per replayed request, comparing the source and target responses.
-  They land in `s3://$BUCKET/tuples/` as gzipped batches, about every 60 s. Copy one locally
-  and pretty-print it with `console tuples show --in <file>`.
+  They land in `s3://$BUCKET/tuples/` as gzipped JSON lines, about every 60 s. To look at one
+  from your workstation:
+
+  ```bash
+  KEY=$(aws s3 ls --recursive "s3://$BUCKET/tuples/" | awk '{print $4}' | head -1)
+  aws s3 cp "s3://$BUCKET/$KEY" - | gunzip | head -1 \
+    | jq -c '{request: .sourceRequest["Request-URI"], source: .sourceResponse["Status-Code"], target: [.targetResponses[]["Status-Code"]]}'
+  ```
 - **Document counts.** The target can end up with slightly *more* documents than the source. The
   replayer re-sends every captured request, including requests the source rejected.
 
