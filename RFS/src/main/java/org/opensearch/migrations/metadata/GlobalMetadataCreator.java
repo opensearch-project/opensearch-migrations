@@ -21,6 +21,7 @@ public interface GlobalMetadataCreator {
         MigrationMode mode,
         IClusterMetadataContext context);
 
+    @SuppressWarnings("java:S100") // Sonar treats the generated record constructor as a method
     record TemplateSelection(GlobalMetadata metadata, GlobalMetadataCreatorResults skippedResults) {
         public GlobalMetadataCreatorResults merge(GlobalMetadataCreatorResults createdResults) {
             return GlobalMetadataCreatorResults.builder()
@@ -34,7 +35,9 @@ public interface GlobalMetadataCreator {
         }
 
         private static List<CreationResult> concat(List<CreationResult> created, List<CreationResult> skipped) {
-            return Stream.concat(nullToEmpty(created).stream(), nullToEmpty(skipped).stream()).toList();
+            var createdResults = created == null ? List.<CreationResult>of() : created;
+            var skippedResults = skipped == null ? List.<CreationResult>of() : skipped;
+            return Stream.concat(createdResults.stream(), skippedResults.stream()).toList();
         }
     }
 
@@ -44,9 +47,5 @@ public interface GlobalMetadataCreator {
             .indexTemplates(List.of())
             .componentTemplates(List.of())
             .build();
-    }
-
-    private static List<CreationResult> nullToEmpty(List<CreationResult> results) {
-        return results == null ? List.of() : results;
     }
 }
