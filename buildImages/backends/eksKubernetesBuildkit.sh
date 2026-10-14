@@ -153,7 +153,6 @@ ensure_eks_buildx_builder() {
     --driver-opt="requests.memory=${BUILDKIT_REQUESTS_MEMORY:-8Gi}"
     --driver-opt="limits.cpu=${BUILDKIT_LIMITS_CPU:-8}"
     --driver-opt="limits.memory=${BUILDKIT_LIMITS_MEMORY:-16Gi}"
-    --driver-opt="timeout=${timeout_seconds}s"
   )
 
   docker buildx create \
@@ -184,8 +183,9 @@ ensure_eks_buildx_builder() {
   echo "Bootstrapping builder..."
 
   # The kubernetes driver creates its builder Deployments as part of buildx
-  # bootstrap. Give that bootstrap enough time for the build-nodepool cold-start
-  # path; a kubectl pre-wait cannot help before buildx has created anything.
+  # bootstrap. Retry within the overall deadline to allow for nodepool cold
+  # starts; older buildx versions reject the Kubernetes driver's timeout option.
+  # A kubectl pre-wait cannot help before buildx has created anything.
   local deadline=$(( $(date +%s) + timeout_seconds ))
   local attempt=1
   while true; do

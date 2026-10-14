@@ -30,6 +30,18 @@ run_with_optional_timeout() {
 kubectl() { record "kubectl $*"; }
 docker() {
   record "docker $*"
+  # Match the older Kubernetes driver on Jenkins: unknown options fail at create.
+  if [[ "$1 $2" == "buildx create" ]]; then
+    local arg
+    for arg in "$@"; do
+      case "$arg" in
+        --driver-opt=timeout=*)
+          printf 'ERROR: invalid driver option timeout for driver kubernetes\n' >&2
+          return 1
+          ;;
+      esac
+    done
+  fi
   if [[ "$1 $2" != "buildx inspect" ]]; then return 0; fi
   local attempt
   attempt=$(($(cat "$STATE_DIR/attempts") + 1))
@@ -96,15 +108,25 @@ def test_deadline_also_dumps_provisioning_diagnostics(tmp_path):
     assert not any(call.startswith("sleep ") for call in calls)
 
 
-def test_both_kubernetes_drivers_receive_the_configured_cold_start_timeout(tmp_path):
+def test_older_driver_retries_cold_start_within_the_configured_deadline(tmp_path):
     completed, calls = run_bootstrap(
-        tmp_path, READY_ON_ATTEMPT="1", BUILDKIT_BOOTSTRAP_TIMEOUT="5m",
+        tmp_path, INSPECT_SECONDS="120", BUILDKIT_BOOTSTRAP_TIMEOUT="5m",
     )
     assert completed.returncode == 0, completed.stderr
     create_calls = [call for call in calls if call.startswith("docker buildx create ")]
     assert len(create_calls) == 2
-    assert all("--driver-opt=timeout=300s" in call for call in create_calls)
+    assert "--node=builder-amd64" in create_calls[0]
+    assert "--node=builder-arm64" in create_calls[1]
     assert "timeout 300s" in calls
+    assert "timeout 170s" in calls
+    assert calls.count("sleep 10") == 1
+    assert calls.count("docker buildx inspect builder-migration-eks-test --bootstrap") == 2
+
+
+def test_ready_builder_does_not_retry(tmp_path):
+    completed, calls = run_bootstrap(tmp_path, READY_ON_ATTEMPT="1")
+    assert completed.returncode == 0, completed.stderr
+    assert calls.count("docker buildx inspect builder-migration-eks-test --bootstrap") == 1
     assert not any(call.startswith("sleep ") for call in calls)
 
 
