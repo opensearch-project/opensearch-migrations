@@ -670,6 +670,10 @@ charts:
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }
+      # Like the otel-collector DaemonSet: run on every node, including the tainted Kafka, proxy,
+      # replayer and k6 pools, so those pods' logs are collected too.
+      tolerations:
+        - operator: Exists
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
