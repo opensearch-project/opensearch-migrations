@@ -84,7 +84,9 @@ build_local_images() {
   echo "Using local image tag: ${image_tag}"
   echo "Using build registry endpoint: ${BUILD_REGISTRY_ENDPOINT}"
   if [[ "${image_tag}" != "latest" ]]; then
-    gradle_args+=("-PimageVersion=${image_tag}")
+    # Push only this tag, so a build with its own tag doesn't overwrite other clusters' :latest
+    # images in the shared local registry.
+    gradle_args+=("-PimageVersion=${image_tag}" "-PimageVersionOnly=true")
   fi
   if [[ -n "${BUILD_CONTAINER_REGISTRY_ENDPOINT:-}" ]]; then
     echo "Using container-visible registry endpoint for builds: ${BUILD_CONTAINER_REGISTRY_ENDPOINT}"
