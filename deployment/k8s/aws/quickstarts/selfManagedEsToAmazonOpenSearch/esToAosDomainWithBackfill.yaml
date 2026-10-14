@@ -12,7 +12,7 @@ sourceClusters:
   source:
     endpoint: "https://elasticsearch-master-headless:9200"
     version: "ES 7.10.2"
-    allowInsecure: true          # testClusters uses SearchGuard demo certificates
+    allowInsecure: true          # testClusters' certificate comes from MA's own CA
     authConfig:
       basic:
         secretName: source-creds # create with: workflow configure credentials create source-creds

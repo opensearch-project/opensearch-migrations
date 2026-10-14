@@ -117,7 +117,7 @@ target's access policy must allow it.
 #### Option A (recommended for a first run): in-cluster Elasticsearch on EKS
 
 The [`testClusters`](../../../charts/aggregates/testClusters) chart with
-[`valuesEksOss.yaml`](../../../charts/aggregates/testClusters/valuesEksOss.yaml) runs a single-node
+[`valuesEks.yaml`](../../../charts/aggregates/testClusters/valuesEks.yaml) runs a single-node
 Elasticsearch 7.10.2 built only from open-source parts that this repository doesn't build:
 
 | Piece | Licence | Role |
@@ -138,7 +138,7 @@ Install only the source half of the chart:
 TC=deployment/k8s/charts/aggregates/testClusters
 helm dependency update $TC
 helm upgrade --install tc $TC -n ma \
-  -f $TC/values.yaml -f $TC/valuesEksOss.yaml \
+  -f $TC/values.yaml -f $TC/valuesEks.yaml \
   --set conditionalPackageInstalls.target=false \
   --wait --timeout 15m
 kubectl -n ma get pods -l app=elasticsearch-master        # 3/3 Running
@@ -164,9 +164,9 @@ in the sample configs.
 - **Node pool.** The overlay creates a `dedicated-search-pool` NodePool on the built-in `default`
   NodeClass. If you bootstrapped with `--tags` or `--disable-general-purpose-pool`, add
   `--set nodeClassName=<the MA release's aws.nodeClassName>`.
-- **No auth.** For a source without auth, add `--set nginxFrontend.basicAuth.enabled=false`, then
-  delete `authConfig` from the source in section 4. Leave the key out entirely: `authConfig: {}`
-  fails validation.
+- **No auth.** For a plain-HTTP source without auth, add `-f $TC/valuesEksNoAuth.yaml` after
+  `valuesEks.yaml`. Then use `http://elasticsearch-master-headless:9200` and delete `authConfig`
+  from the source in section 4. Leave the key out entirely: `authConfig: {}` fails validation.
 
 #### Option B: your own Elasticsearch on EC2
 
