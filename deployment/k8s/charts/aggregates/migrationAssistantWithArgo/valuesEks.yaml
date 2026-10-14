@@ -12,10 +12,14 @@ aws:
   region: ""
   account: ""
 
+# EKS Auto Mode labels every node with its zone and launches capacity in the zone a pod needs.
+workloadsNodePool:
+  zoneSpread: required
+
 cluster:
   dedicatedKarpenterNodePoolForMigrationConsole: true
-  # When true, deploys a custom Karpenter NodePool (general-work-pool), configured by
-  # workloadsNodePool in values.yaml (WhenEmpty consolidation), instead
+  # When true, deploys the custom Karpenter NodePools configured by workloadsNodePool
+  # in values.yaml (isolated data-plane pools by default, with WhenEmpty consolidation), instead
   # of using the EKS Auto Mode general-purpose pool. Recommended for production stability.
   useCustomKarpenterNodePool: true
 
@@ -109,6 +113,21 @@ metrics:
             action: delete
           - key: service.instance.id
             action: delete
+      # Fleet CPU for CloudWatch is summed per node before export: the EMF exporter drops datapoints that collide
+      # on [container, namespace] in one batch, which two pods of one container on one node always do. Converting
+      # to delta first keeps the sum correct when a pod's cumulative counter disappears or restarts.
+      cumulativetodelta/cadvisor:
+        include:
+          metrics: [container_cpu_usage_seconds_total]
+          match_type: strict
+      metricstransform/cadvisor:
+        transforms:
+          - include: container_cpu_usage_seconds_total
+            action: update
+            operations:
+              - action: aggregate_labels
+                label_set: [container, namespace]
+                aggregation_type: sum
       resource/remove_telemetry_sdk_attributes:
         attributes:
           - key: telemetry.sdk.name
@@ -134,10 +153,23 @@ metrics:
         namespace: 'OpenSearchMigrations'
         dimension_rollup_option: NoDimensionRollup
         metric_declarations:
+          - dimensions: [[container, namespace], [container, namespace, pod]]
+            metric_name_selectors:
+              - container_memory_working_set_bytes
+          # Already summed to one point per node and container by metricstransform/cadvisor, so no pod dimension.
           - dimensions: [[container, namespace]]
             metric_name_selectors:
               - container_cpu_usage_seconds_total
-              - container_memory_working_set_bytes
+          # Broker disk throughput, which on EKS is EBS throughput against each volume's provisioned limit.
+          # Kept only for brokers, whose StatefulSet pod names are stable and bounded. Device is a dimension
+          # because the exporter drops points that collide on the same dimensions in one batch.
+          - dimensions: [[container, namespace, pod, device]]
+            label_matchers:
+              - label_names: [container]
+                regex: '^kafka$'
+            metric_name_selectors:
+              - container_fs_writes_bytes_total
+              - container_fs_reads_bytes_total
       prometheus:
         endpoint: "0.0.0.0:8889"
         send_timestamps: true
@@ -156,8 +188,12 @@ metrics:
           exporters: [prometheus]
         metrics/cadvisor:
           receivers: [prometheus]
+          processors: [cumulativetodelta/cadvisor, metricstransform/cadvisor, batch]
+          exporters: [awsemf/cadvisor]
+        metrics/cadvisor-prometheus:
+          receivers: [prometheus]
           processors: [batch]
-          exporters: [awsemf/cadvisor, prometheus]
+          exporters: [prometheus]
 
 logs:
   sharedLogsVolume:

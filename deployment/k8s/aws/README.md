@@ -112,7 +112,7 @@ script resolves the correct CloudFormation exports. `--build` and `--version`
 are mutually exclusive. Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for
 the existing-VPC and other deployment options.
 
-## Configuring the general workload NodePool
+## Configuring workload NodePools
 
 The EKS deployment's main workload pool, `general-work-pool`, can be tuned by
 passing a Helm values override file through `--helm-values`:
@@ -125,15 +125,17 @@ passing a Helm values override file through `--helm-values`:
   --helm-values ./deployment/k8s/aws/examples/nodepool-overrides.yaml
 ```
 
-By default the pool leaves instance selection, including the capacity type,
-to EKS Auto Mode, within the instance types Auto Mode supports. With no
-capacity type, Auto Mode prefers spot over on-demand, and a spot interruption
-stops the migration work on that node; set `capacityTypes: ["on-demand"]` for
-migrations that must not be interrupted. The sample file at
+By default, instance family and size selection remain with EKS Auto Mode.
+Dedicated Kafka, proxy and replayer pools require On-Demand capacity because
+interruptions affect capture availability and replay-rate stability. The
+shared pool and dedicated k6 pool leave capacity type unconstrained, so Auto
+Mode may select Spot for them. The sample file at
 [`examples/nodepool-overrides.yaml`](./examples/nodepool-overrides.yaml)
-narrows the pool to on-demand c/m/r instances of generation 5 and newer, up to
-`4xlarge`. It sets each of these fields:
+requires On-Demand for every pool and narrows selection to c/m/r instances of
+generation 5 and newer, up to `4xlarge`. It sets each of these shared-pool
+fields:
 
+- `workloadsNodePool.mode`
 - `workloadsNodePool.architectures`
 - `workloadsNodePool.capacityTypes`
 - `workloadsNodePool.instanceCategories`
@@ -144,15 +146,50 @@ narrows the pool to on-demand c/m/r instances of generation 5 and newer, up to
 - `workloadsNodePool.disruption.consolidationPolicy`
 - `workloadsNodePool.disruption.consolidateAfter`
 
+`workloadsNodePool.mode` selects the data-plane placement model:
+
+- `shared` keeps Kafka, capture proxies, and replayers together on `general-work-pool`.
+- `isolated` gives Kafka, capture proxies, and replayers separate tainted NodePools.
+
+`isolated` is the default for EKS deployments. Set the mode to `shared` to
+consolidate Kafka, capture proxies, and replayers onto `general-work-pool`.
+
+The optional k6 load generator uses a separate tainted pool in both modes.
+Generated pods carry a required node selector as well as the matching
+toleration, so a toleration cannot accidentally allow them to fall back onto
+a different pool.
+
+Isolation does not require `NodePool.spec.limits`. Limits are optional total
+capacity ceilings for cost or quota control. Per-pool limits and instance
+requirements can be set below:
+
+- `workloadsNodePool.dedicatedPools.kafka`
+- `workloadsNodePool.dedicatedPools.proxy`
+- `workloadsNodePool.dedicatedPools.replayer`
+- `workloadsNodePool.dedicatedPools.k6`
+
+Dedicated pools inherit the shared architecture, capacity type, instance
+category, minimum generation, instance size, and disruption settings unless
+they override them. Kafka, proxy and replayer override the default capacity
+type with `["on-demand"]`; any pool can explicitly select `["spot"]`,
+`["on-demand"]`, or another EKS-supported capacity type through its own
+`capacityTypes` value. Their `limits` are independent and empty by default.
+
+In `shared` mode, Kafka, proxies, and replayers necessarily use the shared
+pool's single capacity policy. Set `workloadsNodePool.capacityTypes:
+["on-demand"]` when using shared mode if proxy and replay interruption is not
+acceptable.
+
 Values files follow normal Helm merge behavior: map fields merge by key, scalar
 conflicts are resolved by the later source, and list fields replace the full
 default list. For example, overriding `workloadsNodePool.disruption.consolidateAfter`
 alone keeps the default `consolidationPolicy`, while overriding `instanceSizes`
 requires supplying the full desired size list.
 
-The pool has no `limits` by default, so its size is bounded only by the
+The pools have no `limits` by default, so their size is bounded only by the
 account's EC2 vCPU quotas. Set `workloadsNodePool.limits.cpu` and/or
-`workloadsNodePool.limits.memory` to cap it.
+`workloadsNodePool.limits.memory` to cap the shared pool, or set `limits` under
+an individual dedicated pool to cap that pool.
 
 Disruption defaults to `consolidationPolicy: WhenEmpty`, so running migration
 pods are never moved to repack nodes, with `consolidateAfter: 0s`, so empty
@@ -163,11 +200,11 @@ which do move running pods.
 
 To check an override file without deploying, run
 [`examples/check-nodepool-overrides.sh`](./examples/check-nodepool-overrides.sh)
-with it. The script runs `helm lint` and prints the NodePool that would be
+with it. The script runs `helm lint` and prints the NodePools that would be
 rendered. It only needs `helm`. The bootstrap itself checks that each
 `--helm-values` file exists before doing anything else. Once the cluster
-exists, and before it mirrors or builds images, it also renders
-`general-work-pool` from those files and validates it against the cluster's
+exists, and before it mirrors or builds images, it also renders the workload
+NodePools from those files and validates them against the cluster's
 NodePool CRD with a server-side dry run, which catches values EKS would reject
 (for example an invalid `consolidateAfter`). The dry run is skipped with
 `--use-general-node-pool`, which does not create the pool.

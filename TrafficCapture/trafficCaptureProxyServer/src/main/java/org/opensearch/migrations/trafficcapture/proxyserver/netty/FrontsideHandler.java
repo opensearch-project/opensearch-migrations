@@ -57,13 +57,15 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                         "closing outbound channel because WRITE future was not successful due to: ",
                         future.cause()
                     );
-                    future.channel().close(); // close the backside
+                    closeAndFlush(future.channel());
+                    closeAndFlush(ctx.channel());
                 }
             });
             outboundChannel.config().setAutoRead(true);
-        } else { // if the outbound channel has died, so be it... let this frontside finish with its call naturally
+        } else {
             log.warn("Output channel (" + outboundChannel + ") is NOT active");
             ReferenceCountUtil.release(msg);
+            closeAndFlush(ctx.channel());
         }
     }
 
@@ -78,12 +80,26 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        log.atError()
+            .setCause(cause)
+            .setMessage("Closing proxy connection after an unrecoverable frontside forwarding error")
+            .log();
+        if (outboundChannel != null) {
+            closeAndFlush(outboundChannel);
+        }
+        closeAndFlush(ctx.channel());
+    }
+
     /**
      * Closes the specified channel after all queued write requests are flushed.
      */
     static void closeAndFlush(Channel ch) {
         if (ch.isActive()) {
             ch.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        } else if (ch.isOpen()) {
+            ch.close();
         }
     }
 }

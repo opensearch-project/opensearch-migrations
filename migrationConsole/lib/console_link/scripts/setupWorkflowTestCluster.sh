@@ -59,6 +59,10 @@ if [[ "${ACTIVE_CONTEXT}" != "${EXPECTED_CONTEXT}" ]]; then
   kubectl config use-context "${EXPECTED_CONTEXT}" >/dev/null
 fi
 
+# kind has no cloud controller to label zones. Give the nodes one, as a single-zone cloud cluster
+# would have, so a "required" workload zone spread can still schedule here.
+kubectl label nodes --all topology.kubernetes.io/zone=local-a --overwrite >/dev/null
+
 echo "Verifying cluster connectivity..."
 kubectl cluster-info
 kubectl get nodes -o wide

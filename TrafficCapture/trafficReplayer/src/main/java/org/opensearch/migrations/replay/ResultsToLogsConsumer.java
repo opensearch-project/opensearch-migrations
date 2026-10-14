@@ -1,169 +1,127 @@
 package org.opensearch.migrations.replay;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
-import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.ThreadSafeTransformerWrapper;
-import org.opensearch.migrations.transform.TransformationLoader;
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.netty.buffer.ByteBuf;
-import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+
 /**
- * Consumes request-response tuples, applies JSON transformation, and logs structured summaries.
- * <p>
- * Each thread gets its own {@link IJsonTransformer} instance via {@link ThreadSafeTransformerWrapper},
- * which must be properly closed to avoid memory retention in thread-local storage.
- * <p>
- * The {@link #close()} method should be called from each thread that uses this consumer,
- * ideally during thread shutdown or in a {@code finally} block, to release per-thread transformer instances.
+ * Deployed progress and tuple-log output for the rebuilt replay chain.
+ *
+ * <p>The progress summary is produced from the request result before worker transformation. The
+ * JSON tuple is emitted by the physical worker sink after transformation. Keeping these as separate
+ * responsibilities preserves the two established logger streams without adding bookkeeping fields
+ * to tuple JSON or S3 objects.</p>
  */
 @Slf4j
-public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTuple, ParsedHttpMessagesAsDicts>, AutoCloseable {
+public final class ResultsToLogsConsumer {
     public static final String OUTPUT_TUPLE_JSON_LOGGER = "OutputTupleJsonLogger";
     public static final String TRANSACTION_SUMMARY_LOGGER = "TransactionSummaryLogger";
     private static final String MISSING_STR = "-";
     private static final ObjectMapper PLAIN_MAPPER = new ObjectMapper();
-    private static final IJsonTransformer NOOP_JSON_TRANSFORMER = new TransformationLoader().getTransformerFactoryLoader(
-        null, null, "NoopTransformerProvider");
 
     private final Logger tupleLogger;
     private final Logger progressLogger;
-
-    private final ThreadSafeTransformerWrapper threadSafeTransformer;
-
     private final AtomicInteger tupleCounter;
 
-    public ResultsToLogsConsumer(Logger tupleLogger, Logger progressLogger, Supplier<IJsonTransformer> tupleTransformerSupplier) {
-        this.tupleLogger = tupleLogger != null ? tupleLogger : LoggerFactory.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
-        this.progressLogger = progressLogger != null ? progressLogger : makeTransactionSummaryLogger();
-        tupleCounter = new AtomicInteger();
-        Supplier<IJsonTransformer> jsonTransformerSupplier = tupleTransformerSupplier != null ? tupleTransformerSupplier : () -> NOOP_JSON_TRANSFORMER ;
-        this.threadSafeTransformer = new ThreadSafeTransformerWrapper(jsonTransformerSupplier);
+    public ResultsToLogsConsumer() {
+        this(null, null);
     }
 
-    // set this up so that the preamble prints out once, right after we have a logger
-    // if it's configured to output at all
+    ResultsToLogsConsumer(
+        Logger tupleLogger,
+        Logger progressLogger
+    ) {
+        this.tupleLogger = tupleLogger != null
+            ? tupleLogger
+            : LoggerFactory.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
+        this.progressLogger = progressLogger != null
+            ? progressLogger
+            : makeTransactionSummaryLogger();
+        tupleCounter = new AtomicInteger();
+    }
+
     private static Logger makeTransactionSummaryLogger() {
         var logger = LoggerFactory.getLogger(TRANSACTION_SUMMARY_LOGGER);
         logger.atDebug().setMessage("{}").addArgument(ResultsToLogsConsumer::getTransactionSummaryStringPreamble).log();
         return logger;
     }
 
-    private static String formatUniqueRequestKey(UniqueSourceRequestKey k) {
-        return k.getTrafficStreamKey().getConnectionId() + "." + k.getSourceRequestIndex();
-    }
-
-    private Map<String, Object> toJSONObject(SourceTargetCaptureTuple tuple, ParsedHttpMessagesAsDicts parsed) {
-        var tupleMap = new LinkedHashMap<String, Object>();
-
-        parsed.sourceRequestOp.ifPresent(r -> tupleMap.put("sourceRequest", r));
-        parsed.sourceResponseOp.ifPresent(r -> tupleMap.put("sourceResponse", r));
-        parsed.targetRequestOp.ifPresent(r -> tupleMap.put("targetRequest", r));
-        tupleMap.put("targetResponses", parsed.targetResponseList);
-
-        tupleMap.put("connectionId", formatUniqueRequestKey(tuple.getRequestKey()));
-        Optional.ofNullable(tuple.topLevelErrorCause).ifPresent(e -> tupleMap.put("error", e.toString()));
-        tupleMap.put("numRequests",  tuple.responseList.size());
-        tupleMap.put("numErrors",  tuple.responseList.stream().filter(r->r.errorCause!=null).count());
-
-        return tupleMap;
-    }
-
-    /**
-     * Writes a tuple object to an output stream as a JSON object.
-     * The JSON tuple is output on one line, and has several objects: "sourceRequest", "sourceResponse",
-     * "targetRequest", and "targetResponses". The "connectionId", "numRequests", and "numErrors" are also included to aid in debugging.
-     * An example of the format is below to highlight the different possibilities in the format, not to convey the representation for an actual http exchange.
-     * <p>
-     * {
-     *   "sourceRequest": {
-     *     "Request-URI": "/api/v1/resource",
-     *     "Method": "POST",
-     *     "HTTP-Version": "HTTP/1.1",
-     *     "header-1": "Content-Type: application/json",
-     *     "header-2": "Authorization: Bearer token",
-     *     "payload": {
-     *       "inlinedJsonBody": {
-     *         "key1": "value1",
-     *         "key2": "value2"
-     *       }
-     *     }
-     *   },
-     *   "targetRequest": {
-     *     "Request-URI": "/api/v1/target",
-     *     "Method": "GET",
-     *     "HTTP-Version": "HTTP/1.1",
-     *     "header-1": "Accept: application/json",
-     *     "header-2": "Authorization: Bearer token",
-     *     "payload": {
-     *       "inlinedBinaryBody": ByteBuf{...}
-     *     }
-     *   },
-     *   "sourceResponse": {
-     *     "response_time_ms": 150,
-     *     "HTTP-Version": "HTTP/1.1",
-     *     "Status-Code": 200,
-     *     "Reason-Phrase": "OK",
-     *     "header-1": "Content-Type: text/plain",
-     *     "header-2": "Cache-Control: no-cache",
-     *     "payload": {
-     *       "inlinedTextBody": "The quick brown fox jumped over the lazy dog\r"
-     *       }
-     *     }
-     *   },
-     *   "targetResponses": [{
-     *     "response_time_ms": 100,
-     *     "HTTP-Version": "HTTP/1.1",
-     *     "Status-Code": 201,
-     *     "Reason-Phrase": "Created",
-     *     "header-1": "Content-Type: application/json",
-     *     "payload": {
-     *       "inlinedJsonSequenceBodies": [
-     *         {"sequenceKey1": "sequenceValue1"},
-     *         {"sequenceKey2": "sequenceValue2"}
-     *       ]
-     *     }
-     *   }],
-     *   "connectionId": "conn-12345",
-     *   "numRequests": 5,
-     *   "numErrors": 1,
-     *   "error": "Request timed out"
-     * }
-     *
-     * @param tuple the RequestResponseResponseTriple object to be converted into json and written to the stream.
-     */
-    public void accept(SourceTargetCaptureTuple tuple, ParsedHttpMessagesAsDicts parsedMessages) {
+    public Map<String, Object> createTupleAndReportProgress(
+        IReplayContexts.ITupleHandlingContext replayContext,
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
+    ) {
+        var parsed = new ParsedHttpMessagesAsDicts(replayContext, result);
         final var index = tupleCounter.getAndIncrement();
         progressLogger.atInfo().setMessage("{}")
-            .addArgument(() -> toTransactionSummaryString(index, tuple, parsedMessages)).log();
-        if (tupleLogger.isInfoEnabled()) {
-            try {
-                var originalTuple = toJSONObject(tuple, parsedMessages);
-                Object transformedTuple = threadSafeTransformer.transformJson(originalTuple);
-                var tupleString = PLAIN_MAPPER.writeValueAsString(transformedTuple);
-                tupleLogger.atInfo().setMessage("{}").addArgument(tupleString).log();
-            } catch (Exception e) {
-                log.atError().setCause(e).setMessage("Exception converting tuple to string").log();
-                tupleLogger.atInfo().setMessage("{ \"error\":\"{}\" }").addArgument(e::getMessage).log();
-                throw Lombok.sneakyThrow(e);
+            .addArgument(() -> toTransactionSummaryString(index, result, parsed)).log();
+        return toJSONObject(result, parsed);
+    }
+
+    private Map<String, Object> toJSONObject(
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result,
+        ParsedHttpMessagesAsDicts parsed
+    ) {
+        return parsed.toTupleMap(result);
+    }
+
+    public TrafficReplayerTopLevel.ManagedPhysicalTupleSinkFactory<
+        Map<String, Object>
+    > tupleSinkFactory() {
+        return ignoredWorkerIndex -> new TrafficReplayerTopLevel.ManagedPhysicalTupleSink<>() {
+            @Override
+            public CompletionStage<Void> write(
+                IReplayContexts.ITupleHandlingContext replayContext,
+                Map<String, Object> tuple
+            ) {
+                if (!tupleLogger.isInfoEnabled()) {
+                    return CompletableFuture.completedFuture(null);
+                }
+                try {
+                    var tupleString = PLAIN_MAPPER.writeValueAsString(tuple);
+                    tupleLogger.atInfo().setMessage("{}").addArgument(tupleString).log();
+                    return CompletableFuture.completedFuture(null);
+                } catch (Exception failure) {
+                    log.atError().setCause(failure).setMessage("Exception converting tuple to string").log();
+                    tupleLogger.atInfo().setMessage("{ \"error\":\"{}\" }").addArgument(failure::getMessage).log();
+                    return CompletableFuture.failedFuture(failure);
+                }
             }
-        }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
     }
 
     public static String getTransactionSummaryStringPreamble() {
@@ -181,33 +139,28 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
 
     public static String toTransactionSummaryString(
         int index,
-        SourceTargetCaptureTuple tuple,
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result,
         ParsedHttpMessagesAsDicts parsed
     ) {
         var sourceResponse = parsed.sourceResponseOp;
         return new StringJoiner(", ").add(Integer.toString(index))
             // REQUEST_ID
-            .add(formatUniqueRequestKey(tuple.getRequestKey()))
+            .add(formatUniqueRequestKey(result.requestId()))
             // Original request timestamp
             .add(
-                Optional.ofNullable(tuple.sourcePair)
-                    .map(sp -> sp.requestData.getLastPacketTimestamp().toString())
-                    .orElse(MISSING_STR)
-            )
+                Optional.ofNullable(result.sourceRequest().getLastPacketTimestamp())
+                .map(Object::toString)
+                .orElse(MISSING_STR))
             // SOURCE/TARGET REQUEST_SIZE_BYTES
             .add(
-                Optional.ofNullable(tuple.sourcePair)
-                    .map(sp -> sp.requestData.stream().mapToInt(bArr -> bArr.length).sum() + "")
-                    .orElse(MISSING_STR)
+                result.sourceRequest().stream().mapToInt(bytes -> bytes.length).sum()
                     + "/"
-                    + Optional.ofNullable(tuple.targetRequestData)
-                        .map(
-                            transformedPackets -> transformedPackets.streamUnretained()
-                                .mapToInt(ByteBuf::readableBytes)
-                                .sum()
-                                + ""
-                        )
-                        .orElse(MISSING_STR)
+                    + preparedRequestSize(result.preparedRequest())
             )
             // SOURCE/TARGET STATUS_CODE
             .add(
@@ -218,13 +171,15 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
             )
             // SOURCE/TARGET RESPONSE_SIZE_BYTES
             .add(
-                Optional.ofNullable(tuple.sourcePair)
-                    .flatMap(sp -> Optional.ofNullable(sp.responseData))
-                    .map(rd -> rd.stream().mapToInt(bArr -> bArr.length).sum() + "")
-                    .orElse(MISSING_STR)
+                sourceResponseSize(result)
                     + "/" +
-                    transformStreamToString(tuple.responseList.stream(),
-                                r -> r.targetResponseData.stream().mapToInt(bArr -> bArr.length).sum() + "")
+                    transformStreamToString(result.targetAttemptHistory().stream(),
+                        attempt -> switch (attempt) {
+                            case TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> obtained ->
+                                obtained.response().getSizeInBytes() + "";
+                            case TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> ignored ->
+                                "0";
+                        })
             )
             // SOURCE/TARGET LATENCY
             .add(
@@ -246,17 +201,53 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
             .toString();
     }
 
-    private static <T> String transformStreamToString(Stream<T> stream, Function<T,String> mapFunction) {
+    private static String formatUniqueRequestKey(ReplayRequestId requestId) {
+        return requestId.connectionProcessingId()
+            .capturedConnectionId()
+            .connectionId()
+            + "."
+            + requestId.capturedRequestOrdinal();
+    }
+
+    private static String preparedRequestSize(
+        NettyPacketToHttpConsumer.PreparedRequest preparedRequest
+    ) {
+        if (preparedRequest == null) {
+            return MISSING_STR;
+        }
+        try (var diagnostic = preparedRequest.request().retainDiagnosticCopy()) {
+            return Long.toString(diagnostic.packets().readableBytes());
+        }
+    }
+
+    private static String sourceResponseSize(
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
+    ) {
+        if (!(result.finalSourceResponse()
+            instanceof RequestReplayOwner.CompleteFinalSourceResponse<
+                HttpMessageAndTimestamp.Response
+            > complete)) {
+            return MISSING_STR;
+        }
+        return Integer.toString(
+            complete.response().stream().mapToInt(bytes -> bytes.length).sum()
+        );
+    }
+
+    private static <T> String transformStreamToString(
+        Stream<T> stream,
+        Function<T, String> mapFunction
+    ) {
         return Stream.of(stream
                 .map(mapFunction)
                 .collect(Collectors.joining(",")))
             .filter(Predicate.not(String::isEmpty))
             .findFirst()
             .orElse(MISSING_STR);
-    }
-
-    @Override
-    public void close() throws Exception {
-        threadSafeTransformer.close();
     }
 }

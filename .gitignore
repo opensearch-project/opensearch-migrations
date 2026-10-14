@@ -34,7 +34,10 @@ migration-assistant-workspace/
 # The whole plugins directory needs to be removed
 plugins/opensearch/loggable-transport-netty4/.gradle/
 # Build files
-TrafficCapture/**/out/
+# IDE build output, every module. Gradle writes to build/, IntelliJ writes to out/.
+# This was scoped to TrafficCapture/ and so let coreUtilities/out/ and
+# transformation/**/out/ through, where `git add -A` picked up 172 compiled classes.
+**/out/
 
 # CDK files from end-to-end testing
 opensearch-cluster-cdk/

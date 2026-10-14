@@ -228,6 +228,9 @@ describe('migration initializer CRD resource generation', () => {
             dependsOn: ["default"],
             kafkaClusterName: "default",
             topicName: "loaded-dump",
+            topicConfig: expect.objectContaining({
+                "message.timestamp.type": "CreateTime",
+            }),
             sourceKind: "s3",
             s3SourceUri: "s3://traffic-bucket/captures/one.proto.gz",
             loadStarted: true

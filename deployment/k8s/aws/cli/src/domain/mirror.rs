@@ -129,7 +129,7 @@ pub const IMAGES: &[&str] = &[
     "docker.io/bats/bats:v1.4.1",
     "quay.io/thanos/thanos:v0.38.0",
     // otel collector
-    "public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3",
+    "public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0",
     // opentelemetry-operator
     "ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.122.0",
     "quay.io/brancz/kube-rbac-proxy:v0.18.1",
@@ -409,7 +409,7 @@ charts:
 defaultBucketConfiguration:
   bucketOperationImage: "{m}/docker.io/amazon/aws-cli:2.25.11"
 
-otelCollectorImage: "{m}/public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"
+otelCollectorImage: "{m}/public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0"
 
 images:
   coordinatorCluster:

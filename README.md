@@ -10,7 +10,9 @@
   - [Supported Migration Paths and Platforms](#supported-migration-paths-and-platforms)
     - [Migration Paths](#migration-paths)
     - [Platforms](#platforms)
-    - [Performance Limitations](#performance-limitations)
+  - [Performance](#performance)
+    - [Capture and Replay](#capture-and-replay)
+    - [Reindex-From-Snapshot and Traffic Replay throughput](#reindex-from-snapshot-and-traffic-replay-throughput)
       - [Test Results](#test-results)
   - [Issue Tracking](#issue-tracking)
   - [Roadmap](#roadmap)
@@ -84,7 +86,30 @@ Note that testing is done on specific minor versions, but any minor versions wit
   - Managed cloud offerings (e.g., Amazon OpenSearch)
   - Managed serverless cloud offerings (e.g. Amazon OpenSearch Serverless)
 
-### Performance Limitations
+## Performance
+
+### Capture and Replay
+A two-hour benchmark (see [details](docs/captureAndReplay/loadTestRun-2026-10-13-160k.md)) recorded a full-rate ingest workload as it was written to an
+Elasticsearch 7.10 source and replayed it live onto an OpenSearch 3.7 target, both Amazon OpenSearch
+Service domains. The load was single-document `_bulk` requests of about 2 KiB, with about a quarter of 
+them opening a new TLS connection.
+
+| What to expect                              | Result                                                                          |
+| ------------------------------------------- | ------------------------------------------------------------------------------- |
+| Sustained live capture                      | ~152K requests/s for two hours (every minute between 149K and 156K)             |
+| Sustained live replay                       | ~154K target requests/s at speedup 1.1, keeping pace with capture               |
+| Replay lag behind live traffic              | 0.26 s median minute, 6.9 s 95th percentile; caught up within a minute of the load stopping |
+| Status codes matching between source and target | 99.995% of 1.1 billion requests                                             |
+| Restarts during the run                     | none                                                                            |
+| Capture proxies                             | 128 × 5 vCPU                                                                    |
+| Kafka                                       | 12 brokers × 12 vCPU, 512 partitions, 3 TiB provisioned-throughput gp3 each     |
+| Traffic Replayers                           | 64 × 8 vCPU                                                                     |
+| Source and target domains (each)            | 48 data nodes (c8g.4xlarge) + 48 coordinators (c8g.8xlarge); ~33% coordinator CPU |
+
+See the [full benchmark report](docs/captureAndReplay/loadTestRun-2026-10-13-160k.md) for the workload,
+configuration, per-minute statistics, errors and retries, and the settings this rate depends on.
+
+### Reindex-From-Snapshot and Traffic Replay throughput
 A performance test was performed on 03/10/25 alongside [PR 1337](https://github.com/opensearch-project/opensearch-migrations/pull/1337)
 to identify general indexing throughput with Reindex-From-Snapshot and Traffic Replay. While Reindex-From-Snapshot
 includes periods of ingestion inactivity (e.g. while downloading the shard data), this was not factored into the ingestion rates.

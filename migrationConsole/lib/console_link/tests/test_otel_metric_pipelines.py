@@ -55,18 +55,56 @@ def test_eks_emf_metric_names_and_dimensions_are_unchanged():
     assert collector["exporters"]["awsemf/cadvisor"] == {
         "namespace": "OpenSearchMigrations",
         "dimension_rollup_option": "NoDimensionRollup",
-        "metric_declarations": [{
-            "dimensions": [["container", "namespace"]],
-            "metric_name_selectors": [
-                "container_cpu_usage_seconds_total",
-                "container_memory_working_set_bytes",
-            ],
-        }],
+        "metric_declarations": [
+            {
+                "dimensions": [["container", "namespace"], ["container", "namespace", "pod"]],
+                "metric_name_selectors": ["container_memory_working_set_bytes"],
+            },
+            {
+                "dimensions": [["container", "namespace"]],
+                "metric_name_selectors": ["container_cpu_usage_seconds_total"],
+            },
+            {
+                "dimensions": [["container", "namespace", "pod", "device"]],
+                "label_matchers": [{"label_names": ["container"], "regex": "^kafka$"}],
+                "metric_name_selectors": [
+                    "container_fs_writes_bytes_total",
+                    "container_fs_reads_bytes_total",
+                ],
+            },
+        ],
     }
-    assert collector["service"]["pipelines"]["metrics/cadvisor"] == {
+    pipelines = collector["service"]["pipelines"]
+    assert pipelines["metrics/cadvisor"] == {
+        "receivers": ["prometheus"],
+        "processors": ["cumulativetodelta/cadvisor", "metricstransform/cadvisor", "batch"],
+        "exporters": ["awsemf/cadvisor"],
+    }
+    assert pipelines["metrics/cadvisor-prometheus"] == {
         "receivers": ["prometheus"],
         "processors": ["batch"],
-        "exporters": ["awsemf/cadvisor", "prometheus"],
+        "exporters": ["prometheus"],
+    }
+
+
+def test_eks_cadvisor_cpu_is_summed_per_node_from_deltas_before_emf():
+    # EMF drops points that collide on [container, namespace] in one batch, so CPU is aggregated first; the delta
+    # conversion must precede the sum so a vanished or restarted pod cannot drive the total negative.
+    collector = _load_collector_config(CHART_DIR / "valuesEks.yaml")
+
+    assert collector["processors"]["cumulativetodelta/cadvisor"] == {
+        "include": {"metrics": ["container_cpu_usage_seconds_total"], "match_type": "strict"},
+    }
+    assert collector["processors"]["metricstransform/cadvisor"] == {
+        "transforms": [{
+            "include": "container_cpu_usage_seconds_total",
+            "action": "update",
+            "operations": [{
+                "action": "aggregate_labels",
+                "label_set": ["container", "namespace"],
+                "aggregation_type": "sum",
+            }],
+        }],
     }
 
 

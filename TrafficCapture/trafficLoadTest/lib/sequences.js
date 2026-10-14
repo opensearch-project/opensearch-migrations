@@ -14,10 +14,11 @@
 
 import http from './http-client.js';
 import { check } from 'k6';
+import exec from 'k6/execution';
 
-// __VU and __ITER are k6 built-in globals; unique per VU + iteration combination.
-function generateId() {
-  return `seq-${__VU}-${__ITER}`;
+export function generateId(execution = exec, prefix = 'seq', suffix = null) {
+  const base = `${prefix}-${execution.vu.idInTest}-${execution.scenario.iterationInTest}`;
+  return suffix === null ? base : `${base}-${suffix}`;
 }
 
 function createDocument(proxyUrl, index, connParams, randomDocument) {

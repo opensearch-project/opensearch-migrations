@@ -79,7 +79,7 @@ class Test0035CdcClientAuthPemEnvVar(MATestBase):
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for capture-proxy to be ready (deployProxyWithTls must apply cleanly)...")
-        wait_for_proxy_ready(ns, timeout_seconds)
+        wait_for_proxy_ready(ns, timeout_seconds, workflow_name=self.workflow_name)
 
         self._assert_pem_env_var(ns)
 

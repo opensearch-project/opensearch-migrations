@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.replay.netty.InterimHttpResponseHandler;
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
@@ -33,6 +34,7 @@ import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.util.ReferenceCountUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -249,9 +251,13 @@ public class HttpByteBufFormatter {
                                                    Stream<ByteBuf> byteBufStream,
                                                    ChannelHandler... handlers) {
         EmbeddedChannel channel = new EmbeddedChannel(
-            msgType == HttpMessageType.REQUEST ? new HttpRequestDecoder() : new HttpResponseDecoder(),
-            new HttpContentDecompressor(0)
+            msgType == HttpMessageType.REQUEST ? new HttpRequestDecoder() : new HttpResponseDecoder()
         );
+        if (msgType == HttpMessageType.RESPONSE) {
+            channel.pipeline().addLast(new InterimHttpResponseHandler());
+            channel.pipeline().addLast(new FirstFinalResponseOnlyHandler());
+        }
+        channel.pipeline().addLast(new HttpContentDecompressor(0));
         for (var h : handlers) {
             channel.pipeline().addLast(h);
         }
@@ -272,6 +278,26 @@ public class HttpByteBufFormatter {
             return output;
         } finally {
             channel.finishAndReleaseAll();
+        }
+    }
+
+    /**
+     * Keeps response parsing aligned with the first final HTTP response while callers retain the complete
+     * raw capture observation as separate evidence.
+     */
+    private static final class FirstFinalResponseOnlyHandler extends ChannelInboundHandlerAdapter {
+        private boolean finalResponseComplete;
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            if (finalResponseComplete) {
+                ReferenceCountUtil.release(msg);
+                return;
+            }
+            if (msg instanceof LastHttpContent) {
+                finalResponseComplete = true;
+            }
+            ctx.fireChannelRead(msg);
         }
     }
 
