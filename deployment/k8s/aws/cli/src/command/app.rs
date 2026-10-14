@@ -26,6 +26,7 @@ pub struct App<'r, R: CommandRunner> {
     pub env: Env,
     pub runner: &'r R,
     pub state: State,
+    pub ecr: Box<dyn ecr_sdk::EcrApi>,
 }
 
 impl<'r, R: CommandRunner> App<'r, R> {
@@ -33,7 +34,12 @@ impl<'r, R: CommandRunner> App<'r, R> {
     pub fn load(env: Env, runner: &'r R) -> Result<Self> {
         let mut state = State::new(env.stage_dir());
         state.load()?;
-        Ok(Self { env, runner, state })
+        Ok(Self {
+            env,
+            runner,
+            state,
+            ecr: Box::new(ecr_sdk::SdkEcr),
+        })
     }
 
     /// CFN deploy or skip. Idempotent: a healthy stack or `SKIP_CFN_DEPLOY=Y`
@@ -276,7 +282,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// line).
     /// Obtain ECR credentials for `registry_host` via the AWS SDK.
     fn ecr_creds(&self, registry_host: &str, region: &str) -> Vec<RegistryCred> {
-        match ecr_sdk::get_ecr_credentials(region) {
+        match self.ecr.credentials(region) {
             Ok((user, pass)) => vec![RegistryCred {
                 registry: registry_host.to_string(),
                 username: user,
@@ -849,7 +855,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
         for &src in crate::mirror::IMAGES {
             let repo = crate::mirror::ecr_repo_name(src);
             let dst = crate::mirror::ecr_dest(src, ecr_host);
-            if let Err(e) = ecr_sdk::create_repository(&repo, region) {
+            if let Err(e) = self.ecr.create_repository(&repo, region) {
                 ui::warn(&format!("create-repository {repo}: {e}"));
             }
             if retry.copy(src, &dst, creds) {
@@ -869,7 +875,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
 
     fn mirror_helm_charts(&self, ecr_host: &str, region: &str) -> Result<()> {
         ui::step("Mirroring helm charts to private ECR");
-        match ecr_sdk::get_ecr_credentials(region) {
+        match self.ecr.credentials(region) {
             Ok((_user, pass)) => {
                 let login = self.runner.run(
                     "helm",
@@ -915,7 +921,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
         region: &str,
     ) -> bool {
         let chart_repo = format!("charts/{}", chart.name);
-        if let Err(e) = ecr_sdk::create_repository(&chart_repo, region) {
+        if let Err(e) = self.ecr.create_repository(&chart_repo, region) {
             ui::warn(&format!("create-repository {chart_repo}: {e}"));
         }
         let pull_ok = if chart.repo.starts_with("oci://") {
@@ -1217,6 +1223,29 @@ impl OciRetry {
 mod tests {
     use super::*;
     use crate::runner::MockRunner;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// ECR that refuses credentials and records the repositories it was asked to create.
+    #[derive(Default)]
+    struct StubEcr {
+        created: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl ecr_sdk::EcrApi for StubEcr {
+        fn credentials(&self, _region: &str) -> std::result::Result<(String, String), String> {
+            Err("stub: no credentials".to_string())
+        }
+
+        fn create_repository(
+            &self,
+            repo_name: &str,
+            _region: &str,
+        ) -> std::result::Result<(), String> {
+            self.created.borrow_mut().push(repo_name.to_string());
+            Ok(())
+        }
+    }
 
     fn env_in(dir: &std::path::Path) -> Env {
         Env {
@@ -1607,11 +1636,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let r = MockRunner::new().stub("aws", &["describe-stacks"], 0, REAL_OUTPUTS);
         let mut app = App::load(env_in(dir.path()), &r).unwrap();
+        let ecr = StubEcr::default();
+        let created = ecr.created.clone();
+        app.ecr = Box::new(ecr);
         app.state.set("MIRROR_IMAGES", "Y");
         app.state.set("AWS_REGION", "us-east-1");
         app.state.set("CFN_STACK_NAME", "MigrationAssistant-ma");
-        // No real ECR creds in test env → mirror fails.
         let result = app.mirror_images_and_charts();
         assert!(result.is_err());
+        assert!(
+            created.borrow().is_empty(),
+            "no repositories without credentials"
+        );
     }
 }

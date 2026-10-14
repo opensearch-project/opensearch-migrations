@@ -228,7 +228,12 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
         "manual_path start stage={} resuming={}",
         env.stage, resuming
     ));
-    let mut app = crate::app::App { env, runner, state };
+    let mut app = crate::app::App {
+        env,
+        runner,
+        state,
+        ecr: Box::new(crate::ecr::SdkEcr),
+    };
 
     // Check required external dependencies before doing any work.
     check_dependencies(runner)?;
