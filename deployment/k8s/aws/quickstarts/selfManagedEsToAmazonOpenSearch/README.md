@@ -88,6 +88,21 @@ straight from ECR Public.
   time and needs only the NAT gateway's outbound access. Leave it off for isolated VPCs.
 - **`--version <tag>`** pins a release instead of the latest.
 
+> **Deploying your own changes instead of the release?** Build everything from your checkout.
+> This needs Java 21 and Docker with Buildx, adds about 30–45 minutes, and pushes the images to
+> the stack's private ECR (so `--use-public-images` doesn't apply):
+>
+> ```bash
+> ./deployment/k8s/aws/aws-bootstrap.sh --deploy-create-vpc-cfn --stack-name "$STACK_NAME" \
+>   --stage "$STAGE" --region "$AWS_REGION" --build --base-dir "$(pwd)" \
+>   --helm-values deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/helm-values-observability.yaml \
+>   --skip-console-exec    # add --with-load-test-images to enable k6 (section 5)
+> ```
+>
+> To redeploy after further changes, see
+> [Build and deploy the current checkout](../../README.md#build-and-deploy-the-current-checkout).
+> Everything after this section is the same either way.
+
 The script sets your kubectl context to the new cluster. When it finishes:
 
 ```bash
@@ -504,8 +519,7 @@ curl --cacert migrations-ca.crt -u admin:admin "https://<nlb-host>:9201/_cluster
 The NLB is internal, so clients must run inside MA's VPC or a network peered with it.
 
 **Sustained load with k6.** The k6 runner image isn't published with releases, so this needs a
-deployment that built it (`aws-bootstrap.sh --build --with-load-test-images`; see the developer
-workflow).
+deployment built from your checkout with `--with-load-test-images` (see the note in section 2).
 
 ```bash
 deployment/k8s/installK6Chart.sh install --namespace ma
