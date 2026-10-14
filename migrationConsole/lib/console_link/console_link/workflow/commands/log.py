@@ -393,7 +393,7 @@ def output_filter(ctx, **params):
 
     _validate_scope(ctx, all_workflows)
     if params['list_labels']:
-        _list_available_labels(workflow_name, all_workflows, namespace, **params)
+        _list_available_labels(**params)
         return
 
     selectors, passthrough_args = _split_passthrough_args(params['extra_args'])

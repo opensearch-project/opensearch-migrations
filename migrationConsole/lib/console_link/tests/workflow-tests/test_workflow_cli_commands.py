@@ -1031,6 +1031,18 @@ class TestWorkflowCLICommands:
             'workflows.argoproj.io/workflow=migration-workflow'
         )
 
+    @patch('console_link.workflow.commands.autocomplete_k8s_labels.fetch_component_values',
+           return_value={'rfs-worker'})
+    @patch('console_link.workflow.commands.autocomplete_k8s_labels._fetch_workflow_labels',
+           return_value=({'task': {'reindexFromSnapshot'}}, []))
+    def test_output_filter_list_prints_labels_and_components(self, _mock_labels, _mock_components):
+        runner = CliRunner()
+
+        result = runner.invoke(workflow_cli, ['log', 'filter', '--list'])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.splitlines() == ['component=rfs-worker', 'task=reindexFromSnapshot']
+
     @patch('console_link.workflow.commands.log._run_history_mode')
     def test_output_filter_selects_by_component(self, mock_history):
         runner = CliRunner()
