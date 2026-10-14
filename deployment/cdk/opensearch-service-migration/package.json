@@ -45,7 +45,7 @@
     "create-acm-cert": "ts-node -e \"require('./lib/lambda/acm-cert-importer-handler').handler({ RequestType: 'Create', ResponseURL: 'Local' }, {})\""
   },
   "devDependencies": {
-    "@aws-cdk/aws-msk-alpha": "2.213.0-alpha.0",
+    "@aws-cdk/aws-msk-alpha": "2.273.0-alpha.0",
     "@eslint/js": "^9.38.0",
     "@types/jest": "^30.0.0",
     "@types/node": "26.6.5",
