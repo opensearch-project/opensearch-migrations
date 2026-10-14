@@ -225,7 +225,10 @@ sourceClusters:
       #repoPathUri: string
     proxy:
       #loggingConfigurationOverrideConfigMap: string
+      #otelMetricsExportEnabled: true
       #otelMetricsCollectorEndpoint: http://otel-collector:4317
+      #otelTraceExportEnabled: true
+      #otelTraceCollectorEndpoint: http://otel-trace-collector:4317
 targetClusters:
   <NAME>:
 ...

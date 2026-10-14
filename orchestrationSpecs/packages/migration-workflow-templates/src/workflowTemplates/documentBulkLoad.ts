@@ -250,8 +250,8 @@ function getRfsDeploymentManifest
             strategy: {
                 type: "RollingUpdate",
                 rollingUpdate: {
-                    maxUnavailable: 1,
-                    maxSurge: 1
+                    maxUnavailable: "5%",
+                    maxSurge: "10%"
                 }
             },
             selector: {

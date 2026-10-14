@@ -1,11 +1,9 @@
 import subprocess
 import os
-import re
 import shutil
 import tempfile
-import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from cerberus import Validator
 import logging
@@ -17,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 KAFKA_TOPICS_SCRIPT = 'kafka-topics.sh'
 KAFKA_CONSUMER_GROUPS_SCRIPT = 'kafka-consumer-groups.sh'
-KAFKA_CONSOLE_CONSUMER_SCRIPT = 'kafka-console-consumer.sh'
 KAFKA_RUN_CLASS_SCRIPT = 'kafka-run-class.sh'
 MSK_IAM_AUTH_PROPERTIES = 'msk-iam-auth.properties'
 DELETE_TOPIC_OPERATION = "Delete Topic"
@@ -26,13 +23,11 @@ LIST_TOPICS_OPERATION = "List Topics"
 DESCRIBE_CONSUMER_GROUP_OPERATION = "Describe Consumer Group"
 LIST_CONSUMER_GROUPS_OPERATION = "List Consumer Groups"
 DESCRIBE_TOPIC_RECORDS_OPERATION = "Describe Topic Records"
+DESCRIBE_REPLAY_PROGRESS_OPERATION = "Describe Replay Progress"
 GET_OFFSET_SHELL_CLASS = 'org.apache.kafka.tools.GetOffsetShell'
 
-# Default per-partition probe timeout when reading the record at CURRENT-OFFSET
-# to derive its timestamp. Kept short because we only ever need one record.
-TIME_LAG_PROBE_TIMEOUT_MS = 5000
-
 DISABLE_JAVA_PERFDATA_OPT = "-XX:-UsePerfData"
+CONTAINER_KAFKA_UTILS_BIN = Path('/root/kafkaUtils/bin/kafkaUtils')
 
 MSK_SCHEMA = {
     "nullable": True,
@@ -109,6 +104,31 @@ def resolve_kafka_tool(script_name: str) -> str:
     )
 
 
+def resolve_kafka_utils() -> str:
+    configured = os.getenv('KAFKA_UTILS_BIN')
+    if configured:
+        return configured
+
+    on_path = shutil.which('kafkaUtils')
+    if on_path:
+        return on_path
+
+    model_dir = Path(__file__).resolve().parent
+    repo_root = model_dir.parents[4]
+    candidates = [
+        repo_root / 'libraries' / 'kafkaUtils' / 'build' / 'install' / 'kafkaUtils' / 'bin' / 'kafkaUtils',
+        CONTAINER_KAFKA_UTILS_BIN,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    raise FileNotFoundError(
+        "Could not find kafkaUtils. Set KAFKA_UTILS_BIN, run "
+        "'./gradlew :libraries:kafkaUtils:installDist', or use the migration-console image."
+    )
+
+
 def resolve_msk_auth_config() -> str:
     for home in _candidate_kafka_homes():
         candidates = [
@@ -178,43 +198,14 @@ def pretty_print_kafka_record_count(data: str) -> str:
     return formatted_output
 
 
-# --------------------------------------------------------------------------- #
-# Time-lag augmentation for `describe_consumer_group`.
-#
-# `kafka-consumer-groups.sh --describe` already reports lag in messages
-# (LOG-END-OFFSET - CURRENT-OFFSET). Operators usually also need to know HOW
-# OLD that lag is in wall-clock terms — i.e. the timestamp of the record the
-# consumer is sitting on, and how long ago that was. There is no Kafka CLI
-# that returns offset->timestamp directly, so we resolve it by consuming a
-# single record at CURRENT-OFFSET via kafka-console-consumer.sh and parsing
-# the `CreateTime:`/`LogAppendTime:` prefix.
-#
-# For caught-up partitions (LAG == 0), CURRENT-OFFSET points one past the last
-# record, so the probe would hang waiting for a not-yet-appended record. In
-# that case we probe (LOG-END-OFFSET - 1) to surface the age of the most
-# recently appended record, marked clearly. Empty partitions (LOG-END-OFFSET
-# == 0) are reported without a probe.
-# --------------------------------------------------------------------------- #
-
-# Native describe header layout (Kafka 2.x+):
-#   GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID
-# Whitespace between columns varies. We anchor on the header row to discover
-# column indices, then split data rows by whitespace.
 _DESCRIBE_HEADER_TOKENS = (
     'GROUP', 'TOPIC', 'PARTITION', 'CURRENT-OFFSET',
     'LOG-END-OFFSET', 'LAG',
 )
-_TIMESTAMP_PREFIX_RE = re.compile(r'^(CreateTime|LogAppendTime):(-?\d+)\b')
 
 
 def parse_consumer_group_describe(text: str) -> List[dict]:
-    """Parse `kafka-consumer-groups.sh --describe` table output.
-
-    Returns a list of {topic, partition, current_offset, log_end_offset, lag}
-    dicts, one per data row. Rows where any of those four numeric fields are
-    missing or '-' (e.g. an inactive group with no committed offset yet) are
-    skipped silently — the time-lag section can't add anything for them.
-    """
+    """Parse the native `kafka-consumer-groups.sh --describe` table."""
     rows: List[dict] = []
     header_indices: Optional[dict] = None
     for raw_line in text.splitlines():
@@ -231,14 +222,12 @@ def parse_consumer_group_describe(text: str) -> List[dict]:
 
 
 def _detect_describe_header(tokens: List[str]) -> Optional[dict]:
-    """Return a column->index map if `tokens` is the describe header row."""
-    if all(h in tokens for h in _DESCRIBE_HEADER_TOKENS):
-        return {h: tokens.index(h) for h in _DESCRIBE_HEADER_TOKENS}
+    if all(header in tokens for header in _DESCRIBE_HEADER_TOKENS):
+        return {header: tokens.index(header) for header in _DESCRIBE_HEADER_TOKENS}
     return None
 
 
 def _parse_describe_row(tokens: List[str], header_indices: dict) -> Optional[dict]:
-    """Extract one data row, or None if the row is malformed/incomplete."""
     if len(tokens) <= header_indices['LAG']:
         return None
     try:
@@ -269,212 +258,38 @@ def _parse_offset(token: str) -> Optional[int]:
         return None
 
 
-def _format_duration(seconds: float) -> str:
-    """Format a positive duration as a compact human string, e.g. '2h13m4s'.
-
-    Negative durations (clock skew or future-timestamped messages) are
-    returned with a leading '-'. Zero is rendered as '0s'.
-    """
-    if seconds == 0:
-        return '0s'
-    sign = '-' if seconds < 0 else ''
-    seconds = abs(seconds)
-    days, rem = divmod(int(seconds), 86400)
-    hours, rem = divmod(rem, 3600)
-    minutes, secs = divmod(rem, 60)
-    parts: List[str] = []
-    if days:
-        parts.append(f'{days}d')
-    if hours:
-        parts.append(f'{hours}h')
-    if minutes:
-        parts.append(f'{minutes}m')
-    if secs or not parts:
-        parts.append(f'{secs}s')
-    return sign + ''.join(parts)
-
-
-def _format_iso_utc(epoch_ms: int) -> str:
-    secs, ms = divmod(epoch_ms, 1000)
-    return time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(secs)) + f'.{ms:03d}Z'
-
-
-def _probe_record_timestamp_ms(
-    command: List[str],
-    timeout_seconds: float,
-) -> Tuple[Optional[int], Optional[str]]:
-    """Run the prepared kafka-console-consumer command and parse the timestamp
-    prefix from its first line of stdout.
-
-    Returns (epoch_ms, error). Exactly one is None.
-    """
-    try:
-        proc = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout_seconds,
-        )
-    except subprocess.TimeoutExpired:
-        return None, 'probe timed out'
-    except OSError as exc:
-        return None, f'probe failed: {exc}'
-
-    for line in (proc.stdout or '').splitlines():
-        match = _TIMESTAMP_PREFIX_RE.match(line)
-        if match:
-            try:
-                ts = int(match.group(2))
-            except ValueError:
-                continue
-            if ts < 0:
-                # Kafka reports -1 when the message has no timestamp set
-                # (timestamp.type=NoTimestampType). Surface it as an error.
-                return None, 'record has no timestamp'
-            return ts, None
-
-    stderr_summary = (proc.stderr or '').strip().splitlines()
-    if stderr_summary:
-        return None, f'probe failed: {stderr_summary[-1][:120]}'
-    return None, 'no record returned'
-
-
-def _build_time_lag_section(
-    describe_output: str,
-    brokers: str,
-    extra_console_consumer_args: List[str],
-    probe_timeout_ms: int = TIME_LAG_PROBE_TIMEOUT_MS,
-    now_ms: Optional[int] = None,
-) -> str:
-    """Build the per-partition TIME LAG report appended after the native
-    describe output.
-
-    `extra_console_consumer_args` carries auth flags (e.g. --consumer.config
-    for SCRAM/MSK) so this helper stays auth-agnostic.
-    """
-    rows = parse_consumer_group_describe(describe_output)
-    if not rows:
-        return ('PARTITION TIME LAG\n'
-                '  (no committed offsets parsed from the describe output above; '
-                'nothing to probe)\n')
-
-    if now_ms is None:
-        now_ms = int(time.time() * 1000)
-
-    try:
-        consumer_script = resolve_kafka_tool(KAFKA_CONSOLE_CONSUMER_SCRIPT)
-    except FileNotFoundError as exc:
-        return ('PARTITION TIME LAG\n'
-                f'  (skipped: {exc})\n')
-
-    headers = ['TOPIC', 'PARTITION', 'PROBED-OFFSET', 'TIMESTAMP (UTC)',
-               'TIME-LAG', 'NOTE']
-    # Probe each partition. We deliberately keep this serial: typical groups
-    # have a handful of partitions and serializing avoids surprising fan-out
-    # of subprocess invocations from a console command.
-    formatted_rows: List[List[str]] = [
-        _format_partition_row(
-            row, now_ms, consumer_script, brokers,
-            extra_console_consumer_args, probe_timeout_ms,
-        )
-        for row in rows
-    ]
-
-    # Width-aligned table render. Width = max(header, all cells) per column.
-    widths = [len(h) for h in headers]
-    for r in formatted_rows:
-        for i, cell in enumerate(r):
-            widths[i] = max(widths[i], len(cell))
-
-    def _render(cells: List[str]) -> str:
-        return '  '.join(cell.ljust(widths[i]) for i, cell in enumerate(cells)).rstrip()
-
-    lines = ['PARTITION TIME LAG', _render(headers)]
-    lines.extend(_render(r) for r in formatted_rows)
-    lines.append('')  # trailing newline-friendly
-    return '\n'.join(lines) + '\n'
-
-
-def _format_partition_row(
-    row: dict,
-    now_ms: int,
-    consumer_script: str,
-    brokers: str,
-    extra_console_consumer_args: List[str],
-    probe_timeout_ms: int,
-) -> List[str]:
-    """Compute a single TIME LAG table row for one partition.
-
-    Empty partitions (LOG-END-OFFSET == 0) skip the probe. Caught-up
-    partitions probe LOG-END-OFFSET-1 to surface last-record age.
-    """
-    topic = row['topic']
-    partition = row['partition']
-    current_offset = row['current_offset']
-    log_end_offset = row['log_end_offset']
-
-    if log_end_offset == 0:
-        return [topic, str(partition), '-', '-', '-', 'partition empty']
-
-    caught_up = current_offset >= log_end_offset
-    probed_offset = (log_end_offset - 1) if caught_up else current_offset
-    note = 'caught up; showing last record' if caught_up else ''
-
-    command = [
-        consumer_script,
-        '--bootstrap-server', brokers,
-        '--topic', topic,
-        '--partition', str(partition),
-        '--offset', str(probed_offset),
-        '--max-messages', '1',
-        '--timeout-ms', str(probe_timeout_ms),
-        '--property', 'print.timestamp=true',
-        '--property', 'print.value=false',
-        '--property', 'print.key=false',
-    ] + extra_console_consumer_args
-    # debug-level: this fires once per partition and would flood operator-facing
-    # output on a topic with many partitions.
-    logger.debug("Probing record timestamp: %s", command)
-
-    # Allow a small buffer over Kafka's --timeout-ms so the JVM can exit cleanly.
-    wall_timeout = (probe_timeout_ms / 1000.0) + 5.0
-    ts_ms, err = _probe_record_timestamp_ms(command, timeout_seconds=wall_timeout)
-    if ts_ms is None:
-        err_note = (note + '; ' if note else '') + (err or 'unknown error')
-        return [topic, str(partition), str(probed_offset), '-', '-', err_note]
-
-    timestamp_str = _format_iso_utc(ts_ms)
-    delta_seconds = (now_ms - ts_ms) / 1000.0
-    return [
-        topic, str(partition), str(probed_offset),
-        timestamp_str, _format_duration(delta_seconds), note,
-    ]
-
-
-def _augment_describe_output_with_time_lag(
+def _augment_describe_output_with_replay_progress(
     base_result: CommandResult,
+    group_name: str,
     brokers: str,
-    extra_console_consumer_args: List[str],
-    probe_timeout_ms: int = TIME_LAG_PROBE_TIMEOUT_MS,
+    kafka_property_file: Optional[str] = None,
 ) -> CommandResult:
-    """Append a TIME LAG section to a successful describe-consumer-group
-    CommandResult. On failure (or empty output) the original result is
-    returned untouched.
-    """
+    """Append replay-watermark diagnostics without consuming traffic values."""
     if not base_result.success or not base_result.value:
         return base_result
+
     try:
-        section = _build_time_lag_section(
-            describe_output=base_result.value,
-            brokers=brokers,
-            extra_console_consumer_args=extra_console_consumer_args,
-            probe_timeout_ms=probe_timeout_ms,
+        command = [
+            resolve_kafka_utils(),
+            '--consumerGroupProgress', group_name,
+            '--kafkaBrokers', brokers,
+            '--kafkaClientId', 'migration-console-replay-progress',
+        ]
+        if kafka_property_file:
+            command.extend(['--kafkaPropertyFile', kafka_property_file])
+        progress_result = get_result_for_command(
+            command,
+            DESCRIBE_REPLAY_PROGRESS_OPERATION,
         )
-    except Exception as exc:  # noqa: BLE001 — never let a probe failure mask the describe output
-        logger.warning("Failed to build time-lag section: %s", exc, exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — diagnostics must not mask native group state
+        logger.warning("Failed to query replay progress: %s", exc, exc_info=True)
         return base_result
-    return CommandResult(success=True, value=base_result.value.rstrip() + '\n\n' + section)
+    if not progress_result.success or not progress_result.value:
+        return base_result
+    return CommandResult(
+        success=True,
+        value=base_result.value.rstrip() + '\n\n' + progress_result.value,
+    )
 
 
 class Kafka(ABC):
@@ -559,9 +374,11 @@ class MSK(Kafka):
         result = get_result_for_command(command, DESCRIBE_CONSUMER_GROUP_OPERATION)
         if not include_time_lag:
             return result
-        return _augment_describe_output_with_time_lag(
-            result, self.brokers,
-            extra_console_consumer_args=['--consumer.config', resolve_msk_auth_config()],
+        return _augment_describe_output_with_replay_progress(
+            result,
+            group_name,
+            self.brokers,
+            kafka_property_file=resolve_msk_auth_config(),
         )
 
     def list_consumer_groups(self) -> CommandResult:
@@ -621,8 +438,10 @@ class StandardKafka(Kafka):
         result = get_result_for_command(command, DESCRIBE_CONSUMER_GROUP_OPERATION)
         if not include_time_lag:
             return result
-        return _augment_describe_output_with_time_lag(
-            result, self.brokers, extra_console_consumer_args=[],
+        return _augment_describe_output_with_replay_progress(
+            result,
+            group_name,
+            self.brokers,
         )
 
     def list_consumer_groups(self) -> CommandResult:
@@ -718,9 +537,11 @@ class ScramKafka(Kafka):
         result = get_result_for_command(command, "Describe Consumer Group")
         if not include_time_lag:
             return result
-        return _augment_describe_output_with_time_lag(
-            result, self.brokers,
-            extra_console_consumer_args=['--consumer.config', self._props_file],
+        return _augment_describe_output_with_replay_progress(
+            result,
+            group_name,
+            self.brokers,
+            kafka_property_file=self._props_file,
         )
 
     def list_consumer_groups(self) -> CommandResult:

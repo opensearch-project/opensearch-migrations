@@ -6,7 +6,9 @@ import com.beust.jcommander.ParameterException;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -74,6 +76,21 @@ public class TestCreateSnapshotArgs {
         );
         // Should get past arg parsing (no ParameterException) and fail on connection
         assert !(ex instanceof ParameterException);
+    }
+
+    @Test
+    void gcsRepoWithoutRegion_passesArgValidation() {
+        var ex = assertThrows(Exception.class, () ->
+            CreateSnapshot.main(new String[]{
+                "--snapshot-name", "snap",
+                "--snapshot-repo-name", "repo",
+                "--source-host", "http://localhost:9200",
+                "--repo-uri", "gs://bucket/path"
+            })
+        );
+        // gs:// requires no --s3-region, so arg validation must pass and the run
+        // must get far enough to fail on the (absent) source cluster instead.
+        assertThat(ex, not(instanceOf(ParameterException.class)));
     }
 
     @Test

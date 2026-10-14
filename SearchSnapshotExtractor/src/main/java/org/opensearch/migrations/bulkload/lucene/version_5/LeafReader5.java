@@ -184,6 +184,12 @@ public class LeafReader5 implements LuceneLeafReader {
         return null;
     }
 
+    @Override
+    public NumericValueReader openNumericValueReader(String fieldName) throws IOException {
+        NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
+        return docId -> dv == null ? null : dv.get(docId);
+    }
+
     // Lucene 5 uses get(docId) for random access
     @Override
     public Object getNumericValue(int docId, String fieldName) throws IOException {

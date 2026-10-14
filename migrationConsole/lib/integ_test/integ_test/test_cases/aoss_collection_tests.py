@@ -13,6 +13,7 @@ import os
 
 from console_link.middleware.clusters import cat_indices, connection_check
 from console_link.models.cluster import Cluster
+from ..common_utils import ClusterAPIRequestError, execute_api_call
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
@@ -304,14 +305,20 @@ class Test0021AossCollectionMigrations(MATestBase):
             data = data.get(key)
         return data
 
+    @staticmethod
+    def _get_json(target_name, target, path):
+        # AOSS occasionally drops a connection without a response; the shared gateway retries
+        # connection errors and unexpected status codes, and bounds each attempt with a timeout.
+        try:
+            return execute_api_call(target, path).json()
+        except ClusterAPIRequestError as e:
+            raise AssertionError(f"{target_name}: GET {path} failed: {e}") from e
+
     def _assert_index_exists(self, target_name, target, index):
-        response = target.call_api(f"/{index}", raise_error=False)
-        assert response.status_code == 200, (
-            f"{target_name}/{index}: index does not exist (status={response.status_code})"
-        )
+        self._get_json(target_name, target, f"/{index}")
 
     def _assert_mapping(self, target_name, target, index, dotted_path, expected):
-        mappings = target.call_api(f"/{index}/_mapping").json()
+        mappings = self._get_json(target_name, target, f"/{index}/_mapping")
         properties = mappings[index].get("mappings", {}) if index in mappings else mappings.get("mappings", mappings)
         actual = self._get_nested(properties, dotted_path)
         assert actual == expected, (
@@ -319,7 +326,7 @@ class Test0021AossCollectionMigrations(MATestBase):
         )
 
     def _assert_setting_absent(self, target_name, target, index, dotted_path):
-        settings = target.call_api(f"/{index}/_settings").json()
+        settings = self._get_json(target_name, target, f"/{index}/_settings")
         settings = settings[index].get("settings", {}) if index in settings else settings
         actual = self._get_nested(settings, dotted_path)
         assert actual is None, (
@@ -327,16 +334,15 @@ class Test0021AossCollectionMigrations(MATestBase):
         )
 
     def _assert_setting_value(self, target_name, target, index, dotted_path, expected):
-        settings = target.call_api(f"/{index}/_settings").json()
+        settings = self._get_json(target_name, target, f"/{index}/_settings")
         settings = settings[index].get("settings", {}) if index in settings else settings
         actual = self._get_nested(settings, dotted_path)
         assert actual == expected, (
             f"{target_name}/{index}: setting {dotted_path} expected={expected}, got={actual}"
         )
 
-    @staticmethod
-    def _assert_doc_count_positive(target_name, target, index):
-        count = target.call_api(f"/{index}/_count").json().get("count", 0)
+    def _assert_doc_count_positive(self, target_name, target, index):
+        count = self._get_json(target_name, target, f"/{index}/_count").get("count", 0)
         assert count > 0, f"{target_name}/{index}: expected docs > 0, got {count}"
 
     def verify_clusters(self):
@@ -355,7 +361,7 @@ class Test0021AossCollectionMigrations(MATestBase):
                 for path, expected in checks.items():
                     self._assert_setting_value(target_name, target, index, path, expected)
 
-            total = target.call_api("/_count").json().get("count", 0)
+            total = self._get_json(target_name, target, "/_count").get("count", 0)
             assert total > 0, f"No documents found on {target_name} AOSS target"
             logger.info(
                 "Verified %d indices on the %s AOSS target",

@@ -264,11 +264,8 @@ describe("workflow schema UI hints", () => {
         expect(proxyConfig.properties.otelTraceCollectorEndpoint["x-expert"]).toBe(true);
         expect(proxyConfig.properties.otelMetricsCollectorEndpoint["x-expert"]).toBe(true);
 
-        expect(replayerConfig.properties.podReplicas["x-expert"]).toBe(true);
-        expect(replayerConfig.properties.podReplicas["x-ui-hint"]).toMatchObject({
-            kind: "text",
-            readOnly: true,
-        });
+        expect(replayerConfig.properties.podReplicas["x-expert"]).toBeUndefined();
+        expect(replayerConfig.properties.podReplicas["x-ui-hint"]).toBeUndefined();
         expect(replayerConfig.properties.minPodReplicas["x-expert"]).toBe(true);
         expect(replayerConfig.properties.loggingConfigurationOverrideConfigMap["x-expert"]).toBe(true);
         expect(replayerConfig.properties.useLocalStack["x-expert"]).toBe(true);

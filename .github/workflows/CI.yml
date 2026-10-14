@@ -143,6 +143,16 @@ jobs:
       - name: Test Workflow Web UI kubectl helper
         run: ./deployment/k8s/tests/workflowWebScriptTest.sh
 
+  gradle-repository-tests:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
+      - name: Test dependency repository routing
+        run: python3 -m unittest discover -s gradle/tests -v
+
   generate-test-matrix:
     runs-on: ubuntu-22.04
     outputs:
@@ -486,7 +496,9 @@ jobs:
       run: sleep 60
     - name: Collect issues from the server
       run: |
-        curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
+        curl -s -u "$SONAR_TOKEN:" \
+          "http://localhost:9000/api/issues/search?componentKeys=local_project&ps=500" \
+          -o issues.json
 
         echo "::group::SonarQube Issues"
         jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
@@ -501,7 +513,7 @@ jobs:
           echo "::error file=$FILE,line=$LINE,title=$RULE::$MESSAGE"
         done
 
-        ISSUE_COUNT=$(jq '.issues | length' issues.json)
+        ISSUE_COUNT=$(jq '.total' issues.json)
         BASELINE_ISSUE_COUNT=0
         if [ "$ISSUE_COUNT" -gt "$BASELINE_ISSUE_COUNT" ]; then
           echo "❌ Build failed: Found $ISSUE_COUNT issues, which is more than the baseline of $BASELINE_ISSUE_COUNT."
@@ -520,6 +532,7 @@ jobs:
     needs:
       - python-tests
       - jenkins-kind-setup-script-tests
+      - gradle-repository-tests
       - seed-gradle-test-docker-cache
       - gradle-tests
       - link-checker

@@ -42,6 +42,13 @@ import {
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
 import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {
+    workloadNodePoolResolvedInput,
+    workloadNodeSelector,
+    workloadNodeTolerations,
+    workloadZoneSpreadConstraints,
+    workloadZoneSpreadResolvedInput,
+} from "./commonUtils/workloadNodePool";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -188,8 +195,20 @@ function makeProxyParamsDict(
     const effectiveKafkaSecretName = expr.getLoose(kafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(kafkaConfig, "kafkaUserName");
     const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
+    const processConfig = expr.omit(
+        expr.get(config, "proxyConfig"),
+        ...ARGO_PROXY_WORKFLOW_OPTION_KEYS
+    );
+    const processConfigWithMetricsOptOut = expr.ternary(
+        expr.equals(
+            expr.dig(processConfig, ["otelMetricsCollectorEndpoint"], expr.literal("")),
+            expr.literal("")
+        ),
+        expr.omit(processConfig, "otelMetricsCollectorEndpoint"),
+        processConfig
+    );
     return expr.mergeDicts(
-        expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
+        processConfigWithMetricsOptOut,
         expr.mergeDicts(
             expr.ternary(expr.dig(config, ["proxyConfig", "noCapture"], false),
                 expr.makeDict({}),
@@ -269,6 +288,9 @@ function makeProxyDeploymentManifest(args: {
     workflowName: BaseExpression<string>,
     sourceK8sLabel: BaseExpression<string>,
     taskK8sLabel: BaseExpression<string>,
+    workloadNodePoolName: BaseExpression<string>,
+    workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }) {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const hasCaSecret = hasKafkaCaSecret(args.kafkaCaSecretName);
@@ -363,7 +385,11 @@ function makeProxyDeploymentManifest(args: {
             replicas: makeDirectTypeProxy(args.podReplicas),
             minReadySeconds: 2,
             strategy: {
-                type: "Recreate"
+                type: "RollingUpdate",
+                rollingUpdate: {
+                    maxSurge: "10%",
+                    maxUnavailable: "5%"
+                }
             },
             selector: {matchLabels: {"migrations/proxy": args.proxyName}},
             template: {
@@ -375,6 +401,11 @@ function makeProxyDeploymentManifest(args: {
                     [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
                 }},
                 spec: {
+                    nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
+                    tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
+                    topologySpreadConstraints: makeDirectTypeProxy(
+                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, ["migrations/proxy"])
+                    ),
                     containers: [podConfig.container],
                     volumes: podConfig.volumes
                 }
@@ -504,6 +535,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "captureProxy")
         .addOptionalInput("tlsSecretName", c => "")
+        .addInputsFromRecord(workloadNodePoolResolvedInput("proxyNodePoolName"))
+        .addInputsFromRecord(workloadZoneSpreadResolvedInput())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
             .setDefinition({
@@ -530,6 +563,9 @@ export const SetupCapture = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
                     taskK8sLabel: b.inputs.taskK8sLabel,
+                    workloadNodePoolName: b.inputs.workloadNodePoolName,
+                    workloadZoneSpread: b.inputs.workloadZoneSpread,
+                    workloadZoneSpreadExtras: b.inputs.workloadZoneSpreadExtras,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -553,6 +589,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "captureProxy")
+        .addInputsFromRecord(workloadNodePoolResolvedInput("proxyNodePoolName"))
+        .addInputsFromRecord(workloadZoneSpreadResolvedInput())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
             .setDefinition({
@@ -580,6 +618,9 @@ export const SetupCapture = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
                     taskK8sLabel: b.inputs.taskK8sLabel,
+                    workloadNodePoolName: b.inputs.workloadNodePoolName,
+                    workloadZoneSpread: b.inputs.workloadZoneSpread,
+                    workloadZoneSpreadExtras: b.inputs.workloadZoneSpreadExtras,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

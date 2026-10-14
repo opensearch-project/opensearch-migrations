@@ -109,11 +109,11 @@ describe("unified schema builder", () => {
         expect(topicSpec.properties.partitions).toMatchObject({
             type: "integer",
             minimum: 1,
-            default: 1,
+            default: 2,
             "x-essential": true,
             "x-effective-default": {
-                label: "1",
-                value: 1,
+                label: "2",
+                value: 2,
             },
         });
         expect(topicSpec.properties.partitions["x-expert"]).toBeUndefined();

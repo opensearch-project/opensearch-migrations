@@ -74,12 +74,12 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
         "partitions": {
           "type": "integer",
           "minimum": 1,
-          "default": 1,
+          "default": 2,
           "description": "Number of partitions for the topic. This can be increased after deployment but cannot be decreased.",
           "x-effective-default": {
-            "label": "1",
-            "value": 1,
-            "description": "New topics use one partition unless this value is overridden."
+            "label": "2",
+            "value": 2,
+            "description": "New topics use two partitions unless this value is overridden."
           },
           "x-essential": true
         },

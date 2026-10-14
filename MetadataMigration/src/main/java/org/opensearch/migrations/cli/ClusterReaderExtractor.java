@@ -42,11 +42,21 @@ public class ClusterReaderExtractor {
 
         RepoUri parsedUri = arguments.repoUri != null ? RepoUri.parse(arguments.repoUri) : null;
 
-        if (parsedUri instanceof RepoUri.S3RepoUri && (arguments.s3Region == null || arguments.localDir == null)) {
-            throw new ParameterException("If an s3 repo is being used, --s3-region and --local-dir must be set");
-        }
-        if (parsedUri instanceof RepoUri.GcsRepoUri && arguments.localDir == null) {
-            throw new ParameterException("If a GCS repo is being used, --local-dir must be set");
+        switch (parsedUri) {
+            case RepoUri.S3RepoUri s -> {
+                if (arguments.s3Region == null || arguments.localDir == null) {
+                    throw new ParameterException("If an s3 repo is being used, --s3-region and --local-dir must be set");
+                }
+            }
+            case RepoUri.GcsRepoUri g -> {
+                if (arguments.localDir == null) {
+                    throw new ParameterException("If a GCS repo is being used, --local-dir must be set");
+                }
+            }
+            case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
+            // A null repoUri is valid here: the remote-source path is checked below.
+            // Required because a switch over a null selector throws NPE without it.
+            case null -> { /* fall through to the remote-source and version checks */ }
         }
 
         // Solr backup: prefer snapshot over remote when snapshot args are provided

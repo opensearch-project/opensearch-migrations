@@ -899,7 +899,7 @@ export const REPO_CONFIG = z.object({
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
             "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing.")
         .expert(),
-    s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
+    s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
             "Used for s3:// URIs only; ignored for gs://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
@@ -1135,32 +1135,110 @@ function validatePipelineRawConfigConflict(
     }
 }
 
-const blankStringAsDisabled = (value: unknown) =>
-    typeof value === "string" && value.trim().length === 0 ? "" : value;
+export const DEFAULT_OTEL_METRICS_COLLECTOR_ENDPOINT = "http://otel-collector:4317";
 
-const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.string()]);
+export const OTEL_EXPORT_CONTROL_FIELD_MASK = {
+    otelTraceExportEnabled: true,
+    otelMetricsExportEnabled: true,
+} as const;
 
-const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
+const OTEL_COLLECTOR_ENDPOINT = z.string()
+    .refine(value => value.trim().length > 0, "OpenTelemetry collector endpoints must not be blank.");
 
-// Default is applied in the preprocess step rather than via .default().optional():
-// under zod >=4.4 that ordering no longer applies the default for an absent key,
-// and .optional().default() makes the input type required. Empty/blank strings
-// stay explicit disables, while omitted values default to the collector. The
-// metadata default keeps generated JSON/OpenAPI schemas useful for schema-driven
-// clients such as interactive config viewers.
-const optionalEndpointWithDefault = (defaultValue: string) =>
-    z.preprocess(
-        (value) => value === undefined ? defaultValue : blankStringAsDisabled(value),
-        OPTIONAL_ENDPOINT.optional()
-    ).meta({default: defaultValue});
+const OTEL_EXPORT_OPTIONS = {
+    otelTraceExportEnabled: z.boolean().optional()
+        .describe("Export OpenTelemetry traces. When omitted, providing otelTraceCollectorEndpoint enables export; otherwise export is disabled.")
+        .meta({default: false})
+        .expert(),
+    otelTraceCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT.optional()
+        .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317').")
+        .expert(),
+    otelMetricsExportEnabled: z.boolean().optional()
+        .describe(`Export OpenTelemetry metrics. Defaults to enabled; when enabled without an explicit endpoint, the workflow uses '${DEFAULT_OTEL_METRICS_COLLECTOR_ENDPOINT}'.`)
+        .meta({default: true})
+        .expert(),
+    otelMetricsCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT.optional()
+        .describe("URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317').")
+        .expert(),
+} as const;
 
-const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
-    .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export.")
-    .expert();
+type OtelExportOptions = {
+    otelTraceExportEnabled?: boolean;
+    otelTraceCollectorEndpoint?: string;
+    otelMetricsExportEnabled?: boolean;
+    otelMetricsCollectorEndpoint?: string;
+};
 
-const OTEL_METRICS_COLLECTOR_ENDPOINT = optionalEndpointWithDefault("http://otel-collector:4317")
-    .describe("URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export.")
-    .expert();
+function resolveOtelExportEnabled(
+    configuredValue: boolean | undefined,
+    collectorEndpoint: string | undefined,
+    defaultValue: boolean,
+): boolean {
+    return configuredValue ?? (collectorEndpoint !== undefined ? true : defaultValue);
+}
+
+function validateOtelExportOptions(ctx: z.RefinementCtx, data: OtelExportOptions) {
+    const traceExportEnabled = resolveOtelExportEnabled(
+        data.otelTraceExportEnabled,
+        data.otelTraceCollectorEndpoint,
+        false,
+    );
+    const metricsExportEnabled = resolveOtelExportEnabled(
+        data.otelMetricsExportEnabled,
+        data.otelMetricsCollectorEndpoint,
+        true,
+    );
+
+    if (traceExportEnabled && data.otelTraceCollectorEndpoint === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "'otelTraceCollectorEndpoint' is required when 'otelTraceExportEnabled' is true.",
+            path: ["otelTraceCollectorEndpoint"]
+        });
+    } else if (!traceExportEnabled && data.otelTraceCollectorEndpoint !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "'otelTraceCollectorEndpoint' cannot be set when 'otelTraceExportEnabled' is false.",
+            path: ["otelTraceCollectorEndpoint"]
+        });
+    }
+
+    if (!metricsExportEnabled && data.otelMetricsCollectorEndpoint !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "'otelMetricsCollectorEndpoint' cannot be set when 'otelMetricsExportEnabled' is false.",
+            path: ["otelMetricsCollectorEndpoint"]
+        });
+    }
+}
+
+function normalizeOtelExportOptions<T extends OtelExportOptions>(data: T): T {
+    const otelTraceExportEnabled = resolveOtelExportEnabled(
+        data.otelTraceExportEnabled,
+        data.otelTraceCollectorEndpoint,
+        false,
+    );
+    const otelMetricsExportEnabled = resolveOtelExportEnabled(
+        data.otelMetricsExportEnabled,
+        data.otelMetricsCollectorEndpoint,
+        true,
+    );
+
+    return {
+        ...data,
+        otelTraceExportEnabled,
+        otelMetricsExportEnabled,
+        ...(otelMetricsExportEnabled && data.otelMetricsCollectorEndpoint === undefined
+            ? {otelMetricsCollectorEndpoint: DEFAULT_OTEL_METRICS_COLLECTOR_ENDPOINT}
+            : {}),
+    } as T;
+}
+
+function withOtelExportOptions<T extends z.ZodObject<any>>(schema: T): T {
+    return schema
+        .superRefine((data, ctx) => validateOtelExportOptions(ctx, data))
+        .overwrite(data => normalizeOtelExportOptions(data)) as T;
+}
 
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
@@ -1228,7 +1306,7 @@ export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
 ]);
 
 export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
-    partitions: 1,
+    partitions: 2,
     replicas: 3,
     config: {
         "retention.ms": 604800000,
@@ -1279,28 +1357,9 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
             size: "2Gi",
             deleteClaim: true,
         },
-        template: {
-            pod: {
-                // Spread brokers one-per-node so a single node disruption can only take
-                // one broker. ScheduleAnyway keeps this soft so <3-node dev clusters still
-                // schedule instead of wedging Pending.
-                topologySpreadConstraints: [
-                    {
-                        maxSkew: 1,
-                        topologyKey: "kubernetes.io/hostname",
-                        whenUnsatisfiable: "ScheduleAnyway",
-                        labelSelector: {
-                            matchExpressions: [
-                                {
-                                    key: "strimzi.io/name",
-                                    operator: "Exists",
-                                },
-                            ],
-                        },
-                    },
-                ],
-            },
-        },
+        // Zone and host spread are not defaults here: the workflow generates them from the
+        // deployment's workloadZoneSpread setting unless template.pod.topologySpreadConstraints is
+        // set explicitly in these overrides, in which case that list is used as given.
     },
 };
 
@@ -1448,16 +1507,16 @@ export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.objec
 }))
     .describe("Kubernetes deployment-level options for the capture proxy.");
 
-export const USER_PROXY_PROCESS_OPTIONS = z.object({
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
+    ...OTEL_EXPORT_OPTIONS,
     setHeader: z.array(z.string()).optional()
         .uiHint({kind: 'array', addLabel: 'header'})
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
     destinationConnectionPoolSize: z.number().default(0).optional()
-        .describe("Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling.")
+        .describe("Number of warm destination connections maintained per Netty worker thread. " +
+            "0 disables the warm pool and opens destination connections on demand.")
         .expert(),
     destinationConnectionPoolTimeout: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
@@ -1479,8 +1538,9 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .describe("When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
-    numThreads: z.number().default(1).optional()
-        .describe("Number of Netty worker threads for the proxy to handle concurrent connections.")
+    numThreads: z.number().default(0).optional()
+        .describe("Number of Netty worker threads for the proxy to handle concurrent connections. " +
+            "0 uses Netty's processor-aware default.")
         .expert(),
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.")
@@ -1522,19 +1582,19 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .describe("Java regex pattern to test against the combined 'METHOD /path' value of the incoming request. The proxy uses full-string matching. Matching requests are forwarded but not recorded.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
-}).describe("Process-level configuration options for the capture proxy application. These are passed as command-line arguments to the proxy container.");
+})).describe("Process-level configuration options for the capture proxy application. These are passed as command-line arguments to the proxy container.");
 
 export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
 export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTIONS);
 
-export const USER_PROXY_OPTIONS = withScalableServiceValidation(z.object({
+export const USER_PROXY_OPTIONS = withOtelExportOptions(withScalableServiceValidation(z.object({
     ...USER_PROXY_WORKFLOW_OPTIONS.shape,
     ...USER_PROXY_PROCESS_OPTIONS.shape,
-}))
+})))
     .describe("Process-level and deployment-level configuration options for the capture proxy.");
 
 const REPLAYER_POD_REPLICAS_DESCRIPTION =
-    "Traffic replay currently requires exactly one pod replica. This fixed setting is shown for diagnostic completeness.";
+    "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes assigned Kafka partitions and replays traffic to the target.";
 const REPLAYER_SERVICE_WORKFLOW_OPTIONS = scalableServiceWorkflowOptions(
     "traffic replayer",
     REPLAYER_POD_REPLICAS_DESCRIPTION,
@@ -1542,14 +1602,6 @@ const REPLAYER_SERVICE_WORKFLOW_OPTIONS = scalableServiceWorkflowOptions(
 
 export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
     ...REPLAYER_SERVICE_WORKFLOW_OPTIONS.shape,
-    podReplicas: z.number().int().min(1).max(1).default(1).optional()
-        .describe(REPLAYER_POD_REPLICAS_DESCRIPTION)
-        .uiHint({
-            kind: "text",
-            readOnly: true,
-            message: "Traffic replay currently requires exactly one pod replica.",
-        })
-        .expert(),
     minPodReplicas: REPLAYER_SERVICE_WORKFLOW_OPTIONS.shape.minPodReplicas.expert(),
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC)
@@ -1572,7 +1624,7 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.ob
 }))
     .describe("Kubernetes deployment-level options for the traffic replayer.");
 
-export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
+export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .expert()
@@ -1581,13 +1633,55 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.")
         .expert()
         .changeRestriction('impossible'),
-    lookaheadTimeSeconds: z.number().default(400).optional()
-        .describe("Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."),
-    maxConcurrentRequests: z.number().default(10000).optional()
-        .describe("Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target.")
+    maxConcurrentRequests: z.number().int().min(1).optional()
+        .describe("Maximum number of target HTTP requests that can be in flight simultaneously.")
         .expert(),
-    numClientThreads: z.number().default(0).optional()
-        .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors).")
+    numClientThreads: z.number().int().nonnegative().default(0).optional()
+        .describe("Number of target Netty event-loop threads. 0 uses Netty's default of 2 times the available processors.")
+        .expert(),
+    cancellationGraceMs: z.number().int().nonnegative().default(1000).optional()
+        .describe("Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown.")
+        .expert(),
+    kafkaQuietWindowMs: z.number().int().min(1).default(60000).optional()
+        .describe("Milliseconds Kafka consumer-group membership must stop growing before partitions are rebalanced across new replayers. " +
+            "Replacements for departed replayers are filled immediately. Also the delay before the first assignment after the whole " +
+            "replayer fleet starts. Must be greater than cancellationGraceMs.")
+        .expert(),
+    targetRetryMaxDelayMs: z.number().int().min(100).default(30000).optional()
+        .describe("Upper bound in milliseconds on one request's jittered exponential backoff between target attempts.")
+        .expert(),
+    targetRetryBudgetRatio: z.number().nonnegative().default(0.2).optional()
+        .describe("Sustained target retries allowed per first attempt across each replayer process. Retries beyond the budget wait for it, " +
+            "so retry load stays proportional to the replayed load.")
+        .expert(),
+    targetRetryBudgetFloorPerSecond: z.number()
+        .refine(value => value > 0, "targetRetryBudgetFloorPerSecond must be positive")
+        .default(50).optional()
+        .describe("Target retries per second always allowed in each replayer process, so a process whose requests are all retrying still makes progress.")
+        .expert(),
+    targetConnectionInitialRate: z.number().nonnegative()
+        .refine(value => value === 0 || (value >= 10 && value <= 1000000), "targetConnectionInitialRate must be 0 or between 10 and 1000000")
+        .default(200).optional()
+        .describe("Starting allowance, in new target connections per second, for each replayer process's adaptive connection limiter. " +
+            "The allowance halves when connects or TLS handshakes fail and grows while they succeed. 0 disables the limiter.")
+        .expert(),
+    catchUpFactor: z.number().nonnegative()
+        .refine(value => value === 0 || value > 1, "catchUpFactor must be 0 or greater than 1")
+        .default(2).optional()
+        .describe("How many times faster than the normal schedule a newly assigned partition replays work that is already overdue. " +
+            "0 sends overdue work immediately.")
+        .expert(),
+    heartbeatExpirationIntervalSeconds: z.number().int().min(1).default(30).optional()
+        .describe("Broker-time heartbeat expiration interval E in seconds.")
+        .expert(),
+    maximumBackwardSkewSeconds: z.number().int().nonnegative().default(5).optional()
+        .describe("Maximum permitted Kafka broker timestamp regression S in seconds.")
+        .expert(),
+    sourceResponseRetryWindowSeconds: z.number().int().min(1).default(5).optional()
+        .describe("Broker-time source-response retry window W in seconds.")
+        .expert(),
+    readyRequestsBufferPerThread: z.number().int().min(1).default(2).optional()
+        .describe("Retry-ready request buffer target P for each target Netty event-loop thread.")
         .expert(),
     nonRetryableDocExceptionTypes: z.array(z.string()).optional()
         .uiHint({kind: 'array', addLabel: 'exception type'})
@@ -1599,18 +1693,13 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "Set explicitly to override the defaults entirely (not additive). " +
             "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
             "illegal_argument_exception, resource_already_exists_exception."),
-    observedPacketConnectionTimeout: z.number().default(360).optional()
-        .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds.")
-        .essential(),
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
-    quiescentPeriodMs: z.number().default(5000).optional()
-        .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing.")
-        .expert(),
+    ...OTEL_EXPORT_OPTIONS,
     removeAuthHeader: z.boolean().default(false).optional()
         .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.")
         .changeRestriction('gated'),
-    speedupFactor: z.number().default(1.1).optional()
+    speedupFactor: z.number()
+        .refine(value => value > 0, "speedupFactor must be positive")
+        .default(1.1).optional()
         .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed.")
         .essential(),
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
@@ -1676,12 +1765,12 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs.")
         .expert(),
-}).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is read from Kafka and replayed to the target cluster.");
+})).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is read from Kafka and replayed to the target cluster.");
 
 export const USER_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(USER_REPLAYER_WORKFLOW_OPTIONS);
 export const USER_REPLAYER_PROCESS_OPTION_KEYS = getZodKeys(USER_REPLAYER_PROCESS_OPTIONS);
 
-export const USER_REPLAYER_OPTIONS = z.object({
+export const USER_REPLAYER_OPTIONS = withOtelExportOptions(z.object({
     ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
     ...USER_REPLAYER_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
@@ -1704,15 +1793,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
         });
     }
 
-    if (data.lookaheadTimeSeconds !== undefined && data.observedPacketConnectionTimeout !== undefined
-        && data.lookaheadTimeSeconds <= data.observedPacketConnectionTimeout) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `lookaheadTimeSeconds (${data.lookaheadTimeSeconds}) must be strictly greater than observedPacketConnectionTimeout (${data.observedPacketConnectionTimeout})`,
-            path: ['lookaheadTimeSeconds']
-        });
-    }
-});
+}));
 
 // Internal (glue-layer) field: the config transformer folds the user-facing Solr
 // `collectionAllowlist` into this on the shared create-snapshot config. It is NOT a
@@ -1762,9 +1843,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
         .expert()
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
-export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = withOtelExportOptions(z.object({
+    ...OTEL_EXPORT_OPTIONS,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .uiHint({kind: 'array', addLabel: 'index pattern'})
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
@@ -1788,15 +1868,15 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
             "Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.")
         .expert()
         .changeRestriction('impossible'),
-}).describe("Process-level options for the CreateSnapshot command, controlling which indices are snapshotted and rate limiting.");
+})).describe("Process-level options for the CreateSnapshot command, controlling which indices are snapshotted and rate limiting.");
 
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS);
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_PROCESS_OPTIONS);
 
-export const USER_CREATE_SNAPSHOT_OPTIONS = z.object({
+export const USER_CREATE_SNAPSHOT_OPTIONS = withOtelExportOptions(z.object({
     ...USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS.shape,
     ...USER_CREATE_SNAPSHOT_PROCESS_OPTIONS.shape,
-});
+}));
 
 export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
@@ -1825,7 +1905,7 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .describe("When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster.")
 }).describe("Workflow-level options for metadata migration, controlling JVM settings and approval gates.");
 
-export const USER_METADATA_PROCESS_OPTIONS = z.object({
+export const USER_METADATA_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     componentTemplateAllowlist: z.array(z.string()).default([]).optional()
         .uiHint({kind: 'array', addLabel: 'component template'})
         .describe("List of component template names to include in the metadata migration. " +
@@ -1853,8 +1933,7 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled.")
         .expert(),
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    ...OTEL_EXPORT_OPTIONS,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output.")
         .expert(),
@@ -1883,12 +1962,12 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .expert()
         .changeRestriction('impossible'),
-}).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
+})).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
 export const USER_METADATA_PROCESS_OPTION_KEYS = getZodKeys(USER_METADATA_PROCESS_OPTIONS);
 
-export const USER_METADATA_OPTIONS = z.object({
+export const USER_METADATA_OPTIONS = withOtelExportOptions(z.object({
     ...USER_METADATA_WORKFLOW_OPTIONS.shape,
     ...USER_METADATA_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
@@ -1897,7 +1976,7 @@ export const USER_METADATA_OPTIONS = z.object({
         "transformerConfigBase64",
         "transformerConfigFile"
     ]);
-});
+}));
 
 export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object({
     ...scalableServiceWorkflowOptions(
@@ -1948,7 +2027,7 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
 }))
     .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
-export const USER_RFS_PROCESS_OPTIONS = z.object({
+export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
         .uiHint({kind: 'array', addLabel: 'index pattern'})
         .describe("Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
@@ -2005,8 +2084,7 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    ...OTEL_EXPORT_OPTIONS,
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
@@ -2087,7 +2165,7 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .expert()
         .checksumFor('replayer')
         .changeRestriction('impossible'),
-}).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
+})).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 /**
  * Deployment-level S3 defaults read from the cluster (the migrations-default-s3-config ConfigMap) by the
@@ -2108,7 +2186,7 @@ export const DEPLOYMENT_DEFAULTS_CONFIG = z.object({
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);
 export const USER_RFS_PROCESS_OPTION_KEYS = getZodKeys(USER_RFS_PROCESS_OPTIONS);
 
-export const USER_RFS_OPTIONS = z.object({
+export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
     ...USER_RFS_WORKFLOW_OPTIONS.shape,
     ...USER_RFS_PROCESS_OPTIONS.shape,
 })
@@ -2119,7 +2197,7 @@ export const USER_RFS_OPTIONS = z.object({
             "docTransformerConfigBase64",
             "docTransformerConfigFile"
         ]);
-    })
+    }))
     .transform((data) => {
         const requestEphemeral = data.resources?.requests?.["ephemeral-storage"];
         const userRequestEphemeralStorageBytes = requestEphemeral
@@ -2664,8 +2742,7 @@ export const ELASTICSEARCH_SNAPSHOT_INFO = z.object({
 const SOLR_BACKUP_PROCESS_OPTIONS = {
     collectionAllowlist: SOLR_COLLECTION_ALLOWLIST,
     topology: SOLR_TOPOLOGY_OPTION,
-    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
-    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
+    ...OTEL_EXPORT_OPTIONS,
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC)
         .expert(),
@@ -2674,12 +2751,12 @@ const SOLR_BACKUP_PROCESS_OPTIONS = {
         .expert(),
 } as const;
 
-export const SOLR_CREATE_BACKUP_OPTIONS = z.object({
+export const SOLR_CREATE_BACKUP_OPTIONS = withOtelExportOptions(z.object({
     snapshotPrefix: z.string().default("").optional()
         .describe("Prefix for auto-generated Solr backup names. When set, the backup name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'.")
         .expert(),
     ...SOLR_BACKUP_PROCESS_OPTIONS,
-}).describe("Configuration for creating a new Solr backup as part of the migration workflow.");
+})).describe("Configuration for creating a new Solr backup as part of the migration workflow.");
 
 export const SOLR_CREATE_BACKUP_CONFIG = z.object({
     repoName: z.string()
@@ -2698,7 +2775,7 @@ export const SOLR_CREATE_BACKUP_CONFIG = z.object({
         .describe("Configuration for creating a new Solr backup of the source cluster."),
 }).describe("Configuration to create a new Solr backup of the source cluster as part of the migration workflow.");
 
-export const SOLR_EXTERNAL_BACKUP_CONFIG = z.object({
+export const SOLR_EXTERNAL_BACKUP_CONFIG = withOtelExportOptions(z.object({
     externalBackupName: z.string()
         .describe("Name of a pre-existing Solr backup in the configured repository. The workflow prepares and validates this backup before metadata and document migration."),
     repoName: z.string()
@@ -2714,7 +2791,7 @@ export const SOLR_EXTERNAL_BACKUP_CONFIG = z.object({
             message: "Choose a repository defined under this source cluster's snapshotInfo.repos.",
         }),
     ...SOLR_BACKUP_PROCESS_OPTIONS,
-}).describe("Externally-managed Solr backup configuration. Solr backups are prepared and validated automatically; collectionAllowlist scopes the collections/cores to validate and migrate.");
+})).describe("Externally-managed Solr backup configuration. Solr backups are prepared and validated automatically; collectionAllowlist scopes the collections/cores to validate and migrate.");
 
 export const SOLR_BACKUP_CONFIG = z.union([
     SOLR_EXTERNAL_BACKUP_CONFIG,
@@ -3176,6 +3253,50 @@ const OVERALL_MIGRATION_CONFIG_OBJECT = //validateOptionalDefaultConsistency
             const proxies = data.traffic.proxies ?? {};
             const s3Sources = data.traffic.s3Sources ?? {};
             const kafkaClusters = data.traffic.kafkaClusters ?? {};
+            const reportedTimestampRequirements = new Set<string>();
+            const validateWorkflowManagedTimestampType = (
+                kafkaClusterName: string,
+                kafkaTopicName: string,
+                requiredTimestampType: "LogAppendTime" | "CreateTime",
+                topicKind: string
+            ) => {
+                const kafkaCluster = kafkaClusters[kafkaClusterName];
+                if (!kafkaCluster || !("autoCreate" in kafkaCluster)) {
+                    return;
+                }
+                const topicConfig = kafkaCluster.topics?.[kafkaTopicName]?.specOverrides?.config;
+                const configuredTimestampType =
+                    topicConfig !== null
+                    && typeof topicConfig === "object"
+                    && !Array.isArray(topicConfig)
+                        ? topicConfig["message.timestamp.type"]
+                        : undefined;
+                if (configuredTimestampType === undefined
+                    || configuredTimestampType === requiredTimestampType) {
+                    return;
+                }
+
+                const requirementKey = `${kafkaClusterName}\0${kafkaTopicName}\0${requiredTimestampType}`;
+                if (reportedTimestampRequirements.has(requirementKey)) {
+                    return;
+                }
+                reportedTimestampRequirements.add(requirementKey);
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Workflow-managed ${topicKind} '${kafkaTopicName}' on Kafka cluster '${kafkaClusterName}' requires `
+                        + `'message.timestamp.type' to be '${requiredTimestampType}'.`,
+                    path: [
+                        "traffic",
+                        "kafkaClusters",
+                        kafkaClusterName,
+                        "topics",
+                        kafkaTopicName,
+                        "specOverrides",
+                        "config",
+                        "message.timestamp.type",
+                    ],
+                });
+            };
             for (const [proxyName, proxyConfig] of Object.entries(proxies)) {
                 if (!(proxyConfig.source in data.sourceClusters)) {
                     ctx.addIssue({
@@ -3200,6 +3321,39 @@ const OVERALL_MIGRATION_CONFIG_OBJECT = //validateOptionalDefaultConsistency
                         path: ['traffic', 'proxies', proxyName, 'kafkaTopic']
                     });
                 }
+
+                if (proxyConfig.proxyConfig.noCapture !== true) {
+                    const effectiveKafkaRef = kafkaRef ?? "default";
+                    validateWorkflowManagedTimestampType(
+                        effectiveKafkaRef,
+                        proxyConfig.kafkaTopic,
+                        "LogAppendTime",
+                        "live capture topics"
+                    );
+                    const kafkaCluster = kafkaClusters[effectiveKafkaRef];
+                    const partitionCount = kafkaCluster && 'autoCreate' in kafkaCluster
+                        ? kafkaCluster.topics?.[proxyConfig.kafkaTopic]?.specOverrides?.partitions
+                            ?? DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.partitions
+                        : undefined;
+                    const proxyCount = proxyConfig.proxyConfig.podReplicas ?? 1;
+                    const requiredPartitionCount = proxyCount > 0 ? proxyCount + 1 : 1;
+                    if (typeof partitionCount === "number" && partitionCount < requiredPartitionCount) {
+                        const topicName = proxyConfig.kafkaTopic || proxyName;
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `Kafka topic '${topicName}' on cluster '${effectiveKafkaRef}' has ${partitionCount} partition(s), but capture proxy '${proxyName}' with ${proxyCount} pod replica(s) requires at least ${requiredPartitionCount} partition(s) so a rolling update always has a spare writer partition.`,
+                            path: [
+                                'traffic',
+                                'kafkaClusters',
+                                effectiveKafkaRef,
+                                'topics',
+                                proxyConfig.kafkaTopic,
+                                'specOverrides',
+                                'partitions'
+                            ]
+                        });
+                    }
+                }
             }
             for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
                 const kafkaRef = s3Config.kafka;
@@ -3216,6 +3370,12 @@ const OVERALL_MIGRATION_CONFIG_OBJECT = //validateOptionalDefaultConsistency
                         path: ['traffic', 's3Sources', s3Name, 'kafkaTopic']
                     });
                 }
+                validateWorkflowManagedTimestampType(
+                    kafkaRef ?? "default",
+                    s3Config.kafkaTopic,
+                    "CreateTime",
+                    "BYOC import topics"
+                );
             }
 
             for (const [replayerName, rc] of Object.entries(data.traffic.replayers ?? {})) {

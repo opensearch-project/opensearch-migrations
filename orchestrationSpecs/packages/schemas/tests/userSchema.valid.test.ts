@@ -182,4 +182,109 @@ describe("valid configs parse successfully", () => {
             expect(result.error.issues.map(issue => issue.path.join("."))).toContain("traffic.replayers.sourceTarget");
         }
     });
+
+    test("no-capture proxies do not require Kafka rollout capacity", () => {
+        const result = OVERALL_MIGRATION_CONFIG.safeParse({
+            sourceClusters: {
+                source: {
+                    version: "ES 7.10.2",
+                    endpoint: "http://source:9200",
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+            traffic: {
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {},
+                        topics: {
+                            capture: {
+                                specOverrides: {partitions: 1},
+                            },
+                        },
+                    },
+                },
+                proxies: {
+                    proxy1: {
+                        source: "source",
+                        kafka: "default",
+                        kafkaTopic: "capture",
+                        proxyConfig: {
+                            listenPort: 9201,
+                            podReplicas: 2,
+                            noCapture: true,
+                        },
+                    },
+                },
+                replayers: {},
+            },
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    test.each([
+        ["live capture", "LogAppendTime", {
+            proxies: {
+                proxy1: {
+                    source: "source",
+                    kafka: "default",
+                    kafkaTopic: "capture",
+                    proxyConfig: {listenPort: 9201},
+                },
+            },
+            s3Sources: {},
+        }, "capture"],
+        ["BYOC import", "CreateTime", {
+            proxies: {},
+            s3Sources: {
+                dump1: {
+                    s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
+                    awsRegion: "us-east-1",
+                    sourceLabel: "archived-source",
+                    kafka: "default",
+                    kafkaTopic: "dump",
+                },
+            },
+        }, "dump"],
+    ])("workflow-managed %s topics accept explicit %s", (
+        _name,
+        timestampType,
+        trafficEntries,
+        topicName,
+    ) => {
+        const result = OVERALL_MIGRATION_CONFIG.safeParse({
+            sourceClusters: {
+                source: {
+                    version: "ES 7.10.2",
+                    endpoint: "http://source:9200",
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+            traffic: {
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {},
+                        topics: {
+                            [topicName]: {
+                                specOverrides: {
+                                    config: {
+                                        "message.timestamp.type": timestampType,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                ...trafficEntries,
+                replayers: {},
+            },
+        });
+
+        if (!result.success) {
+            throw new Error(result.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("\n"));
+        }
+        expect(result.success).toBe(true);
+    });
 });

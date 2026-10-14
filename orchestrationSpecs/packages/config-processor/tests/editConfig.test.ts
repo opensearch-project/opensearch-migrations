@@ -2156,10 +2156,11 @@ describe("editConfig state", () => {
             valueType: "number",
             essential: true,
         });
-        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.observedPacketConnectionTimeout"),).toMatchObject({
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.observedPacketConnectionTimeout"),).toBeUndefined();
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.maxConcurrentRequests"),).toMatchObject({
             valueKind: "scalar",
             valueType: "number",
-            essential: true,
+            expert: true,
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig.targetServerResponseTimeoutSeconds"),).toMatchObject({
             valueKind: "scalar",
@@ -2834,7 +2835,7 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.topics.capture.specOverrides.partitions"),).toMatchObject({
             valueKind: "scalar",
             valueType: "number",
-            value: 1,
+            value: 2,
             valueDefaulted: true,
             expert: false,
             essential: true,

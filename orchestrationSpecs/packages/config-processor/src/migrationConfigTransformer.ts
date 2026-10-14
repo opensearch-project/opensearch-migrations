@@ -46,6 +46,8 @@ type SolrBackupNormalizedConfig = {
     externalBackupName?: string;
     collectionAllowlist: string[];
     topology?: "cloud" | "standalone";
+    otelTraceExportEnabled?: boolean;
+    otelMetricsExportEnabled?: boolean;
     otelTraceCollectorEndpoint?: string;
     otelMetricsCollectorEndpoint?: string;
     jvmArgs?: string;
@@ -125,8 +127,15 @@ async function rewriteRepoEndpointIfLocalStack(
     resolveLocalStackDns: boolean
 ): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
-    // GCS repos have no LocalStack-equivalent; the endpoint check is a no-op
-    // for gs:// URIs and the resulting useLocalStack stays false.
+    // The localstack:// rewrite below is an S3 addressing workaround, not a
+    // generic emulator feature: resolving the host to an IP forces the AWS SDK
+    // out of virtual-host-style addressing. See MetadataMigration/DEVELOPER_GUIDE.md.
+    //
+    // Path-style emulators need none of this. fake-gcs-server is reached through
+    // a plain http:// endpoint (see the gcs/ chart templates), and GcsRepo.create
+    // infers "emulator" from a non-empty endpoint and installs NoCredentials.
+    // So the check below is a no-op for gs:// URIs and useLocalStack stays false,
+    // not because GCS lacks an emulator, but because it does not need the rewrite.
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = resolveLocalStackDns
@@ -739,6 +748,41 @@ function buildKafkaClientConfig(
     };
 }
 
+type WorkflowManagedTopicTimestampType = "LogAppendTime" | "CreateTime";
+
+function defaultWorkflowManagedTopicTimestampType(
+    kafkaConfig: ReturnType<typeof buildKafkaClientConfig>,
+    requiredTimestampType: WorkflowManagedTopicTimestampType
+) {
+    if (!kafkaConfig.managedByWorkflow) {
+        return kafkaConfig;
+    }
+    const topicSpecOverrides =
+        kafkaConfig.topicSpecOverrides ?? DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES;
+    const topicConfig = topicSpecOverrides.config ?? {};
+    const configuredTimestampType = topicConfig["message.timestamp.type"];
+    if (configuredTimestampType !== undefined) {
+        if (configuredTimestampType !== requiredTimestampType) {
+            throw new Error(
+                `Workflow-managed topic '${kafkaConfig.kafkaTopic}' requires `
+                + `'message.timestamp.type' to be '${requiredTimestampType}', but received `
+                + `'${String(configuredTimestampType)}'.`
+            );
+        }
+        return kafkaConfig;
+    }
+    return {
+        ...kafkaConfig,
+        topicSpecOverrides: {
+            ...topicSpecOverrides,
+            config: {
+                ...topicConfig,
+                "message.timestamp.type": requiredTimestampType,
+            },
+        },
+    };
+}
+
 function isGenerateSnapshot(config: WorkflowSnapshotNameConfig): config is WorkflowGeneratedSnapshotConfig {
     return 'createSnapshotConfig' in config;
 }
@@ -1112,9 +1156,16 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ...sourceCluster,
                 label: proxy.source,
             });
+            const kafkaConfig = buildKafkaClientConfig(
+                kafkaClusterNameForReference(proxy),
+                kafkaClusters,
+                topic
+            );
             return {
                 name: proxyName,
-                kafkaConfig: buildKafkaClientConfig(kafkaClusterNameForReference(proxy), kafkaClusters, topic),
+                kafkaConfig: proxy.proxyConfig.noCapture === true
+                    ? kafkaConfig
+                    : defaultWorkflowManagedTopicTimestampType(kafkaConfig, "LogAppendTime"),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
                 sourceConnectionIdentity,
                 proxyConfig: prepareProxyConfig(proxy.proxyConfig),
@@ -1417,7 +1468,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 awsRegion: s3.awsRegion,
                 ...(s3.endpoint ? { endpoint: s3.endpoint } : {}),
                 kafkaClusterName: kafkaCluster,
-                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
+                kafkaConfig: defaultWorkflowManagedTopicTimestampType(
+                    buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
+                    "CreateTime"
+                ),
             };
         });
     }

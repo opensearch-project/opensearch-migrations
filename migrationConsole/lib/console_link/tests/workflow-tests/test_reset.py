@@ -476,6 +476,30 @@ class TestResetCommandDelete:
         mock_delete_targets.assert_called_once_with([('kafkaclusters', 'kafka', 'Ready', [])], 'ma', True)
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset._delete_targets')
+    @patch('console_link.workflow.commands.reset.list_migration_resources')
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    @patch('console_link.workflow.commands.reset._handle_kafka_storage')
+    def test_delete_kafka_releases_workload_before_deleting_storage(
+        self, mock_storage, mock_find, mock_list, mock_delete_targets, _mock_k8s
+    ):
+        resource = ('kafkaclusters', 'kafka', 'Ready', [])
+        mock_find.return_value = resource
+        mock_list.return_value = [resource]
+        call_order = []
+        mock_delete_targets.side_effect = lambda *_: call_order.append('workload') or True
+        mock_storage.side_effect = lambda *_: call_order.append('storage')
+
+        result = CliRunner().invoke(
+            workflow_cli,
+            ['reset', 'kafka', '--delete-storage'],
+        )
+
+        assert result.exit_code == 0
+        assert call_order == ['workload', 'storage']
+        mock_storage.assert_called_once_with('ma', ['kafka'], True)
+
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     @patch('console_link.workflow.commands.reset._find_resource_by_name')
     def test_delete_blocks_on_dependents_without_cascade(
@@ -692,6 +716,28 @@ class TestResetAll:
 
         assert result.exit_code == 0
         mock_delete_targets.assert_called_once_with(resources, 'ma', True)
+
+    @patch('console_link.workflow.commands.reset._handle_kafka_storage')
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset._delete_targets')
+    @patch('console_link.workflow.commands.reset.list_migration_resources')
+    def test_reset_all_releases_kafka_before_deleting_storage(
+        self, mock_list, mock_delete_targets, _mock_k8s, mock_storage
+    ):
+        resources = [('kafkaclusters', 'kafka', 'Ready', [])]
+        mock_list.return_value = resources
+        call_order = []
+        mock_delete_targets.side_effect = lambda *_: call_order.append('workload') or True
+        mock_storage.side_effect = lambda *_: call_order.append('storage')
+
+        result = CliRunner().invoke(
+            workflow_cli,
+            ['reset', '--all', '--include-proxies', '--delete-storage'],
+        )
+
+        assert result.exit_code == 0
+        assert call_order == ['workload', 'storage']
+        mock_storage.assert_called_once_with('ma', ['kafka'], True)
 
     @patch('console_link.workflow.commands.reset._handle_kafka_storage')
     @patch('console_link.workflow.commands.reset.load_k8s_config')

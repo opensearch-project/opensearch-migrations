@@ -15,3 +15,9 @@ exclude = .tox,.git,*/migrations/*,*/static/CACHE/*,docs,node_modules,.venv,venv
 per-file-ignores =
     # We utilize * imports on test files here to dynamically collect test cases
     conftest.py: F401,F403
+    # Dashboard generators are tables of CloudWatch SEARCH and PromQL expressions; splitting those mid-query
+    # hurts readability more than the long lines do.
+    deployment/k8s/scripts/generate-capture-replay-dashboard.py: E501
+    deployment/k8s/scripts/generate-capture-replay-grafana-dashboard.py: E501
+    # Verbatim CLI table output used as a parser fixture.
+    migrationConsole/lib/integ_test/tests/test_log_kafka_consumer_group_state.py: E501

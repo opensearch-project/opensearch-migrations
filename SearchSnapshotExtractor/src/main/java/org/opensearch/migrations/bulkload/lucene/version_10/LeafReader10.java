@@ -86,6 +86,12 @@ public class LeafReader10 implements LuceneLeafReader {
         return new Document10(wrapped.storedFields().document(luceneDocId));
     }
 
+    @Override
+    public DocumentReader openDocumentReader() throws IOException {
+        var storedFields = wrapped.storedFields();
+        return docId -> new Document10(storedFields.document(docId));
+    }
+
     public int maxDoc() {
         return wrapped.maxDoc();
     }
@@ -195,6 +201,12 @@ public class LeafReader10 implements LuceneLeafReader {
                 default -> {}
             }
         }
+    }
+
+    @Override
+    public NumericValueReader openNumericValueReader(String fieldName) throws IOException {
+        NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
+        return docId -> dv != null && dv.advanceExact(docId) ? dv.longValue() : null;
     }
 
     @Override

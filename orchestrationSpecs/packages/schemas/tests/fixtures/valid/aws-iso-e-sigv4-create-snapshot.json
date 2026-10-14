@@ -1,0 +1,48 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10.2",
+      "endpoint": "https://my-domain.eu-isoe-west-1.es.cloud.adc-e.uk",
+      "authConfig": {
+        "sigv4": {
+          "region": "eu-isoe-west-1"
+        }
+      },
+      "snapshotInfo": {
+        "repos": {
+          "default": {
+            "awsRegion": "eu-isoe-west-1",
+            "repoPathUri": "s3://my-snapshot-bucket/snapshots",
+            "s3RoleArn": "arn:aws-iso-e:iam::123456789012:role/SnapshotRole"
+          }
+        },
+        "snapshots": {
+          "snap1": {
+            "repoName": "default",
+            "config": {
+              "createSnapshotConfig": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  "targetClusters": {
+    "target": {
+      "endpoint": "http://target:9200"
+    }
+  },
+  "snapshotMigrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "fromSnapshot": "snap1",
+      "slices": [
+        {
+          "metadataMigrationConfig": {},
+          "label": "slice-0"
+        }
+      ]
+    }
+  ]
+}

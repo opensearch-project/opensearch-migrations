@@ -7,17 +7,23 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
+import org.opensearch.migrations.bulkload.common.bulk.enums.VersionType;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
+import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneAdapter;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
+import org.opensearch.migrations.bulkload.transformers.BulkVersioningTransformerProvider;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
@@ -30,6 +36,8 @@ import lombok.SneakyThrows;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mock.Strictness;
@@ -42,6 +50,8 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.lessThan;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -235,6 +245,91 @@ class OpenSearchClientTest {
         verify(restClient, times(maxAttempts)).postAsyncBytes(any(), any(), any(), any());
         verify(failedRequestLogger).logBulkFailure(any(), any(), any(), any());
         verifyNoMoreInteractions(failedRequestLogger);
+    }
+
+    @Test
+    void generatingIdsDoesNotSilentlyRemoveExplicitConcurrencyChecks() throws Exception {
+        var operation = IndexOp.builder()
+            .operation(IndexOperationMeta.builder()
+                .id("source-id").index("products")
+                .versioning(VersionControlMetadata.builder()
+                    .version(7L).versionType(VersionType.EXTERNAL)
+                    .ifSeqNo(5L).ifPrimaryTerm(3L).build())
+                .build())
+            .document(Map.of("field", "value"))
+            .build();
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("generated-id")))));
+
+        openSearchClient.sendBulkRequest("products", List.of(operation), null, true,
+            DocumentExceptionAllowlist.empty()).block();
+
+        var request = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient).postAsyncBytes(any(), request.capture(), any(), any());
+        var action = OBJECT_MAPPER.readTree(new String(request.getValue(), java.nio.charset.StandardCharsets.UTF_8)
+            .split("\n")[0]).path("index");
+        assertFalse(action.has("_id"));
+        assertFalse(action.has("version"));
+        assertFalse(action.has("version_type"));
+        assertEquals(5L, action.path("if_seq_no").longValue());
+        assertEquals(3L, action.path("if_primary_term").longValue());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"raw,false", "raw,true", "map,false", "map,true", "native,false", "native,true"})
+    void retriesPreserveOnlyExplicitVersioningAndRespectIdPolicy(String path, boolean generateIds) throws Exception {
+        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntry("done"), itemEntryRetryableFailure("retry")))))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("retry")))));
+        var documents = List.of(snapshotDocument("done", 7L), snapshotDocument("retry", Long.MAX_VALUE));
+        if (path.equals("raw")) {
+            openSearchClient.sendBulkRequestRaw("products", documents, null, generateIds, DocumentExceptionAllowlist.empty()).block();
+        } else {
+            var operations = documents.stream()
+                .map(doc -> path.equals("native") ? BulkOperationConverter.fromRawDocument(doc, "products")
+                    : BulkOperationConverter.fromDocument(doc, "products"))
+                .toList();
+            if (path.equals("native")) {
+                var transformer = new BulkVersioningTransformerProvider()
+                    .createTransformer(Map.of("versionType", "external_gte"));
+                operations = transformer.transformOperations(operations);
+            }
+            openSearchClient.sendBulkRequest("products", operations, null, generateIds, DocumentExceptionAllowlist.empty()).block();
+        }
+        var requests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
+        var retriedLines = new String(requests.getAllValues().get(1), java.nio.charset.StandardCharsets.UTF_8).split("\n");
+        assertEquals(2, retriedLines.length, "Only the failed document should be retried");
+        assertEquals(generateIds ? "" : "retry", OBJECT_MAPPER.readTree(retriedLines[0]).path("index").path("_id").asText());
+        for (byte[] body : requests.getAllValues()) {
+            String[] lines = new String(body, java.nio.charset.StandardCharsets.UTF_8).split("\n");
+            for (int i = 0; i < lines.length; i += 2) {
+                var action = OBJECT_MAPPER.readTree(lines[i]).path("index");
+                if (generateIds) {
+                    assertFalse(action.has("_id"));
+                }
+                if (generateIds || !path.equals("native")) {
+                    assertFalse(action.has("version"));
+                    assertFalse(action.has("version_type"));
+                } else {
+                    assertEquals(action.path("_id").asText().equals("retry") ? Long.MAX_VALUE : 7L,
+                        action.path("version").longValue());
+                    assertEquals("external_gte", action.path("version_type").asText());
+                }
+                if (path.equals("native")) {
+                    assertEquals("{ \"value\" : 9007199254740993 }", lines[i + 1],
+                        "Native metadata transformations and ID stripping must retain raw bodies through retries");
+                }
+            }
+        }
+        verifyNoInteractions(failedRequestLogger);
+    }
+
+    private static Document snapshotDocument(String id, Long version) {
+        return new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, id, null,
+            "{ \"value\" : 9007199254740993 }".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            null, DocumentChangeType.INDEX, version));
     }
 
     private HttpResponse bulkItemResponse(boolean hasErrors, List<BulkItemResponseEntry> entries) {

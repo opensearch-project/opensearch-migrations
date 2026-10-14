@@ -42,6 +42,13 @@ import {
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
 import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {
+    workloadNodePoolResolvedInput,
+    workloadNodeSelector,
+    workloadNodeTolerations,
+    workloadZoneSpreadConstraints,
+    workloadZoneSpreadResolvedInput,
+} from "./commonUtils/workloadNodePool";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -128,10 +135,22 @@ function makeReplayerParamsDict(
     const effectiveKafkaSecretName = expr.getLoose(deserializedKafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(deserializedKafkaConfig, "kafkaUserName");
     const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
+    const processOptions = expr.omit(
+        expr.deserializeRecord(options),
+        ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS
+    );
+    const processOptionsWithMetricsOptOut = expr.ternary(
+        expr.equals(
+            expr.dig(processOptions, ["otelMetricsCollectorEndpoint"], expr.literal("")),
+            expr.literal("")
+        ),
+        expr.omit(processOptions, "otelMetricsCollectorEndpoint"),
+        processOptions
+    );
     return expr.mergeDicts(
         expr.mergeDicts(
             makeReplayerTargetParamDict(targetConfig),
-            expr.omit(expr.deserializeRecord(options), ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
+            processOptionsWithMetricsOptOut
         ),
         expr.mergeDicts(
             expr.makeDict({
@@ -205,6 +224,9 @@ function getReplayerDeploymentManifest
     sourceK8sLabel: BaseExpression<string>,
     targetK8sLabel: BaseExpression<string>,
     taskK8sLabel: BaseExpression<string>,
+    workloadNodePoolName: BaseExpression<string>,
+    workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }): Deployment {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const hasCaSecret = hasKafkaCaSecret(args.kafkaCaSecretName);
@@ -301,6 +323,11 @@ function getReplayerDeploymentManifest
                 },
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
+                    nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
+                    tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
+                    topologySpreadConstraints: makeDirectTypeProxy(
+                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, [REPLAYER_SELECTOR_LABEL])
+                    ),
                     containers: [finalContainerDefinition.container],
                     volumes: finalContainerDefinition.volumes
                 },
@@ -327,6 +354,8 @@ const createDeploymentInputs = {
     sourceK8sLabel: defineRequiredParam<string>(),
     targetK8sLabel: defineRequiredParam<string>(),
     taskK8sLabel: defineParam<string>({expression: expr.literal("trafficReplayer")}),
+    ...workloadNodePoolResolvedInput("replayerNodePoolName"),
+    ...workloadZoneSpreadResolvedInput(),
     ...makeRequiredImageParametersForKeys(["TrafficReplayer"]),
     resources: defineRequiredParam<ResourceRequirementsType>()
 };
@@ -379,6 +408,9 @@ function makeReplayerDeploymentDefinition(
             sourceK8sLabel: inputs.sourceK8sLabel,
             targetK8sLabel: inputs.targetK8sLabel,
             taskK8sLabel: inputs.taskK8sLabel,
+            workloadNodePoolName: inputs.workloadNodePoolName,
+            workloadZoneSpread: inputs.workloadZoneSpread,
+            workloadZoneSpreadExtras: inputs.workloadZoneSpreadExtras,
         })
     };
 }

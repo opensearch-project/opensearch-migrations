@@ -31,3 +31,27 @@ data:
   {{- $pairs = append $pairs (printf "%s=%s" $key (toString $value)) }}
   {{- end }}
   awsResourceTags: {{ join "," $pairs | quote }}
+
+  # Workload templates resolve these at pod-creation time. Empty values preserve ordinary
+  # Kubernetes scheduling when custom EKS NodePools are disabled. A toleration permits a pod onto
+  # its tainted pool; the matching node selector is what requires that placement.
+  {{- $nodePoolsEnabled := .Values.cluster.useCustomKarpenterNodePool }}
+  {{- $mode := .Values.workloadsNodePool.mode | default "isolated" }}
+  {{- if not (has $mode (list "shared" "isolated")) }}
+  {{- fail (printf "workloadsNodePool.mode must be shared or isolated, got %q" $mode) }}
+  {{- end }}
+  {{- $sharedPoolName := .Values.workloadsNodePool.name | default "general-work-pool" }}
+  {{- $kafkaPoolName := ternary .Values.workloadsNodePool.dedicatedPools.kafka.name $sharedPoolName (eq $mode "isolated") }}
+  {{- $proxyPoolName := ternary .Values.workloadsNodePool.dedicatedPools.proxy.name $sharedPoolName (eq $mode "isolated") }}
+  {{- $replayerPoolName := ternary .Values.workloadsNodePool.dedicatedPools.replayer.name $sharedPoolName (eq $mode "isolated") }}
+  kafkaNodePoolName: {{ ternary $kafkaPoolName "" $nodePoolsEnabled | quote }}
+  proxyNodePoolName: {{ ternary $proxyPoolName "" $nodePoolsEnabled | quote }}
+  replayerNodePoolName: {{ ternary $replayerPoolName "" $nodePoolsEnabled | quote }}
+  {{- $zoneSpread := .Values.workloadsNodePool.zoneSpread | default "preferred" }}
+  {{- if not (has $zoneSpread (list "required" "preferred" "none")) }}
+  {{- fail (printf "workloadsNodePool.zoneSpread must be required, preferred or none, got %q" $zoneSpread) }}
+  {{- end }}
+  workloadZoneSpread: {{ $zoneSpread | quote }}
+  {{- $zoneCount := .Values.workloadsNodePool.zoneCount | default 0 | int }}
+  workloadZoneSpreadConstraintExtras: {{ ternary (printf "{\"minDomains\":%d}" $zoneCount) "{}" (and (eq $zoneSpread "required") (gt $zoneCount 1)) | quote }}
+  k6NodePoolName: {{ ternary .Values.workloadsNodePool.dedicatedPools.k6.name "" $nodePoolsEnabled | quote }}

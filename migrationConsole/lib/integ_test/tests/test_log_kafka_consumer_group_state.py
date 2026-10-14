@@ -4,8 +4,8 @@ integ-test base.
 
 Covers two checkpoints:
 * [replay-start]: pure snapshot, no waits, no asserts.
-* [replay-end]: wait for max LAG <= threshold, log snapshot, raise on
-  timeout. The replay-end assertion exists because we hit cases on EKS
+* [replay-end]: wait until every partition has committed to within a threshold of
+  its log-end offset at the start of the check, log snapshot, raise on timeout. The replay-end assertion exists because we hit cases on EKS
   where verify_clusters passed (target had the expected docs) while the
   replayer's consumer group never committed past offset 0.
 """
@@ -17,14 +17,19 @@ import pytest
 from integ_test.test_cases import cdc_base
 
 
-# Realistic native describe output (the augmented TIME LAG section is appended
-# by the augmenter and is not relevant to the readiness gate).
+# Realistic native describe output with the augmented replay-watermark section,
+# which is not relevant to the readiness gate.
 DESCRIBE_OUTPUT_FULLY_DRAINED = """\
 Consumer group 'logging-group-default' has no active members.
 
 GROUP                  TOPIC                  PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID  HOST  CLIENT
 logging-group-default  logging-traffic-topic  0          42              42              0    -            -     -
 logging-group-default  logging-traffic-topic  1          7               7               0    -            -     -
+
+REPLAY WATERMARK (record timestamps; not authoritative Kafka backlog drain time)
+TOPIC                  PARTITION  COMMITTED-OFFSET  OFFSET-LAG  REPLAYED-THROUGH (UTC)  LATEST-RECORD (UTC)  TEMPORAL-BACKLOG  NOTE
+logging-traffic-topic  0          42                0           2026-10-08T12:00:00Z   2026-10-08T12:00:00Z  0s                caught up by offset
+logging-traffic-topic  1          7                 0           2026-10-08T12:00:00Z   2026-10-08T12:00:00Z  0s                caught up by offset
 """
 
 DESCRIBE_OUTPUT_GROUP_MISSING = """\
@@ -123,36 +128,64 @@ def test_max_lag_omits_group_when_unspecified(mock_run):
     assert invoked_cmd == ["console", "kafka", "describe-consumer-group"]
 
 
+@patch.object(cdc_base.subprocess, "run")
+def test_consumer_group_probe_allows_slow_eks_console_startup(mock_run):
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_NEAR_DRAINED)
+
+    assert cdc_base._consumer_group_has_active_assignment() is True
+
+    assert mock_run.call_args.kwargs["timeout"] == cdc_base.CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS
+    assert cdc_base.CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS >= 30
+    assignment_timeout = cdc_base.CONSUMER_GROUP_ASSIGNMENT_TIMEOUT_SECONDS
+    probe_timeout = cdc_base.CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS
+    assert assignment_timeout > probe_timeout
+
+
+@patch.object(cdc_base.subprocess, "run")
+def test_consumer_group_assignment_requires_a_live_consumer(mock_run):
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_NEAR_DRAINED)
+    assert cdc_base._consumer_group_has_active_assignment() is True
+
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_FULLY_DRAINED)
+    assert cdc_base._consumer_group_has_active_assignment() is False
+
+
 # --- Caught-up bounded poll --------------------------------------------------
 
-@patch.object(cdc_base, "_consumer_group_max_lag")
-def test_wait_for_caught_up_returns_true_on_first_success(mock_lag):
-    mock_lag.return_value = 1
+def _offsets(*rows):
+    """{(topic, partition): (committed, log_end)} for one capture-proxy probe."""
+    return {("capture-proxy", p): (current, end) for p, current, end in rows}
+
+
+@patch.object(cdc_base, "_consumer_group_offsets")
+def test_wait_for_caught_up_returns_true_on_first_success(mock_offsets):
+    # Head-of-line residue: one record short of the snapshot is within the default allowance.
+    mock_offsets.return_value = _offsets((0, 224, 225), (1, 50, 50))
     succeeded, last = cdc_base._wait_for_consumer_group_caught_up(
         None, "label", max_allowed_lag=1, timeout_seconds=5, interval_seconds=0.01,
     )
     assert succeeded is True
     assert last == 1
-    assert mock_lag.call_count == 1
+    assert mock_offsets.call_count == 1
 
 
 @patch("time.sleep", return_value=None)
-@patch.object(cdc_base, "_consumer_group_max_lag")
-def test_wait_for_caught_up_returns_false_when_persistently_behind(mock_lag, _sleep):
-    mock_lag.return_value = 9
+@patch.object(cdc_base, "_consumer_group_offsets")
+def test_wait_for_caught_up_returns_false_when_persistently_behind(mock_offsets, _sleep):
+    mock_offsets.return_value = _offsets((0, 216, 225), (1, 50, 50))
     succeeded, last = cdc_base._wait_for_consumer_group_caught_up(
         None, "label", max_allowed_lag=1, timeout_seconds=0.05, interval_seconds=0.01,
     )
     assert succeeded is False
     assert last == 9
-    assert mock_lag.call_count >= 1
+    assert mock_offsets.call_count >= 1
 
 
 @patch("time.sleep", return_value=None)
-@patch.object(cdc_base, "_consumer_group_max_lag")
-def test_wait_for_caught_up_drops_below_threshold_eventually(mock_lag, _sleep):
-    # Simulate the replayer draining: 9 -> 4 -> 1.
-    mock_lag.side_effect = [9, 4, 1]
+@patch.object(cdc_base, "_consumer_group_offsets")
+def test_wait_for_caught_up_drops_below_threshold_eventually(mock_offsets, _sleep):
+    # Simulate the replayer draining toward the start-of-check log end of 225: 9 -> 4 -> 1 behind.
+    mock_offsets.side_effect = [_offsets((0, 216, 225)), _offsets((0, 221, 225)), _offsets((0, 224, 225))]
     succeeded, last = cdc_base._wait_for_consumer_group_caught_up(
         None, "label", max_allowed_lag=1, timeout_seconds=5, interval_seconds=0.01,
     )
@@ -161,11 +194,14 @@ def test_wait_for_caught_up_drops_below_threshold_eventually(mock_lag, _sleep):
 
 
 @patch("time.sleep", return_value=None)
-@patch.object(cdc_base, "_consumer_group_max_lag")
-def test_wait_for_caught_up_treats_unparsed_max_as_not_ready(mock_lag, _sleep):
-    # An uncommitted partition reports LAG=-, parser returns None. The wait
-    # must keep polling until at least one commit lands.
-    mock_lag.side_effect = [None, None, 0]
+@patch.object(cdc_base, "_consumer_group_offsets")
+def test_wait_for_caught_up_ignores_records_appended_after_the_check_starts(mock_offsets, _sleep):
+    # Capture proxies keep appending heartbeats, so live LAG never settles at 0-1. Once the replayer
+    # commits everything that existed at the first probe, the drain is complete.
+    mock_offsets.side_effect = [
+        _offsets((0, 220, 225), (1, 50, 50)),
+        _offsets((0, 225, 228), (1, 50, 53)),  # caught up to the snapshot; live LAG 3 on each
+    ]
     succeeded, last = cdc_base._wait_for_consumer_group_caught_up(
         None, "label", max_allowed_lag=1, timeout_seconds=5, interval_seconds=0.01,
     )
@@ -173,7 +209,28 @@ def test_wait_for_caught_up_treats_unparsed_max_as_not_ready(mock_lag, _sleep):
     assert last == 0
 
 
-# --- log_kafka_consumer_group_state (pure snapshot) --------------------------
+@patch("time.sleep", return_value=None)
+@patch.object(cdc_base, "_consumer_group_offsets")
+def test_wait_for_caught_up_treats_unparsed_or_uncommitted_as_not_ready(mock_offsets, _sleep):
+    # A failed describe returns None, and an uncommitted partition has no committed offset. The wait
+    # must keep polling until at least one commit lands.
+    mock_offsets.side_effect = [None, _offsets((0, None, 42)), _offsets((0, 42, 42))]
+    succeeded, last = cdc_base._wait_for_consumer_group_caught_up(
+        None, "label", max_allowed_lag=1, timeout_seconds=5, interval_seconds=0.01,
+    )
+    assert succeeded is True
+    assert last == 0
+
+
+@patch.object(cdc_base.subprocess, "run")
+def test_consumer_group_offsets_parse_committed_and_log_end(mock_run):
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_NEAR_DRAINED)
+    assert cdc_base._consumer_group_offsets() == _offsets((0, 224, 225), (1, 50, 50))
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_NO_COMMITS_YET)
+    assert cdc_base._consumer_group_offsets() == _offsets((0, None, 42))
+    mock_run.return_value = _completed(DESCRIBE_OUTPUT_GROUP_MISSING)
+    assert cdc_base._consumer_group_offsets() is None
+
 
 @patch.object(cdc_base.subprocess, "run")
 def test_log_kafka_state_emits_describe_with_no_wait(mock_run):
@@ -203,13 +260,15 @@ def test_assert_replay_drained_returns_when_drain_succeeds(mock_wait, mock_snaps
 
 
 @patch.object(cdc_base, "_emit_describe_snapshot")
+@patch.object(cdc_base, "_dump_topic_on_drain_failure")
 @patch.object(cdc_base, "_wait_for_consumer_group_caught_up", return_value=(False, 348))
-def test_assert_replay_drained_raises_on_timeout(mock_wait, mock_snapshot):
+def test_assert_replay_drained_raises_on_timeout(mock_wait, mock_dump, mock_snapshot):
     with pytest.raises(cdc_base.ReplayLagDrainTimeout) as excinfo:
         cdc_base.assert_replay_drained(label="replay-end")
 
     # Snapshot must be emitted BEFORE the raise so the lag table is in CI logs.
     mock_snapshot.assert_called_once()
+    mock_dump.assert_called_once()
     assert "348" in str(excinfo.value)
     assert "LAG<=1" in str(excinfo.value)
 

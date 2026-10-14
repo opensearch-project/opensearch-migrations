@@ -163,7 +163,7 @@ function workflowTopicSpecSchema(topicSpec: unknown): unknown {
         partitions: {
             defaultValue: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.partitions,
             description: "Number of partitions for the topic. This can be increased after deployment but cannot be decreased.",
-            defaultDescription: "New topics use one partition unless this value is overridden.",
+            defaultDescription: "New topics use two partitions unless this value is overridden.",
         },
         replicas: {
             defaultValue: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.replicas,

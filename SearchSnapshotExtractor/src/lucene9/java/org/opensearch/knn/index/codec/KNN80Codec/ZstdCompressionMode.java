@@ -6,9 +6,9 @@
 package org.opensearch.knn.index.codec.KNN80Codec;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 import com.github.luben.zstd.ZstdDecompressCtx;
-import com.github.luben.zstd.ZstdDictDecompress;
 import org.apache.lucene.codecs.compressing.CompressionMode;
 import org.apache.lucene.codecs.compressing.Compressor;
 import org.apache.lucene.codecs.compressing.Decompressor;
@@ -37,14 +37,23 @@ public class ZstdCompressionMode extends CompressionMode {
 
         private void doDecompress(DataInput in, ZstdDecompressCtx dctx, BytesRef bytes, int decompressedLen) throws IOException {
             final int compressedLength = in.readVInt();
+            if (compressedLength > 0) {
+                compressedBuffer = ArrayUtil.growNoCopy(compressedBuffer, compressedLength);
+                in.readBytes(compressedBuffer, 0, compressedLength);
+            }
             if (compressedLength == 0) {
+                if (decompressedLen != 0) {
+                    throw new IllegalStateException("Empty Zstd block: expected " + decompressedLen + " decoded bytes");
+                }
                 return;
             }
-            compressedBuffer = ArrayUtil.growNoCopy(compressedBuffer, compressedLength);
-            in.readBytes(compressedBuffer, 0, compressedLength);
 
             bytes.bytes = ArrayUtil.grow(bytes.bytes, bytes.length + decompressedLen);
             int uncompressed = dctx.decompressByteArray(bytes.bytes, bytes.length, decompressedLen, compressedBuffer, 0, compressedLength);
+            if (uncompressed != decompressedLen) {
+                throw new IllegalStateException(
+                    "Zstd block length mismatch: expected " + decompressedLen + " decoded bytes, got " + uncompressed);
+            }
             bytes.length += uncompressed;
         }
 
@@ -61,32 +70,33 @@ public class ZstdCompressionMode extends CompressionMode {
             bytes.offset = bytes.length = 0;
 
             try (ZstdDecompressCtx dctx = new ZstdDecompressCtx()) {
-                // decompress dictionary first
                 doDecompress(in, dctx, bytes, dictLength);
-                try (ZstdDictDecompress dictDecompress = new ZstdDictDecompress(bytes.bytes, 0, dictLength)) {
-                    dctx.loadDict(dictDecompress);
-
-                    int offsetInBlock = dictLength;
-                    int offsetInBytesRef = offset;
-
-                    // Skip unneeded blocks
-                    while (offsetInBlock + blockLength < offset) {
-                        final int compressedLength = in.readVInt();
-                        in.skipBytes(compressedLength);
-                        offsetInBlock += blockLength;
-                        offsetInBytesRef -= blockLength;
-                    }
-
-                    // Read blocks that intersect with the interval we need
-                    while (offsetInBlock < offset + length) {
-                        int l = Math.min(blockLength, originalLength - offsetInBlock);
-                        doDecompress(in, dctx, bytes, l);
-                        offsetInBlock += blockLength;
-                    }
-
-                    bytes.offset = offsetInBytesRef;
-                    bytes.length = length;
+                if (dictLength > 0) {
+                    // The byte-array API copies the dictionary into the context, which owns its cleanup.
+                    // bytes.bytes may have spare capacity; only the exact dictionary prefix is valid.
+                    dctx.loadDict(Arrays.copyOf(bytes.bytes, dictLength));
                 }
+
+                int offsetInBlock = dictLength;
+                int offsetInBytesRef = offset;
+
+                // Skip unneeded blocks
+                while (offsetInBlock + blockLength < offset) {
+                    final int compressedLength = in.readVInt();
+                    in.skipBytes(compressedLength);
+                    offsetInBlock += blockLength;
+                    offsetInBytesRef -= blockLength;
+                }
+
+                // Read blocks that intersect with the interval we need
+                while (offsetInBlock < offset + length) {
+                    int l = Math.min(blockLength, originalLength - offsetInBlock);
+                    doDecompress(in, dctx, bytes, l);
+                    offsetInBlock += blockLength;
+                }
+
+                bytes.offset = offsetInBytesRef;
+                bytes.length = length;
             }
         }
 

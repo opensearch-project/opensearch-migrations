@@ -1159,10 +1159,16 @@ def _reset_by_resource_name(ctx, path, namespace, cascade, include_proxies, dele
         ctx.exit(ExitCode.FAILURE.value)
         return
     kafka_names = [name for plural, name, _, _ in targets if plural == 'kafkaclusters']
-    _handle_kafka_storage(namespace, kafka_names, delete_storage)
+    if not delete_storage:
+        _handle_kafka_storage(namespace, kafka_names, False)
     if not _delete_targets(targets, namespace, delete_output_artifacts):
         ctx.exit(ExitCode.FAILURE.value)
         return
+    if delete_storage:
+        # PVC protection prevents deleting claims that are still mounted by Kafka pods.
+        # Tear down the Strimzi workload first, then explicitly remove any claims that
+        # remain because of their deleteClaim or reclaim policy.
+        _handle_kafka_storage(namespace, kafka_names, True)
     _warn_target_indexes_remain(targets)
 
 
@@ -1199,8 +1205,11 @@ def _reset_and_resubmit(
         for target in plan.targets
         if target.plural == "kafkaclusters"
     ]
-    _handle_kafka_storage(namespace, kafka_names, delete_storage)
+    if not delete_storage:
+        _handle_kafka_storage(namespace, kafka_names, False)
     reset_service.execute(plan.token)
+    if delete_storage:
+        _handle_kafka_storage(namespace, kafka_names, True)
 
     try:
         result = edit_service.submit_saved_config(workflow_name)
@@ -1215,6 +1224,55 @@ def _reset_and_resubmit(
         "Reset completed and replacement workflow submitted: "
         f"{result.get('workflow_name', workflow_name)}"
     )
+
+
+def _reset_all_resources(
+    ctx,
+    resources,
+    namespace,
+    include_proxies,
+    delete_storage,
+    delete_output_artifacts,
+    dry_run=False,
+    output_format="text",
+):
+    """Delete every listed migration resource for ``workflow reset --all``."""
+    delete_targets, protected_proxy_names = _prune_ancestors_of_protected_proxies(
+        resources, include_proxies
+    )
+    if not include_proxies and protected_proxy_names:
+        proxy_names = ", ".join(sorted(f"captureproxy.{n}" for n in protected_proxy_names))
+        messages = [
+            f"Keeping protected proxies alive: {proxy_names}",
+            "Use --include-proxies to delete them.",
+        ]
+    else:
+        messages = []
+
+    if dry_run:
+        _emit_reset_plan(
+            _reset_plan(delete_targets, namespace, messages, delete_storage),
+            output_format,
+        )
+        return
+
+    for message in messages:
+        click.echo(message)
+
+    kafka_names = [name for plural, name, _, _ in delete_targets if plural == 'kafkaclusters']
+    if not delete_storage:
+        _handle_kafka_storage(namespace, kafka_names, False)
+
+    if delete_targets and not _delete_targets(delete_targets, namespace, delete_output_artifacts):
+        ctx.exit(ExitCode.FAILURE.value)
+        return
+
+    if delete_storage:
+        # Delete retained Kafka storage only after the broker workload has released it.
+        _handle_kafka_storage(namespace, kafka_names, True)
+
+    _warn_target_indexes_remain(delete_targets)
+    click.echo("Done.")
 
 
 @click.command(name="reset")
@@ -1398,37 +1456,16 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
             click.echo("Use 'workflow submit' to replace the Argo workflow without deleting migration resources.")
             return
 
-        delete_targets, protected_proxy_names = _prune_ancestors_of_protected_proxies(
-            resources, include_proxies
+        _reset_all_resources(
+            ctx,
+            resources,
+            namespace,
+            include_proxies,
+            delete_storage,
+            not keep_output_artifacts,
+            dry_run,
+            output_format,
         )
-        if not include_proxies and protected_proxy_names:
-            proxy_names = ", ".join(sorted(f"captureproxy.{n}" for n in protected_proxy_names))
-            messages = [
-                f"Keeping protected proxies alive: {proxy_names}",
-                "Use --include-proxies to delete them.",
-            ]
-        else:
-            messages = []
-
-        if dry_run:
-            _emit_reset_plan(
-                _reset_plan(delete_targets, namespace, messages, delete_storage),
-                output_format,
-            )
-            return
-
-        for message in messages:
-            click.echo(message)
-
-        kafka_names = [name for plural, name, _, _ in delete_targets if plural == 'kafkaclusters']
-        _handle_kafka_storage(namespace, kafka_names, delete_storage)
-
-        if delete_targets and not _delete_targets(delete_targets, namespace, not keep_output_artifacts):
-            ctx.exit(ExitCode.FAILURE.value)
-            return
-
-        _warn_target_indexes_remain(delete_targets)
-        click.echo("Done.")
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)

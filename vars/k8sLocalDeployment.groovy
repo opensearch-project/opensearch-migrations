@@ -144,6 +144,7 @@ def call(Map config = [:]) {
                             def selectedTestIds = testIds ?: params.TEST_IDS
                             def loadTestTarget = selectedTestIds.split(',').any { it.trim().startsWith("008") }
                                     ? " :buildImages:buildKitLoadTestAll_amd64" : ""
+                            configureMavenCache()
                             sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64${loadTestTarget} -Pbuilder=builder-kind-ma -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
                             // Keep builder-kind-ma alive across runs so the buildkit cache persists.
                         }
@@ -205,6 +206,9 @@ def call(Map config = [:]) {
                         }
                     }
                 }
+            }
+            cleanup {
+                cleanupMavenCache()
             }
         }
     }

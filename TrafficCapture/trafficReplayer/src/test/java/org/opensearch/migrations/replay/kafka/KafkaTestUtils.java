@@ -8,6 +8,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -89,7 +90,11 @@ public class KafkaTestUtils {
     ) {
         while (true) {
             try {
-                var record = new ProducerRecord(TEST_TOPIC_NAME, recordId, trafficStream.toByteArray());
+                var record = new ProducerRecord(
+                    TEST_TOPIC_NAME,
+                    recordId,
+                    CaptureRecord.newBuilder().setTrafficStream(trafficStream).build().toByteArray()
+                );
                 var tsKeyStr = TrafficChannelKeyFormatter.format(
                     trafficStream.getNodeId(),
                     trafficStream.getConnectionId()
@@ -120,7 +125,11 @@ public class KafkaTestUtils {
     ) {
         final var timestamp = Instant.now().plus(Duration.ofDays(i));
         var trafficStream = KafkaTestUtils.makeTestTrafficStreamWithFixedTime(timestamp, i);
-        var record = new ProducerRecord(testTopicName, makeKey(i), trafficStream.toByteArray());
+        var record = new ProducerRecord(
+            testTopicName,
+            makeKey(i),
+            CaptureRecord.newBuilder().setTrafficStream(trafficStream).build().toByteArray()
+        );
         return kafkaProducer.send(record, (metadata, exception) -> { sendCompleteCount.incrementAndGet(); });
     }
 
