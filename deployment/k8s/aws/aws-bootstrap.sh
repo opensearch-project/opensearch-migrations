@@ -48,6 +48,7 @@ namespace="ma"
 build=false
 use_public_images=true
 skip_console_exec=false
+helm_upgrade=false
 stage_filter=""
 extra_helm_values=""
 disable_general_purpose_pool=false
@@ -87,6 +88,9 @@ while [[ $# -gt 0 ]]; do
     --namespace) namespace="$2"; shift 2 ;;
     --build) build=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
+    # Undocumented on purpose (not in --help): Migration Assistant releases aren't backward compatible yet,
+    # so upgrading an existing release in place is unsupported. For developers redeploying their own builds.
+    --helm-upgrade) helm_upgrade=true; shift 1 ;;
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
     --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
@@ -1998,7 +2002,7 @@ else
   HELM_VALUES_FLAGS="-f ${ma_chart_dir}/values.yaml -f ${ma_chart_dir}/valuesEks.yaml"
 fi
 
-check_existing_ma_release "$namespace" "$namespace"
+[[ "$helm_upgrade" == "true" ]] || check_existing_ma_release "$namespace" "$namespace"
 
 # Build TLS-related helm --set flags and create Pod Identity Associations
 TLS_HELM_FLAGS=""
@@ -2129,7 +2133,7 @@ if [[ -n "$extra_helm_values" ]]; then
 fi
 # Suppress trace to avoid leaking helm values in logs
 set +x
-helm install "$namespace" "${ma_chart_dir}" \
+helm $([[ "$helm_upgrade" == "true" ]] && echo "upgrade --install" || echo install) "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
   --create-namespace \
