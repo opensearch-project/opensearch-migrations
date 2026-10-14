@@ -2,7 +2,7 @@
 
 This walkthrough takes a new team member from an empty AWS account to a running live migration:
 
-1. Deploy the released Migration Assistant (MA) on EKS.
+1. Deploy Migration Assistant (MA) on EKS, from the released images or built from your checkout.
 2. Create a self-managed Elasticsearch 7.10 source.
 3. Create a target: an Amazon OpenSearch Service domain, or an OpenSearch Serverless collection.
 4. Pre-load the source with OpenSearch Benchmark, then configure and submit a migration: snapshot
@@ -47,9 +47,8 @@ cd "$(git rev-parse --show-toplevel)"
 - AWS CLI v2. The credentials must be able to create CloudFormation, EKS, ECR, IAM, VPC and
   OpenSearch resources.
 - `kubectl`, `helm` (3.x) and `jq`.
-- A checkout of this repository, for the sample configs and the test-cluster chart. Nothing is
-  built from it; to deploy your own changes, see the
-  [developer workflow](../../README.md#build-and-deploy-the-current-checkout).
+- A checkout of this repository, for the sample configs and the test-cluster chart.
+- Only to build the images yourself (section 2, option B): Java 21 and Docker with Buildx.
 - Node.js 20+ and the AWS CDK CLI (`npm install -g aws-cdk`). These are only for the target
   cluster script in section 3.
 - A shell on macOS or Linux.
@@ -64,9 +63,19 @@ For background on what you are deploying, see:
 
 ## 2. Deploy Migration Assistant on EKS
 
-This deploys the latest Migration Assistant release: it creates the CloudFormation stack (VPC, EKS
-Auto Mode cluster, IAM roles), installs the release's Helm chart, and pulls the release's images
-straight from ECR Public.
+Both options create the same CloudFormation stack (VPC, EKS Auto Mode cluster, IAM roles) and
+install the Migration Assistant Helm chart. They differ only in where the chart and images come
+from. Pick one:
+
+| | Option A: released images | Option B: images built from your checkout |
+|---|---|---|
+| Use it to | Try Migration Assistant as shipped | Test your own changes |
+| Chart and images | The latest (or `--version`) release, pulled from ECR Public | Built from your checkout and pushed to the stack's private ECR |
+| Extra prerequisites | None | Java 21, Docker with Buildx |
+| Time | About 20 minutes | About 50–65 minutes |
+| k6 load generator (section 5) | Not available | Available with `--with-load-test-images` |
+
+#### Option A (recommended): released images
 
 ```bash
 ./deployment/k8s/aws/aws-bootstrap.sh \
@@ -79,29 +88,41 @@ straight from ECR Public.
   --skip-console-exec
 ```
 
+- **`--use-public-images`** skips mirroring the images into a private ECR repository, which saves
+  time and needs only the NAT gateway's outbound access. Leave it off for isolated VPCs.
+- **`--version <tag>`** pins a release instead of the latest.
+
+#### Option B: images built from your checkout
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --stack-name "$STACK_NAME" \
+  --stage "$STAGE" \
+  --region "$AWS_REGION" \
+  --build \
+  --base-dir "$(pwd)" \
+  --helm-values deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/helm-values-observability.yaml \
+  --skip-console-exec
+```
+
+- **`--build`** builds the images, the chart and the CloudFormation templates from your checkout,
+  pushes the images to the stack's private ECR, and mirrors every third-party image there too. It
+  replaces `--use-public-images` and can't be combined with `--version`.
+- **`--with-load-test-images`** also builds the k6 runner and operator images for section 5.
+- **`--image-tag <tag>`** tags the built images; the default is `latest`.
+- To rebuild and redeploy after further changes, see
+  [Build and deploy the current checkout](../../README.md#build-and-deploy-the-current-checkout).
+
+#### Both options
+
 - **`--deploy-create-vpc-cfn`** creates a new VPC (`10.212.0.0/16`, three AZs, private subnets
   with NAT). To use an existing VPC instead, pass
   `--deploy-import-vpc-cfn --vpc-id ... --subnet-ids ...`.
 - **`--helm-values .../helm-values-observability.yaml`** turns on Grafana, which EKS leaves off by
   default. Omit it if CloudWatch is enough for you.
-- **`--use-public-images`** skips mirroring the images into a private ECR repository, which saves
-  time and needs only the NAT gateway's outbound access. Leave it off for isolated VPCs.
-- **`--version <tag>`** pins a release instead of the latest.
 
-> **Deploying your own changes instead of the release?** Build everything from your checkout.
-> This needs Java 21 and Docker with Buildx, adds about 30–45 minutes, and pushes the images to
-> the stack's private ECR (so `--use-public-images` doesn't apply):
->
-> ```bash
-> ./deployment/k8s/aws/aws-bootstrap.sh --deploy-create-vpc-cfn --stack-name "$STACK_NAME" \
->   --stage "$STAGE" --region "$AWS_REGION" --build --base-dir "$(pwd)" \
->   --helm-values deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/helm-values-observability.yaml \
->   --skip-console-exec    # add --with-load-test-images to enable k6 (section 5)
-> ```
->
-> To redeploy after further changes, see
-> [Build and deploy the current checkout](../../README.md#build-and-deploy-the-current-checkout).
-> Everything after this section is the same either way.
+Everything after this point is the same for both options.
 
 The script sets your kubectl context to the new cluster. When it finishes:
 
@@ -519,7 +540,7 @@ curl --cacert migrations-ca.crt -u admin:admin "https://<nlb-host>:9201/_cluster
 The NLB is internal, so clients must run inside MA's VPC or a network peered with it.
 
 **Sustained load with k6.** The k6 runner image isn't published with releases, so this needs a
-deployment built from your checkout with `--with-load-test-images` (see the note in section 2).
+deployment built from your checkout with `--with-load-test-images` (section 2, option B).
 
 ```bash
 deployment/k8s/installK6Chart.sh install --namespace ma
