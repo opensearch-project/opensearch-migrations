@@ -489,7 +489,9 @@ jobs:
       run: sleep 60
     - name: Collect issues from the server
       run: |
-        curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
+        curl -s -u "$SONAR_TOKEN:" \
+          "http://localhost:9000/api/issues/search?componentKeys=local_project&ps=500" \
+          -o issues.json
 
         echo "::group::SonarQube Issues"
         jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
@@ -504,7 +506,7 @@ jobs:
           echo "::error file=$FILE,line=$LINE,title=$RULE::$MESSAGE"
         done
 
-        ISSUE_COUNT=$(jq '.issues | length' issues.json)
+        ISSUE_COUNT=$(jq '.total' issues.json)
         BASELINE_ISSUE_COUNT=0
         if [ "$ISSUE_COUNT" -gt "$BASELINE_ISSUE_COUNT" ]; then
           echo "❌ Build failed: Found $ISSUE_COUNT issues, which is more than the baseline of $BASELINE_ISSUE_COUNT."

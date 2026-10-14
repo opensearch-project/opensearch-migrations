@@ -45,7 +45,8 @@ public class RootWireLoggingContextTest {
                     "c",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    x -> shouldBlock
+                    x -> shouldBlock,
+                    new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
                 )
             );
             channelWriter.accept(channel);
@@ -82,7 +83,9 @@ public class RootWireLoggingContextTest {
             Assertions.assertEquals(1, streamManager.flushCount.get());
 
             var trafficStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-            Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 && trafficStream.getSubStream(0).hasRead());
+            Assertions.assertTrue(
+                trafficStream.getSubStreamCount() > 0 && trafficStream.getSubStream(0).hasRead()
+            );
             var combinedTrafficPacketsStream = new SequenceInputStream(
                 Collections.enumeration(
                     trafficStream.getSubStreamList()

@@ -1626,6 +1626,16 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
 exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
 {
   "AWSTemplateFormatVersion": "2010-09-09",
+  "Conditions": {
+    "UseThirdAvailabilityZone": {
+      "Fn::Equals": [
+        {
+          "Ref": "AvailabilityZoneCount",
+        },
+        3,
+      ],
+    },
+  },
   "Description": "(SO0290) - Migration Assistant for Amazon OpenSearch Service - EKS VPC Create Template v2.0.0",
   "Mappings": {
     "Solution": {
@@ -1647,10 +1657,15 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           },
           "Parameters": [
             "Stage",
+            "AvailabilityZoneCount",
           ],
         },
       ],
-      "ParameterLabels": {},
+      "ParameterLabels": {
+        "AvailabilityZoneCount": {
+          "default": "Availability Zone Count",
+        },
+      },
     },
   },
   "Outputs": {
@@ -1759,6 +1774,15 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
     },
   },
   "Parameters": {
+    "AvailabilityZoneCount": {
+      "AllowedValues": [
+        "2",
+        "3",
+      ],
+      "Default": 3,
+      "Description": "Number of Availability Zones for the VPC and EKS data plane. EKS requires at least two Availability Zones.",
+      "Type": "Number",
+    },
     "BootstrapVersion": {
       "Default": "/cdk-bootstrap/hnb659fds/version",
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
@@ -2105,37 +2129,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
       "UpdateReplacePolicy": "Delete",
     },
     "EKSInfraMigrationsEKSCluster9232A360": {
-      "DependsOn": [
-        "VpcEIGW61416F369",
-        "VpcIGWD7BA715C",
-        "Vpcipv6cidr40D3CB78",
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1DefaultRoute6B45CB740",
-        "VpcPrivateSubnet1RouteTableB2C5B500",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet1Subnet536B997A",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2DefaultRoute6DDF1236D",
-        "VpcPrivateSubnet2RouteTableA678073B",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet2Subnet3788AAA1",
-        "VpcPublicSubnet1DefaultRoute3DA9E72A",
-        "VpcPublicSubnet1DefaultRoute6A21265FB",
-        "VpcPublicSubnet1EIPD7E02669",
-        "VpcPublicSubnet1NATGateway4D7517AA",
-        "VpcPublicSubnet1RouteTable6C95E38E",
-        "VpcPublicSubnet1RouteTableAssociation97140677",
-        "VpcPublicSubnet1Subnet5C2D37C4",
-        "VpcPublicSubnet2DefaultRoute97F91067",
-        "VpcPublicSubnet2DefaultRoute63E63096C",
-        "VpcPublicSubnet2EIP3C605A87",
-        "VpcPublicSubnet2NATGateway9182C01D",
-        "VpcPublicSubnet2RouteTable94F7E489",
-        "VpcPublicSubnet2RouteTableAssociationDD5762D8",
-        "VpcPublicSubnet2Subnet691E08A3",
-        "Vpc8378EB38",
-        "VpcVPCGWBF912B6E",
-      ],
       "Properties": {
         "AccessConfig": {
           "AuthenticationMode": "API",
@@ -2191,6 +2184,17 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             },
             {
               "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+            },
+            {
+              "Fn::If": [
+                "UseThirdAvailabilityZone",
+                {
+                  "Ref": "VpcPrivateSubnet3SubnetF258B56E",
+                },
+                {
+                  "Ref": "AWS::NoValue",
+                },
+              ],
             },
           ],
         },
@@ -2730,6 +2734,17 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Ref": "VpcPrivateSubnet2RouteTableA678073B",
           },
+          {
+            "Fn::If": [
+              "UseThirdAvailabilityZone",
+              {
+                "Ref": "VpcPrivateSubnet3RouteTableD98824C7",
+              },
+              {
+                "Ref": "AWS::NoValue",
+              },
+            ],
+          },
         ],
         "ServiceName": {
           "Fn::Join": [
@@ -3013,10 +3028,10 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             },
           ],
         },
-        "CidrBlock": "10.212.128.0/18",
+        "CidrBlock": "10.212.96.0/19",
         "Ipv6CidrBlock": {
           "Fn::Select": [
-            2,
+            3,
             {
               "Fn::Cidr": [
                 {
@@ -3030,7 +3045,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                     },
                   ],
                 },
-                4,
+                6,
                 "64",
               ],
             },
@@ -3196,10 +3211,10 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             },
           ],
         },
-        "CidrBlock": "10.212.192.0/18",
+        "CidrBlock": "10.212.128.0/19",
         "Ipv6CidrBlock": {
           "Fn::Select": [
-            3,
+            4,
             {
               "Fn::Cidr": [
                 {
@@ -3213,7 +3228,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                     },
                   ],
                 },
-                4,
+                6,
                 "64",
               ],
             },
@@ -3258,6 +3273,194 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "",
                 [
                   "migration-assistant-private-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPrivateSubnet3DefaultRoute6D33C7A3A": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "EgressOnlyInternetGatewayId": {
+          "Ref": "VpcEIGW61416F369",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet3RouteTableD98824C7",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet3DefaultRoute94B74F0D": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "VpcPublicSubnet3NATGateway7640CD1D",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet3RouteTableD98824C7",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPrivateSubnet3RouteTableAssociation16BDDC43": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet3RouteTableD98824C7",
+        },
+        "SubnetId": {
+          "Ref": "VpcPrivateSubnet3SubnetF258B56E",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPrivateSubnet3RouteTableD98824C7": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": {
+              "Fn::Join": [
+                "",
+                [
+                  "kubernetes.io/cluster/migration-eks-cluster-",
+                  {
+                    "Ref": "Stage",
+                  },
+                  "-",
+                  {
+                    "Ref": "AWS::Region",
+                  },
+                ],
+              ],
+            },
+            "Value": "shared",
+          },
+          {
+            "Key": "kubernetes.io/role/internal-elb",
+            "Value": "1",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-3-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPrivateSubnet3SubnetF258B56E": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            2,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.160.0/19",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            5,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                6,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": {
+              "Fn::Join": [
+                "",
+                [
+                  "kubernetes.io/cluster/migration-eks-cluster-",
+                  {
+                    "Ref": "Stage",
+                  },
+                  "-",
+                  {
+                    "Ref": "AWS::Region",
+                  },
+                ],
+              ],
+            },
+            "Value": "shared",
+          },
+          {
+            "Key": "kubernetes.io/role/internal-elb",
+            "Value": "1",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-private-subnet-3-",
                   {
                     "Ref": "Stage",
                   },
@@ -3431,7 +3634,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             },
           ],
         },
-        "CidrBlock": "10.212.0.0/18",
+        "CidrBlock": "10.212.0.0/19",
         "Ipv6CidrBlock": {
           "Fn::Select": [
             0,
@@ -3448,7 +3651,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                     },
                   ],
                 },
-                4,
+                6,
                 "64",
               ],
             },
@@ -3648,7 +3851,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             },
           ],
         },
-        "CidrBlock": "10.212.64.0/18",
+        "CidrBlock": "10.212.32.0/19",
         "Ipv6CidrBlock": {
           "Fn::Select": [
             1,
@@ -3665,7 +3868,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                     },
                   ],
                 },
-                4,
+                6,
                 "64",
               ],
             },
@@ -3692,6 +3895,230 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "",
                 [
                   "migration-assistant-public-subnet-2-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPublicSubnet3DefaultRoute4697774F": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcVPCGWBF912B6E",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet3RouteTable93458DBB",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet3DefaultRoute6B5CB0A56": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "DestinationIpv6CidrBlock": "::/0",
+        "GatewayId": {
+          "Ref": "VpcIGWD7BA715C",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet3RouteTable93458DBB",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet3EIP3A666A23": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "kubernetes.io/role/elb",
+            "Value": "1",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-3-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::EIP",
+    },
+    "VpcPublicSubnet3NATGateway7640CD1D": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+        "VpcPublicSubnet3DefaultRoute4697774F",
+        "VpcPublicSubnet3DefaultRoute6B5CB0A56",
+        "VpcPublicSubnet3RouteTableAssociation1F1EDF02",
+      ],
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "VpcPublicSubnet3EIP3A666A23",
+            "AllocationId",
+          ],
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet3SubnetBE12F0B6",
+        },
+        "Tags": [
+          {
+            "Key": "kubernetes.io/role/elb",
+            "Value": "1",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-3-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::EC2::NatGateway",
+    },
+    "VpcPublicSubnet3RouteTable93458DBB": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "kubernetes.io/role/elb",
+            "Value": "1",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-3-",
+                  {
+                    "Ref": "Stage",
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPublicSubnet3RouteTableAssociation1F1EDF02": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet3RouteTable93458DBB",
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet3SubnetBE12F0B6",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPublicSubnet3SubnetBE12F0B6": {
+      "Condition": "UseThirdAvailabilityZone",
+      "DependsOn": [
+        "Vpcipv6cidr40D3CB78",
+      ],
+      "Properties": {
+        "AssignIpv6AddressOnCreation": true,
+        "AvailabilityZone": {
+          "Fn::Select": [
+            2,
+            {
+              "Fn::GetAZs": "",
+            },
+          ],
+        },
+        "CidrBlock": "10.212.64.0/19",
+        "Ipv6CidrBlock": {
+          "Fn::Select": [
+            2,
+            {
+              "Fn::Cidr": [
+                {
+                  "Fn::Select": [
+                    0,
+                    {
+                      "Fn::GetAtt": [
+                        "Vpc8378EB38",
+                        "Ipv6CidrBlocks",
+                      ],
+                    },
+                  ],
+                },
+                6,
+                "64",
+              ],
+            },
+          ],
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "kubernetes.io/role/elb",
+            "Value": "1",
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "migration-assistant-public-subnet-3-",
                   {
                     "Ref": "Stage",
                   },
@@ -3744,6 +4171,17 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           },
           {
             "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+          {
+            "Fn::If": [
+              "UseThirdAvailabilityZone",
+              {
+                "Ref": "VpcPrivateSubnet3SubnetF258B56E",
+              },
+              {
+                "Ref": "AWS::NoValue",
+              },
+            ],
           },
         ],
         "VpcEndpointType": "Interface",
@@ -3816,6 +4254,17 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
           },
+          {
+            "Fn::If": [
+              "UseThirdAvailabilityZone",
+              {
+                "Ref": "VpcPrivateSubnet3SubnetF258B56E",
+              },
+              {
+                "Ref": "AWS::NoValue",
+              },
+            ],
+          },
         ],
         "VpcEndpointType": "Interface",
         "VpcId": {
@@ -3887,6 +4336,17 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
           },
+          {
+            "Fn::If": [
+              "UseThirdAvailabilityZone",
+              {
+                "Ref": "VpcPrivateSubnet3SubnetF258B56E",
+              },
+              {
+                "Ref": "AWS::NoValue",
+              },
+            ],
+          },
         ],
         "VpcEndpointType": "Interface",
         "VpcId": {
@@ -3957,6 +4417,17 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           },
           {
             "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+          },
+          {
+            "Fn::If": [
+              "UseThirdAvailabilityZone",
+              {
+                "Ref": "VpcPrivateSubnet3SubnetF258B56E",
+              },
+              {
+                "Ref": "AWS::NoValue",
+              },
+            ],
           },
         ],
         "VpcEndpointType": "Interface",

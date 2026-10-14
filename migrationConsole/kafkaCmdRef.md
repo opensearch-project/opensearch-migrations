@@ -50,12 +50,13 @@ Describe a particular Consumer Group
 ./kafka-consumer-groups.sh --bootstrap-server "$MIGRATION_KAFKA_BROKER_ENDPOINTS" --timeout 100000 --describe --group logging-group-default
 ```
 
-#### `console kafka describe-consumer-group` (with TIME LAG section)
+#### `console kafka describe-consumer-group` (with replay watermark)
 
-The migration console wraps the native describe with a per-partition
-**TIME LAG** section, showing how stale each partition's consumer position is
-in wall-clock time — useful when message-count lag (`LAG = LOG-END-OFFSET -
-CURRENT-OFFSET`) doesn't tell you whether the group is 50ms or 50min behind.
+The migration console preserves the native consumer-group table and appends a
+per-partition **REPLAY WATERMARK** section. The native `LAG` column remains the
+authoritative offset-distance signal. The added section shows the timestamp
+span between the last contiguously and durably replayed record and the newest
+timestamped record in the partition.
 
 Invocation (inside the migration-console pod, EKS or local):
 
@@ -63,43 +64,36 @@ Invocation (inside the migration-console pod, EKS or local):
 console kafka describe-consumer-group logging-group-default
 ```
 
-The native `kafka-consumer-groups.sh --describe` table is preserved verbatim,
-followed by a section like:
+The appended section looks like:
 
 ```
-TOPIC  PARTITION  PROBED-OFFSET  TIMESTAMP (UTC)         TIME-LAG  NOTE
-t1     0          100            2024-01-02T03:04:05Z    8m12s
-t1     1          199            2024-01-02T03:11:50Z    27s       caught up; showing last record
-t1     2          -              -                       -         partition empty
+REPLAY WATERMARK (record timestamps; not authoritative Kafka backlog drain time)
+TOPIC  PARTITION  COMMITTED-OFFSET  OFFSET-LAG  REPLAYED-THROUGH (UTC)  LATEST-RECORD (UTC)  TEMPORAL-BACKLOG  NOTE
+t1     0          101               49          2024-01-02T03:04:05Z   2024-01-02T03:12:17Z   8m12s
+t1     1          200               0           2024-01-02T03:11:50Z   2024-01-02T03:11:50Z   0s                caught up by offset
 ```
 
 Row semantics:
 
-- **Active-lag** partitions probe `CURRENT-OFFSET` (the next record the group
-  is about to consume) so `TIME-LAG` is the age of the oldest unprocessed
-  record.
-- **Caught-up** partitions (`LAG == 0`) probe `LOG-END-OFFSET - 1` so the row
-  still surfaces the age of the last produced record; annotated `caught up;
-  showing last record`.
-- **Empty** partitions (`LOG-END-OFFSET == 0`) skip the probe and render
-  `partition empty`.
-- Records without a timestamp (`timestamp.type=NoTimestampType`) surface as
-  `record has no timestamp`; per-partition probe failures (timeout, parse
-  error, missing tool) render `-` in the affected columns and never abort the
-  rest of the table.
+- The replayer commits Kafka's normal next-read offset together with the record
+  timestamp of the last record in the durably replayed contiguous prefix.
+- `REPLAYED-THROUGH` comes from that committed offset metadata.
+- `LATEST-RECORD` comes from Kafka's batched maximum-timestamp lookup.
+- `TEMPORAL-BACKLOG = LATEST-RECORD - REPLAYED-THROUGH` while offset lag is
+  nonzero. It is zero when the partition is caught up by offset.
+- Missing or malformed watermark metadata renders `-` rather than inventing a
+  reassuring value. This is expected until a replayer with watermark support
+  makes its first commit.
 
-If the consumer group has not yet committed any offsets (e.g. the replayer
-joined the group but auto-commit hasn't fired), the section falls back to:
+The query uses Kafka Admin metadata APIs only. It starts no per-partition
+consumer JVMs and does not fetch captured-traffic values. For a workflow-managed
+live-capture topic, record timestamps are broker-assigned `LogAppendTime`, so the
+timestamp span is meaningful broker time. It is still not the age of the exact
+next unprocessed record and is not authoritative Kafka backlog drain time.
 
-```
-PARTITION TIME LAG
-  (no committed offsets parsed from the describe output above; nothing to probe)
-```
-
-In the EKS CDC integ tests, `log_kafka_consumer_group_state` polls briefly
-for the first auto-commit before invoking describe, so the labelled
-`[replay-start]` / `[replay-end]` snapshots in the test log capture the
-full time-lag table rather than the empty-group fallback.
+If the consumer group has no committed offsets, the replay-watermark section
+states that directly. Failure of the supplemental query never hides a successful
+native consumer-group description.
 
 Delete a particular Consumer Group (Requires Consumer Group to be empty to perform)
 ```shell

@@ -737,7 +737,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "default": {
-                        "partitions": 1,
+                        "partitions": 2,
                         "replicas": 3,
                         "config": {
                           "retention.ms": 604800000,
@@ -920,7 +920,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "numThreads": {
                       "type": "number",
-                      "default": 1
+                      "default": 0
                     },
                     "tls": {
                       "oneOf": [
@@ -1451,7 +1451,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "default": {
-                        "partitions": 1,
+                        "partitions": 2,
                         "replicas": 3,
                         "config": {
                           "retention.ms": 604800000,
@@ -2960,7 +2960,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "default": {
-                        "partitions": 1,
+                        "partitions": 2,
                         "replicas": 3,
                         "config": {
                           "retention.ms": 604800000,
@@ -3084,17 +3084,69 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                       "changeRestriction": "impossible"
                     },
-                    "lookaheadTimeSeconds": {
-                      "type": "number",
-                      "default": 400
-                    },
                     "maxConcurrentRequests": {
-                      "type": "number",
-                      "default": 10000
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Maximum number of target HTTP requests that can be in flight simultaneously."
                     },
                     "numClientThreads": {
-                      "type": "number",
+                      "type": "integer",
+                      "minimum": 0,
                       "default": 0
+                    },
+                    "cancellationGraceMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 1000
+                    },
+                    "kafkaQuietWindowMs": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 60000
+                    },
+                    "targetRetryMaxDelayMs": {
+                      "type": "integer",
+                      "minimum": 100,
+                      "default": 30000
+                    },
+                    "targetRetryBudgetRatio": {
+                      "type": "number",
+                      "minimum": 0,
+                      "default": 0.2
+                    },
+                    "targetRetryBudgetFloorPerSecond": {
+                      "type": "number",
+                      "default": 50
+                    },
+                    "targetConnectionInitialRate": {
+                      "type": "number",
+                      "minimum": 0,
+                      "default": 200
+                    },
+                    "catchUpFactor": {
+                      "type": "number",
+                      "minimum": 0,
+                      "default": 2
+                    },
+                    "heartbeatExpirationIntervalSeconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 30
+                    },
+                    "maximumBackwardSkewSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 5
+                    },
+                    "sourceResponseRetryWindowSeconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 5
+                    },
+                    "readyRequestsBufferPerThread": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 2
                     },
                     "nonRetryableDocExceptionTypes": {
                       "type": "array",
@@ -3103,10 +3155,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
                     },
-                    "observedPacketConnectionTimeout": {
-                      "type": "number",
-                      "default": 360
-                    },
                     "otelTraceCollectorEndpoint": {
                       "type": "string",
                       "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317')."
@@ -3114,10 +3162,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "otelMetricsCollectorEndpoint": {
                       "type": "string",
                       "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
-                    },
-                    "quiescentPeriodMs": {
-                      "type": "number",
-                      "default": 5000
                     },
                     "removeAuthHeader": {
                       "type": "boolean",
@@ -5571,7 +5615,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "destinationConnectionPoolSize": {
                     "type": "number",
                     "default": 0,
-                    "description": "Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."
+                    "description": "Number of warm destination connections maintained per Netty worker thread. 0 disables the warm pool and opens destination connections on demand."
                   },
                   "destinationConnectionPoolTimeout": {
                     "type": "string",
@@ -5613,8 +5657,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "numThreads": {
                     "type": "number",
-                    "default": 1,
-                    "description": "Number of Netty worker threads for the proxy to handle concurrent connections."
+                    "default": 0,
+                    "description": "Number of Netty worker threads for the proxy to handle concurrent connections. 0 uses Netty's processor-aware default."
                   },
                   "tls": {
                     "oneOf": [
@@ -6120,20 +6164,81 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                     "changeRestriction": "impossible"
                   },
-                  "lookaheadTimeSeconds": {
-                    "type": "number",
-                    "default": 400,
-                    "description": "Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."
-                  },
                   "maxConcurrentRequests": {
-                    "type": "number",
-                    "default": 10000,
-                    "description": "Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum number of target HTTP requests that can be in flight simultaneously."
                   },
                   "numClientThreads": {
-                    "type": "number",
+                    "type": "integer",
+                    "minimum": 0,
                     "default": 0,
-                    "description": "Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."
+                    "description": "Number of target Netty event-loop threads. 0 uses Netty's default of 2 times the available processors."
+                  },
+                  "cancellationGraceMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1000,
+                    "description": "Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown."
+                  },
+                  "kafkaQuietWindowMs": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 60000,
+                    "description": "Milliseconds Kafka consumer-group membership must stop growing before partitions are rebalanced across new replayers. Replacements for departed replayers are filled immediately. Also the delay before the first assignment after the whole replayer fleet starts. Must be greater than cancellationGraceMs."
+                  },
+                  "targetRetryMaxDelayMs": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "default": 30000,
+                    "description": "Upper bound in milliseconds on one request's jittered exponential backoff between target attempts."
+                  },
+                  "targetRetryBudgetRatio": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 0.2,
+                    "description": "Sustained target retries allowed per first attempt across each replayer process. Retries beyond the budget wait for it, so retry load stays proportional to the replayed load."
+                  },
+                  "targetRetryBudgetFloorPerSecond": {
+                    "type": "number",
+                    "default": 50,
+                    "description": "Target retries per second always allowed in each replayer process, so a process whose requests are all retrying still makes progress."
+                  },
+                  "targetConnectionInitialRate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 200,
+                    "description": "Starting allowance, in new target connections per second, for each replayer process's adaptive connection limiter. The allowance halves when connects or TLS handshakes fail and grows while they succeed. 0 disables the limiter."
+                  },
+                  "catchUpFactor": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 2,
+                    "description": "How many times faster than the normal schedule a newly assigned partition replays work that is already overdue. 0 sends overdue work immediately."
+                  },
+                  "heartbeatExpirationIntervalSeconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 30,
+                    "description": "Broker-time heartbeat expiration interval E in seconds."
+                  },
+                  "maximumBackwardSkewSeconds": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 5,
+                    "description": "Maximum permitted Kafka broker timestamp regression S in seconds."
+                  },
+                  "sourceResponseRetryWindowSeconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 5,
+                    "description": "Broker-time source-response retry window W in seconds."
+                  },
+                  "readyRequestsBufferPerThread": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 2,
+                    "description": "Retry-ready request buffer target P for each target Netty event-loop thread."
                   },
                   "nonRetryableDocExceptionTypes": {
                     "type": "array",
@@ -6141,11 +6246,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "type": "string"
                     },
                     "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
-                  },
-                  "observedPacketConnectionTimeout": {
-                    "type": "number",
-                    "default": 360,
-                    "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
                   },
                   "otelTraceExportEnabled": {
                     "type": "boolean",
@@ -6164,11 +6264,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "otelMetricsCollectorEndpoint": {
                     "type": "string",
                     "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317')."
-                  },
-                  "quiescentPeriodMs": {
-                    "type": "number",
-                    "default": 5000,
-                    "description": "Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."
                   },
                   "removeAuthHeader": {
                     "type": "boolean",

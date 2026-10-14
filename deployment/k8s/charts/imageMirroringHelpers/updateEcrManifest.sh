@@ -124,7 +124,7 @@ quay.io/strimzi/kafka-bridge:0.32.0
 quay.io/strimzi/kaniko-executor:0.47.0
 quay.io/strimzi/maven-builder:0.47.0
 quay.io/coreos/etcd:v3.5.12
-public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3
+public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0
 mirror.gcr.io/amazon/aws-cli:2.25.11
 mirror.gcr.io/amazon/aws-cli:latest
 RUNTIME

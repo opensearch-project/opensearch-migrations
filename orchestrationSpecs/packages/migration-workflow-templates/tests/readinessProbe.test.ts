@@ -7,7 +7,10 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
 
     function getResourceManifest(rendered: any, templateName: string): any {
         const manifest = getRawManifest(rendered, templateName)
-            .replace(/^(\s*)(volumeMounts|volumes): \{\{=.*$/gm, "$1$2: []");
+            .replace(
+                /^(\s*)(nodeSelector|tolerations|topologySpreadConstraints|volumeMounts|volumes): \{\{=.*$/gm,
+                "$1$2: []",
+            );
         return yaml.load(manifest);
     }
 
@@ -32,7 +35,6 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
         expect(typeof mrs).toBe("number");
         expect(mrs).toBeGreaterThanOrEqual(1);
     }
-
 
     it("deployProxyDeployment container has a tcpSocket readinessProbe on listenPort with minReadySeconds", () => {
         const deployment = getResourceManifest(setupCapture, "deployproxydeployment");

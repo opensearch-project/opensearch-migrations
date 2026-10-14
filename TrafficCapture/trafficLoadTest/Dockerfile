@@ -24,6 +24,11 @@ COPY lib/sigv4.js /tmp/sigv4/lib/sigv4.js
 COPY tests/sigv4.js /tmp/sigv4/tests/sigv4.js
 RUN /tmp/k6 run --quiet /tmp/sigv4/tests/sigv4.js
 
+COPY lib/ /tmp/sequences/lib/
+COPY k6-config/ /tmp/sequences/k6-config/
+COPY tests/sequences.js /tmp/sequences/tests/sequences.js
+RUN /tmp/k6 run --quiet /tmp/sequences/tests/sequences.js
+
 FROM grafana/k6:2.2.0
 
 COPY --from=builder /tmp/k6 /usr/bin/k6

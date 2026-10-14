@@ -93,7 +93,7 @@ build_local_images() {
 
   print_step "Building container images for ${platform}"
   # buildKitLoadTestAll_* is listed separately: buildImagesToRegistry_* no longer builds the k6
-  # scripts image, because load-test images are their own aggregate (see buildImages/build.gradle).
+  # runner or patched operator, because load-test images are their own aggregate.
   # Load-test cases (Test008x) need it in the registry before the k6LoadTest chart can run.
   gradlew ":buildImages:buildImagesToRegistry_${platform}" \
     ":buildImages:buildKitLoadTestAll_${platform}" \

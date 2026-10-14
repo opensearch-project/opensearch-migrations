@@ -1,136 +1,3166 @@
+{{- if .Values.metrics.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: prometheus-metrics-dashboard
+  name: capture-replay-observability-dashboard
   labels:
-    grafana_dashboard: "1" # Required label for Grafana to pick-up dashboard
+    grafana_dashboard: "1"
 data:
-  prometheus-metrics-dashboard.json: |
+  capture-replay-observability.json: |
     {
       "id": null,
-      "title": "Prometheus Metrics Dashboard",
-      "tags": [],
+      "uid": "capture-replay-observability",
+      "title": "Capture and Replay Observability",
+      "tags": [
+        "capture",
+        "replay",
+        "kubernetes"
+      ],
       "timezone": "browser",
-      "schemaVersion": 30,
-      "version": 1,
-      "refresh": "5s",
+      "schemaVersion": 39,
+      "version": 4,
+      "refresh": "15s",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
       "panels": [
         {
-          "type": "graph",
-          "title": "CPU Usage",
-          "datasource": "Prometheus",
-          "targets": [
-            {
-              "expr": "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[5m])) by (instance)",
-              "legendFormat": "thing",
-              "refId": "A"
-            }
-          ],
-          "xaxis": {
-            "mode": "time"
-          },
-          "yaxes": [
-            {
-              "format": "percent",
-              "label": "CPU Usage"
-            }
-          ],
+          "type": "text",
+          "title": "",
           "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 0
-          }
-        },
-        {
-          "type": "graph",
-          "title": "Memory Usage",
-          "datasource": "Prometheus",
-          "targets": [
-            {
-              "expr": "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
-              "legendFormat": "Memory Usage",
-              "refId": "A"
-            }
-          ],
-          "xaxis": {
-            "mode": "time"
-          },
-          "yaxes": [
-            {
-              "format": "percent",
-              "label": "Memory Usage"
-            }
-          ],
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 0
-          }
-        },
-        {
-          "type": "graph",
-          "title": "Disk I/O",
-          "datasource": "Prometheus",
-          "targets": [
-            {
-              "expr": "rate(node_disk_io_time_seconds_total[5m])",
-              "legendFormat": "thing - thing2",
-              "refId": "A"
-            }
-          ],
-          "xaxis": {
-            "mode": "time"
-          },
-          "yaxes": [
-            {
-              "format": "s",
-              "label": "I/O Time"
-            }
-          ],
-          "gridPos": {
-            "h": 8,
+            "h": 2,
             "w": 24,
             "x": 0,
-            "y": 8
-          }
+            "y": 0
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "**How to read this dashboard.** Prometheus twin of the CloudWatch *capture-replay* dashboard, same layout. Rates are fleet totals per second. Gauges marked *fleet* are sums over per-process series (pod_uuid); *hottest pod* is the largest single process. Per-process series from restarted pods linger up to 5 minutes (exporter metric_expiration), so fleet gauge sums can briefly over-count after churn. Durations show the windowed mean; p95 lines come from buckets topped at 10 s. MiB = 1,048,576 bytes. AWS/ES domain and NLB panels are CloudWatch-only. Proxy panels are empty when the capture proxy is scaled to 0."
+          },
+          "id": 1
         },
         {
-          "type": "singlestat",
-          "title": "Total Requests",
-          "datasource": "Prometheus",
+          "type": "stat",
+          "title": "Captured requests/s",
+          "description": "Fully parsed HTTP requests observed by the capture proxy, fleet total per second. Empty when the proxy is scaled to 0.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "targets": [
             {
-              "expr": "sum(rate(http_requests_total[5m]))",
-              "refId": "A"
+              "refId": "A",
+              "expr": "sum(rate(fullRequest_count_total[$__rate_interval]))",
+              "legendFormat": "Captured req/s"
             }
           ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "min": 0
+            },
+            "overrides": []
+          },
           "gridPos": {
-            "h": 4,
+            "h": 3,
+            "w": 3,
+            "x": 0,
+            "y": 2
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "none",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "textMode": "value_and_name"
+          },
+          "id": 2
+        },
+        {
+          "type": "stat",
+          "title": "Replayed tuples/s",
+          "description": "Source/target tuples compared by the replayers (tupleComparison), fleet total per second, including tuples whose source response is missing.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(tupleComparison_total[$__rate_interval]))",
+              "legendFormat": "Replayed tuples/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 4,
+            "x": 3,
+            "y": 2
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "none",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "textMode": "value_and_name"
+          },
+          "id": 3
+        },
+        {
+          "type": "stat",
+          "title": "Mean replay lag (s)",
+          "description": "Windowed mean of lagBetweenSourceAndTargetRequests (sum/count rates), in seconds.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Mean lag (s)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 3,
+            "x": 7,
+            "y": 2
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "none",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "textMode": "value_and_name"
+          },
+          "id": 4
+        },
+        {
+          "type": "stat",
+          "title": "Catch-up ETA to floor (hours)",
+          "description": "Hours for the 5-minute mean replay lag to reach the selected floor at the current lag-reduction rate; 0 when lag is already at or below it.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(((((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) - ${catchup_floor_seconds:raw}) / 3600) / (-deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]))) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) > ${catchup_floor_seconds:raw}) and on() (deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]) < -0.01)) or on() (0 * (sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) <= ${catchup_floor_seconds:raw}))",
+              "legendFormat": "Hours to floor (0 = caught up)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "h",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 3,
+            "x": 10,
+            "y": 2
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "none",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "textMode": "value_and_name"
+          },
+          "id": 5
+        },
+        {
+          "type": "stat",
+          "title": "Actual speedup (5 min)",
+          "description": "1 minus the 10-minute derivative of the 5-minute mean replay lag. Above 1 means replay is gaining on real time; 1 is real time; below 1 means lag is growing.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "1 - deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m])",
+              "legendFormat": "Speedup"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 3,
+            "x": 13,
+            "y": 2
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "none",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "textMode": "value_and_name"
+          },
+          "id": 6
+        },
+        {
+          "type": "stat",
+          "title": "Status-code match %",
+          "description": "Matching tuples divided by all tuples (including those without a source response), over the rate window.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * sum(rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval])) / sum(rate(tupleComparison_total[$__rate_interval]))",
+              "legendFormat": "Match %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 4,
+            "x": 16,
+            "y": 2
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "none",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "textMode": "value_and_name"
+          },
+          "id": 7
+        },
+        {
+          "type": "text",
+          "title": "Target CPU / JVM pressure (max node %)",
+          "gridPos": {
+            "h": 3,
+            "w": 4,
+            "x": 20,
+            "y": 2
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "CloudWatch-only: AWS/ES `CPUUtilization` / `JVMMemoryPressure` for the target domain are not in Prometheus."
+          },
+          "id": 8
+        },
+        {
+          "type": "row",
+          "title": "End-to-end flow",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 5
+          },
+          "panels": [],
+          "id": 9
+        },
+        {
+          "type": "timeseries",
+          "title": "Requests through the pipeline (per second)",
+          "description": "Fleet-total per-second rates at each stage, from capture to tuple comparison.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(fullRequest_count_total[$__rate_interval]))",
+              "legendFormat": "Proxy requests captured/s"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(capturePublishingRecordsAccepted_records_total[$__rate_interval]))",
+              "legendFormat": "Proxy Kafka records published/s"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(kafkaSourceRecordsRead_records_total[$__rate_interval]))",
+              "legendFormat": "Replayer Kafka records read/s"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(targetTransactionCount_total[$__rate_interval]))",
+              "legendFormat": "Replayer target transactions/s"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(tupleComparison_total[$__rate_interval]))",
+              "legendFormat": "Tuples compared/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 6
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 10
+        },
+        {
+          "type": "timeseries",
+          "title": "Bytes through the pipeline (MiB/s)",
+          "description": "Application-observed bytes at each stage, MiB = 1,048,576 bytes. The CloudWatch version also plots the capture NLB's ProcessedBytes, which has no Prometheus source.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(bytesRead_bytes_total[$__rate_interval])) / 1048576",
+              "legendFormat": "Proxy request bytes (client → proxy)"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(bytesWritten_bytes_total[$__rate_interval])) / 1048576",
+              "legendFormat": "Proxy response bytes (proxy → client)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(capturePublishingBytesAccepted_bytes_total[$__rate_interval])) / 1048576",
+              "legendFormat": "Proxy → Kafka published"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(kafkaBytesRead_bytes_total[$__rate_interval])) / 1048576",
+              "legendFormat": "Kafka → replayer read"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(bytesWrittenToTarget_bytes_total[$__rate_interval])) / 1048576",
+              "legendFormat": "Replayer → target requests"
+            },
+            {
+              "refId": "F",
+              "expr": "sum(rate(bytesReadFromTarget_bytes_total[$__rate_interval])) / 1048576",
+              "legendFormat": "Target → replayer responses"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "suffix: MiB/s",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 6
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 11
+        },
+        {
+          "type": "timeseries",
+          "title": "Replay lag, schedule slip and speedup",
+          "description": "Windowed mean replay lag and schedule slip (histogram sum/count rates) with the selected catch-up floor; p95 lag from buckets. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it. Right axis: 1 minus the 10-minute derivative of the 5-minute mean lag (speedup ×).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[$__rate_interval])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Mean replay lag (s)"
+            },
+            {
+              "refId": "B",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(lagBetweenSourceAndTargetRequests_milliseconds_bucket[$__rate_interval]))) / 1000",
+              "legendFormat": "p95 replay lag (s)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(scheduleLag_milliseconds_sum[$__rate_interval])) / sum(rate(scheduleLag_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Mean schedule slip (s)"
+            },
+            {
+              "refId": "D",
+              "expr": "vector(${catchup_floor_seconds:raw})",
+              "legendFormat": "Catch-up floor (s)"
+            },
+            {
+              "refId": "E",
+              "expr": "1 - deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m])",
+              "legendFormat": "Actual speedup (5 min)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Actual speedup (5 min)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 6
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 12
+        },
+        {
+          "type": "row",
+          "title": "Throughput — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 13
+          },
+          "panels": [],
+          "id": 13
+        },
+        {
+          "type": "text",
+          "title": "",
+          "transparent": true,
+          "gridPos": {
+            "h": 1,
             "w": 6,
             "x": 0,
-            "y": 16
+            "y": 14
           },
-          "format": "none"
+          "options": {
+            "mode": "markdown",
+            "content": "### Capture proxy"
+          },
+          "id": 14
         },
         {
-          "type": "singlestat",
-          "title": "Up Time",
-          "datasource": "Prometheus",
-          "targets": [
-            {
-              "expr": "time() - node_boot_time_seconds",
-              "refId": "A"
-            }
-          ],
+          "type": "text",
+          "title": "",
+          "transparent": true,
           "gridPos": {
-            "h": 4,
+            "h": 1,
             "w": 6,
             "x": 6,
-            "y": 16
+            "y": 14
           },
-          "format": "s"
+          "options": {
+            "mode": "markdown",
+            "content": "### Kafka → replayer consumer"
+          },
+          "id": 15
+        },
+        {
+          "type": "text",
+          "title": "",
+          "transparent": true,
+          "gridPos": {
+            "h": 1,
+            "w": 6,
+            "x": 12,
+            "y": 14
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "### Replayer intake"
+          },
+          "id": 16
+        },
+        {
+          "type": "text",
+          "title": "",
+          "transparent": true,
+          "gridPos": {
+            "h": 1,
+            "w": 6,
+            "x": 18,
+            "y": 14
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "### Replayer → target"
+          },
+          "id": 17
+        },
+        {
+          "type": "timeseries",
+          "title": "Proxy → Kafka publishing",
+          "description": "Records accepted by the Kafka producer and acknowledged by Kafka, per second; right axis: records awaiting acknowledgement. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(capturePublishingRecordsAccepted_records_total[$__rate_interval]))",
+              "legendFormat": "Records accepted/s"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(capturePublishingCompletions_records_total{outcome=\"acknowledged\"}[$__rate_interval]))",
+              "legendFormat": "Acknowledged/s"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(capturePublishingRecordsAwaitingAcknowledgement_records)",
+              "legendFormat": "Records awaiting ack (fleet)"
+            },
+            {
+              "refId": "D",
+              "expr": "max(sum by (exported_instance) (capturePublishingRecordsAwaitingAcknowledgement_records))",
+              "legendFormat": "Records awaiting ack (hottest pod)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Records awaiting ack (fleet)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Records awaiting ack (hottest pod)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 0,
+            "y": 15
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 18
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer consumer: read vs committed (records/s)",
+          "description": "Kafka records read and committed by the replayers, and commit resolutions by outcome, per second.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(kafkaSourceRecordsRead_records_total[$__rate_interval]))",
+              "legendFormat": "Read/s"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(kafkaSourceRecordsCommitted_records_total[$__rate_interval]))",
+              "legendFormat": "Committed/s"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (outcome) (rate(kafkaSourceCommitResolutions_events_total[$__rate_interval]))",
+              "legendFormat": "Commit resolutions/s \u007b\u007boutcome\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 6,
+            "y": 15
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 19
+        },
+        {
+          "type": "timeseries",
+          "title": "Source response framing (per second)",
+          "description": "How captured source requests/responses were reconstituted and framed, per second.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(replayIntakeRequestsReconstituted_requests_total[$__rate_interval]))",
+              "legendFormat": "Requests reconstituted"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(replayIntakeResponsesProvenComplete_responses_total[$__rate_interval]))",
+              "legendFormat": "Responses proven complete"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(replayIntakeResponsesUnprovenComplete_responses_total[$__rate_interval]))",
+              "legendFormat": "Responses unproven complete"
+            },
+            {
+              "refId": "D",
+              "expr": "sum by (incompleteReason) (rate(replayIntakeResponsesIncomplete_responses_total[$__rate_interval]))",
+              "legendFormat": "Incomplete \u007b\u007bincompleteReason\u007d\u007d"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(replayIntakeSourceConnectionsExpired_connections_total[$__rate_interval]))",
+              "legendFormat": "Source connections expired"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 15
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 20
+        },
+        {
+          "type": "timeseries",
+          "title": "Target connections",
+          "description": "Open target connections (fleet total gauge); right axis: connection lifecycle events per second. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(activeTargetConnections)",
+              "legendFormat": "Open target connections (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(connectionsOpened_total[$__rate_interval]))",
+              "legendFormat": "Opened/s"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(connectionsClosedCount_total[$__rate_interval]))",
+              "legendFormat": "Closed/s"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(requestConnectingExceptionCount_total[$__rate_interval]))",
+              "legendFormat": "Connect exceptions/s"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(nonRetryableConnectionFailures_total[$__rate_interval]))",
+              "legendFormat": "Non-retryable failures/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Opened/s"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ops"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Closed/s"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ops"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Connect exceptions/s"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ops"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Non-retryable failures/s"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ops"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 15
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 21
+        },
+        {
+          "type": "row",
+          "title": "Backlog — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 22
+          },
+          "panels": [],
+          "id": 22
+        },
+        {
+          "type": "timeseries",
+          "title": "Proxy connections and writers",
+          "description": "Fleet totals of client connections and writer routing state, the hottest pod's connections, and connection closes per second by reason. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(captureConnectionsActive_connections)",
+              "legendFormat": "Client connections (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "max(sum by (exported_instance) (captureConnectionsActive_connections))",
+              "legendFormat": "Client connections (hottest pod)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(captureWritersActive_writers)",
+              "legendFormat": "Active writers (fleet)"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(captureWritersDraining_writers)",
+              "legendFormat": "Draining writers (fleet)"
+            },
+            {
+              "refId": "E",
+              "expr": "sum by (reason) (rate(captureConnectionCloses_connections_total[$__rate_interval]))",
+              "legendFormat": "Closes/s \u007b\u007breason\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 23
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 23
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka backlog behind the replayers (records)",
+          "description": "Unread lag = end offset minus position over each replayer's assigned partitions (kafkaSourceConsumerLag), summed across the fleet; uncommitted backlog adds records the replayers hold but have not committed. Right axis: assigned partitions whose lag is unknown. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(kafkaSourceConsumerLag_records)",
+              "legendFormat": "Unread lag (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(kafkaSourceConsumerLag_records) + sum(kafkaSourceRecordsOutstanding_records)",
+              "legendFormat": "Uncommitted backlog = unread + held (fleet)"
+            },
+            {
+              "refId": "C",
+              "expr": "max(kafkaSourceMaxPartitionLag_records)",
+              "legendFormat": "Largest single-partition lag"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(kafkaSourceLagUnknownPartitions_partitions)",
+              "legendFormat": "Partitions with unknown lag"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Partitions with unknown lag"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 23
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 24
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer in-flight work (fleet total)",
+          "description": "Fleet totals of replayer in-flight populations. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(replayActiveContexts_contexts)",
+              "legendFormat": "Active contexts (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(replayActiveOwnerOperations_operations)",
+              "legendFormat": "Owner operations (fleet)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(replayLongRunningOwnerOperations_operations)",
+              "legendFormat": "Long-running owner operations (fleet)"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(replayIntakeActiveRecordTrackers_records)",
+              "legendFormat": "Record trackers (fleet)"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(replayIntakeRetryReadyRequestSupply_requests)",
+              "legendFormat": "Retry-ready request supply (fleet)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 23
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 25
+        },
+        {
+          "type": "timeseries",
+          "title": "Target permits and retries",
+          "description": "Active and pending target-attempt permits (fleet totals); right axis: retries, exhausted retries and attempts without a response, per second. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(targetAttemptPermitsActive_permits)",
+              "legendFormat": "Permits active (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(targetAttemptPermitAcquisitionsPending_requests)",
+              "legendFormat": "Permits pending (fleet)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(numRetriedRequests_count_total[$__rate_interval]))",
+              "legendFormat": "Retried requests/s"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(targetRetriesExhausted_requests_total[$__rate_interval]))",
+              "legendFormat": "Retries exhausted/s"
+            },
+            {
+              "refId": "E",
+              "expr": "sum by (noResponseKind) (rate(targetAttemptsWithoutResponse_attempts_total[$__rate_interval]))",
+              "legendFormat": "No response/s \u007b\u007bnoResponseKind\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Retried requests/s"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ops"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Retries exhausted/s"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ops"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "No response/s \u007b\u007bnoResponseKind\u007d\u007d"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ops"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 23
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 26
+        },
+        {
+          "type": "row",
+          "title": "Latency / age — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 31
+          },
+          "panels": [],
+          "id": 27
+        },
+        {
+          "type": "timeseries",
+          "title": "Proxy latency (mean ms)",
+          "description": "Windowed means (histogram sum/count rates) plus p95 of Kafka publish → ack. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(gatheringRequestDuration_milliseconds_sum[$__rate_interval])) / sum(rate(gatheringRequestDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Gather request"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(gatheringResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(gatheringResponseDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Gather response (source latency)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(kafkaCommitDuration_milliseconds_sum[$__rate_interval])) / sum(rate(kafkaCommitDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Kafka publish → ack"
+            },
+            {
+              "refId": "D",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(kafkaCommitDuration_milliseconds_bucket[$__rate_interval])))",
+              "legendFormat": "Kafka publish → ack p95"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 0,
+            "y": 32
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 28
+        },
+        {
+          "type": "timeseries",
+          "title": "Commit-head age (seconds since broker append)",
+          "description": "Age of the oldest uncommitted commit head on any partition (max) and the median across replayer processes; right axis: partitions whose head has been held for more than 5 minutes. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(kafkaSourceOldestCommitHeadAge_milliseconds) / 1000",
+              "legendFormat": "Oldest head (any pod)"
+            },
+            {
+              "refId": "B",
+              "expr": "quantile(0.5, max by (exported_instance) (kafkaSourceOldestCommitHeadAge_milliseconds)) / 1000",
+              "legendFormat": "Oldest head per pod (p50 across pods)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(kafkaSourceStaleCommitHeadPartitions_partitions)",
+              "legendFormat": "Partitions with head held > 5 min (fleet)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Partitions with head held > 5 min (fleet)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 6,
+            "y": 32
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 29
+        },
+        {
+          "type": "timeseries",
+          "title": "Oldest work (hottest pod, seconds)",
+          "description": "Age of the oldest open replay context and of the oldest held Kafka record on the hottest process. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(replayOldestContextAge_milliseconds) / 1000",
+              "legendFormat": "Oldest context"
+            },
+            {
+              "refId": "B",
+              "expr": "max(replayOldestKafkaRecordAge_milliseconds) / 1000",
+              "legendFormat": "Oldest Kafka record"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 32
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 30
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer → target latency (mean seconds)",
+          "description": "Windowed means (histogram sum/count rates) of each target-request phase, plus p95 target transaction. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(targetTransactionDuration_milliseconds_sum[$__rate_interval])) / sum(rate(targetTransactionDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Target transaction"
+            },
+            {
+              "refId": "B",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(targetTransactionDuration_milliseconds_bucket[$__rate_interval]))) / 1000",
+              "legendFormat": "Target transaction p95"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(requestConnectingDuration_milliseconds_sum[$__rate_interval])) / sum(rate(requestConnectingDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Connect"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(requestSendingDuration_milliseconds_sum[$__rate_interval])) / sum(rate(requestSendingDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Send"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(waitingForResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Wait for response"
+            },
+            {
+              "refId": "F",
+              "expr": "sum(rate(receivingResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(receivingResponseDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Receive response"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 32
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 31
+        },
+        {
+          "type": "row",
+          "title": "Skew across pods (p10 / p50 / p90 / max) — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 39
+          },
+          "panels": [],
+          "id": 32
+        },
+        {
+          "type": "timeseries",
+          "title": "Proxy skew: client connections per pod",
+          "description": "Distribution of active client connections across capture-proxy processes. Each process is one exported_instance (pod_uuid); per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so a restarted pod can briefly appear twice after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "quantile(0.1, sum by (exported_instance) (captureConnectionsActive_connections))",
+              "legendFormat": "p10"
+            },
+            {
+              "refId": "B",
+              "expr": "quantile(0.5, sum by (exported_instance) (captureConnectionsActive_connections))",
+              "legendFormat": "p50"
+            },
+            {
+              "refId": "C",
+              "expr": "quantile(0.9, sum by (exported_instance) (captureConnectionsActive_connections))",
+              "legendFormat": "p90"
+            },
+            {
+              "refId": "D",
+              "expr": "max(sum by (exported_instance) (captureConnectionsActive_connections))",
+              "legendFormat": "max"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 0,
+            "y": 40
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 33
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer skew: partitions owned per pod",
+          "description": "Distribution of assigned Kafka partitions across replayer processes. Each process is one exported_instance (pod_uuid); per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so a restarted pod can briefly appear twice after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "quantile(0.1, sum by (exported_instance) (kafkaSourceAssignedPartitions_partitions))",
+              "legendFormat": "p10"
+            },
+            {
+              "refId": "B",
+              "expr": "quantile(0.5, sum by (exported_instance) (kafkaSourceAssignedPartitions_partitions))",
+              "legendFormat": "p50"
+            },
+            {
+              "refId": "C",
+              "expr": "quantile(0.9, sum by (exported_instance) (kafkaSourceAssignedPartitions_partitions))",
+              "legendFormat": "p90"
+            },
+            {
+              "refId": "D",
+              "expr": "max(sum by (exported_instance) (kafkaSourceAssignedPartitions_partitions))",
+              "legendFormat": "max"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 6,
+            "y": 40
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 34
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer skew: Kafka records read per pod-second",
+          "description": "Distribution of per-process Kafka read rates (records/s) across replayers. Each process is one exported_instance (pod_uuid); per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so a restarted pod can briefly appear twice after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "quantile(0.1, sum by (exported_instance) (rate(kafkaSourceRecordsRead_records_total[$__rate_interval])))",
+              "legendFormat": "p10"
+            },
+            {
+              "refId": "B",
+              "expr": "quantile(0.5, sum by (exported_instance) (rate(kafkaSourceRecordsRead_records_total[$__rate_interval])))",
+              "legendFormat": "p50"
+            },
+            {
+              "refId": "C",
+              "expr": "quantile(0.9, sum by (exported_instance) (rate(kafkaSourceRecordsRead_records_total[$__rate_interval])))",
+              "legendFormat": "p90"
+            },
+            {
+              "refId": "D",
+              "expr": "max(sum by (exported_instance) (rate(kafkaSourceRecordsRead_records_total[$__rate_interval])))",
+              "legendFormat": "max"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 40
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 35
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer skew: active target permits per pod",
+          "description": "Distribution of active target-attempt permits across replayer processes. Each process is one exported_instance (pod_uuid); per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so a restarted pod can briefly appear twice after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "quantile(0.1, sum by (exported_instance) (targetAttemptPermitsActive_permits))",
+              "legendFormat": "p10"
+            },
+            {
+              "refId": "B",
+              "expr": "quantile(0.5, sum by (exported_instance) (targetAttemptPermitsActive_permits))",
+              "legendFormat": "p50"
+            },
+            {
+              "refId": "C",
+              "expr": "quantile(0.9, sum by (exported_instance) (targetAttemptPermitsActive_permits))",
+              "legendFormat": "p90"
+            },
+            {
+              "refId": "D",
+              "expr": "max(sum by (exported_instance) (targetAttemptPermitsActive_permits))",
+              "legendFormat": "max"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 40
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 36
+        },
+        {
+          "type": "row",
+          "title": "Faults — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 47
+          },
+          "panels": [],
+          "id": 37
+        },
+        {
+          "type": "timeseries",
+          "title": "Proxy faults (per minute)",
+          "description": "Fault counter increases per minute (rate × 60); zero when a counter has never incremented.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(sum(rate(capturePublisherFailures_failures_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Publisher failures"
+            },
+            {
+              "refId": "B",
+              "expr": "(sum(rate(captureWritesRejected_writes_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Writes rejected"
+            },
+            {
+              "refId": "C",
+              "expr": "(sum(rate(captureHeartbeatDeadlineViolations_violations_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Heartbeat deadline violations"
+            },
+            {
+              "refId": "D",
+              "expr": "(sum(rate(gatheringRequestExceptionCount_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Request exceptions"
+            },
+            {
+              "refId": "E",
+              "expr": "(sum(rate(gatheringResponseExceptionCount_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Source response exceptions"
+            },
+            {
+              "refId": "F",
+              "expr": "(sum(rate(kafkaCommitExceptionCount_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Kafka commit exceptions"
+            },
+            {
+              "refId": "G",
+              "expr": "(sum(rate(capturePublishingCompletions_records_total{outcome=\"failed\"}[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Failed publications"
+            },
+            {
+              "refId": "H",
+              "expr": "sum(captureGapActive_processes) or vector(0)",
+              "legendFormat": "Processes with an active capture gap"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 0,
+            "y": 48
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 38
+        },
+        {
+          "type": "timeseries",
+          "title": "Consumer-group churn (per minute)",
+          "description": "Consumer-group churn counter increases per minute (rate × 60), plus the fleet total of commit-uncertain partitions (gauge). Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(sum(rate(rebalanceCallbackCount_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Rebalance callbacks"
+            },
+            {
+              "refId": "B",
+              "expr": "(sum(rate(kafkaSourceGenerationsRetired_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Generations retired"
+            },
+            {
+              "refId": "C",
+              "expr": "(sum(rate(kafkaSourceRevocationsReachingDeadline_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Revocations reaching deadline"
+            },
+            {
+              "refId": "D",
+              "expr": "(sum(rate(kafkaSourceRecordsCancelled_records_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Records cancelled"
+            },
+            {
+              "refId": "E",
+              "expr": "(sum(rate(kafkaSourceRecordsAbandonedAtRevocation_records_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Records abandoned at revocation"
+            },
+            {
+              "refId": "F",
+              "expr": "sum(replayKafkaCommitUncertainPartitions_partitions) or vector(0)",
+              "legendFormat": "Commit-uncertain partitions (fleet)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 6,
+            "y": 48
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 39
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer invariant and fatal failures (per minute)",
+          "description": "Fatal / safety counter increases per minute (rate × 60); zero when a counter has never incremented.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(sum(rate(replayFatalFailures_failures_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Fatal failures"
+            },
+            {
+              "refId": "B",
+              "expr": "(sum(rate(replayIntakeCaptureProtocolViolations_violations_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Capture protocol violations"
+            },
+            {
+              "refId": "C",
+              "expr": "(sum(rate(resourceOwnershipInvariantFailures_failures_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Ownership invariant failures"
+            },
+            {
+              "refId": "D",
+              "expr": "(sum(rate(replayIntakeStaleGenerationInputsIgnored_inputs_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Stale-generation inputs ignored"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 48
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 40
+        },
+        {
+          "type": "text",
+          "title": "Target domain health (TARGET_DOMAIN)",
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 48
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "This panel exists only on the CloudWatch dashboard: it reads AWS/ES domain metrics (CPUUtilization, JVMMemoryPressure, ThreadpoolWriteQueue, ThreadpoolWriteRejected, 5xx, IndexingLatency) for the target domain, which are not exported to Prometheus. Open the CloudWatch capture-replay dashboard and pick the domain there."
+          },
+          "id": 41
+        },
+        {
+          "type": "row",
+          "title": "Compute — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 55
+          },
+          "panels": [],
+          "id": 42
+        },
+        {
+          "type": "timeseries",
+          "title": "Capture proxy CPU and memory",
+          "description": "cAdvisor metrics for container \"proxy\" in $namespace (OTel-collector re-export only, so nothing is double counted). Right axis: working-set bytes, average and hottest pod.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}[$__rate_interval]))",
+              "legendFormat": "CPU cores (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "avg(sum by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Working set (avg pod)"
+            },
+            {
+              "refId": "C",
+              "expr": "max(sum by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Working set (hottest pod)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Working set (avg pod)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Working set (hottest pod)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 0,
+            "y": 56
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 43
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka broker CPU and disk (EBS) throughput",
+          "description": "Broker CPU cores (fleet) and cAdvisor filesystem throughput for the kafka containers; right axis MiB/s, fleet totals and the busiest (pod, device) volume.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"kafka\",container!=\"POD\",image!=\"\"}[$__rate_interval]))",
+              "legendFormat": "CPU cores (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(sum by (pod, device) (rate(container_fs_writes_bytes_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"kafka\",container!=\"POD\",image!=\"\"}[$__rate_interval]))) / 1048576",
+              "legendFormat": "Disk writes (fleet)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(sum by (pod, device) (rate(container_fs_reads_bytes_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"kafka\",container!=\"POD\",image!=\"\"}[$__rate_interval]))) / 1048576",
+              "legendFormat": "Disk reads (fleet)"
+            },
+            {
+              "refId": "D",
+              "expr": "max(sum by (pod, device) (rate(container_fs_writes_bytes_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"kafka\",container!=\"POD\",image!=\"\"}[$__rate_interval]))) / 1048576",
+              "legendFormat": "Disk writes (busiest volume)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Disk writes (fleet)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "suffix: MiB/s"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Disk reads (fleet)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "suffix: MiB/s"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Disk writes (busiest volume)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "suffix: MiB/s"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 6,
+            "y": 56
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 44
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer CPU and memory",
+          "description": "cAdvisor metrics for container \"replayer\" in $namespace (OTel-collector re-export only, so nothing is double counted). Right axis: working-set bytes, average and hottest pod.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"replayer\",container!=\"POD\",image!=\"\"}[$__rate_interval]))",
+              "legendFormat": "CPU cores (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "avg(sum by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"replayer\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Working set (avg pod)"
+            },
+            {
+              "refId": "C",
+              "expr": "max(sum by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"replayer\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Working set (hottest pod)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Working set (avg pod)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Working set (hottest pod)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 56
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 45
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka poll and commit timing (mean ms)",
+          "description": "Windowed means (histogram sum/count rates) plus p95 poll duration. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(kafkaPollDuration_milliseconds_sum[$__rate_interval])) / sum(rate(kafkaPollDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Poll"
+            },
+            {
+              "refId": "B",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(kafkaPollDuration_milliseconds_bucket[$__rate_interval])))",
+              "legendFormat": "Poll p95"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(commitDuration_milliseconds_sum[$__rate_interval])) / sum(rate(commitDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Commit"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(rebalanceCallbackDuration_milliseconds_sum[$__rate_interval])) / sum(rate(rebalanceCallbackDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Rebalance callback"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 56
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 46
+        },
+        {
+          "type": "row",
+          "title": "Fleet size — Capture proxy | Kafka → replayer consumer | Replayer intake | Replayer → target",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 63
+          },
+          "panels": [],
+          "id": 47
+        },
+        {
+          "type": "timeseries",
+          "title": "Capture proxy pods and source domain nodes",
+          "description": "Capture proxy pods with a cAdvisor sample. Source domain node counts are CloudWatch-only (AWS/ES Nodes).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(count by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"proxy\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Proxy pods running"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 0,
+            "y": 64
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 48
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka broker pods",
+          "description": "Kafka broker pods with a cAdvisor sample.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(count by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"kafka\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Broker pods running"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 6,
+            "y": 64
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 49
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer pods",
+          "description": "Replayer pods with a cAdvisor sample.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(count by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"replayer\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Replayer pods running"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 64
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 50
+        },
+        {
+          "type": "text",
+          "title": "Target domain nodes",
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 64
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "This panel exists only on the CloudWatch dashboard: it reads the AWS/ES Nodes metric for the target domain, which is not exported to Prometheus."
+          },
+          "id": 51
+        },
+        {
+          "type": "row",
+          "title": "Correctness and result tuples",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 71
+          },
+          "panels": [],
+          "id": 52
+        },
+        {
+          "type": "timeseries",
+          "title": "Status-code match % (includes missing source responses)",
+          "description": "Matching tuples divided by all tuples, including tuples without a source response.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * sum(rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval])) / sum(rate(tupleComparison_total[$__rate_interval]))",
+              "legendFormat": "Match %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 0,
+            "y": 72
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 53
+        },
+        {
+          "type": "timeseries",
+          "title": "Status-code mismatches per graph period (source → target)",
+          "description": "Mismatched tuples counted in each graph interval by method and source → target status-code class (stacked); tuples without a source response are labelled as such.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "label_replace(sum by (method, sourceStatusCode, targetStatusCode) (increase(tupleComparison_total{statusCodesMatch=\"false\"}[$__interval])), \"sourceStatusCode\", \"no source response\", \"sourceStatusCode\", \"\")",
+              "legendFormat": "\u007b\u007bmethod\u007d\u007d \u007b\u007bsourceStatusCode\u007d\u007d → \u007b\u007btargetStatusCode\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 8,
+            "y": 72
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 54
+        },
+        {
+          "type": "timeseries",
+          "title": "Status-code matches per second",
+          "description": "Matching tuples per second by method and status-code class (stacked).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (method, targetStatusCode) (rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval]))",
+              "legendFormat": "\u007b\u007bmethod\u007d\u007d \u007b\u007btargetStatusCode\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 16,
+            "y": 72
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 55
+        },
+        {
+          "type": "timeseries",
+          "title": "Tuple durability (S3)",
+          "description": "Tuple writes accepted and made durable per second; right axis: writes pending (fleet total). Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(tupleDurabilityWritesAccepted_writes_total[$__rate_interval]))",
+              "legendFormat": "Accepted/s"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(tupleDurabilityWritesDurable_writes_total[$__rate_interval]))",
+              "legendFormat": "Durable/s"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(tupleDurabilityWritesPending_writes)",
+              "legendFormat": "Pending (fleet)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Pending (fleet)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 0,
+            "y": 78
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 56
+        },
+        {
+          "type": "timeseries",
+          "title": "Tuple durability latency (seconds)",
+          "description": "Windowed mean and p95 tuple write latency, and the oldest context still comparing results (pending tuple) on the hottest process. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(tupleDurabilityWriteLatency_milliseconds_sum[$__rate_interval])) / sum(rate(tupleDurabilityWriteLatency_milliseconds_count[$__rate_interval])) / 1000",
+              "legendFormat": "Mean write latency"
+            },
+            {
+              "refId": "B",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tupleDurabilityWriteLatency_milliseconds_bucket[$__rate_interval]))) / 1000",
+              "legendFormat": "p95 write latency"
+            },
+            {
+              "refId": "C",
+              "expr": "max(replayOldestContextAgeByActivity_milliseconds{activity=\"comparingResults\"}) / 1000",
+              "legendFormat": "Oldest pending tuple (hottest pod)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 8,
+            "y": 78
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 57
+        },
+        {
+          "type": "timeseries",
+          "title": "Tuple / S3 faults (per minute)",
+          "description": "Tuple and S3 fault counter increases per minute (rate × 60); zero when a counter has never incremented.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(sum(rate(tupleSinkUploadRetryAttempts_retries_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "S3 upload retries"
+            },
+            {
+              "refId": "B",
+              "expr": "(sum(rate(tupleSinkUploadRecoveries_objects_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "S3 upload recoveries"
+            },
+            {
+              "refId": "C",
+              "expr": "(sum(rate(tupleDurabilityRetries_retries_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Outer tuple retries"
+            },
+            {
+              "refId": "D",
+              "expr": "(sum(rate(tupleDurabilityWritesCancelled_writes_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Writes cancelled"
+            },
+            {
+              "refId": "E",
+              "expr": "(sum(rate(tupleDurabilityTerminalFailures_writes_total[$__rate_interval])) * 60) or vector(0)",
+              "legendFormat": "Terminal failures"
+            },
+            {
+              "refId": "F",
+              "expr": "sum(tupleSinkUploadsRetrying_objects) or vector(0)",
+              "legendFormat": "S3 objects awaiting retry (now)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 16,
+            "y": 78
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 58
+        },
+        {
+          "type": "row",
+          "title": "Source cluster and replayer internals",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 84
+          },
+          "panels": [],
+          "id": 59
+        },
+        {
+          "type": "text",
+          "title": "Source domain health (SOURCE_DOMAIN)",
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 0,
+            "y": 85
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "This panel exists only on the CloudWatch dashboard: it reads AWS/ES domain metrics (CPUUtilization, JVMMemoryPressure, ThreadpoolWriteQueue, ThreadpoolWriteRejected, 5xx) for the source domain, which are not exported to Prometheus. Open the CloudWatch capture-replay dashboard and pick the domain there."
+          },
+          "id": 60
+        },
+        {
+          "type": "timeseries",
+          "title": "Active contexts by activity (fleet total)",
+          "description": "Fleet total of active replay contexts by activity. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (activity) (replayActiveContextsByActivity_contexts)",
+              "legendFormat": "\u007b\u007bactivity\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 6,
+            "y": 85
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 61
+        },
+        {
+          "type": "timeseries",
+          "title": "Owner operations by type (fleet total)",
+          "description": "Fleet total of active owner operations by operation type. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (operationType) (replayActiveOwnerOperationsByType_operations)",
+              "legendFormat": "\u007b\u007boperationType\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 85
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 62
+        },
+        {
+          "type": "timeseries",
+          "title": "Replayer owned payload memory (fleet MiB)",
+          "description": "Fleet total of payload bytes owned by replayer resources, by resource type. Per-process series from restarted pods linger for up to the exporter's 5 minute metric_expiration, so fleet sums of gauges can briefly over-count after pod churn.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (resourceType) (resourceOwnedBytes_bytes)",
+              "legendFormat": "\u007b\u007bresourceType\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 85
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 63
+        },
+        {
+          "type": "timeseries",
+          "title": "OTel collector (telemetry pipeline) CPU and memory",
+          "description": "cAdvisor metrics for container \"otel-collector\" in $namespace (OTel-collector re-export only, so nothing is double counted). Right axis: working-set bytes, average and hottest pod.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"otel-collector\",container!=\"POD\",image!=\"\"}[$__rate_interval]))",
+              "legendFormat": "CPU cores (fleet)"
+            },
+            {
+              "refId": "B",
+              "expr": "avg(sum by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"otel-collector\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Working set (avg pod)"
+            },
+            {
+              "refId": "C",
+              "expr": "max(sum by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"otel-collector\",container!=\"POD\",image!=\"\"}))",
+              "legendFormat": "Working set (hottest pod)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Working set (avg pod)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Working set (hottest pod)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 92
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 64
+        },
+        {
+          "type": "timeseries",
+          "title": "Catch-up ETA to floor (hours)",
+          "description": "Hours for the 5-minute mean replay lag to reach the selected floor at the current 10-minute lag-reduction rate; 0 when lag is already at or below the floor. Gaps are intentional while lag is above the floor and not falling by more than 0.01 s/s. This is not a Kafka backlog drain time.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(((((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) - ${catchup_floor_seconds:raw}) / 3600) / (-deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]))) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) > ${catchup_floor_seconds:raw}) and on() (deriv((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000)[10m:1m]) < -0.01)) or on() (0 * (sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) and on() ((sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_sum[5m])) / sum(rate(lagBetweenSourceAndTargetRequests_milliseconds_count[5m])) / 1000) <= ${catchup_floor_seconds:raw}))",
+              "legendFormat": "Hours to floor at current reduction rate"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "h",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 92
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 65
+        },
+        {
+          "type": "timeseries",
+          "title": "Intake demand (backpressure)",
+          "description": "Intake demand evaluations per second by demand state (stacked).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (demandState) (rate(replayIntakeDemandEvaluations_evaluations_total[$__rate_interval]))",
+              "legendFormat": "\u007b\u007bdemandState\u007d\u007d/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 92
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 66
         }
-      ]
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "DS_PROMETHEUS",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {}
+          },
+          {
+            "name": "catchup_floor_seconds",
+            "type": "custom",
+            "label": "Catch-up lag floor",
+            "query": "1 second : 1,5 seconds : 5,1 minute : 60",
+            "current": {
+              "selected": true,
+              "text": "5 seconds",
+              "value": "5"
+            },
+            "options": [
+              {
+                "selected": false,
+                "text": "1 second",
+                "value": "1"
+              },
+              {
+                "selected": true,
+                "text": "5 seconds",
+                "value": "5"
+              },
+              {
+                "selected": false,
+                "text": "1 minute",
+                "value": "60"
+              }
+            ],
+            "includeAll": false,
+            "multi": false
+          },
+          {
+            "name": "namespace",
+            "type": "query",
+            "label": "Namespace",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "definition": "label_values(container_cpu_usage_seconds_total{container=\"replayer\"}, namespace)",
+            "query": {
+              "query": "label_values(container_cpu_usage_seconds_total{container=\"replayer\"}, namespace)",
+              "refId": "PrometheusVariableQueryEditor-VariableQuery"
+            },
+            "current": {
+              "selected": true,
+              "text": "ma",
+              "value": "ma"
+            },
+            "includeAll": false,
+            "multi": false,
+            "refresh": 1
+          }
+        ]
+      }
     }
+{{- end }}

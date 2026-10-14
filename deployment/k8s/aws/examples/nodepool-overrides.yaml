@@ -1,14 +1,16 @@
-# Example overrides for the main EKS general workload NodePool (`general-work-pool`).
+# Example overrides for the EKS workload NodePools.
 # Pass with:
 #   ./deployment/k8s/aws/aws-bootstrap.sh --helm-values deployment/k8s/aws/examples/nodepool-overrides.yaml ...
 #
-# The chart leaves instance selection unconstrained by default (see workloadsNodePool in the
-# chart's values.yaml). This example narrows it to on-demand, current-generation compute, general
-# purpose and memory optimized instances up to 4xlarge, and caps the pool's total size (the chart
-# sets no limits by default). Omitted map fields fall back to the chart defaults.
+# The chart requires on-demand capacity for dedicated Kafka, proxy and replayer pools by default
+# while leaving the shared and dedicated k6 capacity types unconstrained. This example requires
+# on-demand for every pool, narrows selection to current-generation compute, general-purpose and
+# memory optimized instances up to 4xlarge, and caps the pool's total size (the chart sets no
+# limits by default). Omitted map fields fall back to the chart defaults.
 # List fields replace the full default list, so provide the complete desired list when overriding.
 
 workloadsNodePool:
+  mode: isolated
   architectures: ["amd64", "arm64"]
   capacityTypes: ["on-demand"]
   instanceCategories: ["c", "m", "r"]
@@ -20,3 +22,21 @@ workloadsNodePool:
   disruption:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 30m
+  dedicatedPools:
+    # Dedicated-pool limits are independent of the shared-pool limit above.
+    kafka:
+      limits:
+        cpu: "192"
+        memory: "384Gi"
+    proxy:
+      limits:
+        cpu: "448"
+        memory: "896Gi"
+    replayer:
+      limits:
+        cpu: "640"
+        memory: "1280Gi"
+    k6:
+      limits:
+        cpu: "224"
+        memory: "448Gi"

@@ -69,6 +69,7 @@ def call(Map config = [:]) {
             "captureProxyServiceEnabled": true,
             "targetClusterProxyServiceEnabled": true,
             "trafficReplayerServiceEnabled": true,
+            "trafficReplayerGroupId": "logging-group-${testUniqueId}",
             "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
             "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 $rfsTransformersArg",

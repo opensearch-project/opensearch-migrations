@@ -58,6 +58,8 @@ deploy_import_vpc=false
 cfn_stack_name=""
 vpc_id=""
 subnet_ids=""
+availability_zone_count=3
+availability_zone_count_set=false
 eks_access_principal_arn=""
 grant_eks_access_only=false
 skip_cfn_deploy=false
@@ -95,6 +97,7 @@ while [[ $# -gt 0 ]]; do
     --stack-name) cfn_stack_name="$2"; shift 2 ;;
     --vpc-id) vpc_id="$2"; shift 2 ;;
     --subnet-ids) subnet_ids="$2"; shift 2 ;;
+    --availability-zone-count) availability_zone_count="$2"; availability_zone_count_set=true; shift 2 ;;
     --eks-access-principal-arn) eks_access_principal_arn="$2"; shift 2 ;;
     --grant-eks-access-only) grant_eks_access_only=true; shift 1 ;;
     --skip-cfn-deploy) skip_cfn_deploy=true; shift 1 ;;
@@ -140,6 +143,9 @@ while [[ $# -gt 0 ]]; do
       echo "  --vpc-id <id>                             VPC ID (required with --deploy-import-vpc-cfn)."
       echo "  --subnet-ids <id1,id2>                    Comma-separated subnet IDs, each in a different AZ"
       echo "                                            (required with --deploy-import-vpc-cfn)."
+      echo "  --availability-zone-count <2|3>           Number of AZs for a newly created VPC (default: 3)."
+      echo "                                            Only valid with --deploy-create-vpc-cfn. EKS requires"
+      echo "                                            cluster subnets in at least two Availability Zones."
       echo "  --create-vpc-endpoints [list]             Create VPC endpoints for private subnet connectivity."
       echo "                                            Only valid with --deploy-import-vpc-cfn."
       echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth."
@@ -200,7 +206,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
       echo "                                            Useful for CI systems that need a predictable context name."
       echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
-      echo "  --with-load-test-images                   Also build the load-test images (migrations/k6_runner)."
+      echo "  --with-load-test-images                   Also build the load-test runner and patched operator images."
       echo "                                            They are not part of the standard image set. Only the k6"
       echo "                                            load-test cases (Test008x) need them. Requires --build."
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
@@ -487,6 +493,17 @@ validate_args() {
       echo "Error: --subnet-ids is only valid with --deploy-import-vpc-cfn." >&2
       exit 1
     fi
+  fi
+  case "$availability_zone_count" in
+    2|3) ;;
+    *)
+      echo "Error: --availability-zone-count must be 2 or 3; EKS requires at least two Availability Zones." >&2
+      exit 1
+      ;;
+  esac
+  if [[ "$availability_zone_count_set" == "true" && "$deploy_create_vpc" != "true" ]]; then
+    echo "Error: --availability-zone-count is only valid with --deploy-create-vpc-cfn." >&2
+    exit 1
   fi
   # Validate repo checkout exists when --build is specified
   if [[ "$build" == "true" ]]; then
@@ -841,6 +858,9 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
   # Build parameter overrides for `aws cloudformation deploy`
   cfn_params=("Stage=${stage_filter}")
+  if [[ "$deploy_create_vpc" == "true" ]]; then
+    cfn_params+=("AvailabilityZoneCount=${availability_zone_count}")
+  fi
   if [[ "$deploy_import_vpc" == "true" ]]; then
     cfn_params+=("VPCId=${vpc_id}")
     cfn_params+=("VPCSubnetIds=${subnet_ids}")
@@ -1075,7 +1095,7 @@ fi
 # --- validate --helm-values against the cluster ---
 # This is the first point the cluster is reachable, and it comes before anything slow or
 # cluster-mutating: the Auto Mode compute changes for --tags, image mirroring and --build. Render
-# general-work-pool from the chart and the deployer's --helm-values files, and have the API server
+# workload NodePools from the chart and the deployer's --helm-values files, and have the API server
 # check it against the NodePool CRD that EKS Auto Mode installs. --dry-run=server persists nothing,
 # so a bad value fails in seconds. Only the NodePool is checked: it is what the overrides
 # configure, and the rest of the chart needs values (images, private ECR, TLS) that don't exist yet.
@@ -1093,13 +1113,13 @@ validate_helm_values_against_cluster() {
   IFS=',' read -ra files <<< "$user_helm_values"
   for f in "${files[@]}"; do values_args+=(-f "$f"); done
 
-  echo "Validating general-work-pool from --helm-values (${user_helm_values}) against the cluster..."
+  echo "Validating workload NodePools from --helm-values (${user_helm_values}) against the cluster..."
   nodepool=$(helm template "$namespace" "$ma_chart_dir" --kube-version 1.35.0 -f - "${values_args[@]}" \
-    --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set aws.account="$AWS_ACCOUNT" \
+    --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set-string aws.account="$AWS_ACCOUNT" \
     --show-only templates/resources/aws/workloadsNodePool.yaml <<< "$eks_values") \
-    || { echo "Error: failed to render general-work-pool from --helm-values." >&2; exit 1; }
+    || { echo "Error: failed to render workload NodePools from --helm-values." >&2; exit 1; }
   kubectl --context="$KUBE_CONTEXT" apply --dry-run=server -f - <<< "$nodepool" >/dev/null \
-    || { echo "Error: the cluster rejected general-work-pool as rendered from --helm-values:" >&2
+    || { echo "Error: the cluster rejected workload NodePools as rendered from --helm-values:" >&2
          echo "$nodepool" >&2
          echo "  Nothing was changed. Fix the workloadsNodePool values and re-run the bootstrap." >&2
          exit 1; }
@@ -1871,7 +1891,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   BUILD_TARGETS=":buildImages:buildImagesToRegistry"
   # Load-test images are their own aggregate (see buildImages/build.gradle), so
   # buildImagesToRegistry does not build them. Only the k6 load-test cases
-  # (Test008x) need migrations/k6_runner in the registry.
+  # (Test008x) need migrations/k6_runner and migrations/k6_operator in the registry.
   if [[ "$with_load_test_images" == "true" ]]; then
     BUILD_TARGETS="${BUILD_TARGETS} :buildImages:buildKitLoadTestAll"
   fi
@@ -1985,8 +2005,17 @@ TLS_HELM_FLAGS=""
 
 # Override custom nodepool when --use-general-node-pool is set
 NODEPOOL_HELM_FLAGS=""
+# The zone spread's minDomains comes from the number of zones the cluster's subnets cover, so a
+# workload fleet waits for capacity in every zone rather than filling the first zones to get nodes.
+cluster_zone_count=$(aws ec2 describe-subnets --region "${AWS_CFN_REGION}" \
+  --subnet-ids $(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'cluster.resourcesVpcConfig.subnetIds' --output text) \
+  --query 'Subnets[].AvailabilityZone' --output text 2>/dev/null | tr '\t' '\n' | sort -u | grep -c . || true)
+if [[ "${cluster_zone_count:-0}" -gt 1 ]]; then
+  NODEPOOL_HELM_FLAGS="--set workloadsNodePool.zoneCount=${cluster_zone_count}"
+fi
 if [[ "$use_general_node_pool" == "true" ]]; then
-  NODEPOOL_HELM_FLAGS="--set cluster.useCustomKarpenterNodePool=false"
+  NODEPOOL_HELM_FLAGS="${NODEPOOL_HELM_FLAGS} --set cluster.useCustomKarpenterNodePool=false"
 fi
 
 # For any PCA mode, ensure Pod Identity Association exists
@@ -2109,7 +2138,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   $EXTRA_VALUES_FLAGS \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
-  --set aws.account="${AWS_ACCOUNT}" \
+  --set-string aws.account="${AWS_ACCOUNT}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \
