@@ -68,3 +68,8 @@ traffic:
       replayerConfig:
         podReplicas: 2
         speedupFactor: 1.1
+        # Result tuples go to localstack; read them with `console tuples show`.
+        tupleS3Bucket: "migrations-default-123456789012-dev-us-east-2"
+        tupleS3Region: "us-east-2"
+        tupleS3Endpoint: "http://localstack.ma.svc.cluster.local:4566"
+        useLocalStack: true

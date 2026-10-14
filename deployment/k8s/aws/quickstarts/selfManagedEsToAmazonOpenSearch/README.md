@@ -671,11 +671,13 @@ streams named `from-fluentbit-<pod>`. Lines are structured as `event=<name> key=
 From your workstation:
 
 ```bash
-kubectl -n ma logs -l app=replayer -c replayer --since=15m --prefix \
+kubectl -n ma logs -l migrations.opensearch.org/task=trafficReplayer -c replayer --tail=-1 --since=15m --prefix \
   | grep -E 'event=(replayer_startup_summary|kafka_assignment_changed|kafka_commit_retry_degraded|tuple_sink_upload_(degraded|recovered)|replayer_fatal_failure)'
-kubectl -n ma logs -l migrations/proxy=capture-proxy -c proxy --since=15m --prefix \
+kubectl -n ma logs -l migrations.opensearch.org/task=captureProxy -c proxy --tail=-1 --since=15m --prefix \
   | grep -E 'event=capture_(startup_summary|health|write_gate_changed|heartbeat_late|publisher_failed)'
 ```
+
+`--tail=-1` matters: with `-l`, `kubectl logs` otherwise shows only the last 10 lines of each pod.
 
 The same queries work in CloudWatch Logs Insights:
 
@@ -693,9 +695,9 @@ Its descendants carry `writer`, `connection`, `lifetime`, `request` and `attempt
 
 Two things to know about the logs:
 
-- **Pod labels.** Replayer pods are labelled `app=replayer`. Proxy pods are labelled
-  `migrations/proxy=<proxy name>`. Older examples that use `app=traffic-replayer` or
-  `app=capture-proxy` match nothing.
+- **Pod labels.** Every workflow-created workload carries `migrations.opensearch.org/task`
+  (`captureProxy`, `trafficReplayer`, `reindexFromSnapshot`, ...), which is the simplest way to
+  select one kind of pod.
 - **Activity-monitor events.** `replay_health`, `replay_oldest_record` and `replay_stall_detected`
   are written only to the replayer's host log files, and those files are off by default
   (`MIGRATIONS_HOST_FILE_LOG_LEVEL=off`). Use the metrics instead: `replayOldestContextAge*` and
@@ -704,17 +706,14 @@ Two things to know about the logs:
 ### One-shot snapshot script
 
 [`deployment/k8s/scripts/capture-replay-gameday.sh`](../../../scripts/capture-replay-gameday.sh)
-`baseline` prints key Prometheus values and recent lifecycle events. Its defaults predate workflow
-naming, so override them:
+`baseline` prints consumer lag, key Prometheus values and recent lifecycle events; `lag` and
+`events` print one part each:
 
 ```bash
-NAMESPACE=ma KAFKA_CLUSTER=default CONSUMER_GROUP=replayer-target \
-REPLAYER_SELECTOR=app=replayer CAPTURE_SELECTOR=migrations/proxy=capture-proxy \
-  deployment/k8s/scripts/capture-replay-gameday.sh events
+NAMESPACE=ma deployment/k8s/scripts/capture-replay-gameday.sh baseline
 ```
 
-The script's `lag` subcommand calls Kafka's plaintext listener. The auto-created cluster uses
-SCRAM over TLS, so use `console kafka describe-consumer-group` for lag instead.
+With more than one replayer, add `CONSUMER_GROUP=replayer-<target label>`.
 
 ---
 
@@ -743,14 +742,15 @@ console kafka describe-consumer-group                   # LAG ≈ 0 when replay 
 ```
 
 - **Result tuples.** One tuple per replayed request, comparing the source and target responses.
-  They land in `s3://$BUCKET/tuples/` as gzipped JSON lines, about every 60 s. To look at one
-  from your workstation:
+  They land in `s3://$BUCKET/tuples/` as gzipped JSON lines, about every 60 s. In the console:
 
   ```bash
-  KEY=$(aws s3 ls --recursive "s3://$BUCKET/tuples/" | awk '{print $4}' | head -1)
-  aws s3 cp "s3://$BUCKET/$KEY" - | gunzip | head -1 \
-    | jq -c '{request: .sourceRequest["Request-URI"], source: .sourceResponse["Status-Code"], target: [.targetResponses[]["Status-Code"]]}'
+  console tuples show --limit 5 --pretty          # the newest 5; add --replayer <name> if there are several
+  console tuples show --since 15m | jq -c '{uri: .sourceRequest["Request-URI"], source: .sourceResponse["Status-Code"], target: [.targetResponses[]["Status-Code"]]}'
   ```
+
+  The console reads them from its read-only mount of the deployment's bucket at
+  `/artifacts/tuples/`, which you can also browse directly.
 - **Document counts.** The target can end up with slightly *more* documents than the source. The
   replayer re-sends every captured request, including requests the source rejected.
 

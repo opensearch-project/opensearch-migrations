@@ -78,7 +78,8 @@ already have:
 | Variable | Default | What it does |
 |---|---|---|
 | `KIND_CLUSTER_NAME` | `ma` | Cluster name; the kube context is `kind-<name>` |
-| `LOCAL_IMAGE_TAG` | `latest` | Also tags every image with this tag, and deploys it. Images are still tagged `latest` as well. |
+| `LOCAL_IMAGE_TAG` | `latest` | Tags and deploys every image with this tag only, so other clusters' `latest` images stay untouched. |
+| `KIND_LOGS_DIR` | `~/.opensearch-migrations/kind/<cluster>/logs` | Where every node's logs land on this machine, one directory per node. |
 | `SKIP_LOAD_TEST_IMAGES` | `false` | `true` skips the k6 images. Use it if you won't run k6, or if your network blocks `proxy.golang.org`. |
 
 ```shell
@@ -88,9 +89,13 @@ KIND_CLUSTER_NAME=ma-test LOCAL_IMAGE_TAG=ma-test SKIP_LOAD_TEST_IMAGES=true ./k
 Two things to know:
 - **Shared registry.** The script shares one registry container, `docker-registry` on port 5001,
   with every local cluster, and briefly restarts it on each run.
-- **Let the script create the cluster.** If a cluster with that name already exists but was created
-  without `kindClusterConfig.yaml`, the script stops with "missing the containerd registry
-  config_path setting". Delete the cluster, or pick another name.
+- **Let the script create the cluster.** It adds the registry configuration and the log mounts when
+  it creates the cluster. If a cluster with that name already exists without them, the script stops
+  and asks you to delete it, or pick another name.
+
+**Logs.** Fluent Bit on every node writes the pods' logs to `${KIND_LOGS_DIR}/<node>/` on this
+machine, and the migration console sees all of them at `/shared-logs-output`. They stay after the
+cluster is deleted.
 
 ```shell
 kubectl -n ma get pods          # all Running / Completed
@@ -109,9 +114,11 @@ The AWS
 [quick start](aws/quickstarts/selfManagedEsToAmazonOpenSearch/README.md) explains each step in
 more detail.
 
-From the repository root, load the config and create the credentials:
+From the repository root, create the credentials the config refers to, then load the config:
 
 ```shell
+printf 'admin:admin' | kubectl -n ma exec -i migration-console-0 -- workflow configure credentials create --stdin --silent source-creds
+printf 'admin:admin' | kubectl -n ma exec -i migration-console-0 -- workflow configure credentials create --stdin --silent target-creds
 kubectl -n ma exec -i migration-console-0 -- workflow configure edit --stdin < deployment/k8s/configs/localQuickStart.yaml
 kubectl -n ma exec -it migration-console-0 -- bash
 ```
@@ -120,8 +127,6 @@ Inside the console, pre-load the source and then submit. The pre-load uses OpenS
 test mode: about 1,000 documents in each of 10 indices, in under two minutes.
 
 ```shell
-printf 'admin:admin' | workflow configure credentials create --stdin --silent source-creds
-printf 'admin:admin' | workflow configure credentials create --stdin --silent target-creds
 console clusters run-test-benchmarks --cluster source
 workflow submit
 workflow status                  # or: workflow manage
@@ -144,6 +149,7 @@ console clusters curl target /qs-test/_refresh -X POST
 console clusters curl source /qs-test/_count
 console clusters curl target /qs-test/_count
 console kafka describe-consumer-group           # LAG 0 when replay has caught up
+console tuples show --limit 3 --pretty          # source vs. target for the newest replayed requests
 ```
 
 ## Access the Migration Console
@@ -171,4 +177,5 @@ docker buildx rm "builder-kind-${KIND_CLUSTER_NAME:-ma}"
 
 `./kindCleanup.sh` (with the same `KIND_CLUSTER_NAME`) does that too, but it also removes the shared
 registry container that other local clusters pull from. `KIND_PRUNE_VOLUMES=true` additionally
-deletes the image cache.
+deletes the image cache. Either way the cluster's logs are kept; `./kindCleanup.sh --delete-logs`
+removes them as well, or delete `${KIND_LOGS_DIR}` yourself.
