@@ -101,7 +101,15 @@ repository root:
 ```
 
 To rebuild and reinstall the current checkout on an existing Migration
-Assistant CloudFormation/EKS deployment:
+Assistant CloudFormation/EKS deployment, first remove the installed release.
+The script only installs: it stops if a release named after `--namespace`
+already exists. `helm uninstall` runs the chart's pre-delete hook, which stops
+and deletes migration workflows and resources and empties the deployment's S3
+bucket, so finish or save anything you need first.
+
+```bash
+helm uninstall ma -n ma
+```
 
 ```bash
 ./deployment/k8s/aws/aws-bootstrap.sh \

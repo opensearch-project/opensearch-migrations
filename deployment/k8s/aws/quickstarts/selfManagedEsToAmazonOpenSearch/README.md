@@ -111,7 +111,9 @@ from. Pick one:
   replaces `--use-public-images` and can't be combined with `--version`.
 - **`--with-load-test-images`** also builds the k6 runner and operator images for section 5.
 - **`--image-tag <tag>`** tags the built images; the default is `latest`.
-- To rebuild and redeploy after further changes, see
+- **Redeploying later changes** means uninstalling the `ma` release first, because the script only
+  installs. That uninstall deletes the migration's workflows and resources and empties the S3
+  bucket. See
   [Build and deploy the current checkout](../../README.md#build-and-deploy-the-current-checkout).
 
 #### Both options
