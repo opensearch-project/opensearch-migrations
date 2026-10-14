@@ -1,14 +1,11 @@
 # Quick start: self-managed Elasticsearch 7.10 -> Amazon OpenSearch Service domain, capture and replay.
-# Walkthrough: docs/quickStartSelfManagedEsToAmazonOpenSearch.md
+# Walkthrough: README.md in this directory
 #
 # Replace every <...> placeholder before running `workflow configure edit --stdin < this-file`.
 # The source endpoint below is the in-cluster testClusters chart; for an EC2 source, use its
 # load balancer or node address instead.
 
 skipApprovals: true
-
-# Capture and replay only. The *WithBackfill.yaml sibling adds snapshot, metadata and backfill.
-snapshotMigrationConfigs: []
 
 sourceClusters:
   source:
@@ -26,6 +23,9 @@ targetClusters:
       sigv4:
         region: "<REGION>"
         service: es
+
+# Capture and replay only. The *WithBackfill.yaml sibling adds snapshot, metadata and backfill.
+snapshotMigrationConfigs: []
 
 kafkaClusterConfiguration:
   default:

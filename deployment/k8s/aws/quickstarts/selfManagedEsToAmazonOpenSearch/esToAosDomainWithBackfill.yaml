@@ -1,14 +1,12 @@
-# Quick start: self-managed Elasticsearch 7.10 -> Amazon OpenSearch Serverless collection, capture and replay.
-# Walkthrough: docs/quickStartSelfManagedEsToAmazonOpenSearch.md
+# Quick start: self-managed Elasticsearch 7.10 -> Amazon OpenSearch Service domain:
+# snapshot + metadata + backfill of existing data, then capture and replay of live traffic.
+# Walkthrough: README.md in this directory
 #
 # Replace every <...> placeholder before running `workflow configure edit --stdin < this-file`.
 # The source endpoint below is the in-cluster testClusters chart; for an EC2 source, use its
 # load balancer or node address instead.
 
 skipApprovals: true
-
-# Capture and replay only. The *WithBackfill.yaml sibling adds snapshot, metadata and backfill.
-snapshotMigrationConfigs: []
 
 sourceClusters:
   source:
@@ -18,14 +16,34 @@ sourceClusters:
     authConfig:
       basic:
         secretName: source-creds # create with: workflow configure credentials create source-creds
+    snapshotInfo:
+      repos:
+        default:
+          awsRegion: "<REGION>"
+          repoPathUri: "s3://<BUCKET>/quickstart-snapshot"   # MA's default bucket works
+      snapshots:
+        snap1:
+          repoName: default
+          config:
+            createSnapshotConfig: {}
 
 targetClusters:
   target:
-    endpoint: "<COLLECTION_ENDPOINT>"      # e.g. https://abc123xyz.us-east-2.aoss.amazonaws.com
+    endpoint: "<TARGET_DOMAIN_ENDPOINT>"   # e.g. https://vpc-qs-target-abc123.us-east-2.es.amazonaws.com
     authConfig:
       sigv4:
         region: "<REGION>"
-        service: aoss
+        service: es
+
+# One snapshot of the source, migrated to the target as metadata (index settings and mappings)
+# followed by a document backfill (Reindex-From-Snapshot workers).
+snapshotMigrationConfigs:
+  - fromSource: source
+    toTarget: target
+    perSnapshotConfig:
+      snap1:
+        - metadataMigrationConfig: {}
+          documentBackfillConfig: {}
 
 kafkaClusterConfiguration:
   default:
@@ -48,6 +66,11 @@ traffic:
     replay1:
       fromCapturedTraffic: capture-proxy
       toTarget: target
+      # Start replaying only after the backfill finishes, so live updates land on top of the
+      # backfilled documents rather than racing them.
+      dependsOnSnapshotMigrations:
+        - source: source
+          snapshot: snap1
       replayerConfig:
         podReplicas: 2
         speedupFactor: 1.1

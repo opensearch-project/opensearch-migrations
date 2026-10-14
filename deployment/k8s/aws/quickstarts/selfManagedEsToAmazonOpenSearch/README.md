@@ -54,8 +54,8 @@ cd "$(git rev-parse --show-toplevel)"
 
 For background on what you are deploying, see:
 
-- [`deployment/k8s/aws/README.md`](../deployment/k8s/aws/README.md) for the EKS bootstrap.
-- [`captureAndReplay/captureAndReplayArchitecture.md`](captureAndReplay/captureAndReplayArchitecture.md)
+- [`deployment/k8s/aws/README.md`](../../README.md) for the EKS bootstrap.
+- [`captureAndReplay/captureAndReplayArchitecture.md`](../../../../../docs/captureAndReplay/captureAndReplayArchitecture.md)
   for how capture and replay work.
 
 ---
@@ -73,7 +73,7 @@ images to a new private ECR repository, and installs the chart.
   --region "$AWS_REGION" \
   --build \
   --base-dir "$(pwd)" \
-  --helm-values deployment/k8s/configs/quickStart/helm-values-observability.yaml \
+  --helm-values deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/helm-values-observability.yaml \
   --skip-console-exec
 ```
 
@@ -114,7 +114,7 @@ target's access policy must allow it.
 
 #### Option A (recommended for a first run): in-cluster Elasticsearch on EKS
 
-The [`testClusters`](../deployment/k8s/charts/aggregates/testClusters) chart runs a single-node
+The [`testClusters`](../../../charts/aggregates/testClusters) chart runs a single-node
 ES 7.10.2 with SearchGuard. It serves HTTPS with demo certificates and basic auth `admin:admin`.
 `valuesEks.yaml` places it on its own on-demand NodePool and gives it S3 access, so snapshots work.
 
@@ -172,7 +172,7 @@ any ES cluster you run yourself works if the network allows it:
 
 ### Target
 
-Both target options use [`test/awsDeployCluster.sh`](../test/awsDeployCluster.sh). It deploys
+Both target options use [`test/awsDeployCluster.sh`](../../../../../test/awsDeployCluster.sh). It deploys
 [amazon-opensearch-service-sample-cdk](https://github.com/aws-samples/amazon-opensearch-service-sample-cdk)
 from a JSON context file and writes the endpoints to `test/tmp/cluster-details-$STAGE.json`. Run
 it from `test/`, because it clones the CDK project into the current directory.
@@ -271,8 +271,7 @@ and replayed bulk requests usually carry IDs. The same shape is exercised by `Te
 
 ### 4.1 Pick a config and load it
 
-Four ready-to-edit configs are in
-[`deployment/k8s/configs/quickStart/`](../deployment/k8s/configs/quickStart):
+Four ready-to-edit configs sit next to this guide:
 
 | File | Target | What runs |
 |---|---|---|
@@ -295,7 +294,7 @@ Fill in the placeholders:
 
 ```bash
 BUCKET=$(kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}')
-CONFIG=deployment/k8s/configs/quickStart/esToAosDomainWithBackfill.yaml
+CONFIG=deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/esToAosDomainWithBackfill.yaml
 sed -e "s|<TARGET_DOMAIN_ENDPOINT>|${TARGET_ENDPOINT}|; s|<COLLECTION_ENDPOINT>|${TARGET_ENDPOINT}|" \
     -e "s|<REGION>|${AWS_REGION}|g; s|<BUCKET>|${BUCKET}|g" \
     "$CONFIG" > /tmp/migration.yaml
@@ -450,7 +449,7 @@ first and accept that overlap, or use writes that carry IDs.
   proxies and 2 replayers.
 - **Proxy TLS.** TLS is on by default. When `tls` is omitted, the proxy gets a cert-manager
   certificate from the `migrations-ca` issuer. Set `tls: {mode: plaintext}` for plain HTTP. For
-  PCA and bring-your-own certificates, see [`captureProxyTls.md`](captureProxyTls.md).
+  PCA and bring-your-own certificates, see [`captureProxyTls.md`](../../../../../docs/captureProxyTls.md).
 - **Proxy service.** `serviceType` defaults to `LoadBalancer`, an internal NLB. Set
   `internetFacing: true` only if you understand the exposure.
 - **Backfill.** `snapshotMigrationConfigs` lists which snapshot goes to which target.
@@ -500,7 +499,7 @@ loadtest list
 the `nyc_taxis` index, the same index the benchmark pre-load created. That is fine for watching a
 live index change on top of backfilled data. For separate counts, add `-e INDEX_NAME=k6-taxis`. `ingest-ramp` and `ingest-burst` are also defined.
 For profiles, rates and SigV4 sources, see
-[`TrafficCapture/trafficLoadTest/README.md`](../TrafficCapture/trafficLoadTest/README.md).
+[`TrafficCapture/trafficLoadTest/README.md`](../../../../../TrafficCapture/trafficLoadTest/README.md).
 
 ---
 
@@ -508,7 +507,7 @@ For profiles, rates and SigV4 sources, see
 
 This branch adds a full metric set for the proxy and replayer, matching CloudWatch and Grafana
 dashboards, and bounded `event=` log lines. The operator runbook is
-[`captureAndReplay/observabilityOperations.md`](captureAndReplay/observabilityOperations.md): full
+[`captureAndReplay/observabilityOperations.md`](../../../../../docs/captureAndReplay/observabilityOperations.md): full
 metric inventory, conservation checks, thresholds and decision trees. This section is the tour.
 
 ### CloudWatch dashboard
@@ -646,7 +645,7 @@ Two things to know about the logs:
 
 ### One-shot snapshot script
 
-[`deployment/k8s/scripts/capture-replay-gameday.sh`](../deployment/k8s/scripts/capture-replay-gameday.sh)
+[`deployment/k8s/scripts/capture-replay-gameday.sh`](../../../scripts/capture-replay-gameday.sh)
 `baseline` prints key Prometheus values and recent lifecycle events. Its defaults predate workflow
 naming, so override them:
 
@@ -692,12 +691,12 @@ console kafka describe-consumer-group                   # LAG ≈ 0 when replay 
   replayer re-sends every captured request, including requests the source rejected.
 
 For reference numbers at scale, see the
-[160K req/s benchmark](captureAndReplay/loadTestRun-2026-10-13-160k.md). It was managed-to-managed,
+[160K req/s benchmark](../../../../../docs/captureAndReplay/loadTestRun-2026-10-13-160k.md). It was managed-to-managed,
 but its per-pod sizing figures also apply here.
 
 ---
 
-## 8. Settings worth knowing (new on this branch)
+## 8. Capture and replay settings worth knowing
 
 All of these go in the migration config. Defaults are tuned for correctness; change them only for
 load. Field definitions are in `orchestrationSpecs/packages/schemas/src/userSchemas.ts`.
@@ -740,7 +739,7 @@ false).
 - EKS spreads them across zones by default (`workloadsNodePool.zoneSpread: required`, with
   `minDomains` set from the subnet count).
 
-See [`deployment/k8s/aws/README.md`](../deployment/k8s/aws/README.md#configuring-workload-nodepools).
+See [`deployment/k8s/aws/README.md`](../../README.md#configuring-workload-nodepools).
 
 **Kafka** (`kafkaClusterConfiguration.default.autoCreate`): the defaults are smoke-test size
 (3 brokers, 2 Gi storage). For real load, set `clusterSpecOverrides`, `nodePoolSpecOverrides` and
@@ -793,5 +792,5 @@ Alternatively, `migration-assistant cleanup --stage "$STAGE"` from
 | Proxy never becomes ready | `kubectl -n ma describe captureproxy capture-proxy`, NLB provisioning, the AWS Load Balancer Controller events. |
 | 401 through the proxy | The client isn't sending the *source's* credentials. The proxy only forwards them. |
 | Replayer 403 from the target | The target's access policy, the FGAC mapping or the AOSS data access policy doesn't include `$MA_POD_ROLE_ARN`. |
-| Lag grows | Follow the runbook's decision trees, in [`observabilityOperations.md`](captureAndReplay/observabilityOperations.md#decision-trees). |
+| Lag grows | Follow the runbook's decision trees, in [`observabilityOperations.md`](../../../../../docs/captureAndReplay/observabilityOperations.md#decision-trees). |
 | Anything else | `migration-assistant diag`, or `kubectl -n ma get events --sort-by=.lastTimestamp`. |

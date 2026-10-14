@@ -79,7 +79,7 @@ EKS Auto Mode infrastructure with either the existing CloudFormation workflow or
 the additive [AWS Terraform module](../terraform/aws/README.md).
 
 For an end-to-end walkthrough on EKS, see
-[Quick start: self-managed Elasticsearch to Amazon OpenSearch with capture and replay](../../docs/quickStartSelfManagedEsToAmazonOpenSearch.md).
+[Quick start: self-managed Elasticsearch to Amazon OpenSearch with capture and replay](aws/quickstarts/selfManagedEsToAmazonOpenSearch/README.md).
 It covers creating the source and target, configuring the migration, and observing it.
 
 ### GKE
