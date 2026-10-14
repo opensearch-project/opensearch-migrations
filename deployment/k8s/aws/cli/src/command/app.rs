@@ -765,7 +765,6 @@ impl<'r, R: CommandRunner> App<'r, R> {
         let image_tag = self.resolve_image_tag();
         self.state.set("BUILD_IMAGE_TAG", &image_tag);
         let builder = artifact::builder_name(&kube_ctx);
-        let skip_test = self.state.get_or("SKIP_TEST_IMAGES", "N") == "Y";
 
         // Run the whole image-build block as a single bash script mirroring
         // Set up the kubernetes-driver buildkit builder (the
@@ -777,7 +776,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
         // Jenkins console only shows our summary line).
         ui::step("Building images (buildkit setup + gradle buildImagesToRegistry)");
         let script = artifact::build_images_script(
-            &base, &region, &ecr_host, &registry, &builder, &image_tag, &kube_ctx, skip_test,
+            &base, &region, &ecr_host, &registry, &builder, &image_tag, &kube_ctx,
         );
         // Stream: buildkit setup + multi-arch image build runs ~8+ min.
         let out = self
@@ -1601,7 +1600,6 @@ mod tests {
         app.state.set("MA_VERSION", "local-build");
         app.state.set("CFN_STACK_NAME", "MigrationAssistant-ma");
         app.state.set("KUBECTL_CONTEXT", "migration-eks-ma");
-        app.state.set("SKIP_TEST_IMAGES", "Y");
         app.build_images_or_skip().unwrap();
         let g = r
             .calls_to("bash")
