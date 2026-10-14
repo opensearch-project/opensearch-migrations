@@ -399,8 +399,8 @@ source:
 | Workload | Data | Indices it creates |
 |---|---|---|
 | `geonames` | Points of interest from geonames.org | `geonames` |
-| `http_logs` | 1998 World Cup web server logs | `logs-181998`, `logs-191998`, ... |
-| `nested` | StackOverflow questions with nested answers | `sonested` |
+| `http_logs` | 1998 World Cup web server logs | `logs-181998` through `logs-241998`, plus an empty `reindexed-logs` |
+| `nested` | StackOverflow questions with nested answers | `sonested` (`_cat/indices` reports about 3K documents because it counts the nested ones; `_count` says 1,000) |
 | `nyc_taxis` | 2015 NYC yellow-cab trips | `nyc_taxis` |
 
 Each one is an `opensearch-benchmark run` with these options (see

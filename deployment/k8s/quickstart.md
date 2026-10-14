@@ -1,7 +1,8 @@
 # 🚀 Quickstart Guide - Migration Assistant
 
 Get started quickly by testing out the Migration Assistant solution in a local Kubernetes cluster while utilizing test
-Elasticsearch and OpenSearch clusters and the same Helm charts that can be deployed to the cloud
+Elasticsearch and OpenSearch clusters and the same Helm charts that can be deployed to the cloud.
+For Amazon EKS, see the [AWS quick start](aws/quickstarts/selfManagedEsToAmazonOpenSearch/README.md).
 
 ## What you'll need
 
@@ -54,37 +55,95 @@ instructions [here](https://kind.sigs.k8s.io/docs/user/quick-start/).
 kind --version
 ```
 
-## Build the Docker images
+## Build and deploy
 
-Since we are building from source here, we will need to build the necessary Docker images for the Migration Assistant
-that our K8s containers will utilize. The `kindTesting.sh` script handles kind setup, image builds (via BuildKit),
-and deployment all-in-one:
+`kindTesting.sh` does everything in one step:
+
+1. Creates the kind cluster from `kindClusterConfig.yaml`.
+2. Builds the Migration Assistant images into a local registry.
+3. Installs the Migration Assistant chart.
+4. Installs the [`testClusters`](charts/aggregates/testClusters) chart:
+   - an Elasticsearch 7.10 source (`elasticsearch-oss` behind nginx, HTTPS with `admin:admin`);
+   - an OpenSearch target.
 
 ```shell
 ./kindTesting.sh
 ```
 
-## Deploy the Migration Assistant Helm chart
+The first build takes 30–60 minutes; later builds reuse the cache.
 
-This will deploy our main Migration Assistant Helm chart which will create the needed resources to perform the Migration
-Assistant suite of migration tooling
+**Running it beside other kind clusters.** Set these so the run doesn't reuse or replace anything you
+already have:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `KIND_CLUSTER_NAME` | `ma` | Cluster name; the kube context is `kind-<name>` |
+| `LOCAL_IMAGE_TAG` | `latest` | Also tags every image with this tag, and deploys it. Images are still tagged `latest` as well. |
+| `SKIP_LOAD_TEST_IMAGES` | `false` | `true` skips the k6 images. Use it if you won't run k6, or if your network blocks `proxy.golang.org`. |
 
 ```shell
-helm install ma -n ma charts/aggregates/migrationAssistantWithArgo \
-  --create-namespace \
-  -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
+KIND_CLUSTER_NAME=ma-test LOCAL_IMAGE_TAG=ma-test SKIP_LOAD_TEST_IMAGES=true ./kindTesting.sh
 ```
 
-To see all helm deployments for this namespace
+Two things to know:
+- **Shared registry.** The script shares one registry container, `docker-registry` on port 5001,
+  with every local cluster, and briefly restarts it on each run.
+- **Let the script create the cluster.** If a cluster with that name already exists but was created
+  without `kindClusterConfig.yaml`, the script stops with "missing the containerd registry
+  config_path setting". Delete the cluster, or pick another name.
 
 ```shell
-helm -n ma list
+kubectl -n ma get pods          # all Running / Completed
 ```
 
-To view the pods that were created and are initializing
+## Run a migration
+
+[`configs/localQuickStart.yaml`](configs/localQuickStart.yaml) runs the full live-migration shape
+against the test clusters:
+
+1. Snapshot the source to the localstack S3 bucket.
+2. Migrate metadata and backfill the documents into the target.
+3. Capture new traffic through the proxy and replay it.
+
+The AWS
+[quick start](aws/quickstarts/selfManagedEsToAmazonOpenSearch/README.md) explains each step in
+more detail.
+
+From the repository root, load the config and create the credentials:
 
 ```shell
-kubectl -n ma get pods
+kubectl -n ma exec -i migration-console-0 -- workflow configure edit --stdin < deployment/k8s/configs/localQuickStart.yaml
+kubectl -n ma exec -it migration-console-0 -- bash
+```
+
+Inside the console, pre-load the source and then submit. The pre-load uses OpenSearch Benchmark's
+test mode: about 1,000 documents in each of 10 indices, in under two minutes.
+
+```shell
+printf 'admin:admin' | workflow configure credentials create --stdin --silent source-creds
+printf 'admin:admin' | workflow configure credentials create --stdin --silent target-creds
+console clusters run-test-benchmarks --cluster source
+workflow submit
+workflow status                  # or: workflow manage
+```
+
+The snapshot waits for the capture proxy, and the replayer waits for the backfill. The whole run
+takes about 20 minutes. When `Perform Snapshot Migration` has succeeded, compare the two sides:
+
+```shell
+console clusters curl target /_refresh -X POST
+console clusters curl source /geonames/_count
+console clusters curl target /geonames/_count
+```
+
+Then send traffic through the proxy, and check that the replayer catches up:
+
+```shell
+console clusters generate-data --cluster proxy --index-name qs-test --num-docs 5000
+console clusters curl target /qs-test/_refresh -X POST
+console clusters curl source /qs-test/_count
+console clusters curl target /qs-test/_count
+console kafka describe-consumer-group           # LAG 0 when replay has caught up
 ```
 
 ## Access the Migration Console
@@ -97,22 +156,19 @@ kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
 
 ## Cleanup
 
-After exiting the Migration Console
+Remove the migration resources from inside the console:
 
 ```shell
-migration-console (~) -> exit
+workflow reset --all --cascade --include-proxies --delete-storage
 ```
 
-To remove the Migration Assistant Helm deployment (and its installed chart dependencies), as well as any created
-volumes:
+To remove just your kind cluster and its image builder:
 
 ```shell
-helm uninstall -n ma ma
-kubectl -n ma delete pvc --all
+kind delete cluster --name "${KIND_CLUSTER_NAME:-ma}"
+docker buildx rm "builder-kind-${KIND_CLUSTER_NAME:-ma}"
 ```
 
-To remove the kind containers (only necessary if no longer using kind):
-
-```shell
-./kindCleanup.sh
-```
+`./kindCleanup.sh` (with the same `KIND_CLUSTER_NAME`) does that too, but it also removes the shared
+registry container that other local clusters pull from. `KIND_PRUNE_VOLUMES=true` additionally
+deletes the image cache.

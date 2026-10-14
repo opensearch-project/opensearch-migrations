@@ -1,0 +1,70 @@
+# Local (kind) quick start: snapshot + metadata + backfill of the testClusters source, then
+# capture and replay of live traffic, into the testClusters OpenSearch target.
+# Walkthrough: deployment/k8s/quickstart.md. Credentials: workflow configure credentials create
+# source-creds / target-creds (admin:admin for both). The bucket and localstack endpoint are the
+# local Migration Assistant defaults (kubectl -n ma get cm migrations-default-s3-config).
+
+skipApprovals: true
+
+sourceClusters:
+  source:
+    endpoint: "https://elasticsearch-master-headless:9200"
+    version: "ES 7.10.2"
+    allowInsecure: true
+    authConfig:
+      basic:
+        secretName: source-creds
+    snapshotInfo:
+      repos:
+        default:
+          awsRegion: "us-east-2"
+          repoPathUri: "s3://migrations-default-123456789012-dev-us-east-2/quickstart-snapshot"
+          endpoint: "localstack://localstack.ma.svc.cluster.local:4566"
+      snapshots:
+        snap1:
+          repoName: default
+          config:
+            createSnapshotConfig: {}
+
+targetClusters:
+  target:
+    endpoint: "https://opensearch-cluster-master-headless:9200"
+    allowInsecure: true
+    authConfig:
+      basic:
+        secretName: target-creds
+
+snapshotMigrationConfigs:
+  - fromSource: source
+    toTarget: target
+    perSnapshotConfig:
+      snap1:
+        - metadataMigrationConfig: {}
+          documentBackfillConfig: {}
+
+kafkaClusterConfiguration:
+  default:
+    autoCreate:
+      topicSpecOverrides:
+        partitions: 4
+
+traffic:
+  proxies:
+    capture-proxy:
+      source: source
+      proxyConfig:
+        listenPort: 9201
+        podReplicas: 2
+        # kind has no load-balancer controller.
+        serviceType: ClusterIP
+
+  replayers:
+    replay1:
+      fromCapturedTraffic: capture-proxy
+      toTarget: target
+      dependsOnSnapshotMigrations:
+        - source: source
+          snapshot: snap1
+      replayerConfig:
+        podReplicas: 2
+        speedupFactor: 1.1
