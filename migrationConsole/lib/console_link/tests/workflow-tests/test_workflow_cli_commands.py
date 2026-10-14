@@ -1031,6 +1031,40 @@ class TestWorkflowCLICommands:
             'workflows.argoproj.io/workflow=migration-workflow'
         )
 
+    @patch('console_link.workflow.commands.log._run_history_mode')
+    def test_output_filter_selects_by_component(self, mock_history):
+        runner = CliRunner()
+
+        result = runner.invoke(
+            workflow_cli,
+            ['log', 'filter', '--from-snapshot-migration', 'm1', '--component', 'rfs-coordinator']
+        )
+
+        assert result.exit_code == 0
+        args, _ = mock_history.call_args
+        assert args[2] == (
+            'migrations.opensearch.org/component=rfs-coordinator,'
+            'migrations.opensearch.org/from-snapshot-migration=m1,'
+            'workflows.argoproj.io/workflow=migration-workflow'
+        )
+
+    @patch('console_link.workflow.commands.log._run_history_mode')
+    def test_output_filter_raw_label_supports_negation(self, mock_history):
+        runner = CliRunner()
+
+        result = runner.invoke(
+            workflow_cli,
+            ['log', 'filter', '--from-snapshot-migration', 'm1', '--label', 'component!=rfs-coordinator']
+        )
+
+        assert result.exit_code == 0
+        args, _ = mock_history.call_args
+        assert args[2] == (
+            'migrations.opensearch.org/from-snapshot-migration=m1,'
+            'migrations.opensearch.org/component!=rfs-coordinator,'
+            'workflows.argoproj.io/workflow=migration-workflow'
+        )
+
     def test_output_filter_rejects_unexpected_argument(self):
         runner = CliRunner()
 

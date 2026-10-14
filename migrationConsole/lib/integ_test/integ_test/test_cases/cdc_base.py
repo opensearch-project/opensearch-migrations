@@ -25,8 +25,8 @@ PROXY_DEPLOYMENT_NAME = "capture-proxy"
 PROXY_RESOURCE_NAME = "capture-proxy"
 PROXY_SERVICE_NAME = "capture-proxy"
 PROXY_PORT = 9201
-REPLAYER_LABEL_SELECTOR = "app=replayer"
-PROXY_LABEL_SELECTOR = "migrations/proxy=capture-proxy"
+REPLAYER_LABEL_SELECTOR = "migrations.opensearch.org/component=traffic-replayer"
+PROXY_LABEL_SELECTOR = "migrations.opensearch.org/component=capture-proxy"
 PROXY_ENDPOINT = f"https://capture-proxy:{PROXY_PORT}"
 CDC_SOURCE_TARGET_COMBINATIONS = CDC_MIGRATION_COMBINATIONS
 PROXY_READY_TIMEOUT_SECONDS = 3600
