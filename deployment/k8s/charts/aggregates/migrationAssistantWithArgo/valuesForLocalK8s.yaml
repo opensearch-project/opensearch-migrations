@@ -117,6 +117,25 @@ charts:
 
   fluent-bit:
     waitForInstallation: false
+    values:
+      # Each node's Fluent Bit writes to that node's own host directory instead of the shared
+      # logs PVC (a ReadWriteOnce volume only one node's Fluent Bit could mount). kindTesting.sh
+      # mounts a directory on this machine there for every node. Lists replace whole, so the
+      # lua-scripts entries from values.yaml are repeated.
+      extraVolumes:
+        - name: logs-pv
+          hostPath:
+            path: /var/log/migrations
+            type: DirectoryOrCreate
+        - name: lua-scripts
+          configMap:
+            name: fluentbit-lua-scripts
+      extraVolumeMounts:
+        - name: logs-pv
+          mountPath: /shared_logs
+        - name: lua-scripts
+          mountPath: /fluentbit/scripts
+          readOnly: true
 
   kube-prometheus-stack:
     waitForInstallation: false
@@ -126,3 +145,11 @@ charts:
 
   jaeger:
     waitForInstallation: false
+
+# Logs go to each node's host directory (see fluent-bit above), not the shared logs PVC, and the
+# console reads every node's logs from the nodes' shared parent directory.
+logs:
+  sharedLogsVolume:
+    enabled: false
+  hostLogsVolume:
+    enabled: true

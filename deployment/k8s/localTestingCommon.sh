@@ -43,6 +43,11 @@ print_next_steps() {
   echo
   echo "Helm releases:"
   helm --kube-context "${KUBE_CONTEXT}" -n ma list
+  if [[ -n "${KIND_LOGS_DIR:-}" ]]; then
+    echo
+    echo "Logs (one directory per node; also at /shared-logs-output in the migration console):"
+    echo "  ${KIND_LOGS_DIR}"
+  fi
 }
 
 detect_platform() {

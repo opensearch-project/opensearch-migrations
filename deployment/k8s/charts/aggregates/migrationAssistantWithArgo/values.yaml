@@ -246,6 +246,12 @@ logs:
     name: logs-pvc
     size: 10Gi
     storageClass: ""
+  # Alternative to sharedLogsVolume for local clusters whose nodes mount a shared host directory
+  # (kindTesting.sh mounts one per node, plus their parent at this path): the console mounts the
+  # node path at /shared-logs-output, where it sees every node's logs.
+  hostLogsVolume:
+    enabled: false
+    path: /var/log/migrations-all
   format: application # application or docker-json
 
 
