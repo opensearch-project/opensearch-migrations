@@ -187,23 +187,29 @@ spec:
                 "sourceClusters": { "source1": $source },
                 "targetClusters": { "target1": $target },
                 "snapshotMigrationConfigs": [],
-                "kafkaClusterConfiguration": {
-                  "default": {
-                    "autoCreate": {
-                      "nodePoolSpecOverrides": (
-                        $kafkaNodePoolSpecOverrides + {
-                          "replicas": $kafkaBrokerReplicas
+                "traffic": {
+                  "kafkaClusters": {
+                    "default": {
+                      "autoCreate": {
+                        "nodePoolSpecOverrides": (
+                          $kafkaNodePoolSpecOverrides + {
+                            "replicas": $kafkaBrokerReplicas
+                          }
+                        )
+                      },
+                      "topics": {
+                        "capture-proxy": {
+                          "specOverrides": {
+                            "partitions": $trafficTopicPartitions
+                          }
                         }
-                      ),
-                      "topicSpecOverrides": {
-                        "partitions": $trafficTopicPartitions
                       }
                     }
-                  }
-                },
-                "traffic": {
+                  },
                   "proxies": {
                     "capture-proxy": {
+                      "kafka": "default",
+                      "kafkaTopic": "capture-proxy",
                       "source": "source1",
                       "proxyConfig": ({
                         "listenPort": 9201,

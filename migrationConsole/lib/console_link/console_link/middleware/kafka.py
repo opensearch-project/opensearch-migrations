@@ -20,8 +20,19 @@ def delete_topic(kafka: Kafka, topic_name: str) -> CommandResult:
     return result
 
 
-def describe_consumer_group(kafka: Kafka, group_name: str) -> CommandResult:
-    result = kafka.describe_consumer_group(group_name=group_name)
+def describe_consumer_group(
+    kafka: Kafka,
+    group_name: str,
+    *,
+    include_time_lag: bool = True,
+) -> CommandResult:
+    if include_time_lag:
+        result = kafka.describe_consumer_group(group_name=group_name)
+    else:
+        result = kafka.describe_consumer_group(
+            group_name=group_name,
+            include_time_lag=False,
+        )
     return result
 
 

@@ -1,5 +1,7 @@
 """Storage implementation for workflow configurations using Kubernetes ConfigMaps."""
 
+from copy import deepcopy
+from dataclasses import dataclass
 import logging
 from typing import Optional, List
 
@@ -12,6 +14,21 @@ logger = logging.getLogger(__name__)
 
 # Constants
 CONFIG_YAML_KEY = "workflow_config.yaml"
+MISSING_CONFIG_REVISION = "missing"
+
+
+@dataclass(frozen=True)
+class StoredWorkflowConfigDocument:
+    raw_yaml: str
+    persisted_revision: str
+
+
+class WorkflowConfigConflict(RuntimeError):
+    def __init__(self, current: StoredWorkflowConfigDocument):
+        super().__init__(
+            "The saved workflow configuration changed; reload it before saving."
+        )
+        self.current = current
 
 
 class WorkflowConfigStore:
@@ -100,6 +117,101 @@ class WorkflowConfigStore:
                 logger.error(f"Kubernetes API error saving config for session {session_name}: {e}")
                 raise
 
+    def load_document(
+        self,
+        session_name: str = "default",
+    ) -> StoredWorkflowConfigDocument:
+        """Load raw configuration text with its Kubernetes concurrency token."""
+        config_map = self._read_config_map(session_name)
+        if config_map is None:
+            return StoredWorkflowConfigDocument(
+                raw_yaml="",
+                persisted_revision=MISSING_CONFIG_REVISION,
+            )
+        return _stored_document(config_map)
+
+    def save_document(
+        self,
+        config: WorkflowConfig,
+        expected_revision: str,
+        session_name: str = "default",
+    ) -> StoredWorkflowConfigDocument:
+        """Save only when the ConfigMap still has the expected resourceVersion."""
+        current_map = self._read_config_map(session_name)
+        current = _stored_document_or_missing(current_map)
+        if current.persisted_revision != expected_revision:
+            raise WorkflowConfigConflict(current)
+
+        if current_map is None:
+            saved_map = self._create_document(config, session_name)
+        else:
+            saved_map = self._replace_document(
+                current_map,
+                config,
+                expected_revision,
+                session_name,
+            )
+
+        saved = (
+            _stored_document(saved_map)
+            if saved_map is not None
+            else self.load_document(session_name)
+        )
+        if saved.persisted_revision == MISSING_CONFIG_REVISION:
+            raise RuntimeError(
+                "Kubernetes did not return the saved workflow configuration"
+            )
+        return saved
+
+    def _create_document(
+        self,
+        config: WorkflowConfig,
+        session_name: str,
+    ):
+        body = _new_config_map(session_name, config.raw_yaml)
+        try:
+            return self.v1.create_namespaced_config_map(
+                namespace=self.namespace,
+                body=body,
+            )
+        except ApiException as error:
+            if error.status == 409:
+                raise WorkflowConfigConflict(
+                    self.load_document(session_name)
+                ) from error
+            raise
+
+    def _replace_document(
+        self,
+        current_map,
+        config: WorkflowConfig,
+        expected_revision: str,
+        session_name: str,
+    ):
+        body = deepcopy(current_map)
+        body.metadata.resource_version = expected_revision
+        labels = dict(getattr(body.metadata, "labels", None) or {})
+        labels.update(_config_map_labels(session_name))
+        body.metadata.labels = labels
+        data = dict(getattr(body, "data", None) or {})
+        data.update({
+            CONFIG_YAML_KEY: config.raw_yaml,
+            "session_name": session_name,
+        })
+        body.data = data
+        try:
+            return self.v1.replace_namespaced_config_map(
+                name=session_name,
+                namespace=self.namespace,
+                body=body,
+            )
+        except ApiException as error:
+            if error.status in {404, 409}:
+                raise WorkflowConfigConflict(
+                    self.load_document(session_name)
+                ) from error
+            raise
+
     def load_config(self, session_name: str = "default") -> Optional[WorkflowConfig]:
         """Load workflow configuration from Kubernetes ConfigMap
 
@@ -135,6 +247,17 @@ class WorkflowConfigStore:
 
         logger.info(f"Loaded workflow config for session: {session_name}")
         return config
+
+    def _read_config_map(self, session_name: str):
+        try:
+            return self.v1.read_namespaced_config_map(
+                name=session_name,
+                namespace=self.namespace,
+            )
+        except ApiException as error:
+            if error.status == 404:
+                return None
+            raise
 
     def delete_config(self, session_name: str = "default") -> str:
         """Delete workflow configuration from Kubernetes ConfigMap
@@ -192,3 +315,47 @@ class WorkflowConfigStore:
 
     def close(self):
         """Close any connections (no-op for Kubernetes client)"""
+
+
+def _config_map_labels(session_name: str) -> dict[str, str]:
+    return {
+        "app": "migration-assistant",
+        "component": "workflow-config",
+        "session": session_name,
+    }
+
+
+def _new_config_map(session_name: str, raw_yaml: str) -> client.V1ConfigMap:
+    return client.V1ConfigMap(
+        metadata=client.V1ObjectMeta(
+            name=session_name,
+            labels=_config_map_labels(session_name),
+        ),
+        data={
+            CONFIG_YAML_KEY: raw_yaml,
+            "session_name": session_name,
+        },
+    )
+
+
+def _stored_document(config_map) -> StoredWorkflowConfigDocument:
+    metadata = getattr(config_map, "metadata", None)
+    revision = str(getattr(metadata, "resource_version", None) or "")
+    if not revision:
+        raise RuntimeError(
+            "Workflow configuration ConfigMap has no resourceVersion"
+        )
+    data = getattr(config_map, "data", None) or {}
+    return StoredWorkflowConfigDocument(
+        raw_yaml=str(data.get(CONFIG_YAML_KEY) or ""),
+        persisted_revision=revision,
+    )
+
+
+def _stored_document_or_missing(config_map) -> StoredWorkflowConfigDocument:
+    if config_map is not None:
+        return _stored_document(config_map)
+    return StoredWorkflowConfigDocument(
+        raw_yaml="",
+        persisted_revision=MISSING_CONFIG_REVISION,
+    )

@@ -1,64 +1,17 @@
 import {Readable} from 'stream';
-import {z, ZodError} from 'zod';
+import {
+    InputValidationError,
+    parseWithValidation,
+} from "@opensearch-migrations/config-edit-core";
+import {z} from 'zod';
 import {parse} from "yaml";
 
-export class InputValidationElement {
-    constructor(
-        public readonly path: PropertyKey[],
-        public readonly message: string
-    ) {}
-}
-
-export class InputValidationError extends Error {
-    constructor(
-        public readonly errors: InputValidationElement[]
-    ) {
-        super();
-        this.name = 'InputValidationError';
-        Error.captureStackTrace?.(this, this.constructor);
-    }
-
-    get message(): string {
-        return `Found ${this.errors.length} errors: ${formatInputValidationError(this, {singleLine: true})}`;
-    }
-}
-
-export function formatInputValidationError(
-    e: InputValidationError,
-    options?: { singleLine?: boolean }
-): string {
-    const singleLine = options?.singleLine ?? false;
-
-    return e.errors
-        .map(i => [i.message, i.path.map(pk => pk.toString()).join(".")])
-        .map(([k, v]) =>
-            singleLine
-                ? `${k} at: ${v}`
-                : `${k}... at:\n  ${v}`
-        )
-        .join(singleLine ? "; " : "\n");
-}
-
-export function stripComments<T>(obj: T): T {
-    if (obj === null || typeof obj !== 'object') {
-        return obj;
-    }
-
-    if (Array.isArray(obj)) {
-        return obj.map(stripComments) as T;
-    }
-
-    const result: any = {};
-    for (const [key, value] of Object.entries(obj)) {
-        // Skip keys starting with "//" or "#"
-        if (key.startsWith('//') || key.startsWith('#')) {
-            continue;
-        }
-        result[key] = stripComments(value);
-    }
-
-    return result;
-}
+export {
+    formatInputValidationError,
+    InputValidationElement,
+    InputValidationError,
+    stripComments,
+} from "@opensearch-migrations/config-edit-core";
 
 export class StreamSchemaParser<TInput extends z.ZodSchema> {
     constructor(protected inputStrictSchema: z.ZodSchema<z.infer<TInput>>) {
@@ -83,18 +36,7 @@ export class StreamSchemaParser<TInput extends z.ZodSchema> {
      * Validate input against schema
      */
     validateInput(data: unknown): z.infer<TInput> {
-        const strippedData = stripComments(data);
-        const result = this.inputStrictSchema.safeParse(strippedData);
-
-        if (!result.success) {
-            throw new InputValidationError(
-                result.error.issues.map(errItem =>
-                    new InputValidationElement(errItem.path, errItem.message)
-                )
-            );
-        }
-
-        return result.data;
+        return parseWithValidation(this.inputStrictSchema, data);
     }
 }
 

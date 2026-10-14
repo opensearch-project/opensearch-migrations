@@ -15,7 +15,7 @@ from click.testing import CliRunner
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 from console_link.workflow.cli import workflow_cli
-from console_link.workflow.commands.log import MIGRATION_RESOURCE_UID_LABEL
+from console_link.workflow.application.logs import MIGRATION_RESOURCE_UID_LABEL
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
 

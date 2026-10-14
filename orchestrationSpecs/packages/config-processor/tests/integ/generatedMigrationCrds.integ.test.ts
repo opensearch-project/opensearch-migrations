@@ -69,9 +69,19 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
             },
         },
         traffic: {
+            kafkaClusters: {
+                kafka: {
+                    autoCreate: {},
+                    topics: {
+                        "source-proxy": {},
+                    },
+                },
+            },
             proxies: {
                 "source-proxy": {
                     source: "source",
+                    kafka: "kafka",
+                    kafkaTopic: "source-proxy",
                     proxyConfig: {
                         listenPort: 9200,
                     },
@@ -82,7 +92,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
                     fromCapturedTraffic: "source-proxy",
                     toTarget: "target",
                     dependsOnSnapshotMigrations: [
-                        {source: "source", snapshot: "snap1"},
+                        {source: "source", snapshot: "snap1"}
                     ],
                     replayerConfig: {
                         speedupFactor: 5,
@@ -94,15 +104,16 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
         snapshotMigrationConfigs: [{
             fromSource: "source",
             toTarget: "target",
-            perSnapshotConfig: {
-                snap1: [{
+                fromSnapshot: "snap1",
+                slices: {
+                    "slice-0": {
                     metadataMigrationConfig: {},
                     documentBackfillConfig: {
                         maxConnections: 8,
                     },
-                }],
-            },
-        }],
+                    },
+                },
+            },],
     } as any;
 }
 
@@ -151,9 +162,9 @@ async function generateSnapshotMigrationManifest(config: z.infer<typeof OVERALL_
     const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "fds-bundle-"));
     try {
         await new MigrationInitializer().generateOutputFiles(
-            workflows, outputDir, config, "workflow-a", {runNumber: 1700000000000});
+            workflows, outputDir, config, "workflow-a", {runNumber: 1700000000000,});
         const resourcesDir = path.join(outputDir, "resources");
-        const file = fs.readdirSync(resourcesDir).find(f => f.includes("-snapshotmigration-"));
+        const file = fs.readdirSync(resourcesDir).find((f) => f.includes("-snapshotmigration-"));
         if (!file) {
             throw new Error(`No SnapshotMigration manifest in ${resourcesDir}`);
         }
@@ -189,7 +200,7 @@ describe("generated migration CRDs live compatibility", () => {
 
     test("accepts custom migration resources generated from a workflow config", async () => {
         await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs",);
         await execOrThrow(
             container,
             [
@@ -201,12 +212,12 @@ describe("generated migration CRDs live compatibility", () => {
                 "-l",
                 "migrations.opensearch.org/generated=true",
             ],
-            "wait for generated migration CRDs"
+            "wait for generated migration CRDs",
         );
 
         await execOrThrow(container, ["kubectl", "create", "namespace", TEST_NAMESPACE], "create test namespace");
 
-        const bundle = await new MigrationInitializer().generateMigrationBundle(sampleConfig(), "workflow-a", {runNumber: 1700000000000});
+        const bundle = await new MigrationInitializer().generateMigrationBundle(sampleConfig(), "workflow-a", {runNumber: 1700000000000,});
         const resources = bundle.customMigrationResources.items.map(manifestForCreate);
 
         for (let i = 0; i < resources.length; i++) {
@@ -222,7 +233,7 @@ describe("generated migration CRDs live compatibility", () => {
             await execOrThrow(
                 container,
                 ["kubectl", "apply", "-f", containerPath, "-n", TEST_NAMESPACE],
-                `apply ${resource.kind}/${name}`
+                `apply ${resource.kind}/${name}`,
             );
 
             const readBack = JSON.parse(await execOrThrow(
@@ -236,8 +247,8 @@ describe("generated migration CRDs live compatibility", () => {
                     "-o",
                     "json",
                 ],
-                `read back ${resource.kind}/${name}`
-            ));
+                `read back ${resource.kind}/${name}`,
+            ),);
             assertSpecRoundTrip(resource.kind, name, resource.spec, readBack.spec);
         }
     });
@@ -245,7 +256,7 @@ describe("generated migration CRDs live compatibility", () => {
     test("accepts MigrationRun history records and rejects spec updates", async () => {
         await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
         await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs",);
         await execOrThrow(
             container,
             [
@@ -257,10 +268,10 @@ describe("generated migration CRDs live compatibility", () => {
                 "-l",
                 "migrations.opensearch.org/generated=true",
             ],
-            "wait for generated migration CRDs"
+            "wait for generated migration CRDs",
         );
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"], "apply generated migration VAPs");
-        await execOrThrow(container, ["kubectl", "create", "namespace", MIGRATION_RUN_NAMESPACE], "create migration run namespace");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"], "apply generated migration VAPs",);
+        await execOrThrow(container, ["kubectl", "create", "namespace", MIGRATION_RUN_NAMESPACE], "create migration run namespace",);
 
         const migrationRun = {
             apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -280,7 +291,7 @@ describe("generated migration CRDs live compatibility", () => {
                 workflowName: "migration-workflow",
                 runNumber: 52,
                 timestamp: "2026-05-18T11:44:15Z",
-                resolvedConfig: {source: "https://old-cluster:9200", target: "https://new-cluster:9200"},
+                resolvedConfig: {source: "https://old-cluster:9200", target: "https://new-cluster:9200",},
             },
         };
         await copyTextToContainer(container, stringify(migrationRun), "/tmp/migrationRun.yaml");
@@ -295,7 +306,7 @@ describe("generated migration CRDs live compatibility", () => {
                 MIGRATION_RUN_NAMESPACE,
                 "migrations.opensearch.org/workflow-uid=workflow-uid-123",
             ],
-            "set MigrationRun workflow UID label once"
+            "set MigrationRun workflow UID label once",
         );
         await execOrThrow(
             container,
@@ -315,7 +326,7 @@ describe("generated migration CRDs live compatibility", () => {
                     },
                 }),
             ],
-            "set MigrationRun workflow status once"
+            "set MigrationRun workflow status once",
         );
 
         const updateOutput = await execExpectFailure(
@@ -330,7 +341,7 @@ describe("generated migration CRDs live compatibility", () => {
                 "-p",
                 JSON.stringify({spec: {runNumber: 53}}),
             ],
-            "patch immutable MigrationRun spec"
+            "patch immutable MigrationRun spec",
         );
         expect(updateOutput).toContain("MigrationRun specs are historical records and are immutable after creation.");
         const statusUpdateOutput = await execExpectFailure(
@@ -346,7 +357,7 @@ describe("generated migration CRDs live compatibility", () => {
                 "-p",
                 JSON.stringify({status: {workflowUid: "workflow-uid-456"}}),
             ],
-            "patch immutable MigrationRun workflow status"
+            "patch immutable MigrationRun workflow status",
         );
         expect(statusUpdateOutput).toContain("MigrationRun workflow status fields may only be set once.");
 
@@ -361,8 +372,8 @@ describe("generated migration CRDs live compatibility", () => {
                 "-o",
                 "json",
             ],
-            "read back MigrationRun"
-        ));
+            "read back MigrationRun",
+        ),);
         expect(readBack.spec).toEqual(migrationRun.spec);
         expect(readBack.metadata.labels).toMatchObject(migrationRun.metadata.labels);
         expect(readBack.metadata.labels).toMatchObject({
@@ -377,7 +388,7 @@ describe("generated migration CRDs live compatibility", () => {
     test("allows Kubernetes deletion bookkeeping after a migration resource enters Deleting", async () => {
         await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
         await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs",);
         await execOrThrow(
             container,
             [
@@ -389,10 +400,10 @@ describe("generated migration CRDs live compatibility", () => {
                 "-l",
                 "migrations.opensearch.org/generated=true",
             ],
-            "wait for generated migration CRDs"
+            "wait for generated migration CRDs",
         );
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"], "apply generated migration VAPs");
-        await execOrThrow(container, ["kubectl", "create", "namespace", DELETION_BOOKKEEPING_NAMESPACE], "create deletion bookkeeping namespace");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"], "apply generated migration VAPs",);
+        await execOrThrow(container, ["kubectl", "create", "namespace", DELETION_BOOKKEEPING_NAMESPACE], "create deletion bookkeeping namespace",);
 
         const dataSnapshot = {
             apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -411,7 +422,7 @@ describe("generated migration CRDs live compatibility", () => {
             },
         };
         await copyTextToContainer(container, stringify(dataSnapshot), "/tmp/deletingDataSnapshot.yaml");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/deletingDataSnapshot.yaml"], "apply deleting DataSnapshot");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/deletingDataSnapshot.yaml"], "apply deleting DataSnapshot",);
         await execOrThrow(
             container,
             [
@@ -425,7 +436,7 @@ describe("generated migration CRDs live compatibility", () => {
                 "-p",
                 JSON.stringify({status: {phase: "Deleting"}}),
             ],
-            "mark DataSnapshot as Deleting"
+            "mark DataSnapshot as Deleting",
         );
         await execOrThrow(
             container,
@@ -438,7 +449,7 @@ describe("generated migration CRDs live compatibility", () => {
                 "--cascade=foreground",
                 "--wait=false",
             ],
-            "request foreground deletion for DataSnapshot"
+            "request foreground deletion for DataSnapshot",
         );
 
         await execOrThrow(
@@ -453,7 +464,7 @@ describe("generated migration CRDs live compatibility", () => {
                 "-p",
                 JSON.stringify({metadata: {finalizers: []}}),
             ],
-            "remove deletion finalizer from Deleting DataSnapshot"
+            "remove deletion finalizer from Deleting DataSnapshot",
         );
         await execOrThrow(
             container,
@@ -466,13 +477,13 @@ describe("generated migration CRDs live compatibility", () => {
                 "-n",
                 DELETION_BOOKKEEPING_NAMESPACE,
             ],
-            "wait for DataSnapshot deletion after finalizer removal"
+            "wait for DataSnapshot deletion after finalizer removal",
         );
     });
 
     test("leaves the failed document stream off when the config names no bucket", async () => {
         await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs",);
         await execOrThrow(
             container,
             [
@@ -484,33 +495,33 @@ describe("generated migration CRDs live compatibility", () => {
                 "-l",
                 "migrations.opensearch.org/generated=true",
             ],
-            "wait for generated migration CRDs"
+            "wait for generated migration CRDs",
         );
         await execOrThrow(container, ["kubectl", "create", "namespace", FAILED_DOCUMENT_STREAM_NAMESPACE],
-            "create failed document stream namespace");
+            "create failed document stream namespace",);
 
         const applyAndReadSpec = async (manifest: any, label: string) => {
             const named = {
                 ...manifest,
-                metadata: {...manifest.metadata, name: label, namespace: FAILED_DOCUMENT_STREAM_NAMESPACE},
+                metadata: {...manifest.metadata, name: label, namespace: FAILED_DOCUMENT_STREAM_NAMESPACE,},
             };
             await copyTextToContainer(container, stringify(named), `/tmp/sm-${label}.yaml`);
             await execOrThrow(
                 container,
                 ["kubectl", "apply", "-f", `/tmp/sm-${label}.yaml`, "-n", FAILED_DOCUMENT_STREAM_NAMESPACE],
-                `apply SnapshotMigration/${label}`
+                `apply SnapshotMigration/${label}`,
             );
             const readBack = JSON.parse(await execOrThrow(
                 container,
                 ["kubectl", "get", `snapshotmigrations.migrations.opensearch.org/${label}`,
-                    "-n", FAILED_DOCUMENT_STREAM_NAMESPACE, "-o", "json"],
-                `read back SnapshotMigration/${label}`
-            ));
+                    "-n", FAILED_DOCUMENT_STREAM_NAMESPACE, "-o", "json",],
+                `read back SnapshotMigration/${label}`,
+            ),);
             return readBack.spec;
         };
 
         const withoutBucket = await applyAndReadSpec(
-            await generateSnapshotMigrationManifest(sampleConfig()), "no-bucket");
+            await generateSnapshotMigrationManifest(sampleConfig()), "no-bucket",);
 
         // The deployment default must not leak in.
         expect(withoutBucket.documentBackfillFailedDocumentStreamS3Bucket).toBeUndefined();
@@ -520,10 +531,10 @@ describe("generated migration CRDs live compatibility", () => {
 
         // Control: an explicit bucket does reach the CR, so the assertions above aren't vacuous.
         const configWithBucket = sampleConfig() as any;
-        configWithBucket.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig
+        configWithBucket.snapshotMigrationConfigs[0].slices["slice-0"].documentBackfillConfig
             .failedDocumentStreamS3Bucket = "user-named-bucket";
         const withBucket = await applyAndReadSpec(
-            await generateSnapshotMigrationManifest(configWithBucket), "with-bucket");
+            await generateSnapshotMigrationManifest(configWithBucket), "with-bucket",);
 
         expect(withBucket.documentBackfillFailedDocumentStreamS3Bucket).toBe("user-named-bucket");
         expect(withBucket.documentBackfillFailedDocumentStreamS3Region).toBe("us-east-2");   // snapshot repo's

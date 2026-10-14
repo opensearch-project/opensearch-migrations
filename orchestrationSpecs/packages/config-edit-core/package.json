@@ -1,0 +1,28 @@
+{
+  "name": "@opensearch-migrations/config-edit-core",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=22.14"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "npx tsc -b ../schemas/tsconfig.json && npx tsgo -p tsconfig.json --noEmit",
+    "test": "jest --config ./jest.config.js",
+    "check-browser-bundle": "node checkBrowserBundle.js",
+    "benchmark": "tsx benchmarks/editCoreBenchmark.ts"
+  },
+  "dependencies": {
+    "@opensearch-migrations/schemas": "*",
+    "ajv": "^8.20.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/jest": "*",
+    "typescript": "^5.9.3"
+  }
+}

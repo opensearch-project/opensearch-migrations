@@ -16,7 +16,6 @@ import {
     TARGET_CLUSTER_CONFIG,
     USER_CREATE_SNAPSHOT_OPTIONS,
     USER_METADATA_OPTIONS,
-    USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     USER_PROXY_OPTIONS,
     USER_REPLAYER_OPTIONS,
     USER_RFS_OPTIONS,
@@ -30,7 +29,9 @@ import {z} from "zod";
 // cross-field refinements, so rebuilding a plain object from the shape before
 // the structural op restores the prior (and intended) behavior.
 function dropRefinements<T extends z.ZodRawShape>(schema: z.ZodObject<T>): z.ZodObject<T> {
-    return z.object(schema.shape);
+    const withoutRefinements = z.object(schema.shape);
+    const meta = schema.meta();
+    return meta ? withoutRefinements.meta(meta) as z.ZodObject<T> : withoutRefinements;
 }
 
 // DO NOT CHANGE FROM SNAKE CASE - used to create services.yaml files for the console
@@ -82,7 +83,7 @@ function makeOptionalDefaultedFieldsRequired<T extends z.ZodTypeAny>(schema: T):
             updatedShape[key] = transformField(shape[key]);
         }
 
-        return schema.safeExtend(updatedShape) as any as T;
+        return dropRefinements(schema).safeExtend(updatedShape) as any as T;
     }
 
     // Handle arrays: recurse into the element type
@@ -151,7 +152,7 @@ export const NAMED_TARGET_CLUSTER_CONFIG =
     }));
 
 export const DENORMALIZED_REPO_CONFIG =
-    makeOptionalDefaultedFieldsRequired(REPO_CONFIG.safeExtend({
+    makeOptionalDefaultedFieldsRequired(dropRefinements(REPO_CONFIG).safeExtend({
         useLocalStack: z.boolean().default(false),
         repoName: z.string(),
     }));
@@ -272,14 +273,25 @@ const PROXY_RESOLVED_FIELDS = {
     sslTrustCertPemEnvVar: z.string().min(1).optional()
         .describe("Name of the env var carrying the trusted-client-CA PEM into the proxy process. Stripped from the CaptureProxy CR."),
     requireClientAuth: z.boolean().optional()
-        .describe("Flattened tls.clientAuth.required for the proxy process. Stripped from the CaptureProxy CR."),
+        .describe("Resolved proxy-process flag derived from tls.clientAuth presence. Stripped from the CaptureProxy CR."),
     ...FILE_SOURCE_RESOLVED_FIELDS,
 } as const;
 
+export const ARGO_SUPPRESS_CAPTURE_HEADER_MATCH = z.array(z.string()).default([]).optional()
+    .describe("Flattened alternating header-name and Java-regex values for suppressCaptureForHeaderMatch, passed to the proxy process.")
+    .checksumFor('snapshot', 'replayer')
+    .changeRestriction('gated');
+
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_PROXY_OPTIONS)
-        .omit(OTEL_EXPORT_CONTROL_FIELD_MASK)
-        .extend(PROXY_RESOLVED_FIELDS)
+        .omit({
+            ...OTEL_EXPORT_CONTROL_FIELD_MASK,
+            suppressCaptureForHeaderMatch: true,
+        })
+        .safeExtend({
+            suppressCaptureForHeaderMatch: ARGO_SUPPRESS_CAPTURE_HEADER_MATCH,
+            ...PROXY_RESOLVED_FIELDS,
+        })
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
     "loggingConfigurationOverrideConfigMap",

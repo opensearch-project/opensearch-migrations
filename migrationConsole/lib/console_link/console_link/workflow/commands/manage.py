@@ -4,10 +4,12 @@ import datetime
 import logging
 import os
 import psutil
+import shlex
 import sys
 import tempfile
 
 from kubernetes import client
+from textual_serve.server import Server
 
 # Internal imports
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
@@ -15,10 +17,14 @@ from .argo_utils import DEFAULT_ARGO_SERVER_URL
 from .hints import hint_after_manage
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..tui.manage_injections import make_argo_service, make_k8s_pod_scraper, WaiterInterface
-from ..tui.workflow_manage_app import WorkflowTreeApp
+from ..tui.workflow_manage_app import WorkflowTreeApp, reset_terminal_mouse_reporting
 
 
 logger = logging.getLogger(__name__)
+
+MANAGE_SERVE_DEFAULT_HOST = "127.0.0.1"
+MANAGE_SERVE_DEFAULT_PORT = 8000
+TEXTUAL_WEB_DRIVER = "textual.drivers.web_driver:WebDriver"
 
 
 def log_mem(context: str):
@@ -85,6 +91,88 @@ def _initialize_k8s_client(ctx):
     return client.CoreV1Api(api_client)
 
 
+def _running_under_textual_web_driver() -> bool:
+    return os.environ.get("TEXTUAL_DRIVER") == TEXTUAL_WEB_DRIVER
+
+
+def _make_workflow_tree_app(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view):
+    return WorkflowTreeApp(namespace, workflow_name,
+                           make_argo_service(argo_server, insecure, token),
+                           make_k8s_pod_scraper(_initialize_k8s_client(ctx)),
+                           WaiterInterface.default(workflow_name, namespace),
+                           3.0,
+                           resource_view=resource_view)
+
+
+def _quoted_command(args):
+    return " ".join(shlex.quote(str(arg)) for arg in args)
+
+
+def _build_manage_app_command(workflow_name, argo_server, namespace, insecure, token, resource_view):
+    """Build the command textual-serve launches for each browser session."""
+    args = [
+        sys.executable,
+        "-m",
+        "console_link.workflow.cli",
+        "manage",
+        "--workflow-name",
+        workflow_name,
+        "--namespace",
+        namespace,
+    ]
+    if argo_server:
+        args.extend(["--argo-server", argo_server])
+    if insecure:
+        args.append("--insecure")
+    if token:
+        args.extend(["--token", token])
+    args.append("--resource-view" if resource_view else "--step-view")
+    return _quoted_command(args)
+
+
+def _serve_manage_app(workflow_name, argo_server, namespace, insecure, token,
+                      resource_view, serve_host, serve_port, serve_public_url, serve_debug):
+    public_url = serve_public_url or f"http://localhost:{serve_port}"
+    app_command = _build_manage_app_command(workflow_name, argo_server, namespace, insecure, token, resource_view)
+    server = Server(app_command,
+                    host=serve_host,
+                    port=serve_port,
+                    title=f"Workflow Manage: {workflow_name}",
+                    public_url=public_url)
+    click.echo(f"Serving workflow manage on {public_url}")
+    click.echo(f"Listening on {serve_host}:{serve_port}; press Ctrl+C to stop.")
+    server.serve(debug=serve_debug)
+
+
+def _serve_native_manage_app(
+    workflow_name,
+    argo_server,
+    namespace,
+    insecure,
+    token,
+    host,
+    port,
+    static_dir,
+    refresh_interval,
+):
+    from ..web.server import run_server
+
+    public_url = f"http://localhost:{port}"
+    click.echo(f"Serving native workflow manage on {public_url}")
+    click.echo(f"Listening on {host}:{port}; press Ctrl+C to stop.")
+    run_server(
+        namespace=namespace,
+        workflow_name=workflow_name,
+        argo_server=argo_server,
+        insecure=insecure,
+        token=token,
+        host=host,
+        port=port,
+        static_dir=static_dir,
+        refresh_interval=refresh_interval,
+    )
+
+
 # --- Entrypoint ---
 @click.command(name="manage")
 @click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions, hidden=True)
@@ -96,23 +184,68 @@ def _initialize_k8s_client(ctx):
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
 @click.option('--insecure', is_flag=True, default=True, hidden=True, envvar='WORKFLOW_INSECURE')
 @click.option('--token', hidden=True, envvar='ARGO_TOKEN')
-@click.option('--resource-view/--step-view', default=False, show_default='step-view',
+@click.option('--resource-view/--step-view', default=True, show_default='resource-view',
               help='Show the resource-centric view (--resource-view) or the current Argo '
                    "Workflow's step tree (--step-view). The step tree does not show "
                    'historical actions from prior runs.')
+@click.option('--serve', is_flag=True,
+              help='Serve the manage Textual UI over HTTP instead of running it in this terminal.')
+@click.option('--serve-host', default=MANAGE_SERVE_DEFAULT_HOST, show_default=True,
+              envvar='WORKFLOW_MANAGE_SERVE_HOST',
+              help='Host/interface for --serve to bind. Use 0.0.0.0 only when exposing without kubectl port-forward.')
+@click.option('--serve-port', default=MANAGE_SERVE_DEFAULT_PORT, show_default=True,
+              type=click.IntRange(1, 65535), envvar='WORKFLOW_MANAGE_SERVE_PORT',
+              help='Port for --serve to bind.')
+@click.option('--serve-public-url', default=None, envvar='WORKFLOW_MANAGE_SERVE_PUBLIC_URL',
+              help='Browser-facing URL used for links and websockets. Defaults to '
+                   'http://localhost:<port> for kubectl port-forward.')
+@click.option('--serve-debug', is_flag=True, hidden=True, envvar='WORKFLOW_MANAGE_SERVE_DEBUG')
+@click.option('--web', is_flag=True,
+              help='Run the native workflow manage web application and API.')
+@click.option('--web-host', default=MANAGE_SERVE_DEFAULT_HOST, show_default=True,
+              envvar='WORKFLOW_MANAGE_WEB_HOST',
+              help='Host/interface for the native web application to bind.')
+@click.option('--web-port', default=MANAGE_SERVE_DEFAULT_PORT, show_default=True,
+              type=click.IntRange(1, 65535), envvar='WORKFLOW_MANAGE_WEB_PORT',
+              help='Port for the native web application to bind.')
+@click.option('--web-static-dir', default=None, type=click.Path(path_type=str),
+              envvar='WORKFLOW_MANAGE_WEB_STATIC_DIR', hidden=True)
+@click.option('--web-refresh-interval', default=3.0, show_default=True, type=click.FloatRange(min=0.1),
+              envvar='WORKFLOW_MANAGE_WEB_REFRESH_INTERVAL', hidden=True)
 @click.pass_context
-def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view):
-    _configure_file_logging()  # Configure logging when command actually runs
+def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view,
+                   serve, serve_host, serve_port, serve_public_url, serve_debug,
+                   web, web_host, web_port, web_static_dir, web_refresh_interval):
+    if serve and web:
+        raise click.UsageError("--serve and --web cannot be used together")
+    if not web:
+        _configure_file_logging()  # Configure logging when the TUI command runs
+    app = None
     try:
-        app = WorkflowTreeApp(namespace, workflow_name,
-                              make_argo_service(argo_server, insecure, token),
-                              make_k8s_pod_scraper(_initialize_k8s_client(ctx)),
-                              WaiterInterface.default(workflow_name, namespace),
-                              3.0,
-                              resource_view=resource_view)
-        app.run()
+        if web:
+            _serve_native_manage_app(
+                workflow_name,
+                argo_server,
+                namespace,
+                insecure,
+                token,
+                web_host,
+                web_port,
+                web_static_dir,
+                web_refresh_interval,
+            )
+        elif serve:
+            _serve_manage_app(workflow_name, argo_server, namespace, insecure, token,
+                              resource_view, serve_host, serve_port, serve_public_url, serve_debug)
+        else:
+            app = _make_workflow_tree_app(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view)
+            app.run()
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
+    finally:
+        if not serve and not web and not _running_under_textual_web_driver():
+            reset_terminal_mouse_reporting(sys.stdout)
 
-    hint_after_manage(app.last_known_phase)
+    if app is not None:
+        hint_after_manage(app.last_known_phase)

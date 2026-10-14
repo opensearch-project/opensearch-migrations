@@ -3,27 +3,45 @@
     "source": {
       "version": "ES 7.10.2",
       "endpoint": "https://local.testenv.es.amazonaws.com.mydomain.local",
-      "authConfig": { "basic": { "secretName": "source-creds" } },
+      "authConfig": {
+        "basic": {
+          "secretName": "source-creds"
+        }
+      },
       "snapshotInfo": {
+        "repos": {
+          "default": {
+            "repoPathUri": "s3://snapshot-bucket",
+            "awsRegion": "us-east-1"
+          }
+        },
         "snapshots": {
           "snap1": {
-            "repoName": "",
-            "config": { "createSnapshotConfig": {} }
+            "repoName": "default",
+            "config": {
+              "createSnapshotConfig": {}
+            }
           }
         }
       }
     }
   },
   "targetClusters": {
-    "target": { "endpoint": "http://target:9200" }
+    "target": {
+      "endpoint": "http://target:9200"
+    }
   },
   "snapshotMigrationConfigs": [
     {
       "fromSource": "source",
       "toTarget": "target",
-      "perSnapshotConfig": {
-        "snap1": [{ "metadataMigrationConfig": {} }]
-      }
+      "fromSnapshot": "snap1",
+      "slices": [
+        {
+          "metadataMigrationConfig": {},
+          "label": "slice-0"
+        }
+      ]
     }
   ]
 }

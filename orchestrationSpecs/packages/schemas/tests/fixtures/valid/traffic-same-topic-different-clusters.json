@@ -1,12 +1,4 @@
 {
-  "kafkaClusterConfiguration": {
-    "kc-a": {
-      "autoCreate": {}
-    },
-    "kc-b": {
-      "autoCreate": {}
-    }
-  },
   "sourceClusters": {
     "source": {
       "version": "ES 7.10.2",
@@ -23,6 +15,20 @@
   },
   "snapshotMigrationConfigs": [],
   "traffic": {
+    "kafkaClusters": {
+      "kc-a": {
+        "autoCreate": {},
+        "topics": {
+          "shared-topic": {}
+        }
+      },
+      "kc-b": {
+        "autoCreate": {},
+        "topics": {
+          "shared-topic": {}
+        }
+      }
+    },
     "proxies": {
       "p1": {
         "source": "source",

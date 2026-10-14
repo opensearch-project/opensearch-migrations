@@ -22,11 +22,13 @@ from .crd_utils import (
     resource_display_name,
 )
 from ..models.utils import load_k8s_config, get_current_namespace
+from ..application.logs import (
+    LogUnavailable,
+    resource_log_selector,
+)
 
 
 logger = logging.getLogger(__name__)
-MIGRATION_RESOURCE_UID_LABEL = 'migrations.opensearch.org/migration-resource-uid'
-
 # `workflow log` is intentionally for pod logs only. Durable command output is
 # handled by the workflow templates instead: the few output-producing steps
 # write explicit small artifacts under migration-outputs/<resource>/<name>/,
@@ -176,15 +178,15 @@ def _resource_label_selectors(ctx, namespace, resource_name):
     if not resource:
         click.echo(f"No migration resource matching '{resource_name}'.", err=True)
         ctx.exit(1)
-    resource_uid = resource.get('metadata', {}).get('uid')
-    if not resource_uid:
+    try:
+        return resource_log_selector(resource).split(",")
+    except LogUnavailable as error:
         click.echo(
-            f"Migration resource '{resource_name}' has no Kubernetes UID; "
-            "resource logs cannot be selected safely.",
+            f"Migration resource '{resource_name}' {error}",
             err=True,
         )
         ctx.exit(1)
-    return [f"{MIGRATION_RESOURCE_UID_LABEL}={resource_uid}"]
+        return []
 
 
 def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):

@@ -12,11 +12,21 @@
   },
   "snapshotMigrationConfigs": [],
   "traffic": {
+    "kafkaClusters": {
+      "default": {
+        "autoCreate": {},
+        "topics": {
+          "loaded-dump": {}
+        }
+      }
+    },
     "s3Sources": {
       "loaded-dump": {
         "s3Uri": "s3://byo-traffic/kafka_export_slice_10k.proto.gz",
         "awsRegion": "us-east-2",
-        "sourceLabel": "source"
+        "kafka": "default",
+        "sourceLabel": "source",
+        "kafkaTopic": "loaded-dump"
       }
     },
     "replayers": {

@@ -280,7 +280,7 @@ assuming that every replayer begins with request index zero.
 
 ### 3.5 Source-response and connection-lifecycle inputs
 
-Replay intake alone maintains captured source request and response accumulations as TrafficObservations arrive. 
+Replay intake alone maintains captured source request and response accumulations as TrafficObservations arrive.
 
 After replay intake reconstitutes a complete source request, the request-replay owner retains that request for target replay and retry decisions. The captured source response then resolves independently for two purposes:
 1. Retry policy receives either the complete captured source response or an explicit indication that no source response is available for the retry decision.
@@ -1070,21 +1070,21 @@ Target processing distinguishes:
    remain valid.
 2. **Target response obtained.** Apply the configured retry policy. If another attempt is required,
    retry. Otherwise the obtained response is the terminal target outcome, whether successful or
-   unsuccessful. 
-   
-Some retry decisions need only the target result. If such a decision requires no further target 
-attempt, the request-replay owner reports connection-turn completion immediately. 
+   unsuccessful.
 
-A retry decision may instead need the captured source response. The 
-request-replay owner then holds the connection turn until replay intake answers 
-the retry question one way or the other — with the complete source response 
-frozen for retry, or with `SourceResponseUnavailableForRetry` — and runs the 
-retry policy on that immutable input. The separate final source-response result 
-(§3.5) feeds only tuple output and is never part of this wait. The owner does 
-not hold a target-concurrency permit while it waits: the permit is released 
-when the target outcome arrives and reacquired before any further attempt. The 
-connection turn is what preserves per-connection order; the permit bounds only 
-attempts actually in progress.                   
+Some retry decisions need only the target result. If such a decision requires no further target
+attempt, the request-replay owner reports connection-turn completion immediately.
+
+A retry decision may instead need the captured source response. The
+request-replay owner then holds the connection turn until replay intake answers
+the retry question one way or the other — with the complete source response
+frozen for retry, or with `SourceResponseUnavailableForRetry` — and runs the
+retry policy on that immutable input. The separate final source-response result
+(§3.5) feeds only tuple output and is never part of this wait. The owner does
+not hold a target-concurrency permit while it waits: the permit is released
+when the target outcome arrives and reacquired before any further attempt. The
+connection turn is what preserves per-connection order; the permit bounds only
+attempts actually in progress.
 
 An unsuccessful response does not by itself require Kafka redelivery. Source-versus-target status
 comparison remains critical tuple and metric output, not Kafka commit policy.

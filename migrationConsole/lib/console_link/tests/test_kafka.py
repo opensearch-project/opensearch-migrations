@@ -281,6 +281,84 @@ def test_standard_kafka_describe_group(mocker):
          ])
 
 
+def test_standard_kafka_describe_group_can_skip_time_lag(mocker):
+    config = {
+        "broker_endpoints": "abc",
+        "standard": None
+    }
+    kafka = get_kafka(config)
+    mock = mocker.patch('subprocess.run', autospec=True)
+    augmenter = mocker.patch.object(
+        kafka_module,
+        '_augment_describe_output_with_replay_progress',
+    )
+
+    result = kafka.describe_consumer_group(
+        group_name='new_group',
+        include_time_lag=False,
+    )
+
+    assert result.success
+    augmenter.assert_not_called()
+    _assert_kafka_subprocess_run(
+        mock,
+        ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
+         '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--describe',
+         '--group', 'new_group',
+         ])
+
+
+_DESCRIBE_OUTPUT_BASIC = """\
+GROUP     TOPIC          PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID  HOST  CLIENT-ID
+my-group  logging-topic  0          100             150             50   c1           h1    c
+my-group  logging-topic  1          200             200             0    c1           h1    c
+my-group  logging-topic  2          0               0               0    -            -     -
+"""
+
+
+def test_parse_consumer_group_describe_basic():
+    assert kafka_module.parse_consumer_group_describe(_DESCRIBE_OUTPUT_BASIC) == [
+        {
+            'topic': 'logging-topic',
+            'partition': 0,
+            'current_offset': 100,
+            'log_end_offset': 150,
+            'lag': 50,
+        },
+        {
+            'topic': 'logging-topic',
+            'partition': 1,
+            'current_offset': 200,
+            'log_end_offset': 200,
+            'lag': 0,
+        },
+        {
+            'topic': 'logging-topic',
+            'partition': 2,
+            'current_offset': 0,
+            'log_end_offset': 0,
+            'lag': 0,
+        },
+    ]
+
+
+def test_parse_consumer_group_describe_recovers_missing_lag():
+    output = """\
+GROUP   TOPIC   PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
+g1      t1      0          90              100             -
+g1      t1      1          -               100             -
+"""
+    assert kafka_module.parse_consumer_group_describe(output) == [
+        {
+            'topic': 't1',
+            'partition': 0,
+            'current_offset': 90,
+            'log_end_offset': 100,
+            'lag': 10,
+        },
+    ]
+
+
 def test_msk_kafka_list_groups(mocker):
     config = {
         "broker_endpoints": "abc",
