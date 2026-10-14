@@ -1942,17 +1942,18 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
+  # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
+  # direct access to a local Docker daemon from the target environment.
+  source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
   BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
-  if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
+  if builder_status=$(docker buildx inspect "$BUILDER_NAME" 2>/dev/null) \
+      && buildx_nodes_are_ready <<< "$builder_status"; then
     echo "Buildkit already configured and healthy, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
     # Remove stale builder if it exists but failed health check above (e.g. orphaned
     # from a previous interrupted run). This is safe — the builder is recreated below.
     docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
-    # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
-    # direct access to a local Docker daemon from the target environment.
-    source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
     if [[ "$push_images_to_ecr" == "true" ]]; then
       # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
       # from Docker Hub. mirror_images_to_ecr already copied this image above.
