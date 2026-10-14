@@ -95,8 +95,13 @@ build_local_images() {
   # buildKitLoadTestAll_* is listed separately: buildImagesToRegistry_* no longer builds the k6
   # runner or patched operator, because load-test images are their own aggregate.
   # Load-test cases (Test008x) need it in the registry before the k6LoadTest chart can run.
-  gradlew ":buildImages:buildImagesToRegistry_${platform}" \
-    ":buildImages:buildKitLoadTestAll_${platform}" \
+  # SKIP_LOAD_TEST_IMAGES=true leaves them out, for runs that don't use k6 or networks where their
+  # Go module downloads fail.
+  local build_targets=(":buildImages:buildImagesToRegistry_${platform}")
+  if [[ "${SKIP_LOAD_TEST_IMAGES:-false}" != "true" ]]; then
+    build_targets+=(":buildImages:buildKitLoadTestAll_${platform}")
+  fi
+  gradlew "${build_targets[@]}" \
     -Pbuilder="${builder_name}" \
     -PregistryEndpoint="${BUILD_REGISTRY_ENDPOINT}" \
     "${gradle_args[@]}"
