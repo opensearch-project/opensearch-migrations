@@ -33,14 +33,21 @@ def per_min(m, sel=""):
     return f"({rate(m, sel)} * 60) or vector(0)"
 
 
-def mean(h, scale=1):
-    e = f"sum(rate({h}_sum[{RI}])) / sum(rate({h}_count[{RI}]))"
+def mean(h, scale=1, sel=""):
+    s = f"{{{sel}}}" if sel else ""
+    e = f"sum(rate({h}_sum{s}[{RI}])) / sum(rate({h}_count{s}[{RI}]))"
     return e if scale == 1 else f"{e} / {scale}"
 
 
-def p95(h, scale=1):
-    e = f"histogram_quantile(0.95, sum by (le) (rate({h}_bucket[{RI}])))"
+def p95(h, scale=1, sel=""):
+    s = f"{{{sel}}}" if sel else ""
+    e = f"histogram_quantile(0.95, sum by (le) (rate({h}_bucket{s}[{RI}])))"
     return e if scale == 1 else f"{e} / {scale}"
+
+
+# The proxy and the replayer both export waitingForResponseDuration, so pin the scope where a name is shared.
+PROXY = 'otel_scope_name="captureProxy"'
+REPLAYER = 'otel_scope_name="replayer"'
 
 
 def hottest(g, by="exported_instance"):
@@ -219,7 +226,8 @@ def proxy_latency():
     return (P("Proxy latency (mean ms)", "Windowed means (histogram sum/count rates) plus p95 of Kafka publish "
                                          "→ ack." + TOPB, unit="ms")
             .q(mean("gatheringRequestDuration_milliseconds"), "Gather request")
-            .q(mean("gatheringResponseDuration_milliseconds"), "Gather response (source latency)")
+            .q(mean("waitingForResponseDuration_milliseconds", sel=PROXY), "Wait for source's first byte")
+            .q(mean("gatheringResponseDuration_milliseconds"), "Gather source response")
             .q(mean("kafkaCommitDuration_milliseconds"), "Kafka publish → ack")
             .q(p95("kafkaCommitDuration_milliseconds"), "Kafka publish → ack p95"))
 
@@ -403,7 +411,7 @@ def target_latency():
     p.q(p95("targetTransactionDuration_milliseconds", 1000), "Target transaction p95")
     for h, lab in [("requestConnectingDuration", "Connect"), ("requestSendingDuration", "Send"),
                    ("waitingForResponseDuration", "Wait for response"), ("receivingResponseDuration", "Receive response")]:
-        p.q(mean(h + "_milliseconds", 1000), lab)
+        p.q(mean(h + "_milliseconds", 1000, sel=REPLAYER), lab)
     return p
 
 
@@ -451,6 +459,43 @@ def status_mismatches():
 def status_matches():
     return (P("Status-code matches per second", "Matching tuples per second by method and status-code class (stacked).", unit="ops", stacked=True)
             .q(f'sum by (method, targetStatusCode) (rate(tupleComparison_total{{statusCodesMatch="true"}}[{RI}]))', "{{method}} {{targetStatusCode}}"))
+
+
+# The proxy and the replayer time the same response phases, against the source and the target:
+# waitingForResponse = request sent -> first response byte; then gatheringResponse (proxy) and
+# receivingResponse (replayer) = first byte -> response complete.
+SRC_FIRST = mean("waitingForResponseDuration_milliseconds", sel=PROXY)
+TGT_FIRST = mean("waitingForResponseDuration_milliseconds", sel=REPLAYER)
+SRC_TOTAL = f"({SRC_FIRST}) + ({mean('gatheringResponseDuration_milliseconds')})"
+TGT_TOTAL = f"({TGT_FIRST}) + ({mean('receivingResponseDuration_milliseconds', sel=REPLAYER)})"
+COMPARE = (" Fleet means over the window, not per-request pairs; the target is measured under replay load and "
+           "speedup.")
+
+
+def response_times():
+    return (P("Response time, source vs target (mean ms)", "Time from sending the request to the first response "
+              "byte and to the complete response: the source as the capture proxy saw it, the target as the "
+              "replayer saw it, plus p95 to first byte." + COMPARE + TOPB, unit="ms")
+            .q(SRC_FIRST, "Source: request → first byte")
+            .q(TGT_FIRST, "Target: request → first byte")
+            .q(SRC_TOTAL, "Source: request → response complete")
+            .q(TGT_TOTAL, "Target: request → response complete")
+            .q(p95("waitingForResponseDuration_milliseconds", sel=PROXY), "Source: first byte p95")
+            .q(p95("waitingForResponseDuration_milliseconds", sel=REPLAYER), "Target: first byte p95"))
+
+
+def response_time_diff():
+    return (P("Response time difference, target − source (mean ms)", "Target mean minus source mean; positive "
+              "means the target is slower." + COMPARE, unit="ms", mn=None)
+            .q(f"({TGT_FIRST}) - ({SRC_FIRST})", "To first byte")
+            .q(f"({TGT_TOTAL}) - ({SRC_TOTAL})", "To response complete"))
+
+
+def response_time_pct():
+    return (P("Response time difference, target vs source (%)", "(target − source) / source; positive means the "
+              "target is slower." + COMPARE, unit="percent", mn=None)
+            .q(f"100 * (({TGT_FIRST}) - ({SRC_FIRST})) / ({SRC_FIRST})", "To first byte")
+            .q(f"100 * (({TGT_TOTAL}) - ({SRC_TOTAL})) / ({SRC_TOTAL})", "To response complete"))
 
 
 # --- tuples ---
@@ -575,17 +620,22 @@ def layout():
         x += wd
     ps.append(kpi_target_text(x, y, 4, 3))
     y += 3
+    ps.append(row("Response comparisons", y))
+    y += 1
+    for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
+        ps.append(b().build(i * 8, y, 8, 6))
+    y += 6
+    for i, b in enumerate([response_times, response_time_diff, response_time_pct]):
+        ps.append(b().build(i * 8, y, 8, 6))
+    y += 6
     ps.append(row("End-to-end flow", y))
     y += 1
     for i, b in enumerate([flow_requests, flow_bytes, flow_lag]):
         ps.append(b().build(i * 8, y, 8, 7))
     y += 7
     y = layout_grid(ps, y)
-    ps.append(row("Correctness and result tuples", y))
+    ps.append(row("Result tuples", y))
     y += 1
-    for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
-        ps.append(b().build(i * 8, y, 8, 6))
-    y += 6
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
         ps.append(b().build(i * 8, y, 8, 6))
     y += 6

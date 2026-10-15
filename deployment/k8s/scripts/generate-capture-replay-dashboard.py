@@ -258,7 +258,8 @@ def proxy_publish():
 def proxy_latency():
     w = W("Proxy latency (mean ms)")
     w.avg("gatheringRequestDuration", "Gather request", lib="captureProxy")
-    w.avg("gatheringResponseDuration", "Gather response (source latency)", lib="captureProxy")
+    w.avg("waitingForResponseDuration", "Wait for source's first byte", lib="captureProxy")
+    w.avg("gatheringResponseDuration", "Gather source response", lib="captureProxy")
     w.avg("kafkaCommitDuration", "Kafka publish → ack", lib="captureProxy")
     w.avg("captureConnectionDuration", "Client connection lifetime", lib="captureProxy", visible=False)
     return w
@@ -591,6 +592,45 @@ def status_matches():
     return w
 
 
+# The proxy and the replayer time the same response phases, against the source and the target:
+# waitingForResponse = request sent -> first response byte; then gatheringResponse (proxy) and
+# receivingResponse (replayer) = first byte -> response complete. Fleet means, not per-request pairs, and
+# the target is measured under replay load and speedup.
+def response_means(w):
+    """Hidden mean-ms ids: (source first byte, source receive, target first byte, target receive)."""
+    return (w.m("waitingForResponseDuration", "Average", "captureProxy"),
+            w.m("gatheringResponseDuration", "Average", "captureProxy"),
+            w.m("waitingForResponseDuration", "Average"),
+            w.m("receivingResponseDuration", "Average"))
+
+
+def response_times():
+    w = W("Response time, source vs target (mean ms)", yleft={"label": "ms", "showUnits": False})
+    sw, sg, tw, tr = response_means(w)
+    w.e(sw, "Source: request → first byte")
+    w.e(tw, "Target: request → first byte")
+    w.e(f"{sw} + {sg}", "Source: request → response complete")
+    w.e(f"{tw} + {tr}", "Target: request → response complete")
+    return w
+
+
+def response_time_diff():
+    w = W("Response time difference, target − source (mean ms)", yleft={"label": "ms", "showUnits": False})
+    sw, sg, tw, tr = response_means(w)
+    w.e(f"{tw} - {sw}", "To first byte")
+    w.e(f"({tw} + {tr}) - ({sw} + {sg})", "To response complete")
+    return w
+
+
+def response_time_pct():
+    w = W("Response time difference, target vs source (%)",
+          yleft={"label": "% slower (+) / faster (−)", "showUnits": False})
+    sw, sg, tw, tr = response_means(w)
+    w.e(f"IF({sw} > 0, 100 * ({tw} - {sw}) / {sw}, 0/0)", "To first byte")
+    w.e(f"IF(({sw} + {sg}) > 0, 100 * (({tw} + {tr}) - ({sw} + {sg})) / ({sw} + {sg}), 0/0)", "To response complete")
+    return w
+
+
 # --- tuples ----------------------------------------------------------------------------------
 def tuple_flow():
     w = W("Tuple durability (S3)", yright={"label": "pending", "showUnits": False})
@@ -668,6 +708,14 @@ def layout_columns():
         ws.append(w.widget(x, y, wd, 3))
         x += wd
     y += 3
+    ws.append(text("## Response comparisons", 0, y, 24))
+    y += 1
+    for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
+        ws.append(b().widget(i * 8, y, 8, 6))
+    y += 6
+    for i, b in enumerate([response_times, response_time_diff, response_time_pct]):
+        ws.append(b().widget(i * 8, y, 8, 6))
+    y += 6
     ws.append(text("## End-to-end flow", 0, y, 24))
     y += 1
     for i, b in enumerate([flow_requests, flow_bytes, flow_lag]):
@@ -694,11 +742,8 @@ def layout_columns():
         for i, b in enumerate(row):
             ws.append(b().widget(i * 6, y, 6, h))
         y += h
-    ws.append(text("## Correctness and result tuples", 0, y, 24))
+    ws.append(text("## Result tuples", 0, y, 24))
     y += 1
-    for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
-        ws.append(b().widget(i * 8, y, 8, 6))
-    y += 6
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
         ws.append(b().widget(i * 8, y, 8, 6))
     y += 6
