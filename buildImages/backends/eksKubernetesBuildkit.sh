@@ -116,6 +116,18 @@ duration_to_seconds() {
   return 1
 }
 
+# Older buildx versions return success from inspect even when a node failed to
+# bootstrap. Require both native builders to be running before starting a bake.
+buildx_nodes_are_ready() {
+  awk '
+    /^Name:/ { name = $2 }
+    /^Status:/ { status[name] = $2 }
+    END {
+      exit !(status["builder-amd64"] == "running" && status["builder-arm64"] == "running")
+    }
+  '
+}
+
 ensure_eks_buildx_builder() {
   local context builder_name namespace
   set_k8s_context_args
@@ -124,6 +136,14 @@ ensure_eks_buildx_builder() {
   context="$(get_k8s_build_context)"
   builder_name="builder-${context//[^a-zA-Z0-9_-]/-}"
   namespace="${BUILDKIT_NAMESPACE:-buildkit}"
+  local build_timeout="${BUILDKIT_BOOTSTRAP_TIMEOUT:-900s}"
+  local timeout_seconds
+  timeout_seconds="$(duration_to_seconds "${build_timeout}")"
+  local max_attempts="${BUILDKIT_BOOTSTRAP_ATTEMPTS:-0}"
+  if [[ ! "${max_attempts}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: BUILDKIT_BOOTSTRAP_ATTEMPTS must be a non-negative integer." >&2
+    return 1
+  fi
 
   docker buildx rm "${builder_name}" 2>/dev/null || true
 
@@ -163,20 +183,13 @@ ensure_eks_buildx_builder() {
   echo "Bootstrapping builder..."
 
   # The kubernetes driver creates its builder Deployments as part of buildx
-  # bootstrap. Give that bootstrap enough time for the build-nodepool cold-start
-  # path; a kubectl pre-wait cannot help before buildx has created anything.
-  local build_timeout="${BUILDKIT_BOOTSTRAP_TIMEOUT:-900s}"
-  local timeout_seconds
-  timeout_seconds="$(duration_to_seconds "${build_timeout}")"
+  # bootstrap. Retry within the overall deadline to allow for nodepool cold
+  # starts; older buildx versions reject the Kubernetes driver's timeout option.
+  # A kubectl pre-wait cannot help before buildx has created anything.
   local deadline=$(( $(date +%s) + timeout_seconds ))
-  local max_attempts="${BUILDKIT_BOOTSTRAP_ATTEMPTS:-0}"
-  if [[ ! "${max_attempts}" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: BUILDKIT_BOOTSTRAP_ATTEMPTS must be a non-negative integer." >&2
-    return 1
-  fi
   local attempt=1
   while true; do
-    local now remaining attempt_label
+    local now remaining attempt_label builder_status
     now="$(date +%s)"
     remaining=$((deadline - now))
     if [[ "${remaining}" -le 0 ]]; then
@@ -185,6 +198,7 @@ ensure_eks_buildx_builder() {
         get all -n "${namespace}" >&2 || true
       kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
         describe pods -n "${namespace}" >&2 || true
+      dump_node_provisioning_state
       return 1
     fi
 
@@ -194,8 +208,14 @@ ensure_eks_buildx_builder() {
       attempt_label="attempt ${attempt}"
     fi
     echo "Bootstrapping buildx builder (${attempt_label}, ${remaining}s remaining of ${build_timeout})..."
-    if run_with_optional_timeout "${remaining}s" docker buildx inspect --bootstrap; then
-      break
+    if builder_status="$(run_with_optional_timeout "${remaining}s" docker buildx inspect "${builder_name}" --bootstrap 2>&1)"; then
+      printf '%s\n' "${builder_status}"
+      if buildx_nodes_are_ready <<< "${builder_status}"; then
+        break
+      fi
+      echo "buildx inspect returned success but both native builders are not running." >&2
+    else
+      printf '%s\n' "${builder_status}" >&2
     fi
     echo "buildx bootstrap failed on ${attempt_label}; current buildkit namespace state:" >&2
     kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
