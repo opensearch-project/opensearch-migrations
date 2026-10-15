@@ -461,41 +461,64 @@ def status_matches():
             .q(f'sum by (method, targetStatusCode) (rate(tupleComparison_total{{statusCodesMatch="true"}}[{RI}]))', "{{method}} {{targetStatusCode}}"))
 
 
-# The proxy and the replayer time the same response phases, against the source and the target:
-# waitingForResponse = request sent -> first response byte; then gatheringResponse (proxy) and
-# receivingResponse (replayer) = first byte -> response complete.
-SRC_FIRST = mean("waitingForResponseDuration_milliseconds", sel=PROXY)
-TGT_FIRST = mean("waitingForResponseDuration_milliseconds", sel=REPLAYER)
-SRC_TOTAL = f"({SRC_FIRST}) + ({mean('gatheringResponseDuration_milliseconds')})"
-TGT_TOTAL = f"({TGT_FIRST}) + ({mean('receivingResponseDuration_milliseconds', sel=REPLAYER)})"
-COMPARE = (" Fleet means over the window, not per-request pairs; the target is measured under replay load and "
-           "speedup.")
+# Per request pair, for tuples whose status codes matched, the replayer records both sides' spans from the request's
+# last byte to the final response's first byte and to its last byte. Histograms can't hold the signed difference, so
+# tupleResponseDurationDifference holds its magnitude with targetSlower, and tupleResponseDurationRatio holds
+# max(1 ms, target) / max(1 ms, source) in log-spaced buckets around 1.
+SRC_FIRST, TGT_FIRST = "tupleSourceFirstByteDuration_milliseconds", "tupleTargetFirstByteDuration_milliseconds"
+SRC_TOTAL, TGT_TOTAL = "tupleSourceResponseDuration_milliseconds", "tupleTargetResponseDuration_milliseconds"
+DIFF = "tupleResponseDurationDifference_milliseconds"
+RATIO = "tupleResponseDurationRatio"
+SPANS = [("firstByte", "To first byte"), ("total", "To response complete")]
+COMPARE = (" Values are per request pair, for requests whose status codes matched; the target is measured under "
+           "replay load and speedup.")
+
+
+def signed_mean_difference(span):
+    """The exact mean of target − source: slower magnitudes less the others, over every pair."""
+    def total(slower):
+        return f"(sum(rate({DIFF}_sum{{span=\"{span}\",targetSlower=\"{slower}\"}}[{RI}])) or vector(0))"
+    return f"({total('true')} - {total('false')}) / sum(rate({DIFF}_count{{span=\"{span}\"}}[{RI}]))"
+
+
+def ratio_pct(quantile, span):
+    return (f"100 * (histogram_quantile({quantile}, sum by (le) (rate({RATIO}_bucket{{span=\"{span}\"}}[{RI}]))) "
+            "- 1)")
 
 
 def response_times():
-    return (P("Response time, source vs target (mean ms)", "Time from sending the request to the first response "
-              "byte and to the complete response: the source as the capture proxy saw it, the target as the "
-              "replayer saw it, plus p95 to first byte." + COMPARE + TOPB, unit="ms")
-            .q(SRC_FIRST, "Source: request → first byte")
-            .q(TGT_FIRST, "Target: request → first byte")
-            .q(SRC_TOTAL, "Source: request → response complete")
-            .q(TGT_TOTAL, "Target: request → response complete")
-            .q(p95("waitingForResponseDuration_milliseconds", sel=PROXY), "Source: first byte p95")
-            .q(p95("waitingForResponseDuration_milliseconds", sel=REPLAYER), "Target: first byte p95"))
+    return (P("Response time, source vs target (mean ms)", "Time from the request's last byte to the first byte "
+              "and to the last byte of the final response, on each side, plus p95 of the complete response, from "
+              "buckets topped at 2 minutes." + COMPARE, unit="ms")
+            .q(mean(SRC_FIRST), "Source: request → first byte")
+            .q(mean(TGT_FIRST), "Target: request → first byte")
+            .q(mean(SRC_TOTAL), "Source: request → response complete")
+            .q(mean(TGT_TOTAL), "Target: request → response complete")
+            .q(p95(SRC_TOTAL), "Source: response complete p95")
+            .q(p95(TGT_TOTAL), "Target: response complete p95"))
 
 
 def response_time_diff():
-    return (P("Response time difference, target − source (mean ms)", "Target mean minus source mean; positive "
-              "means the target is slower." + COMPARE, unit="ms", mn=None)
-            .q(f"({TGT_FIRST}) - ({SRC_FIRST})", "To first byte")
-            .q(f"({TGT_TOTAL}) - ({SRC_TOTAL})", "To response complete"))
+    p = P("Response time difference, target − source (mean ms)", "Mean of each pair's target − source; positive "
+          "means the target is slower. The p95 lines are of the difference's magnitude, split by whether the target "
+          "was slower (a tie counts as not slower)." + COMPARE, unit="ms", mn=None)
+    for span, label in SPANS:
+        p.q(signed_mean_difference(span), label)
+    p.q(f'histogram_quantile(0.95, sum by (le, targetSlower) (rate({DIFF}_bucket{{span="total"}}[{RI}])))',
+        "To response complete: p95 |target − source|, target slower={{targetSlower}}")
+    return p
 
 
 def response_time_pct():
-    return (P("Response time difference, target vs source (%)", "(target − source) / source; positive means the "
-              "target is slower." + COMPARE, unit="percent", mn=None)
-            .q(f"100 * (({TGT_FIRST}) - ({SRC_FIRST})) / ({SRC_FIRST})", "To first byte")
-            .q(f"100 * (({TGT_TOTAL}) - ({SRC_TOTAL})) / ({SRC_TOTAL})", "To response complete"))
+    p = P("Response time difference, target vs source (%)", "Median (p50) over pairs of target / source − 1, with p10 "
+          "and p90; positive means the target is slower. The ratio floors each side's duration at 1 ms, so "
+          "sub-millisecond responses don't produce extreme ratios. Percentiles interpolate within log-spaced "
+          "buckets from 0.01 to 100." + COMPARE, unit="percent", mn=None)
+    for span, label in SPANS:
+        p.q(ratio_pct(0.5, span), f"{label} p50")
+        p.q(ratio_pct(0.1, span), f"{label} p10")
+        p.q(ratio_pct(0.9, span), f"{label} p90")
+    return p
 
 
 # --- tuples ---

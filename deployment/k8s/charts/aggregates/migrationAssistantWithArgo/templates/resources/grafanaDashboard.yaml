@@ -449,7 +449,7 @@ data:
         {
           "type": "timeseries",
           "title": "Response time, source vs target (mean ms)",
-          "description": "Time from sending the request to the first response byte and to the complete response: the source as the capture proxy saw it, the target as the replayer saw it, plus p95 to first byte. Fleet means over the window, not per-request pairs; the target is measured under replay load and speedup. Percentiles come from histogram buckets whose highest finite bound is 30 s, or 1 h for lifetimes, lag and waits on a slow peer: once more than 5% of observations exceed that bound the p95 line pins there, so trust the mean above it.",
+          "description": "Time from the request's last byte to the first byte and to the last byte of the final response, on each side, plus p95 of the complete response, from buckets topped at 2 minutes. Values are per request pair, for requests whose status codes matched; the target is measured under replay load and speedup.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -457,33 +457,33 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval]))",
+              "expr": "sum(rate(tupleSourceFirstByteDuration_milliseconds_sum[$__rate_interval])) / sum(rate(tupleSourceFirstByteDuration_milliseconds_count[$__rate_interval]))",
               "legendFormat": "Source: request → first byte"
             },
             {
               "refId": "B",
-              "expr": "sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval]))",
+              "expr": "sum(rate(tupleTargetFirstByteDuration_milliseconds_sum[$__rate_interval])) / sum(rate(tupleTargetFirstByteDuration_milliseconds_count[$__rate_interval]))",
               "legendFormat": "Target: request → first byte"
             },
             {
               "refId": "C",
-              "expr": "(sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval]))) + (sum(rate(gatheringResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(gatheringResponseDuration_milliseconds_count[$__rate_interval])))",
+              "expr": "sum(rate(tupleSourceResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(tupleSourceResponseDuration_milliseconds_count[$__rate_interval]))",
               "legendFormat": "Source: request → response complete"
             },
             {
               "refId": "D",
-              "expr": "(sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval]))) + (sum(rate(receivingResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(receivingResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval])))",
+              "expr": "sum(rate(tupleTargetResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(tupleTargetResponseDuration_milliseconds_count[$__rate_interval]))",
               "legendFormat": "Target: request → response complete"
             },
             {
               "refId": "E",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(waitingForResponseDuration_milliseconds_bucket{otel_scope_name=\"captureProxy\"}[$__rate_interval])))",
-              "legendFormat": "Source: first byte p95"
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tupleSourceResponseDuration_milliseconds_bucket[$__rate_interval])))",
+              "legendFormat": "Source: response complete p95"
             },
             {
               "refId": "F",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(waitingForResponseDuration_milliseconds_bucket{otel_scope_name=\"replayer\"}[$__rate_interval])))",
-              "legendFormat": "Target: first byte p95"
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tupleTargetResponseDuration_milliseconds_bucket[$__rate_interval])))",
+              "legendFormat": "Target: response complete p95"
             }
           ],
           "fieldConfig": {
@@ -515,7 +515,7 @@ data:
         {
           "type": "timeseries",
           "title": "Response time difference, target − source (mean ms)",
-          "description": "Target mean minus source mean; positive means the target is slower. Fleet means over the window, not per-request pairs; the target is measured under replay load and speedup.",
+          "description": "Mean of each pair's target − source; positive means the target is slower. The p95 lines are of the difference's magnitude, split by whether the target was slower (a tie counts as not slower). Values are per request pair, for requests whose status codes matched; the target is measured under replay load and speedup.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -523,13 +523,18 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "(sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval]))) - (sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval])))",
+              "expr": "((sum(rate(tupleResponseDurationDifference_milliseconds_sum{span=\"firstByte\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)) - (sum(rate(tupleResponseDurationDifference_milliseconds_sum{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval]))",
               "legendFormat": "To first byte"
             },
             {
               "refId": "B",
-              "expr": "((sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval]))) + (sum(rate(receivingResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(receivingResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval])))) - ((sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval]))) + (sum(rate(gatheringResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(gatheringResponseDuration_milliseconds_count[$__rate_interval]))))",
+              "expr": "((sum(rate(tupleResponseDurationDifference_milliseconds_sum{span=\"total\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)) - (sum(rate(tupleResponseDurationDifference_milliseconds_sum{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval]))",
               "legendFormat": "To response complete"
+            },
+            {
+              "refId": "C",
+              "expr": "histogram_quantile(0.95, sum by (le, targetSlower) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"total\"}[$__rate_interval])))",
+              "legendFormat": "To response complete: p95 |target − source|, target slower=\u007b\u007btargetSlower\u007d\u007d"
             }
           ],
           "fieldConfig": {
@@ -560,7 +565,7 @@ data:
         {
           "type": "timeseries",
           "title": "Response time difference, target vs source (%)",
-          "description": "(target − source) / source; positive means the target is slower. Fleet means over the window, not per-request pairs; the target is measured under replay load and speedup.",
+          "description": "Median (p50) over pairs of target / source − 1, with p10 and p90; positive means the target is slower. The ratio floors each side's duration at 1 ms, so sub-millisecond responses don't produce extreme ratios. Percentiles interpolate within log-spaced buckets from 0.01 to 100. Values are per request pair, for requests whose status codes matched; the target is measured under replay load and speedup.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -568,13 +573,33 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "100 * ((sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval]))) - (sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval])))) / (sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval])))",
-              "legendFormat": "To first byte"
+              "expr": "100 * (histogram_quantile(0.5, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"firstByte\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To first byte p50"
             },
             {
               "refId": "B",
-              "expr": "100 * (((sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval]))) + (sum(rate(receivingResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(receivingResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval])))) - ((sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval]))) + (sum(rate(gatheringResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(gatheringResponseDuration_milliseconds_count[$__rate_interval]))))) / ((sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval]))) + (sum(rate(gatheringResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(gatheringResponseDuration_milliseconds_count[$__rate_interval]))))",
-              "legendFormat": "To response complete"
+              "expr": "100 * (histogram_quantile(0.1, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"firstByte\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To first byte p10"
+            },
+            {
+              "refId": "C",
+              "expr": "100 * (histogram_quantile(0.9, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"firstByte\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To first byte p90"
+            },
+            {
+              "refId": "D",
+              "expr": "100 * (histogram_quantile(0.5, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"total\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To response complete p50"
+            },
+            {
+              "refId": "E",
+              "expr": "100 * (histogram_quantile(0.1, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"total\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To response complete p10"
+            },
+            {
+              "refId": "F",
+              "expr": "100 * (histogram_quantile(0.9, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"total\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To response complete p90"
             }
           ],
           "fieldConfig": {

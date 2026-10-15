@@ -393,10 +393,21 @@
             "type": "text",
             "x": 0,
             "y": 5,
-            "width": 24,
+            "width": 8,
             "height": 1,
             "properties": {
                 "markdown": "## Response comparisons",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 8,
+            "y": 5,
+            "width": 16,
+            "height": 1,
+            "properties": {
+                "markdown": "Response times are per request pair, for requests whose status codes matched. The target is measured under replay load and speedup.",
                 "background": "transparent"
             }
         },
@@ -510,86 +521,34 @@
                 "stat": "Sum",
                 "metrics": [
                     [
-                        "OpenSearchMigrations",
-                        "waitingForResponseDuration",
-                        "OTelLib",
-                        "captureProxy",
-                        "qualifier",
-                        "MA_QUALIFIER",
                         {
-                            "id": "m1",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "gatheringResponseDuration",
-                        "OTelLib",
-                        "captureProxy",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m2",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "waitingForResponseDuration",
-                        "OTelLib",
-                        "replayer",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m3",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "receivingResponseDuration",
-                        "OTelLib",
-                        "replayer",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m4",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "m1",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
                             "label": "Source: request → first byte",
-                            "id": "e5",
+                            "id": "e1",
                             "visible": true
                         }
                     ],
                     [
                         {
-                            "expression": "m3",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
                             "label": "Target: request → first byte",
-                            "id": "e6",
+                            "id": "e2",
                             "visible": true
                         }
                     ],
                     [
                         {
-                            "expression": "m1 + m2",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
                             "label": "Source: request → response complete",
-                            "id": "e7",
+                            "id": "e3",
                             "visible": true
                         }
                     ],
                     [
                         {
-                            "expression": "m3 + m4",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
                             "label": "Target: request → response complete",
-                            "id": "e8",
+                            "id": "e4",
                             "visible": true
                         }
                     ]
@@ -617,70 +576,18 @@
                 "stat": "Sum",
                 "metrics": [
                     [
-                        "OpenSearchMigrations",
-                        "waitingForResponseDuration",
-                        "OTelLib",
-                        "captureProxy",
-                        "qualifier",
-                        "MA_QUALIFIER",
                         {
-                            "id": "m1",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "gatheringResponseDuration",
-                        "OTelLib",
-                        "captureProxy",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m2",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "waitingForResponseDuration",
-                        "OTelLib",
-                        "replayer",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m3",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "receivingResponseDuration",
-                        "OTelLib",
-                        "replayer",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m4",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "m3 - m1",
+                            "expression": "(FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\"', 'SampleCount', 60))",
                             "label": "To first byte",
-                            "id": "e5",
+                            "id": "e1",
                             "visible": true
                         }
                     ],
                     [
                         {
-                            "expression": "(m3 + m4) - (m1 + m2)",
+                            "expression": "(FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\"', 'SampleCount', 60))",
                             "label": "To response complete",
-                            "id": "e6",
+                            "id": "e2",
                             "visible": true
                         }
                     ]
@@ -700,7 +607,7 @@
             "width": 8,
             "height": 6,
             "properties": {
-                "title": "Response time difference, target vs source (%)",
+                "title": "Response time difference, target vs source (%, duration-weighted)",
                 "view": "timeSeries",
                 "stacked": false,
                 "region": "placeholder-region",
@@ -708,70 +615,18 @@
                 "stat": "Sum",
                 "metrics": [
                     [
-                        "OpenSearchMigrations",
-                        "waitingForResponseDuration",
-                        "OTelLib",
-                        "captureProxy",
-                        "qualifier",
-                        "MA_QUALIFIER",
                         {
-                            "id": "m1",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "gatheringResponseDuration",
-                        "OTelLib",
-                        "captureProxy",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m2",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "waitingForResponseDuration",
-                        "OTelLib",
-                        "replayer",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m3",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "receivingResponseDuration",
-                        "OTelLib",
-                        "replayer",
-                        "qualifier",
-                        "MA_QUALIFIER",
-                        {
-                            "id": "m4",
-                            "stat": "Average",
-                            "visible": false
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(m1 > 0, 100 * (m3 - m1) / m1, 0/0)",
-                            "label": "To first byte",
-                            "id": "e5",
+                            "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) - 1)",
+                            "label": "To first byte (Σ target / Σ source − 1, duration-weighted)",
+                            "id": "e1",
                             "visible": true
                         }
                     ],
                     [
                         {
-                            "expression": "IF((m1 + m2) > 0, 100 * ((m3 + m4) - (m1 + m2)) / (m1 + m2), 0/0)",
-                            "label": "To response complete",
-                            "id": "e6",
+                            "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) - 1)",
+                            "label": "To response complete (Σ target / Σ source − 1, duration-weighted)",
+                            "id": "e2",
                             "visible": true
                         }
                     ]

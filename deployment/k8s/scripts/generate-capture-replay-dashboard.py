@@ -592,42 +592,54 @@ def status_matches():
     return w
 
 
-# The proxy and the replayer time the same response phases, against the source and the target:
-# waitingForResponse = request sent -> first response byte; then gatheringResponse (proxy) and
-# receivingResponse (replayer) = first byte -> response complete. Fleet means, not per-request pairs, and
-# the target is measured under replay load and speedup.
-def response_means(w):
-    """Hidden mean-ms ids: (source first byte, source receive, target first byte, target receive)."""
-    return (w.m("waitingForResponseDuration", "Average", "captureProxy"),
-            w.m("gatheringResponseDuration", "Average", "captureProxy"),
-            w.m("waitingForResponseDuration", "Average"),
-            w.m("receivingResponseDuration", "Average"))
+# Per request pair, for tuples whose status codes matched, the replayer records both sides' spans from the request's
+# last byte to the final response's first byte and to its last byte, and per span the magnitude of target − source
+# with targetSlower, since histograms can't hold negative values. The target is measured under replay load and speedup.
+RESPONSE_NOTE = ("Response times are per request pair, for requests whose status codes matched. The target is "
+                 "measured under replay load and speedup.")
+SPANS = [("firstByte", "To first byte"), ("total", "To response complete")]
+
+
+def response_search(name, stat, dims="", filt=""):
+    """Every method's series of a per-tuple response-time metric; dims and filt add dimensions and filters."""
+    return (f"SEARCH('{{{NS},OTelLib,method,qualifier{dims}}} MetricName=\"{name}\" OTelLib=\"replayer\" "
+            f"qualifier=\"{Q}\"{filt}', '{stat}', 60)")
+
+
+def response_mean(w, name, label):
+    # Sum over SampleCount rather than Average, so the mean pools every method's requests and carries no unit.
+    w.e(f"SUM({response_search(name, 'Sum')}) / SUM({response_search(name, 'SampleCount')})", label)
 
 
 def response_times():
     w = W("Response time, source vs target (mean ms)", yleft={"label": "ms", "showUnits": False})
-    sw, sg, tw, tr = response_means(w)
-    w.e(sw, "Source: request → first byte")
-    w.e(tw, "Target: request → first byte")
-    w.e(f"{sw} + {sg}", "Source: request → response complete")
-    w.e(f"{tw} + {tr}", "Target: request → response complete")
+    response_mean(w, "tupleSourceFirstByteDuration", "Source: request → first byte")
+    response_mean(w, "tupleTargetFirstByteDuration", "Target: request → first byte")
+    response_mean(w, "tupleSourceResponseDuration", "Source: request → response complete")
+    response_mean(w, "tupleTargetResponseDuration", "Target: request → response complete")
     return w
 
 
 def response_time_diff():
     w = W("Response time difference, target − source (mean ms)", yleft={"label": "ms", "showUnits": False})
-    sw, sg, tw, tr = response_means(w)
-    w.e(f"{tw} - {sw}", "To first byte")
-    w.e(f"({tw} + {tr}) - ({sw} + {sg})", "To response complete")
+    name, dims = "tupleResponseDurationDifference", ",span,targetSlower"
+    for span, label in SPANS:
+        slower, faster = (response_search(name, "Sum", dims, f" span=\"{span}\" targetSlower=\"{t}\"")
+                          for t in ("true", "false"))
+        count = response_search(name, "SampleCount", dims, f" span=\"{span}\"")
+        # The exact signed mean: magnitudes where the target was slower, less those where it was not, over all pairs.
+        w.e(f"(FILL(SUM({slower}), 0) - FILL(SUM({faster}), 0)) / SUM({count})", label)
     return w
 
 
 def response_time_pct():
-    w = W("Response time difference, target vs source (%)",
+    # CloudWatch has no percentiles of tupleResponseDurationRatio, so this compares summed durations instead.
+    w = W("Response time difference, target vs source (%, duration-weighted)",
           yleft={"label": "% slower (+) / faster (−)", "showUnits": False})
-    sw, sg, tw, tr = response_means(w)
-    w.e(f"IF({sw} > 0, 100 * ({tw} - {sw}) / {sw}, 0/0)", "To first byte")
-    w.e(f"IF(({sw} + {sg}) > 0, 100 * (({tw} + {tr}) - ({sw} + {sg})) / ({sw} + {sg}), 0/0)", "To response complete")
+    for (src, tgt), (_, label) in zip([("tupleSourceFirstByteDuration", "tupleTargetFirstByteDuration"),
+                                       ("tupleSourceResponseDuration", "tupleTargetResponseDuration")], SPANS):
+        w.e(f"100 * (SUM({response_search(tgt, 'Sum')}) / SUM({response_search(src, 'Sum')}) - 1)",
+            f"{label} (Σ target / Σ source − 1, duration-weighted)")
     return w
 
 
@@ -708,7 +720,8 @@ def layout_columns():
         ws.append(w.widget(x, y, wd, 3))
         x += wd
     y += 3
-    ws.append(text("## Response comparisons", 0, y, 24))
+    ws.append(text("## Response comparisons", 0, y, 8))
+    ws.append(text(RESPONSE_NOTE, 8, y, 16))
     y += 1
     for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
         ws.append(b().widget(i * 8, y, 8, 6))
