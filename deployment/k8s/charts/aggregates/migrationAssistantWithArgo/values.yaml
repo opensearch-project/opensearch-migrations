@@ -246,9 +246,10 @@ logs:
     name: logs-pvc
     size: 10Gi
     storageClass: ""
-  # Alternative to sharedLogsVolume for local clusters whose nodes mount a shared host directory
-  # (kindTesting.sh mounts one per node, plus their parent at this path): the console mounts the
-  # node path at /shared-logs-output, where it sees every node's logs.
+  # Alternative to sharedLogsVolume for local clusters: Fluent Bit writes each node's logs to
+  # <node name>/ under this node path (valuesForLocalK8s.yaml), and the console mounts the path at
+  # /shared-logs-output. kindTesting.sh mounts one host directory here on every node, so the console
+  # sees every node's logs; without that mount it sees only its own node's.
   hostLogsVolume:
     enabled: false
     path: /var/log/migrations-all

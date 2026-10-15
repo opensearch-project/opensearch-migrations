@@ -88,7 +88,8 @@ KIND_CLUSTER_NAME=ma-test LOCAL_IMAGE_TAG=ma-test SKIP_LOAD_TEST_IMAGES=true ./k
 
 Two things to know:
 - **Shared registry.** The script shares one registry container, `docker-registry` on port 5001,
-  with every local cluster, and briefly restarts it on each run.
+  with every local cluster. It creates the container if it's missing and otherwise leaves it running,
+  so one run doesn't interrupt other builds or clusters.
 - **Let the script create the cluster.** It adds the registry configuration and the log mounts when
   it creates the cluster. If a cluster with that name already exists without them, the script stops
   and asks you to delete it, or pick another name.

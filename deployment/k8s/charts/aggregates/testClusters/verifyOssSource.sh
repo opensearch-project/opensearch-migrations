@@ -105,7 +105,7 @@ es_env=$("${K[@]}" exec "$POD" -c source -- bash -c '
 if grep -q '^AWS_CONTAINER_' <<<"$es_env"; then
   echo "INFO  Elasticsearch JVM has the Pod Identity variables (unused while the keystore has credentials)"
 else
-  echo "INFO  Elasticsearch JVM has no Pod Identity variables (post-renderer applied)"
+  echo "INFO  Elasticsearch JVM has no Pod Identity variables"
 fi
 "${K[@]}" exec "$POD" -c refresh-s3-keystore -- sh -c 'test -n "$AWS_CONTAINER_CREDENTIALS_FULL_URI"' \
   && pass "refresh-s3-keystore still has the Pod Identity variables" || fail "refresh-s3-keystore lost the Pod Identity variables"
