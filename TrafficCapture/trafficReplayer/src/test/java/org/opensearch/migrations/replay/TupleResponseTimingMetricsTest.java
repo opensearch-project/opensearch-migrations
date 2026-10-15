@@ -7,6 +7,7 @@ import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
@@ -213,6 +214,51 @@ class TupleResponseTimingMetricsTest {
     }
 
     @Test
+    void tupleJsonReportsTheSameWholeMillisecondSpansForSourceAndTarget() {
+        var fixture = new Fixture();
+        fixture.sourceResponse = source(200, 2_250, 9_500);
+        fixture.targetAttempts = List.of(obtained(target(200, 1_500, 20_000)));
+        fixture.run();
+
+        var sourceResponse = (Map<?, ?>) fixture.tuple.get("sourceResponse");
+        Assertions.assertEquals(2L, sourceResponse.get(ParsedHttpMessagesAsDicts.FIRST_BYTE_MS_KEY));
+        Assertions.assertEquals(9L, sourceResponse.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY));
+        var targetResponse = (Map<?, ?>) ((List<?>) fixture.tuple.get("targetResponses")).get(0);
+        Assertions.assertEquals(1L, targetResponse.get(ParsedHttpMessagesAsDicts.FIRST_BYTE_MS_KEY));
+        Assertions.assertEquals(
+            20L,
+            targetResponse.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY),
+            "the target's total runs from its last request byte, not from the attempt's start one second earlier"
+        );
+    }
+
+    @Test
+    void tupleJsonOmitsAnUnknownFirstByteButKeepsTheTotal() {
+        var fixture = new Fixture();
+        fixture.sourceResponse = sourceResponse(200, null, micros(SOURCE_REQUEST_END, 7_000));
+        fixture.targetAttempts = List.of(obtained(target(200, 1_000, 3_000)), obtained(target(200, 4_000, 6_000)));
+        fixture.run();
+
+        var sourceResponse = (Map<?, ?>) fixture.tuple.get("sourceResponse");
+        Assertions.assertFalse(sourceResponse.containsKey(ParsedHttpMessagesAsDicts.FIRST_BYTE_MS_KEY));
+        Assertions.assertEquals(7L, sourceResponse.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY));
+        var targetResponses = (List<?>) fixture.tuple.get("targetResponses");
+        Assertions.assertEquals(
+            List.of(1L, 4L),
+            targetResponses.stream()
+                .map(r -> ((Map<?, ?>) r).get(ParsedHttpMessagesAsDicts.FIRST_BYTE_MS_KEY))
+                .toList(),
+            "every target attempt that obtained a response reports its own spans"
+        );
+        Assertions.assertEquals(
+            List.of(3L, 6L),
+            targetResponses.stream()
+                .map(r -> ((Map<?, ?>) r).get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY))
+                .toList()
+        );
+    }
+
+    @Test
     void targetFirstByteSkipsInterimResponsePackets() {
         var response = AggregatedRawResponse.builder(TARGET_REQUEST_SENT.minusMillis(5))
             .addResponsePacket(bytes("HTTP/1.1 100 Continue\r\n\r\n"), micros(TARGET_REQUEST_SENT, -2_000))
@@ -371,6 +417,7 @@ class TupleResponseTimingMetricsTest {
         HttpMessageAndTimestamp.Response sourceResponse =
             source(200, 1_000, 2_000);
         List<TargetAttemptOutcome<AggregatedRawResponse>> targetAttempts = List.of(obtained(target(200, 1_000, 2_000)));
+        Map<String, Object> tuple;
 
         Collection<MetricData> run() {
             var generation = new PartitionGenerationId(PARTITION, 1);
@@ -414,7 +461,7 @@ class TupleResponseTimingMetricsTest {
                             SourceResponseCompletionEvidence.NEXT_REQUEST
                         )
                 );
-                new ParsedHttpMessagesAsDicts(tupleContext, result);
+                tuple = new ParsedHttpMessagesAsDicts(tupleContext, result).toTupleMap(result);
                 tupleContext.close();
                 preparedRequest.close();
                 requestContext.close();

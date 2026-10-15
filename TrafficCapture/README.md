@@ -147,6 +147,7 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
     "Status-Code": 200,
     "Reason-Phrase": "OK",
     "response_time_ms": 10,
+    "first_byte_ms": 4,
     "payload": {
       "inlinedJsonBody": {
         "name": "2383a194365a",
@@ -199,6 +200,7 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
       "Status-Code": 200,
       "Reason-Phrase": "OK",
       "response_time_ms": 112,
+      "first_byte_ms": 95,
       "payload": {
         "inlinedJsonBody": {
           "name": "758b4454da60",
@@ -256,6 +258,7 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
     "Status-Code": 200,
     "Reason-Phrase": "OK",
     "response_time_ms": 12,
+    "first_byte_ms": 5,
     "payload": {
       "inlinedTextBody": "green  open searchguard             KRWtFn0nQwi6BdObOAsCYQ 1 0 8 0 45.4kb 45.4kb\nyellow open sg7-auditlog-2024.10.04 F2PV5IeTT0aVxP_BmuJSaQ 1 1 4 0 57.8kb 57.8kb\n"
     }
@@ -292,6 +295,7 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
       "Status-Code": 200,
       "Reason-Phrase": "OK",
       "response_time_ms": 39,
+      "first_byte_ms": 21,
       "payload": {
         "inlinedTextBody": "green open .plugins-ml-config        hfn4ZxQCQvOe0BN5TejuJA 1 0  1 0  3.9kb  3.9kb\ngreen open .opensearch-observability 7LKST3UWQDiNZyG3rnSqxg 1 0  0 0   208b   208b\ngreen open .opendistro_security      AvLAB1yDR4uk8PEQ212Yvg 1 0 10 0 78.3kb 78.3kb\n"
       }
@@ -304,6 +308,12 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
 ```
 
 </details>
+
+Each source and target response carries two times in whole milliseconds, both measured from the request's last
+byte: `first_byte_ms` to the first byte of the final (non-interim) response, and `response_time_ms` to its last
+byte. Source times come from the capture's timestamps; target times come from when the replayer finished sending
+the request and received the response's packets, so they reflect the replay's load and speedup. `first_byte_ms` is
+absent when it can't be determined.
 
 ### Capture Kafka Offloader
 

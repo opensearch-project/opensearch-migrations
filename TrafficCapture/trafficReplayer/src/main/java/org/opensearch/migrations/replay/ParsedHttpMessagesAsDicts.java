@@ -43,7 +43,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
+    /** Whole ms from the request's last byte to the last byte of its final response, on source and target. */
     public static final String RESPONSE_TIME_MS_KEY = "response_time_ms";
+    /** Whole ms from the request's last byte to the first byte of its final response; absent when unknown. */
+    public static final String FIRST_BYTE_MS_KEY = "first_byte_ms";
     public static final String EXCEPTION_KEY_STRING = "Exception";
     public static final String REQUEST_URI_KEY = "Request-URI";
     public static final String METHOD_KEY = "Method";
@@ -159,7 +162,9 @@ public class ParsedHttpMessagesAsDicts {
                 var parsed = new LinkedHashMap<>(convertResponse(
                     context,
                     List.of(response.getCopyOfPackets()),
-                    response.getDuration()
+                    response.getRequestSentTime(),
+                    response.getFinalResponseFirstPacketTime(),
+                    response.getLastPacketTime()
                 ));
                 Optional.ofNullable(response.getError())
                     .ifPresent(error -> parsed.put(EXCEPTION_KEY_STRING, error.toString()));
@@ -202,7 +207,9 @@ public class ParsedHttpMessagesAsDicts {
         return Optional.of(convertResponse(
             context,
             response.packetBytes,
-            responseDuration(result.sourceRequest(), response)
+            result.sourceRequest().getLastPacketTimestamp(),
+            response.getFirstDataTimestamp(),
+            response.getLastPacketTimestamp()
         ));
     }
 
@@ -219,17 +226,6 @@ public class ParsedHttpMessagesAsDicts {
             return Optional.of(incomplete.reason());
         }
         return Optional.empty();
-    }
-
-    private static Duration responseDuration(
-        HttpMessageAndTimestamp.Request request,
-        HttpMessageAndTimestamp.Response response
-    ) {
-        var requestEnd = request.getLastPacketTimestamp();
-        var responseEnd = response.getLastPacketTimestamp();
-        return requestEnd == null || responseEnd == null
-            ? Duration.ZERO
-            : Duration.between(requestEnd, responseEnd);
     }
 
     public ParsedHttpMessagesAsDicts(
@@ -375,7 +371,9 @@ public class ParsedHttpMessagesAsDicts {
     private static Map<String, Object> convertResponse(
         @NonNull IReplayContexts.ITupleHandlingContext context,
         @NonNull List<byte[]> data,
-        Duration latency
+        Instant requestEnd,
+        Instant responseStart,
+        Instant responseEnd
     ) {
         return makeSafeMap(context, () -> {
             try (var transformationCtx = context.getLogicalEnclosingScope().createTransformationContext();
@@ -397,7 +395,8 @@ public class ParsedHttpMessagesAsDicts {
                     map.put(HTTP_VERSION_KEY, message.protocol());
                     map.put(STATUS_CODE_KEY, Integer.parseInt(message.code()));
                     map.put("Reason-Phrase", message.reason());
-                    map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
+                    map.put(RESPONSE_TIME_MS_KEY, millisBetween(requestEnd, responseEnd).orElse(0L));
+                    millisBetween(requestEnd, responseStart).ifPresent(ms -> map.put(FIRST_BYTE_MS_KEY, ms));
                     context.setHttpVersion(message.protocol());
                     encodeBinaryPayloadIfExists(message);
                     if (!message.payload().isEmpty()) {
@@ -409,6 +408,12 @@ public class ParsedHttpMessagesAsDicts {
                 }
             }
         });
+    }
+
+    private static Optional<Long> millisBetween(Instant start, Instant end) {
+        return start == null || end == null
+            ? Optional.empty()
+            : Optional.of(Duration.between(start, end).toMillis());
     }
 
     private static void encodeBinaryPayloadIfExists(HttpJsonMessageWithFaultingPayload message) {
