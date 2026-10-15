@@ -118,7 +118,7 @@ def test_k6_test_capacity_gate_waits_for_ninety_percent_of_each_fleet(monkeypatc
             return proxy_states.pop(0)
 
         def list_namespaced_deployment(self, namespace, label_selector):
-            assert (namespace, label_selector) == ("ma", "app=replayer")
+            assert (namespace, label_selector) == ("ma", "migrations.opensearch.org/component=traffic-replayer")
             return SimpleNamespace(items=[replayer])
 
     monkeypatch.setattr(k6_test.client, "AppsV1Api", FakeAppsApi)

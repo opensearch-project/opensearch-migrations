@@ -61,7 +61,8 @@ write_buildkit_config() {
   source_config="${MIGRATIONS_REPO_ROOT_DIR}/buildImages/buildkitd.toml"
   target_config="/tmp/buildkitd-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}.toml"
 
-  cp "${source_config}" "${target_config}"
+  # buildkitd.toml marks docker-registry:5000 as plain HTTP; point that at this run's registry.
+  sed "s/docker-registry:5000/${BUILD_CONTAINER_REGISTRY_ENDPOINT}/" "${source_config}" > "${target_config}"
 
   local docker_dns_servers=()
   local server
@@ -102,21 +103,64 @@ teardown_registry_container() {
   docker rm -f "${EXTERNAL_REGISTRY_NAME}" >/dev/null 2>&1 || true
 }
 
+# The registry is shared by every build and cluster on this host, so this never replaces a
+# registry that is already there: in-flight pushes and pulls from other runs would fail. It
+# creates the registry if it is missing and starts it if it is stopped. To replace it on purpose,
+# call teardown_registry_container first.
 ensure_registry_container() {
-  local registry_image
-  registry_image="$(ptc_rewrite_image registry:2)"
-  # Always recreate so the container starts with a clean network namespace.
-  # Bind on 0.0.0.0 so the registry is reachable at the host gateway IP from
-  # inside any cluster node container, without docker network connect.
-  # The registry-data volume persists across runs so image layers are reused.
-  teardown_registry_container
-  docker run -d \
-    --name "${EXTERNAL_REGISTRY_NAME}" \
-    --network "${EXTERNAL_DOCKER_NETWORK}" \
-    -p "${EXTERNAL_REGISTRY_PORT}:5000" \
-    -v "${EXTERNAL_REGISTRY_VOLUME}:/var/lib/registry" \
-    --restart=always \
-    "${registry_image}" >/dev/null
+  local registry_image state run_output
+  state="$(docker inspect -f '{{.State.Running}}' "${EXTERNAL_REGISTRY_NAME}" 2>/dev/null || true)"
+  if [[ -z "${state}" ]]; then
+    registry_image="$(ptc_rewrite_image registry:2)"
+    # Bind on 0.0.0.0 so the registry is reachable at the host gateway IP from
+    # inside any cluster node container, without docker network connect.
+    # The registry-data volume persists across runs so image layers are reused.
+    if ! run_output="$(docker run -d \
+      --name "${EXTERNAL_REGISTRY_NAME}" \
+      --network "${EXTERNAL_DOCKER_NETWORK}" \
+      -p "${EXTERNAL_REGISTRY_PORT}:5000" \
+      -v "${EXTERNAL_REGISTRY_VOLUME}:/var/lib/registry" \
+      --restart=always \
+      "${registry_image}" 2>&1)"; then
+      # A concurrent run may have created it first; anything else is a real failure.
+      if ! docker inspect "${EXTERNAL_REGISTRY_NAME}" >/dev/null 2>&1; then
+        echo "${run_output}" >&2
+        return 1
+      fi
+    fi
+  elif [[ "${state}" != "true" ]]; then
+    docker start "${EXTERNAL_REGISTRY_NAME}" >/dev/null
+  fi
+
+  # A concurrent run's container can take a moment to start.
+  local attempt
+  for attempt in $(seq 1 30); do
+    [[ "$(docker inspect -f '{{.State.Running}}' "${EXTERNAL_REGISTRY_NAME}" 2>/dev/null)" == "true" ]] && break
+    if [[ "${attempt}" == 30 ]]; then
+      echo "Registry container ${EXTERNAL_REGISTRY_NAME} isn't running. ${run_output:-}" >&2
+      return 1
+    fi
+    sleep 1
+  done
+
+  # An existing registry must match this run's settings. Fail rather than replace it.
+  if ! docker port "${EXTERNAL_REGISTRY_NAME}" 5000/tcp 2>/dev/null | grep -q "^0.0.0.0:${EXTERNAL_REGISTRY_PORT}\$"; then
+    echo "Registry container ${EXTERNAL_REGISTRY_NAME} doesn't publish port ${EXTERNAL_REGISTRY_PORT} on 0.0.0.0, so cluster nodes can't reach it." >&2
+    echo "Set EXTERNAL_REGISTRY_PORT to match it, or replace it with teardown_registry_container (this interrupts other builds and clusters using it)." >&2
+    return 1
+  fi
+  if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "${EXTERNAL_REGISTRY_NAME}" | grep -q "\"${EXTERNAL_DOCKER_NETWORK}\":"; then
+    echo "Registry container ${EXTERNAL_REGISTRY_NAME} isn't on docker network ${EXTERNAL_DOCKER_NETWORK}." >&2
+    echo "Set EXTERNAL_DOCKER_NETWORK to match it, or replace it with teardown_registry_container (this interrupts other builds and clusters using it)." >&2
+    return 1
+  fi
+
+  for attempt in $(seq 1 30); do
+    curl -sf "http://localhost:${EXTERNAL_REGISTRY_PORT}/v2/" >/dev/null && return 0
+    sleep 1
+  done
+  echo "Registry ${EXTERNAL_REGISTRY_NAME} didn't answer on localhost:${EXTERNAL_REGISTRY_PORT} within 30s" >&2
+  return 1
 }
 
 # Configure containerd on each cluster node to pull from the host-bound

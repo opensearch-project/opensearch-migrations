@@ -246,6 +246,13 @@ logs:
     name: logs-pvc
     size: 10Gi
     storageClass: ""
+  # Alternative to sharedLogsVolume for local clusters: Fluent Bit writes each node's logs to
+  # <node name>/ under this node path (valuesForLocalK8s.yaml), and the console mounts the path at
+  # /shared-logs-output. kindTesting.sh mounts one host directory here on every node, so the console
+  # sees every node's logs; without that mount it sees only its own node's.
+  hostLogsVolume:
+    enabled: false
+    path: /var/log/migrations-all
   format: application # application or docker-json
 
 
@@ -670,6 +677,10 @@ charts:
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }
+      # Like the otel-collector DaemonSet: run on every node, including the tainted Kafka, proxy,
+      # replayer and k6 pools, so those pods' logs are collected too.
+      tolerations:
+        - operator: Exists
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -872,7 +883,9 @@ charts:
           limits:   { cpu: 500m, memory: 256Mi }
         sidecar:
           image:
-            tag: 1.30.11
+            # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
+            # localhost:80. 2.14.1 loads them (checked on kind and EKS).
+            tag: 2.14.1
           dashboards:
             resources:
               requests: { cpu: 50m, memory: 100Mi }
