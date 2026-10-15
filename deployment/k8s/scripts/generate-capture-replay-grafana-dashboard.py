@@ -481,6 +481,32 @@ def signed_mean_difference(span):
     return f"({total('true')} - {total('false')}) / sum(rate({DIFF}_count{{span=\"{span}\"}}[{RI}]))"
 
 
+def signed_difference_quantile(q, span):
+    """The q-quantile of target − source, from the magnitude histograms split by targetSlower.
+
+    Negating the not-slower magnitudes and joining them to the slower ones gives the signed distribution, so with
+    Nf pairs not slower and N in all, the quantile is -(the not-slower magnitude at 1 - qN/Nf) when qN <= Nf, and
+    otherwise the slower magnitude at (qN - Nf)/Nt.
+    """
+    def sel(slower=None):
+        return f'span="{span}"' + (f',targetSlower="{slower}"' if slower else "")
+
+    def count(slower=None):
+        return f"(sum(rate({DIFF}_count{{{sel(slower)}}}[{RI}])) or vector(0))"
+
+    def magnitude(phi, slower):
+        # Both sides are evaluated before "and on()" discards one, so clamp the unused side's quantile into range.
+        return (f"histogram_quantile(scalar(clamp({phi}, 0, 1)), "
+                f"sum by (le) (rate({DIFF}_bucket{{{sel(slower)}}}[{RI}])))")
+
+    def nonzero(n):
+        return f"clamp_min({n}, 1e-9)"
+
+    rank, nf, nt = f"({q} * {count()})", count("false"), count("true")
+    return (f"(-{magnitude(f'1 - {rank} / {nonzero(nf)}', 'false')} and on() ({rank} <= {nf})) or on() "
+            f"({magnitude(f'({rank} - {nf}) / {nonzero(nt)}', 'true')} and on() ({rank} > {nf}))")
+
+
 def ratio_pct(quantile, span):
     return (f"100 * (histogram_quantile({quantile}, sum by (le) (rate({RATIO}_bucket{{span=\"{span}\"}}[{RI}]))) "
             "- 1)")
@@ -499,13 +525,13 @@ def response_times():
 
 
 def response_time_diff():
-    p = P("Response time difference, target − source (mean ms)", "Mean of each pair's target − source; positive "
-          "means the target is slower. The p95 lines are of the difference's magnitude, split by whether the target "
-          "was slower (a tie counts as not slower)." + COMPARE, unit="ms", mn=None)
+    p = P("Response time difference, target − source (ms)", "Mean of each pair's target − source, with p10, p50 "
+          "and p90; positive means the target is slower. The percentiles join the not-slower magnitudes, negated, "
+          "to the slower ones, and interpolate within the duration buckets." + COMPARE, unit="ms", mn=None)
     for span, label in SPANS:
-        p.q(signed_mean_difference(span), label)
-    p.q(f'histogram_quantile(0.95, sum by (le, targetSlower) (rate({DIFF}_bucket{{span="total"}}[{RI}])))',
-        "To response complete: p95 |target − source|, target slower={{targetSlower}}")
+        p.q(signed_mean_difference(span), f"{label} mean")
+        for q in (0.1, 0.5, 0.9):
+            p.q(signed_difference_quantile(q, span), f"{label} p{round(q * 100)}")
     return p
 
 
@@ -648,9 +674,10 @@ def layout():
     for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
         ps.append(b().build(i * 8, y, 8, 6))
     y += 6
+    # Taller than the status-code row: these panels carry up to eight legend entries.
     for i, b in enumerate([response_times, response_time_diff, response_time_pct]):
-        ps.append(b().build(i * 8, y, 8, 6))
-    y += 6
+        ps.append(b().build(i * 8, y, 8, 8))
+    y += 8
     ps.append(row("End-to-end flow", y))
     y += 1
     for i, b in enumerate([flow_requests, flow_bytes, flow_lag]):
