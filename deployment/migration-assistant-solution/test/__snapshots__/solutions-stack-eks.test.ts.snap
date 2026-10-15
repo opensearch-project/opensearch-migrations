@@ -3494,6 +3494,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
     "VpcPublicSubnet1DefaultRoute6A21265FB": {
       "DependsOn": [
         "Vpcipv6cidr40D3CB78",
+        "VpcVPCGWBF912B6E",
       ],
       "Properties": {
         "DestinationIpv6CidrBlock": "::/0",
@@ -3695,6 +3696,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
     "VpcPublicSubnet2DefaultRoute63E63096C": {
       "DependsOn": [
         "Vpcipv6cidr40D3CB78",
+        "VpcVPCGWBF912B6E",
       ],
       "Properties": {
         "DestinationIpv6CidrBlock": "::/0",
@@ -3930,6 +3932,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
       "Condition": "UseThirdAvailabilityZone",
       "DependsOn": [
         "Vpcipv6cidr40D3CB78",
+        "VpcVPCGWBF912B6E",
       ],
       "Properties": {
         "DestinationIpv6CidrBlock": "::/0",
