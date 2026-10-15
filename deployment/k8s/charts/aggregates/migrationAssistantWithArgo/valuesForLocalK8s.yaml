@@ -118,14 +118,27 @@ charts:
   fluent-bit:
     waitForInstallation: false
     values:
-      # Each node's Fluent Bit writes to that node's own host directory instead of the shared
-      # logs PVC (a ReadWriteOnce volume only one node's Fluent Bit could mount). kindTesting.sh
-      # mounts a directory on this machine there for every node. Lists replace whole, so the
-      # lua-scripts entries from values.yaml are repeated.
+      # Each node's Fluent Bit writes to <node name>/ under the node's /var/log/migrations-all
+      # instead of the shared logs PVC (a ReadWriteOnce volume only one node's Fluent Bit could
+      # mount), and the console reads that directory. kindTesting.sh mounts one directory on this
+      # machine there on every node, so the console sees every node's logs. On a cluster without
+      # that mount (Jenkins creates its own), it's a local directory on each node; the console sees
+      # its own node's, which is every node on a single-node cluster. Lists replace whole, so the
+      # OUTPUT_FORMAT and lua-scripts entries from values.yaml are repeated.
+      env:
+        - name: OUTPUT_FORMAT
+          valueFrom:
+            configMapKeyRef:
+              name: log-aggregation-config
+              key: OUTPUT_FORMAT
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
       extraVolumes:
         - name: logs-pv
           hostPath:
-            path: /var/log/migrations
+            path: /var/log/migrations-all
             type: DirectoryOrCreate
         - name: lua-scripts
           configMap:
@@ -133,6 +146,7 @@ charts:
       extraVolumeMounts:
         - name: logs-pv
           mountPath: /shared_logs
+          subPathExpr: $(K8S_NODE_NAME)
         - name: lua-scripts
           mountPath: /fluentbit/scripts
           readOnly: true

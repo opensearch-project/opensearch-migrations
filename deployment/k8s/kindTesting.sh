@@ -32,24 +32,19 @@ if kind get clusters | grep -qx "${KIND_CLUSTER_NAME}"; then
   echo "kind cluster ${KIND_CLUSTER_NAME} already exists, skipping create"
 else
   # kind's config can't reference variables, so render a copy that mounts this machine's log
-  # directories into each node: the node's own directory at /var/log/migrations (Fluent Bit writes
-  # there) and the parent at /var/log/migrations-all (the console reads every node's logs there).
-  # Node names follow kind's: <cluster>-control-plane, <cluster>-worker, <cluster>-worker2, ...
+  # directory into every node at /var/log/migrations-all. Each node's Fluent Bit writes to its own
+  # subdirectory there (valuesForLocalK8s.yaml), and the console reads them all.
   rendered_kind_config="$(mktemp "${TMPDIR:-/tmp}/kind-config.XXXXXX")"
-  awk -v cluster="${KIND_CLUSTER_NAME}" -v logs="${KIND_LOGS_DIR}" '
+  awk -v logs="${KIND_LOGS_DIR}" '
     { print }
     /^[[:space:]]*- role:[[:space:]]*(control-plane|worker)[[:space:]]*$/ {
-      role = $NF; count[role]++
-      node = cluster "-" role (count[role] > 1 ? count[role] : "")
       indent = $0; sub(/-.*/, "", indent)
       printf "%s  extraMounts:\n", indent
-      printf "%s    - hostPath: %s/%s\n%s      containerPath: /var/log/migrations\n", indent, logs, node, indent
       printf "%s    - hostPath: %s\n%s      containerPath: /var/log/migrations-all\n", indent, logs, indent
-      print node > "/dev/stderr"
-    }' "${KIND_CONFIG_FILE}" > "${rendered_kind_config}" 2> "${rendered_kind_config}.nodes"
-  while IFS= read -r node; do mkdir -p "${KIND_LOGS_DIR}/${node}"; done < "${rendered_kind_config}.nodes"
+    }' "${KIND_CONFIG_FILE}" > "${rendered_kind_config}"
+  mkdir -p "${KIND_LOGS_DIR}"
   kind create cluster --name "${KIND_CLUSTER_NAME}" --config "${rendered_kind_config}"
-  rm -f "${rendered_kind_config}" "${rendered_kind_config}.nodes"
+  rm -f "${rendered_kind_config}"
 fi
 
 if ! docker inspect "${KIND_CLUSTER_NAME}-control-plane" --format '{{range .Mounts}}{{.Destination}} {{end}}' \
