@@ -85,10 +85,15 @@ function getDestinationEndpoint(scope: Construct, config: DestinationConfig, pro
     }
 }
 
+// ECS starts a service with one task when its desired count is unset.
+function taskCount(props: CaptureProxyProps): number {
+    return props.taskInstanceCount ?? 1;
+}
+
 function deploymentConfiguration(
     props: CaptureProxyProps
 ): Pick<MigrationServiceCoreProps, "minHealthyPercent" | "maxHealthyPercent"> {
-    const desiredCount = props.taskInstanceCount ?? 0;
+    const desiredCount = taskCount(props);
     if (props.streamingSourceType === StreamingSourceType.DISABLED || desiredCount === 0) {
         return {};
     }
@@ -151,7 +156,8 @@ export class CaptureProxyStack extends MigrationServiceCore {
                 commandArgs,
                 extraArgsDict,
                 "--minimumKafkaTopicPartitions",
-                Math.max((props.taskInstanceCount ?? 0) + 1, 1).toString()
+                // One partition per proxy, plus one for a rolling replacement to join with.
+                (taskCount(props) + 1).toString()
             )
         }
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
