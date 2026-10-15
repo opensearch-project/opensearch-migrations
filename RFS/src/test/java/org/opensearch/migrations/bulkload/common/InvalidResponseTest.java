@@ -662,6 +662,33 @@ class InvalidResponseTest {
         assertThat(result, containsInAnyOrder("index.version.created"));
     }
 
+    // --- getIllegalArguments: Serverless error reasons (opensearch-migrations#3440) ---
+    @Test
+    void testGetIllegalArguments_serverlessRoutingShardsTooSmall() {
+        var reason = "OpenSearch exception [type=illegal_argument_exception, reason=index.number_of_routing_shards [1] "
+            + "must be >= index.number_of_shards [8]]- server : [envoy]";
+        var errorBody = "{\"error\":{\"type\":\"illegal_argument_exception\",\"reason\":\"" + reason + "\"},\"status\":400}";
+        var response = new HttpResponse(400, "Bad Request", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getIllegalArguments();
+
+        assertThat(result, containsInAnyOrder("index.number_of_routing_shards"));
+    }
+
+    @Test
+    void testGetIllegalArguments_serverlessWrappedUnknownSetting() {
+        var reason = "OpenSearch exception [type=illegal_argument_exception, reason=unknown setting [index.creation_date] "
+            + "please check that any required plugins are installed]- server : [envoy]";
+        var errorBody = "{\"error\":{\"type\":\"illegal_argument_exception\",\"reason\":\"" + reason + "\"},\"status\":400}";
+        var response = new HttpResponse(400, "Bad Request", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getIllegalArguments();
+
+        assertThat(result, containsInAnyOrder("index.creation_date"));
+    }
+
     // --- getIllegalArguments: invalid JSON triggers catch block ---
     @Test
     void testGetIllegalArguments_invalidJson() {
