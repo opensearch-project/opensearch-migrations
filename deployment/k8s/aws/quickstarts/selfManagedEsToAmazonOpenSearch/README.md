@@ -38,7 +38,15 @@ export STAGE=qs                      # short, lowercase
 export STACK_NAME=MA-QS
 export AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 cd "$(git rev-parse --show-toplevel)"
+cat > ~/.ma-quickstart.env <<EOF
+cd "$(pwd)"
+export AWS_REGION=$AWS_REGION AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
+export STAGE=$STAGE STACK_NAME=$STACK_NAME AWS_ACCOUNT=$AWS_ACCOUNT
+EOF
 ```
+
+Later steps add more variables to `~/.ma-quickstart.env`. **If you open a new terminal, run
+`source ~/.ma-quickstart.env` first**; a step run with an empty variable fails in confusing ways.
 
 ---
 
@@ -139,9 +147,17 @@ Load the stack's exports into your shell. Later steps use them.
 eval "$(aws cloudformation list-exports \
   --query "Exports[?starts_with(Name,'MigrationsExportString') && contains(Name,'-${STAGE}-')].Value" \
   --output text)"
-echo "$VPC_ID $EKS_CLUSTER_SECURITY_GROUP $MIGRATIONS_EKS_CLUSTER_NAME"
 export MA_POD_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT}:role/${MIGRATIONS_EKS_CLUSTER_NAME}-migrations-role"
+cat >> ~/.ma-quickstart.env <<EOF
+export VPC_ID=$VPC_ID EKS_CLUSTER_SECURITY_GROUP=$EKS_CLUSTER_SECURITY_GROUP
+export MIGRATIONS_EKS_CLUSTER_NAME=$MIGRATIONS_EKS_CLUSTER_NAME MA_POD_ROLE_ARN=$MA_POD_ROLE_ARN
+EOF
+echo "$VPC_ID $EKS_CLUSTER_SECURITY_GROUP"
+echo "$MA_POD_ROLE_ARN"   # arn:aws:iam::<account>:role/migration-eks-cluster-<stage>-<region>-migrations-role
 ```
+
+If any of those are empty or `MA_POD_ROLE_ARN` is missing a part, the exports didn't load (check
+`STAGE` and your credentials) — fix that before going on.
 
 `MA_POD_ROLE_ARN` is the EKS Pod Identity role that MA's pods use, including the replayer. The
 target's access policy must allow it.
@@ -271,6 +287,8 @@ EOF
 (cd test && ./awsDeployCluster.sh --stage "$STAGE" --context-file tmp/quickstart-target-domain.json --vpc-id "$VPC_ID")
 jq . test/tmp/cluster-details-$STAGE.json
 export TARGET_ENDPOINT="https://$(jq -r '.target.endpoint' test/tmp/cluster-details-$STAGE.json | sed 's|^https://||')"
+export TARGET_CONFIG=esToAosDomainWithBackfill.yaml        # the config for a domain (section 4.1)
+echo "export TARGET_ENDPOINT=$TARGET_ENDPOINT TARGET_CONFIG=$TARGET_CONFIG" >> ~/.ma-quickstart.env
 ```
 
 Domain creation takes 20–40 minutes.
@@ -298,6 +316,7 @@ set `MY_ROLE_ARN` by hand instead.
 MY_ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text \
   | sed -E 's#:sts::([0-9]+):assumed-role/([^/]+)/.*#:iam::\1:role/\2#')
 mkdir -p test/tmp
+echo "$STAGE $MA_POD_ROLE_ARN $MY_ROLE_ARN"   # all three must be filled in
 cat > test/tmp/quickstart-target-collection.json <<EOF
 {
   "stage": "${STAGE}",
@@ -315,6 +334,8 @@ cat > test/tmp/quickstart-target-collection.json <<EOF
 EOF
 (cd test && ./awsDeployCluster.sh --stage "$STAGE" --context-file tmp/quickstart-target-collection.json)
 export TARGET_ENDPOINT=$(jq -r '.target.endpoint' test/tmp/cluster-details-$STAGE.json)
+export TARGET_CONFIG=esToAossCollectionWithBackfill.yaml   # the config for a collection (section 4.1)
+echo "export TARGET_ENDPOINT=$TARGET_ENDPOINT TARGET_CONFIG=$TARGET_CONFIG" >> ~/.ma-quickstart.env
 ```
 
 Use the `SEARCH` collection type. `TIMESERIES` collections reject client-supplied document IDs,
@@ -346,14 +367,18 @@ config sets up:
 
 The backfill variants also take a snapshot of the source into the same bucket.
 
-Fill in the placeholders:
+The domain and collection configs differ in how requests to the target are signed: SigV4 service
+`es` for a domain, `aoss` for a collection, and a request signed for the wrong one gets a 403. The
+target step in section 3 set `TARGET_CONFIG` to the matching `WithBackfill` file; for capture and
+replay only, drop `WithBackfill` from the name. Fill in the placeholders:
 
 ```bash
 BUCKET=$(kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}')
-CONFIG=deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/esToAosDomainWithBackfill.yaml
+CONFIG=deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/${TARGET_CONFIG}
 sed -e "s|<TARGET_DOMAIN_ENDPOINT>|${TARGET_ENDPOINT}|; s|<COLLECTION_ENDPOINT>|${TARGET_ENDPOINT}|" \
     -e "s|<REGION>|${AWS_REGION}|g; s|<BUCKET>|${BUCKET}|g" \
     "$CONFIG" > /tmp/migration.yaml
+grep -E 'endpoint:|service:' /tmp/migration.yaml   # your target's endpoint, and es or aoss
 ```
 
 Load the config into the console and create the source credentials. **Don't submit yet.**
@@ -671,9 +696,9 @@ streams named `from-fluentbit-<pod>`. Lines are structured as `event=<name> key=
 From your workstation:
 
 ```bash
-kubectl -n ma logs -l migrations.opensearch.org/task=trafficReplayer -c replayer --tail=-1 --since=15m --prefix \
+kubectl -n ma logs -l migrations.opensearch.org/component=traffic-replayer -c replayer --tail=-1 --since=15m --prefix \
   | grep -E 'event=(replayer_startup_summary|kafka_assignment_changed|kafka_commit_retry_degraded|tuple_sink_upload_(degraded|recovered)|replayer_fatal_failure)'
-kubectl -n ma logs -l migrations.opensearch.org/task=captureProxy -c proxy --tail=-1 --since=15m --prefix \
+kubectl -n ma logs -l migrations.opensearch.org/component=capture-proxy -c proxy --tail=-1 --since=15m --prefix \
   | grep -E 'event=capture_(startup_summary|health|write_gate_changed|heartbeat_late|publisher_failed)'
 ```
 
@@ -695,9 +720,9 @@ Its descendants carry `writer`, `connection`, `lifetime`, `request` and `attempt
 
 Two things to know about the logs:
 
-- **Pod labels.** Every workflow-created workload carries `migrations.opensearch.org/task`
-  (`captureProxy`, `trafficReplayer`, `reindexFromSnapshot`, ...), which is the simplest way to
-  select one kind of pod.
+- **Pod labels.** Every workflow-created pod carries `migrations.opensearch.org/component`
+  (`capture-proxy`, `traffic-replayer`, `rfs-worker`, ...), which is the simplest way to select one
+  kind of pod. [kubernetesLabels.md](../../../../../docs/kubernetesLabels.md) lists them all.
 - **Activity-monitor events.** `replay_health`, `replay_oldest_record` and `replay_stall_detected`
   are written only to the replayer's host log files, and those files are off by default
   (`MIGRATIONS_HOST_FILE_LOG_LEVEL=off`). Use the metrics instead: `replayOldestContextAge*` and
@@ -855,6 +880,6 @@ Alternatively, `migration-assistant cleanup --stage "$STAGE"` from
 | Config rejected on submit | The validation message names the field. Common causes: `authConfig: {}`, too few partitions, the old `fromProxy:` key (now `fromCapturedTraffic`). |
 | Proxy never becomes ready | `kubectl -n ma describe captureproxy capture-proxy`, NLB provisioning, the AWS Load Balancer Controller events. |
 | 401 through the proxy | The client isn't sending the *source's* credentials. The proxy only forwards them. |
-| Replayer 403 from the target | The target's access policy, the FGAC mapping or the AOSS data access policy doesn't include `$MA_POD_ROLE_ARN`. |
+| 403 from the target (console or replayer) | First the SigV4 `service` in `workflow configure view`: `es` for a domain, `aoss` for a collection. Then the target's access policy, the FGAC mapping or the AOSS data access policy: it must include `$MA_POD_ROLE_ARN`. |
 | Lag grows | Follow the runbook's decision trees, in [`observabilityOperations.md`](../../../../../docs/captureAndReplay/observabilityOperations.md#decision-trees). |
 | Anything else | `migration-assistant diag`, or `kubectl -n ma get events --sort-by=.lastTimestamp`. |

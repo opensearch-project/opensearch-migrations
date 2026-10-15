@@ -50,7 +50,7 @@ traffic:
       toTarget: target
       replayerConfig:
         podReplicas: 2
-        speedupFactor: 1.1
+        speedupFactor: 5
         # Source/target comparison tuples. BUCKET_NAME from:
         #   kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}'
         tupleS3Bucket: "<BUCKET>"

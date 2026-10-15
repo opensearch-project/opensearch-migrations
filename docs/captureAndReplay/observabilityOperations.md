@@ -222,19 +222,19 @@ replayer's temporal watermark context.
 
 ## Log queries
 
-Kubernetes examples. Workloads are selected by their `migrations.opensearch.org/task`
-label (`trafficReplayer`, `captureProxy`); `--tail=-1` is needed because `kubectl logs -l`
-otherwise shows only the last 10 lines of each pod:
+Kubernetes examples. Workloads are selected by their `migrations.opensearch.org/component`
+label (`traffic-replayer`, `capture-proxy`; see [kubernetesLabels.md](../kubernetesLabels.md));
+`--tail=-1` is needed because `kubectl logs -l` otherwise shows only the last 10 lines of each pod:
 
 ```bash
-kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/task=trafficReplayer -c replayer \
+kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/component=traffic-replayer -c replayer \
   --tail=-1 --since=15m | grep 'topic=capture-proxy partition=0 generation=12 offset=345'
 
-kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/task=captureProxy -c proxy \
+kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/component=capture-proxy -c proxy \
   --tail=-1 --since=15m \
   | grep -E 'event=capture_(heartbeat_late|write_gate_changed|publisher_failed)'
 
-kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/task=trafficReplayer -c replayer \
+kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/component=traffic-replayer -c replayer \
   --tail=-1 --since=15m | grep -E 'event=tuple_sink_upload_(degraded|recovered)'
 ```
 

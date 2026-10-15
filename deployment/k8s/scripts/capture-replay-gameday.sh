@@ -6,8 +6,8 @@ NAMESPACE="${NAMESPACE:-ma}"
 # only one.
 CONSUMER_GROUP="${CONSUMER_GROUP:-}"
 CONSOLE_POD="${CONSOLE_POD:-migration-console-0}"
-REPLAYER_SELECTOR="${REPLAYER_SELECTOR:-migrations.opensearch.org/task=trafficReplayer}"
-CAPTURE_SELECTOR="${CAPTURE_SELECTOR:-migrations.opensearch.org/task=captureProxy}"
+REPLAYER_SELECTOR="${REPLAYER_SELECTOR:-migrations.opensearch.org/component=traffic-replayer}"
+CAPTURE_SELECTOR="${CAPTURE_SELECTOR:-migrations.opensearch.org/component=capture-proxy}"
 PROMETHEUS_SERVICE="${PROMETHEUS_SERVICE:-kube-prometheus-stack-prometheus}"
 SINCE="${SINCE:-15m}"
 EVENT_PATTERN='event=(replayer_|replay_|kafka_|capture_protocol_|source_connection_|target_|tuple_)'
