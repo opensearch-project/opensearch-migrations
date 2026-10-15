@@ -2,9 +2,11 @@ package org.opensearch.migrations.replay.tracing;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -856,19 +858,88 @@ public interface ReplayContexts extends IReplayContexts {
         Integer sourceStatus;
         Integer targetStatus;
         String method;
+        @Setter(lombok.AccessLevel.NONE)
+        Duration sourceFirstByte;
+        @Setter(lombok.AccessLevel.NONE)
+        Duration sourceTotal;
+        @Setter(lombok.AccessLevel.NONE)
+        Duration targetFirstByte;
+        @Setter(lombok.AccessLevel.NONE)
+        Duration targetTotal;
 
         public TupleHandlingContext(HttpTransactionContext enclosingScope) {
             super(enclosingScope);
             initializeSpan();
         }
 
+        /**
+         * Bounds in ms for a response's first-byte and total durations and for the magnitude of a source/target
+         * difference: the shared duration bounds with sub-5 ms resolution for fast requests and a 2-minute tail.
+         */
+        public static final List<Double> RESPONSE_DURATION_BUCKETS_MS = Stream.of(
+            Stream.of(0.0, 0.5, 1.0, 2.5),
+            CommonScopedMetricInstruments.DURATION_BUCKETS_MS.stream().filter(bound -> bound > 2.5),
+            Stream.of(60_000.0, 120_000.0)
+        ).flatMap(bounds -> bounds).toList();
+
+        /**
+         * Bounds for target/source ratios: reciprocal pairs around 1.0, so that "twice as fast" and "twice as
+         * slow" resolve equally, spanning 0.01 to 100.
+         */
+        public static final List<Double> RESPONSE_DURATION_RATIO_BUCKETS = ratioBuckets(
+            List.of(1.05, 1.1, 1.25, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0)
+        );
+
+        private static List<Double> ratioBuckets(List<Double> slowerBounds) {
+            var faster = slowerBounds.reversed().stream().map(bound -> 1.0 / bound);
+            return Stream.of(faster, Stream.of(1.0), slowerBounds.stream()).flatMap(bounds -> bounds).toList();
+        }
+
+        /** Inputs to a ratio are floored at 1 ms so that sub-millisecond responses don't produce extreme ratios. */
+        static final double RATIO_INPUT_FLOOR_MS = 1.0;
+
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private final LongCounter resultCounter;
+            private final DoubleHistogram sourceFirstByteDuration;
+            private final DoubleHistogram targetFirstByteDuration;
+            private final DoubleHistogram sourceResponseDuration;
+            private final DoubleHistogram targetResponseDuration;
+            private final DoubleHistogram responseDurationDifference;
+            private final DoubleHistogram responseDurationRatio;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 resultCounter = meter.counterBuilder(MetricNames.TUPLE_COMPARISON).build();
+                sourceFirstByteDuration = durationHistogram(meter, MetricNames.TUPLE_SOURCE_FIRST_BYTE_DURATION);
+                targetFirstByteDuration = durationHistogram(meter, MetricNames.TUPLE_TARGET_FIRST_BYTE_DURATION);
+                sourceResponseDuration = durationHistogram(meter, MetricNames.TUPLE_SOURCE_RESPONSE_DURATION);
+                targetResponseDuration = durationHistogram(meter, MetricNames.TUPLE_TARGET_RESPONSE_DURATION);
+                responseDurationDifference =
+                    durationHistogram(meter, MetricNames.TUPLE_RESPONSE_DURATION_DIFFERENCE);
+                responseDurationRatio = meter.histogramBuilder(MetricNames.TUPLE_RESPONSE_DURATION_RATIO)
+                    .setUnit("1")
+                    .setExplicitBucketBoundariesAdvice(RESPONSE_DURATION_RATIO_BUCKETS)
+                    .build();
             }
+
+            private static DoubleHistogram durationHistogram(Meter meter, String name) {
+                return meter.histogramBuilder(name)
+                    .setUnit("ms")
+                    .setExplicitBucketBoundariesAdvice(RESPONSE_DURATION_BUCKETS_MS)
+                    .build();
+            }
+        }
+
+        @Override
+        public void setSourceResponseTiming(Duration firstByte, Duration total) {
+            this.sourceFirstByte = firstByte;
+            this.sourceTotal = total;
+        }
+
+        @Override
+        public void setTargetResponseTiming(Duration firstByte, Duration total) {
+            this.targetFirstByte = firstByte;
+            this.targetTotal = total;
         }
 
         public static @NonNull MetricInstruments makeMetrics(Meter meter) {
@@ -906,6 +977,55 @@ public interface ReplayContexts extends IReplayContexts {
             AttributesBuilder attributesBuilderForAggregate = getSharedAttributes(Attributes.builder());
             setAllAttributes(attributesBuilderForAggregate.build());
             meterIncrementEvent(getMetrics().resultCounter, 1, attributesBuilderForAggregate);
+            if (statusCodesMatch() && hasCompleteResponseTiming()) {
+                sendResponseTimingMetrics();
+            }
+        }
+
+        private boolean statusCodesMatch() {
+            return sourceStatus != null && sourceStatus.equals(targetStatus);
+        }
+
+        /** Histograms drop negative values, so a response that began before its request ended is not compared. */
+        private boolean hasCompleteResponseTiming() {
+            return Stream.of(sourceFirstByte, sourceTotal, targetFirstByte, targetTotal)
+                .allMatch(duration -> duration != null && !duration.isNegative());
+        }
+
+        /**
+         * Records both sides' spans and, for each span, the magnitude and direction of the target's difference from
+         * the source and the target/source ratio. Histograms can't hold the signed difference, hence the split.
+         */
+        private void sendResponseTimingMetrics() {
+            var metrics = getMetrics();
+            meterHistogram(metrics.sourceFirstByteDuration, toMillis(sourceFirstByte), methodAttributes());
+            meterHistogram(metrics.targetFirstByteDuration, toMillis(targetFirstByte), methodAttributes());
+            meterHistogram(metrics.sourceResponseDuration, toMillis(sourceTotal), methodAttributes());
+            meterHistogram(metrics.targetResponseDuration, toMillis(targetTotal), methodAttributes());
+            sendComparison(FIRST_BYTE_SPAN, toMillis(sourceFirstByte), toMillis(targetFirstByte));
+            sendComparison(TOTAL_SPAN, toMillis(sourceTotal), toMillis(targetTotal));
+        }
+
+        private void sendComparison(String span, double sourceMs, double targetMs) {
+            var metrics = getMetrics();
+            meterHistogram(
+                metrics.responseDurationDifference,
+                Math.abs(targetMs - sourceMs),
+                methodAttributes().put(SPAN_KEY, span).put(TARGET_SLOWER_KEY, targetMs > sourceMs)
+            );
+            meterHistogram(
+                metrics.responseDurationRatio,
+                Math.max(RATIO_INPUT_FLOOR_MS, targetMs) / Math.max(RATIO_INPUT_FLOOR_MS, sourceMs),
+                methodAttributes().put(SPAN_KEY, span)
+            );
+        }
+
+        private AttributesBuilder methodAttributes() {
+            return addAttributeIfPresent(Attributes.builder(), METHOD_KEY, Optional.ofNullable(method));
+        }
+
+        private static double toMillis(Duration duration) {
+            return duration.toNanos() / 1_000_000.0;
         }
 
         /**

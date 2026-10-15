@@ -380,8 +380,9 @@ public final class SourceConnectionState {
             return added(assembly);
         }
         if (observation.hasWriteSegment()) {
-            finalResponseBeforeRequestEnd(timestamp)
-                .addSegment(observation.getWriteSegment().getData().toByteArray());
+            var response = finalResponseBeforeRequestEnd(timestamp);
+            response.noteDataTimestamp(timestamp);
+            response.addSegment(observation.getWriteSegment().getData().toByteArray());
             return added(assembly);
         }
         return ObservationOutcome.none();
@@ -404,8 +405,9 @@ public final class SourceConnectionState {
             return added(association);
         }
         if (observation.hasWriteSegment()) {
-            responseUnderAssembly(timestamp)
-                .addSegment(observation.getWriteSegment().getData().toByteArray());
+            var response = responseUnderAssembly(timestamp);
+            response.noteDataTimestamp(timestamp);
+            response.addSegment(observation.getWriteSegment().getData().toByteArray());
             return added(association);
         }
         if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
@@ -839,6 +841,7 @@ public final class SourceConnectionState {
      * without advancing it would replay at the wrong moment while looking correct byte for byte.
      */
     private static void appendTo(HttpMessageAndTimestamp message, byte[] packet, Instant timestamp) {
+        message.noteDataTimestamp(timestamp);
         message.add(packet);
         message.setLastPacketTimestamp(timestamp);
     }

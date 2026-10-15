@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,6 +76,77 @@ public class ParsedHttpMessagesAsDicts {
             getTargetRequestOp(context, result.preparedRequest()),
             getTargetResponseOp(context, result.targetAttemptHistory())
         );
+        fillResponseTimingMetrics(context, result);
+    }
+
+    /**
+     * A response's spans from its request's last byte to the first and last bytes of its final (non-interim)
+     * response. The span is negative when the response began before the request ended.
+     */
+    public record ResponseTiming(@NonNull Duration firstByte, @NonNull Duration total) {
+        static Optional<ResponseTiming> between(Instant requestEnd, Instant responseStart, Instant responseEnd) {
+            if (requestEnd == null || responseStart == null || responseEnd == null) {
+                return Optional.empty();
+            }
+            return Optional.of(new ResponseTiming(
+                Duration.between(requestEnd, responseStart),
+                Duration.between(requestEnd, responseEnd)
+            ));
+        }
+    }
+
+    /** From the captured timestamps of the source request's last packet and its final response's packets. */
+    public static Optional<ResponseTiming> sourceResponseTiming(
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
+    ) {
+        if (!(result.finalSourceResponse()
+            instanceof RequestReplayOwner.CompleteFinalSourceResponse<HttpMessageAndTimestamp.Response> complete)) {
+            return Optional.empty();
+        }
+        var response = complete.response();
+        return ResponseTiming.between(
+            result.sourceRequest().getLastPacketTimestamp(),
+            response.getFirstDataTimestamp(),
+            response.getLastPacketTimestamp()
+        );
+    }
+
+    /** From the final attempt that obtained a response: when its request was fully sent and its packets arrived. */
+    public static Optional<ResponseTiming> targetResponseTiming(
+        List<TargetAttemptOutcome<AggregatedRawResponse>> attempts
+    ) {
+        return attempts.reversed().stream()
+            .<AggregatedRawResponse>mapMulti((attempt, sink) -> {
+                if (attempt instanceof TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> obtained) {
+                    sink.accept(obtained.response());
+                }
+            })
+            .findFirst()
+            .flatMap(response -> ResponseTiming.between(
+                response.getRequestSentTime(),
+                response.getFinalResponseFirstPacketTime(),
+                response.getLastPacketTime()
+            ));
+    }
+
+    private static void fillResponseTimingMetrics(
+        IReplayContexts.ITupleHandlingContext context,
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
+    ) {
+        sourceResponseTiming(result)
+            .ifPresent(timing -> context.setSourceResponseTiming(timing.firstByte(), timing.total()));
+        targetResponseTiming(result.targetAttemptHistory())
+            .ifPresent(timing -> context.setTargetResponseTiming(timing.firstByte(), timing.total()));
     }
 
     private static List<Map<String, Object>> getTargetResponseOp(
