@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -101,6 +102,13 @@ class TracingTest {
                 tuple.setEndpoint("/index/_doc");
                 tuple.setHttpVersion("HTTP/1.1");
             }
+            try (var matchedTuple = requestContext.createTupleContext()) {
+                matchedTuple.setSourceStatus(200);
+                matchedTuple.setTargetStatus(200);
+                matchedTuple.setMethod("GET");
+                matchedTuple.setSourceResponseTiming(Duration.ofMillis(2), Duration.ofMillis(5));
+                matchedTuple.setTargetResponseTiming(Duration.ofMillis(3), Duration.ofMillis(4));
+            }
             requestContext.close();
             trafficContext.close();
             recordContext.complete(IReplayContexts.RecordDisposition.COMMITTED);
@@ -135,7 +143,7 @@ class TracingTest {
                     () -> "Missing published metric " + field.getName()
                 );
             }
-            Assertions.assertEquals(33, IReplayContexts.MetricNames.class.getFields().length);
+            Assertions.assertEquals(39, IReplayContexts.MetricNames.class.getFields().length);
             assertLongPoint(
                 recorded,
                 IReplayContexts.MetricNames.TRANSFORM_TEXT_SUCCEEDED,
@@ -172,7 +180,7 @@ class TracingTest {
                 1
             );
             var spans = telemetry.getFinishedSpans();
-            Assertions.assertEquals(16, spans.size());
+            Assertions.assertEquals(17, spans.size());
             assertSpanCount(spans, IReplayContexts.ActivityNames.CHANNEL, 1);
             assertSpanCount(spans, IReplayContexts.ActivityNames.TCP_CONNECTION, 1);
             assertSpanCount(spans, IReplayContexts.ActivityNames.RECORD_LIFETIME, 1);
@@ -187,7 +195,7 @@ class TracingTest {
             assertSpanCount(spans, IReplayContexts.ActivityNames.REQUEST_SENDING, 1);
             assertSpanCount(spans, IReplayContexts.ActivityNames.WAITING_FOR_RESPONSE, 1);
             assertSpanCount(spans, IReplayContexts.ActivityNames.RECEIVING_RESPONSE, 1);
-            assertSpanCount(spans, IReplayContexts.ActivityNames.TUPLE_COMPARISON, 1);
+            assertSpanCount(spans, IReplayContexts.ActivityNames.TUPLE_COMPARISON, 2);
             assertRoot(spans, IReplayContexts.ActivityNames.CHANNEL);
             assertRoot(spans, IReplayContexts.ActivityNames.RECORD_LIFETIME);
             assertParent(

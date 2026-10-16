@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +43,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
+    /** Whole ms from the request's last byte to the last byte of its final response, on source and target. */
     public static final String RESPONSE_TIME_MS_KEY = "response_time_ms";
+    /** Whole ms from the request's last byte to the first byte of its final response; absent when unknown. */
+    public static final String FIRST_BYTE_MS_KEY = "first_byte_ms";
     public static final String EXCEPTION_KEY_STRING = "Exception";
     public static final String REQUEST_URI_KEY = "Request-URI";
     public static final String METHOD_KEY = "Method";
@@ -75,6 +79,77 @@ public class ParsedHttpMessagesAsDicts {
             getTargetRequestOp(context, result.preparedRequest()),
             getTargetResponseOp(context, result.targetAttemptHistory())
         );
+        fillResponseTimingMetrics(context, result);
+    }
+
+    /**
+     * A response's spans from its request's last byte to the first and last bytes of its final (non-interim)
+     * response. The span is negative when the response began before the request ended.
+     */
+    public record ResponseTiming(@NonNull Duration firstByte, @NonNull Duration total) {
+        static Optional<ResponseTiming> between(Instant requestEnd, Instant responseStart, Instant responseEnd) {
+            if (requestEnd == null || responseStart == null || responseEnd == null) {
+                return Optional.empty();
+            }
+            return Optional.of(new ResponseTiming(
+                Duration.between(requestEnd, responseStart),
+                Duration.between(requestEnd, responseEnd)
+            ));
+        }
+    }
+
+    /** From the captured timestamps of the source request's last packet and its final response's packets. */
+    public static Optional<ResponseTiming> sourceResponseTiming(
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
+    ) {
+        if (!(result.finalSourceResponse()
+            instanceof RequestReplayOwner.CompleteFinalSourceResponse<HttpMessageAndTimestamp.Response> complete)) {
+            return Optional.empty();
+        }
+        var response = complete.response();
+        return ResponseTiming.between(
+            result.sourceRequest().getLastPacketTimestamp(),
+            response.getFirstDataTimestamp(),
+            response.getLastPacketTimestamp()
+        );
+    }
+
+    /** From the final attempt that obtained a response: when its request was fully sent and its packets arrived. */
+    public static Optional<ResponseTiming> targetResponseTiming(
+        List<TargetAttemptOutcome<AggregatedRawResponse>> attempts
+    ) {
+        return attempts.reversed().stream()
+            .<AggregatedRawResponse>mapMulti((attempt, sink) -> {
+                if (attempt instanceof TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> obtained) {
+                    sink.accept(obtained.response());
+                }
+            })
+            .findFirst()
+            .flatMap(response -> ResponseTiming.between(
+                response.getRequestSentTime(),
+                response.getFinalResponseFirstPacketTime(),
+                response.getLastPacketTime()
+            ));
+    }
+
+    private static void fillResponseTimingMetrics(
+        IReplayContexts.ITupleHandlingContext context,
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
+    ) {
+        sourceResponseTiming(result)
+            .ifPresent(timing -> context.setSourceResponseTiming(timing.firstByte(), timing.total()));
+        targetResponseTiming(result.targetAttemptHistory())
+            .ifPresent(timing -> context.setTargetResponseTiming(timing.firstByte(), timing.total()));
     }
 
     private static List<Map<String, Object>> getTargetResponseOp(
@@ -87,7 +162,9 @@ public class ParsedHttpMessagesAsDicts {
                 var parsed = new LinkedHashMap<>(convertResponse(
                     context,
                     List.of(response.getCopyOfPackets()),
-                    response.getDuration()
+                    response.getRequestSentTime(),
+                    response.getFinalResponseFirstPacketTime(),
+                    response.getLastPacketTime()
                 ));
                 Optional.ofNullable(response.getError())
                     .ifPresent(error -> parsed.put(EXCEPTION_KEY_STRING, error.toString()));
@@ -130,7 +207,9 @@ public class ParsedHttpMessagesAsDicts {
         return Optional.of(convertResponse(
             context,
             response.packetBytes,
-            responseDuration(result.sourceRequest(), response)
+            result.sourceRequest().getLastPacketTimestamp(),
+            response.getFirstDataTimestamp(),
+            response.getLastPacketTimestamp()
         ));
     }
 
@@ -147,17 +226,6 @@ public class ParsedHttpMessagesAsDicts {
             return Optional.of(incomplete.reason());
         }
         return Optional.empty();
-    }
-
-    private static Duration responseDuration(
-        HttpMessageAndTimestamp.Request request,
-        HttpMessageAndTimestamp.Response response
-    ) {
-        var requestEnd = request.getLastPacketTimestamp();
-        var responseEnd = response.getLastPacketTimestamp();
-        return requestEnd == null || responseEnd == null
-            ? Duration.ZERO
-            : Duration.between(requestEnd, responseEnd);
     }
 
     public ParsedHttpMessagesAsDicts(
@@ -303,7 +371,9 @@ public class ParsedHttpMessagesAsDicts {
     private static Map<String, Object> convertResponse(
         @NonNull IReplayContexts.ITupleHandlingContext context,
         @NonNull List<byte[]> data,
-        Duration latency
+        Instant requestEnd,
+        Instant responseStart,
+        Instant responseEnd
     ) {
         return makeSafeMap(context, () -> {
             try (var transformationCtx = context.getLogicalEnclosingScope().createTransformationContext();
@@ -325,7 +395,8 @@ public class ParsedHttpMessagesAsDicts {
                     map.put(HTTP_VERSION_KEY, message.protocol());
                     map.put(STATUS_CODE_KEY, Integer.parseInt(message.code()));
                     map.put("Reason-Phrase", message.reason());
-                    map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
+                    map.put(RESPONSE_TIME_MS_KEY, millisBetween(requestEnd, responseEnd).orElse(0L));
+                    millisBetween(requestEnd, responseStart).ifPresent(ms -> map.put(FIRST_BYTE_MS_KEY, ms));
                     context.setHttpVersion(message.protocol());
                     encodeBinaryPayloadIfExists(message);
                     if (!message.payload().isEmpty()) {
@@ -337,6 +408,12 @@ public class ParsedHttpMessagesAsDicts {
                 }
             }
         });
+    }
+
+    private static Optional<Long> millisBetween(Instant start, Instant end) {
+        return start == null || end == null
+            ? Optional.empty()
+            : Optional.of(Duration.between(start, end).toMillis());
     }
 
     private static void encodeBinaryPayloadIfExists(HttpJsonMessageWithFaultingPayload message) {

@@ -882,6 +882,40 @@ class SourceReconstructionTest {
             List.of(finalResponse),
             sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
         );
+        var response = sink.responses.get(0);
+        Assertions.assertEquals(
+            Instant.ofEpochSecond(7),
+            response.getFirstDataTimestamp(),
+            "the final response's first byte is its own write, not the request end or an interim response"
+        );
+        Assertions.assertEquals(Instant.ofEpochSecond(7), response.getLastPacketTimestamp());
+    }
+
+    @Test
+    void segmentedFinalResponseRecordsItsFirstSegmentAsItsFirstData() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                interim(3, "HTTP/1.1 102 Processing\r\n\r\n"),
+                writeSegment(4, "HTTP/1.1 200 OK\r\n"),
+                writeSegment(5, "Content-Length: 0\r\n\r\n"),
+                segmentEnd(6),
+                close(7)
+            )
+        );
+
+        applyAll(script);
+
+        var response = sink.responses.get(0);
+        Assertions.assertEquals(Instant.ofEpochSecond(2), response.getFirstPacketTimestamp());
+        Assertions.assertEquals(Instant.ofEpochSecond(4), response.getFirstDataTimestamp());
+        Assertions.assertEquals(Instant.ofEpochSecond(6), response.getLastPacketTimestamp());
     }
 
     @Test

@@ -61,6 +61,13 @@ public class HttpMessageAndTimestamp {
     @Getter
     @Setter
     private Instant lastPacketTimestamp;
+    /**
+     * When the first observation carrying this message's own bytes was captured. This differs from
+     * {@link #firstPacketTimestamp} for a final response, whose first packet timestamp is the end of its request
+     * unless the response began before the request ended.
+     */
+    @Getter
+    private Instant firstDataTimestamp;
 
     public final RawPackets packetBytes;
     ByteArrayOutputStream currentSegmentBytes;
@@ -84,6 +91,13 @@ public class HttpMessageAndTimestamp {
 
     public void add(byte[] b) {
         packetBytes.add(b);
+    }
+
+    /** Records {@code timestamp} as {@link #getFirstDataTimestamp()} unless an earlier one was recorded. */
+    public void noteDataTimestamp(Instant timestamp) {
+        if (firstDataTimestamp == null) {
+            firstDataTimestamp = timestamp;
+        }
     }
 
     public Stream<byte[]> stream() {
