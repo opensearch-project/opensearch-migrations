@@ -22,6 +22,7 @@ import org.opensearch.migrations.cli.Items;
 import org.opensearch.migrations.cli.Transformers;
 import org.opensearch.migrations.cluster.ClusterWriterRegistry;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.GlobalMetadataCreator.TemplateSelection;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
@@ -115,7 +116,20 @@ public abstract class MigratorEvaluatorBase {
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
         items.succeedOnEmpty(arguments.succeedOnEmpty);
         items.allowExistingIndexes(arguments.allowExistingIndexes);
-        var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
+        var metadataRunner = new MetadataRunner(
+            arguments.snapshotName,
+            clusters.getSource().getGlobalMetadata(),
+            clusters.getTarget().getGlobalMetadataCreator(),
+            transformer
+        );
+        var templateSelection = metadataRunner.selectTemplates();
+        reportMigrationPlan(clusters, templateSelection);
+        var metadataResults = migrateGlobalMetadata(
+            migrationMode,
+            metadataRunner,
+            templateSelection,
+            context
+        );
 
         var indexTemplates = new ArrayList<CreationResult>();
         indexTemplates.addAll(metadataResults.getLegacyTemplates());
@@ -130,6 +144,7 @@ public abstract class MigratorEvaluatorBase {
             var indexResults = migrateIndices(migrationMode, clusters, transformer, context);
             items.indexes(indexResults.getIndexes());
             items.aliases(indexResults.getAliases());
+            items.skippedIndexes(indexResults.getSkippedIndexes());
         } else {
             items.indexes(List.of());
             items.aliases(List.of());
@@ -140,19 +155,38 @@ public abstract class MigratorEvaluatorBase {
         return items.build();
     }
 
-    private GlobalMetadataCreatorResults migrateGlobalMetadata(MigrationMode mode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
-        var metadataRunner = new MetadataRunner(
-            arguments.snapshotName,
-            clusters.getSource().getGlobalMetadata(),
-            clusters.getTarget().getGlobalMetadataCreator(),
-            transformer
+    private GlobalMetadataCreatorResults migrateGlobalMetadata(MigrationMode mode, MetadataRunner metadataRunner, TemplateSelection templateSelection, RootMetadataMigrationContext context) {
+        var metadataResults = metadataRunner.migrateMetadata(
+            mode,
+            context.createMetadataMigrationContext(),
+            templateSelection
         );
-        var metadataResults = metadataRunner.migrateMetadata(mode, context.createMetadataMigrationContext());
         log.info("Metadata copy complete.");
         return metadataResults;
     }
 
-    private IndexMetadataResults migrateIndices(MigrationMode mode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
+    private void reportMigrationPlan(Clusters clusters, TemplateSelection templateSelection) {
+        var indices = clusters.getSource()
+            .getIndexMetadata()
+            .getRepoDataProvider()
+            .getIndicesInSnapshot(arguments.snapshotName);
+        var shouldMigrate = FilterScheme.filterByAllowList(
+            arguments.dataFilterArgs.indexAllowlist,
+            FilterScheme.FilterContext.INDEX
+        );
+        var selectedIndices = indices.stream().filter(index -> shouldMigrate.test(index.getName())).count();
+        var plan = MigrationPlan.from(templateSelection, selectedIndices, indices.size());
+        var message = plan.asCliOutput();
+        log.info("{}", message);
+        System.err.println(message);
+    }
+
+    private IndexMetadataResults migrateIndices(
+        MigrationMode mode,
+        Clusters clusters,
+        Transformer transformer,
+        RootMetadataMigrationContext context
+    ) {
         var indexRunner = new IndexRunner(
             arguments.snapshotName,
             clusters.getSource().getIndexMetadata(),

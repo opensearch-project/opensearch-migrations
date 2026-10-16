@@ -219,6 +219,22 @@ public class ItemsTest {
     }
 
     @Test
+    void testSkippedIndexesAreReportedAsAggregate() {
+        var items = createEmptyItemsBuilder()
+            .skippedIndexes(9999)
+            .build();
+
+        var stringOutput = items.asCliOutput();
+        assertThat(stringOutput, containsString("WARN - 9999 indexes skipped due to filter"));
+        assertThat(stringOutput, not(containsString("WARN - index-")));
+        assertThat(items.isEmpty(), is(false));
+
+        var jsonOutput = items.asJsonOutput();
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("skippedIndexes").asLong(), equalTo(9999L));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("indexes").size(), equalTo(0));
+    }
+
+    @Test
     void testFailureTypes() throws Exception {
         var items = createEmptyItemsBuilder()
             .indexes(List.of(

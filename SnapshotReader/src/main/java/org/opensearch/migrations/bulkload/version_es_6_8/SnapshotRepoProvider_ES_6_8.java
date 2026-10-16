@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.version_es_6_8;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -10,6 +11,8 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_6_8 repoData = null;
+    private String cachedSnapshotName;
+    private List<SnapshotRepo.Index> cachedIndices;
 
     public SnapshotRepoProvider_ES_6_8(SourceRepo repo) {
         this.repo = repo;
@@ -27,41 +30,27 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
         return new ArrayList<>(getRepoData().getSnapshots());
     }
 
-    @SuppressWarnings({
-        "java:S100",   // Naming convention check
-        "java:S1186"   // Empty method check
-    })
-    private record IndexWithSnapshots(
-        String name,
-        String id,
-        List<? extends SnapshotRepo.Snapshot> snapshots
-    ) { }
-
     /**
      * Retrieves all indices that belong to the specified snapshot.
-     * Uses stream operations to: 
-     * - find the target snapshot by name,
-     * - filter repo indices to those containing that snapshot (by name or UUID),
-     * - return the matching indices.
+     * Scans the repository index list once, then caches the result for each requested snapshot.
      */
     @Override
-    public List<? extends SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+    public synchronized List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        if (cachedIndices == null || !Objects.equals(snapshotName, cachedSnapshotName)) {
+            cachedIndices = loadIndicesInSnapshot(snapshotName);
+            cachedSnapshotName = snapshotName;
+        }
+        return cachedIndices;
+    }
+
+    private List<SnapshotRepo.Index> loadIndicesInSnapshot(String snapshotName) {
         return getSnapshotForName(snapshotName)
-            .map(matchedSnapshot ->
-                    getRepoData().getIndices()
-                    .entrySet()
-                    .stream().map(keyVal -> new IndexWithSnapshots(
-                                    keyVal.getKey(),
-                                    keyVal.getValue().getId(),
-                                    keyVal.getValue().getSnapshots())
-                    )
-                    .filter(
-                        index -> index.snapshots().stream()
-                                .anyMatch(matchedSnapshot::isNameOrIdEqual)
-                    )
-                    .map(index -> new SnapshotRepoData_ES_6_8.Index(index.name(), index.id()))
-                    .toList()
-            )
+            .map(snapshot -> getRepoData().getIndices().entrySet().stream()
+                .filter(entry -> entry.getValue().getSnapshots().stream().anyMatch(snapshot::isNameOrIdEqual))
+                .<SnapshotRepo.Index>map(
+                    entry -> new SnapshotRepoData_ES_6_8.Index(entry.getKey(), entry.getValue().getId())
+                )
+                .toList())
             .orElse(List.of());
     }
 
