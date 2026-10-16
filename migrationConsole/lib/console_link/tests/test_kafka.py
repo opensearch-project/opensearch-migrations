@@ -482,3 +482,28 @@ def test_replay_progress_augmenter_runs_one_metadata_utility_and_appends_output(
         ],
         kafka_module.DESCRIBE_REPLAY_PROGRESS_OPERATION,
     )
+
+
+def test_msk_kafka_reset_consumer_group_offsets_to_latest(mocker):
+    kafka = get_kafka({"broker_endpoints": "abc", "msk": None})
+    mock = mocker.patch('subprocess.run', autospec=True)
+    result = kafka.reset_consumer_group_offsets_to_latest(group_name='logging-group-x', topic_name='t')
+
+    assert result.success
+    _assert_kafka_subprocess_run(
+        mock,
+        ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', 'abc',
+         '--group', 'logging-group-x', '--topic', 't', '--reset-offsets', '--to-latest', '--execute',
+         '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'])
+
+
+def test_standard_kafka_reset_consumer_group_offsets_to_latest(mocker):
+    kafka = get_kafka({"broker_endpoints": "abc", "standard": None})
+    mock = mocker.patch('subprocess.run', autospec=True)
+    result = kafka.reset_consumer_group_offsets_to_latest(group_name='logging-group-x', topic_name='t')
+
+    assert result.success
+    _assert_kafka_subprocess_run(
+        mock,
+        ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', 'abc',
+         '--group', 'logging-group-x', '--topic', 't', '--reset-offsets', '--to-latest', '--execute'])
