@@ -12,7 +12,10 @@ integrated into the permanent operator documentation afterward.
 - Metrics detect and localize sustained faults.
 - Logs use `event=<bounded_name> key=value` and carry traffic identities.
 - `replay_health`, `replay_oldest_record`, and `replay_stall_detected` are written
-  to both the main replayer log and the dedicated activity log.
+  only to the replayer's host log files (`replayer.log` and the dedicated activity log),
+  which are off unless `MIGRATIONS_HOST_FILE_LOG_LEVEL` is set; they never reach pod
+  stdout, Fluent Bit or CloudWatch. The `replayOldestContextAge*` and
+  `replayOldestKafkaRecordAge` metrics carry the same signal.
 - Aggregate metrics never use request, connection, Kafka offset, bucket, object key,
   pod, or JVM instance identifiers as attributes.
 - EKS removes `service.instance.id` before CloudWatch metric conversion so fleet
@@ -219,20 +222,20 @@ replayer's temporal watermark context.
 
 ## Log queries
 
-Kubernetes examples:
+Kubernetes examples. Workloads are selected by their `migrations.opensearch.org/component`
+label (`traffic-replayer`, `capture-proxy`; see [kubernetesLabels.md](../kubernetesLabels.md));
+`--tail=-1` is needed because `kubectl logs -l` otherwise shows only the last 10 lines of each pod:
 
 ```bash
-kubectl -n "$NAMESPACE" logs -l app=traffic-replayer --since=15m \
-  | grep 'event=replay_stall_detected'
+kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/component=traffic-replayer -c replayer \
+  --tail=-1 --since=15m | grep 'topic=capture-proxy partition=0 generation=12 offset=345'
 
-kubectl -n "$NAMESPACE" logs -l app=traffic-replayer --since=15m \
-  | grep 'topic=traffic partition=0 generation=12 offset=345'
-
-kubectl -n "$NAMESPACE" logs -l app=capture-proxy --since=15m \
+kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/component=capture-proxy -c proxy \
+  --tail=-1 --since=15m \
   | grep -E 'event=capture_(heartbeat_late|write_gate_changed|publisher_failed)'
 
-kubectl -n "$NAMESPACE" logs -l app=traffic-replayer --since=15m \
-  | grep -E 'event=tuple_sink_upload_(degraded|recovered)'
+kubectl -n "$NAMESPACE" logs -l migrations.opensearch.org/component=traffic-replayer -c replayer \
+  --tail=-1 --since=15m | grep -E 'event=tuple_sink_upload_(degraded|recovered)'
 ```
 
 Useful bounded event names include:
@@ -305,7 +308,8 @@ No trace or span ID is required.
 1. Check broker consumer-group lag with the gameday helper.
 2. Compare `kafkaSourceRecordsRead`, `replayIntakeRecordsApplied`, active record
    trackers, and oldest-record age.
-3. Inspect `replay_oldest_record` and `replay_stall_detected`. With no active
+3. Inspect `replay_oldest_record` and `replay_stall_detected` in the replayer's host
+   log files (enable them with `MIGRATIONS_HOST_FILE_LOG_LEVEL`). With no active
    descendant, use the immutable Kafka diagnostic fields for commit head,
    eligibility, in-flight commit, or uncertainty.
 
@@ -341,7 +345,8 @@ No trace or span ID is required.
 ### Clean shutdown does not finish
 
 1. Evaluate the conservation equations and draining metrics.
-2. Check `replay_health`, `replay_stall_detected`, and shutdown summaries.
+2. Check `replay_health` and `replay_stall_detected` (host log files) and the
+   shutdown summaries.
 3. Identify the remaining context, owner obligation, permit, tuple, resource, or
    Kafka commit state before restarting a pod.
 
@@ -350,11 +355,12 @@ No trace or span ID is required.
 Run against the deployed namespace:
 
 ```bash
-NAMESPACE=ma \
-KAFKA_CLUSTER=migration-kafka \
-CONSUMER_GROUP=traffic-replayer \
-deployment/k8s/scripts/capture-replay-gameday.sh baseline
+NAMESPACE=ma deployment/k8s/scripts/capture-replay-gameday.sh baseline
 ```
+
+With more than one replayer, set `CONSUMER_GROUP=replayer-<target label>`. `lag` runs
+`console kafka describe-consumer-group` in the migration console, which holds the Kafka
+client configuration (SCRAM over TLS by default).
 
 Commands:
 

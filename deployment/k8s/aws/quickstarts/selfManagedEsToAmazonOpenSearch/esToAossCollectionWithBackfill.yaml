@@ -1,0 +1,80 @@
+# Quick start: self-managed Elasticsearch 7.10 -> Amazon OpenSearch Serverless collection:
+# snapshot + metadata + backfill of existing data, then capture and replay of live traffic.
+# Walkthrough: README.md in this directory
+#
+# Replace every <...> placeholder before running `workflow configure edit --stdin < this-file`.
+# The source endpoint below is the in-cluster testClusters chart; for an EC2 source, use its
+# load balancer or node address instead.
+
+skipApprovals: true
+
+sourceClusters:
+  source:
+    endpoint: "https://elasticsearch-master-headless:9200"
+    version: "ES 7.10.2"
+    allowInsecure: true          # testClusters' certificate comes from MA's own CA
+    authConfig:
+      basic:
+        secretName: source-creds # create with: workflow configure credentials create source-creds
+    snapshotInfo:
+      repos:
+        default:
+          awsRegion: "<REGION>"
+          repoPathUri: "s3://<BUCKET>/quickstart-snapshot"   # MA's default bucket works
+      snapshots:
+        snap1:
+          repoName: default
+          config:
+            createSnapshotConfig: {}
+
+targetClusters:
+  target:
+    endpoint: "<COLLECTION_ENDPOINT>"      # e.g. https://abc123xyz.us-east-2.aoss.amazonaws.com
+    authConfig:
+      sigv4:
+        region: "<REGION>"
+        service: aoss
+
+# One snapshot of the source, migrated to the target as metadata (index settings and mappings)
+# followed by a document backfill (Reindex-From-Snapshot workers).
+snapshotMigrationConfigs:
+  - fromSource: source
+    toTarget: target
+    perSnapshotConfig:
+      snap1:
+        - metadataMigrationConfig: {}
+          documentBackfillConfig: {}
+
+kafkaClusterConfiguration:
+  default:
+    autoCreate:
+      topicSpecOverrides:
+        # Must be at least the proxy podReplicas + 1 (one slot for the rolling-update surge pod).
+        partitions: 4
+
+traffic:
+  proxies:
+    capture-proxy:
+      source: source
+      proxyConfig:
+        listenPort: 9201
+        podReplicas: 2
+        # serviceType defaults to LoadBalancer (an internal NLB). TLS defaults to a cert-manager
+        # certificate from the migrations-ca issuer; set `tls: {mode: plaintext}` for plain HTTP.
+
+  replayers:
+    replay1:
+      fromCapturedTraffic: capture-proxy
+      toTarget: target
+      # Start replaying only after the backfill finishes, so live updates land on top of the
+      # backfilled documents rather than racing them.
+      dependsOnSnapshotMigrations:
+        - source: source
+          snapshot: snap1
+      replayerConfig:
+        podReplicas: 2
+        speedupFactor: 5
+        # Source/target comparison tuples. BUCKET_NAME from:
+        #   kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}'
+        tupleS3Bucket: "<BUCKET>"
+        tupleS3Region: "<REGION>"

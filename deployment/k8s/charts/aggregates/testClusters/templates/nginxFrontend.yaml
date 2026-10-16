@@ -1,0 +1,104 @@
+{{- /*
+nginx front end for the Elasticsearch source: TLS and HTTP basic auth for an image that has
+neither (elasticsearch-oss). nginx runs as a sidecar in the Elasticsearch pod, listens on the
+chart's httpPort, and proxies to Elasticsearch on loopback (see valuesOss.yaml and
+valuesEks.yaml). This template renders only the supporting objects: the nginx config, the
+password file and the certificate.
+*/ -}}
+{{- if .Values.nginxFrontend.enabled }}
+{{- $fe := .Values.nginxFrontend }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fe.name }}-conf
+data:
+  nginx.conf: |
+    worker_processes auto;
+    pid /tmp/nginx.pid;
+    error_log /dev/stderr warn;
+
+    events {
+      worker_connections 4096;
+    }
+
+    http {
+      # The pod runs as a non-root user, so every writable path lives under /tmp (an emptyDir).
+      client_body_temp_path /tmp/client_body;
+      proxy_temp_path       /tmp/proxy;
+      fastcgi_temp_path     /tmp/fastcgi;
+      uwsgi_temp_path       /tmp/uwsgi;
+      scgi_temp_path        /tmp/scgi;
+
+      access_log {{ if $fe.accessLog }}/dev/stdout{{ else }}off{{ end }};
+
+      # Bulk requests can be large.
+      client_max_body_size {{ $fe.clientMaxBodySize }};
+
+      upstream elasticsearch {
+        server 127.0.0.1:{{ $fe.upstreamPort }};
+        keepalive 64;
+      }
+
+      server {
+        listen {{ $fe.listenPort }}{{ if $fe.tls.enabled }} ssl{{ end }};
+        {{- if $fe.tls.enabled }}
+        ssl_certificate     /etc/nginx/tls/tls.crt;
+        ssl_certificate_key /etc/nginx/tls/tls.key;
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        {{- end }}
+
+        {{- if $fe.basicAuth.enabled }}
+        auth_basic           "Elasticsearch";
+        auth_basic_user_file /etc/nginx/auth/htpasswd;
+        {{- end }}
+
+        location / {
+          proxy_pass             http://elasticsearch;
+          proxy_http_version     1.1;
+          proxy_set_header       Connection "";
+          proxy_set_header       Host $host;
+          proxy_read_timeout     300s;
+          proxy_send_timeout     300s;
+          proxy_request_buffering off;
+          proxy_buffering        off;
+        }
+      }
+    }
+{{- if $fe.basicAuth.enabled }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $fe.name }}-auth
+type: Opaque
+stringData:
+  # nginx accepts {PLAIN} in auth_basic_user_file; this is a throwaway test cluster.
+  htpasswd: "{{ $fe.basicAuth.username }}:{PLAIN}{{ $fe.basicAuth.password }}\n"
+{{- end }}
+{{- if and $fe.tls.enabled $fe.tls.certManager.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fe.name }}-tls
+spec:
+  secretName: {{ $fe.name }}-tls
+  duration: 8760h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  dnsNames:
+    {{- range $fe.tls.serviceNames }}
+    - {{ . }}
+    - {{ . }}.{{ $.Release.Namespace }}
+    - {{ . }}.{{ $.Release.Namespace }}.svc
+    - {{ . }}.{{ $.Release.Namespace }}.svc.cluster.local
+    {{- end }}
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    {{- toYaml $fe.tls.certManager.issuerRef | nindent 4 }}
+{{- end }}
+{{- end }}

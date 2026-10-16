@@ -148,6 +148,43 @@ describe('Stack Composer Ordering Tests', () => {
         ).not.toContain("--minimumKafkaTopicPartitions")
     })
 
+    test('Capture proxy with no desired count reserves a partition for its rolling replacement', () => {
+        // ECS runs one task when the desired count is unset; with one partition, a replacement task
+        // could never get a partition of its own, so the rollout would never stabilize.
+        const stacks = createStackComposer({
+            "stage": "test",
+            "engineVersion": "OS_2.9",
+            "domainName": "unit-test-opensearch-cluster",
+            "dataNodeCount": 2,
+            "openAccessPolicyEnabled": true,
+            "domainRemovalPolicy": "DESTROY",
+            "vpcEnabled": true,
+            "migrationAssistanceEnabled": true,
+            "captureProxyServiceEnabled": true,
+            "elasticsearchServiceEnabled": true,
+            "otelCollectorEnabled": true
+        })
+
+        const captureProxyStack = stacks.stacks.find(
+            (s) => s instanceof CaptureProxyStack && s.stackName.endsWith("-CaptureProxy")
+        ) as CaptureProxyStack
+        const template = Template.fromStack(captureProxyStack)
+        template.hasResourceProperties("AWS::ECS::Service", {
+            DeploymentConfiguration: Match.objectLike({
+                MinimumHealthyPercent: 100,
+                MaximumPercent: 200
+            })
+        })
+        template.hasResourceProperties("AWS::ECS::TaskDefinition", {
+            ContainerDefinitions: Match.arrayWith([
+                Match.objectLike({
+                    Name: "capture-proxy",
+                    Command: Match.arrayWith(["--minimumKafkaTopicPartitions", "2"])
+                })
+            ])
+        })
+    })
+
     test('Test all migration services with Kafka container get created when enabled', () => {
         const contextOptions = {
             "stage": "test",

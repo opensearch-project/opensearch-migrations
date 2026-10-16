@@ -690,7 +690,7 @@ traffic:
               path: client-ca.pem
   replayers:
     replay:
-      fromProxy: capture
+      fromCapturedTraffic: capture
       toTarget: prod-os
       replayerConfig:
         requestTransforms:

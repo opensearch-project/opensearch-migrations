@@ -1240,7 +1240,9 @@ class TestRenderedChartMatchesTheValues:
         installer = (
             _repo_dir("deployment/k8s") / "installK6Chart.sh"
         ).read_text()
-        assert "migrations_k6_operator_latest" in installer
+        # Default images follow the build's tag (LOCAL_IMAGE_TAG / K6_IMAGE_TAG), latest otherwise.
+        assert 'IMAGE_TAG="${K6_IMAGE_TAG:-${LOCAL_IMAGE_TAG:-latest}}"' in installer
+        assert "migrations_k6_operator_${IMAGE_TAG}" in installer
         assert "k6-operator.manager.image.repository" in installer
         assert "k6-operator.manager.image.tag" in installer
 
