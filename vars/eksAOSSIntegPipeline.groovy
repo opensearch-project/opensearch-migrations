@@ -1,5 +1,5 @@
-// Test 0021 migrates to Classic collections. Test 0024 is opt-in through AOSS_TEST_IDS and routes
-// through the per-account endpoint to NextGen collections from test/aossNextGen/collections.yaml.
+// Test 0021 migrates to Classic collections. Test 0024 routes through the per-account endpoint to
+// NextGen collections from test/aossNextGen/collections.yaml. Both run unless AOSS_TEST_IDS narrows them.
 def call(Map config = [:]) {
     def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def supportedTestIds = ['0021', '0024']
@@ -29,7 +29,7 @@ def call(Map config = [:]) {
             string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/aoss-osb-data/os1x-aoss-osb-data/', description: 'Full S3 URI to snapshot repository')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'os1x-aoss-osb-data', description: 'Name of the snapshot')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '33', description: 'Max retries for workflow monitoring (~1/min). 33=~30min')
-            string(name: 'AOSS_TEST_IDS', defaultValue: '0021', description: 'Tests to run, separated by commas or semicolons: 0021 (Classic collections), 0024 (per-account endpoint routing to NextGen collections)')
+            string(name: 'AOSS_TEST_IDS', defaultValue: '0021,0024', description: 'Tests to run, separated by commas or semicolons: 0021 (Classic collections), 0024 (per-account endpoint routing to NextGen collections)')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
@@ -48,7 +48,7 @@ def call(Map config = [:]) {
                     [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                     [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
                     [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
-                    [key: 'AOSS_TEST_IDS', value: '$.AOSS_TEST_IDS', defaultValue: '0021'],
+                    [key: 'AOSS_TEST_IDS', value: '$.AOSS_TEST_IDS', defaultValue: '0021,0024'],
                     [key: 'job_name', value: '$.job_name']
                 ],
                 tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -73,7 +73,7 @@ def call(Map config = [:]) {
                         env.NEXTGEN_PREFIX = "${maStageName}-ng"
 
                         // Semicolons are accepted because the GitHub trigger splits its parameters on commas
-                        def testIds = (params.AOSS_TEST_IDS ?: '0021').split(/[,;\s]+/).findAll { it }
+                        def testIds = (params.AOSS_TEST_IDS ?: '0021,0024').split(/[,;\s]+/).findAll { it }
                         def unsupported = testIds - supportedTestIds
                         if (!testIds || unsupported) {
                             error("AOSS_TEST_IDS must list tests from ${supportedTestIds}, got '${params.AOSS_TEST_IDS}'")
