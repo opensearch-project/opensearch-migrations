@@ -876,7 +876,7 @@ public interface ReplayContexts extends IReplayContexts {
          * Bounds in ms for a response's first-byte and total durations and for the magnitude of a source/target
          * difference: the shared duration bounds with sub-5 ms resolution for fast requests and a 2-minute tail.
          */
-        public static final List<Double> RESPONSE_DURATION_BUCKETS_MS = Stream.of(
+        private static final List<Double> RESPONSE_DURATION_BUCKETS_MS = Stream.of(
             Stream.of(0.0, 0.5, 1.0, 2.5),
             CommonScopedMetricInstruments.DURATION_BUCKETS_MS.stream().filter(bound -> bound > 2.5),
             Stream.of(60_000.0, 120_000.0)
@@ -886,7 +886,7 @@ public interface ReplayContexts extends IReplayContexts {
          * Bounds for target/source ratios: reciprocal pairs around 1.0, so that "twice as fast" and "twice as
          * slow" resolve equally, spanning 0.01 to 100.
          */
-        public static final List<Double> RESPONSE_DURATION_RATIO_BUCKETS = ratioBuckets(
+        private static final List<Double> RESPONSE_DURATION_RATIO_BUCKETS = ratioBuckets(
             List.of(1.05, 1.1, 1.25, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0)
         );
 
