@@ -33,7 +33,7 @@ public class ClusterVersionDetector {
             .log());
 
     /** Amazon OpenSearch Serverless clusters don't have a version number */
-    private static final Version AMAZON_SERVERLESS_VERSION = Version.builder()
+    public static final Version AMAZON_SERVERLESS_VERSION = Version.builder()
         .flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH)
         .major(2)
         .build();

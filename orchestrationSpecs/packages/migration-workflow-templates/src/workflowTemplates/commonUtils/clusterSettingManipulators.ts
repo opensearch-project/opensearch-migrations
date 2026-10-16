@@ -47,7 +47,17 @@ export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExp
 }
 
 export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
-    return makeClusterParamDict("target", targetConfig);
+    const tc = expr.deserializeRecord(targetConfig);
+    return expr.mergeDicts(
+        makeClusterParamDict("target", targetConfig),
+        expr.ternary(
+            expr.hasKey(tc, "collectionRouted"),
+            expr.makeDict({
+                targetCollectionRouted: expr.getLoose(tc, "collectionRouted")
+            }),
+            expr.makeDict({})
+        )
+    );
 }
 
 export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.infer<typeof SOURCE_CLUSTER_CONFIG>>>) {

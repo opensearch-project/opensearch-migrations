@@ -110,6 +110,10 @@ public class OpenSearchClientFactory {
     }
 
     public Version getClusterVersion() {
+        // A per-account serverless endpoint can't answer GET / without a collection header
+        if (connectionContext.isCollectionRouted()) {
+            return ClusterVersionDetector.AMAZON_SERVERLESS_VERSION;
+        }
         return ClusterVersionDetector.detect(client);
     }
 
@@ -152,6 +156,14 @@ public class OpenSearchClientFactory {
      * @return The detected ServerlessCollectionType, or NONE if not serverless
      */
     public ServerlessCollectionType detectServerlessCollectionType() {
+        return detectServerlessCollectionType(null);
+    }
+
+    /**
+     * Detects the type of one collection behind a per-account serverless endpoint, or of the
+     * endpoint's own collection when serverlessCollection is null.
+     */
+    public ServerlessCollectionType detectServerlessCollectionType(String serverlessCollection) {
         if (version == null) {
             version = getClusterVersion();
         }
@@ -165,7 +177,10 @@ public class OpenSearchClientFactory {
         String probeBody = "{\"settings\":{\"index.knn\":true},\"mappings\":{\"properties\":{\"v\":{\"type\":\"knn_vector\",\"dimension\":-1}}}}";
         
         try {
-            var response = client.putAsync(probeIndex, probeBody, null).block();
+            var response = (serverlessCollection == null
+                ? client.putAsync(probeIndex, probeBody, null)
+                : client.putAsync(probeIndex, probeBody, ServerlessCollectionRouting.headersFor(serverlessCollection), null)
+            ).block();
             if (response != null) {
                 String responseBody = response.body != null ? response.body : "";
                 log.info("Probe response status={}, body={}", response.statusCode, responseBody);
