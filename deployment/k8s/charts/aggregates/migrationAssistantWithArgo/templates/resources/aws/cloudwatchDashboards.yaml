@@ -7,9 +7,12 @@ metadata:
   namespace: {{ .root.Release.Namespace }}
   annotations:
     services.k8s.aws/deletion-policy: {{ $deletionPolicy }}
+    services.k8s.aws/adoption-policy: adopt-or-create
+    services.k8s.aws/adoption-fields: {{ dict "dashboardName" (printf "MA-%s-%s-CaptureReplay" .stage .region) | toJson | quote }}
 spec:
   dashboardName: "MA-{{ .stage }}-{{ .region }}-CaptureReplay"
-  dashboardBody: {{ .root.Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | trim | toJson }}
+  {{- /* fromJson | toJson compacts the body: these CRs are inlined into installer Job scripts, and a single exec argument is limited to 128 KiB. */}}
+  dashboardBody: {{ .root.Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | fromJson | toJson | toJson }}
 ---
 apiVersion: cloudwatch.services.k8s.aws/v1alpha1
 kind: Dashboard
@@ -18,7 +21,9 @@ metadata:
   namespace: {{ .root.Release.Namespace }}
   annotations:
     services.k8s.aws/deletion-policy: {{ $deletionPolicy }}
+    services.k8s.aws/adoption-policy: adopt-or-create
+    services.k8s.aws/adoption-fields: {{ dict "dashboardName" (printf "MA-%s-%s-ReindexFromSnapshot" .stage .region) | toJson | quote }}
 spec:
   dashboardName: "MA-{{ .stage }}-{{ .region }}-ReindexFromSnapshot"
-  dashboardBody: {{ .root.Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-account-id" .account | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | trim | toJson }}
+  dashboardBody: {{ .root.Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-account-id" .account | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | fromJson | toJson | toJson }}
 {{- end -}}

@@ -18,6 +18,7 @@ import {
     InterfaceVpcEndpointAwsService,
     IpAddresses,
     IpProtocol,
+    CfnVPCEndpoint,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {EKSInfra} from "./eks-infra";
@@ -43,6 +44,14 @@ function importVPC(stack: Stack, vpdIdParameter: CfnParameter): IVpc {
         vpcId: vpdIdParameter.valueAsString,
         availabilityZones: Fn.getAzs()
     });
+}
+
+function applyConditionToResources(scope: Construct, condition: CfnCondition) {
+    for (const child of scope.node.findAll()) {
+        if (cdk.CfnResource.isCfnResource(child)) {
+            child.cfnOptions.condition = condition;
+        }
+    }
 }
 
 export class SolutionsInfrastructureEKSStack extends Stack {
@@ -83,33 +92,88 @@ export class SolutionsInfrastructureEKSStack extends Stack {
         const stackMarker = `${stageParameter.valueAsString}-${Aws.REGION}`;
 
         const solutionsUserAgent = `AwsSolution/${props.solutionId}/${props.solutionVersion}`
+        const eksClusterName = `migration-eks-cluster-${stackMarker}`
 
         let vpc: IVpc;
+        let vpcForEks: IVpc;
         let vpcSubnetIds: string[] = []
         if (props.createVPC) {
+            const availabilityZoneCountParameter = new CfnParameter(this, 'AvailabilityZoneCount', {
+                type: 'Number',
+                allowedValues: ['2', '3'],
+                default: 3,
+                description: 'Number of Availability Zones for the VPC and EKS data plane. EKS requires at least two Availability Zones.'
+            });
+            addParameterLabel(parameterLabels, availabilityZoneCountParameter, "Availability Zone Count")
+            additionalParameters.push(availabilityZoneCountParameter.logicalId)
+
+            const useThirdAvailabilityZone = new CfnCondition(this, 'UseThirdAvailabilityZone', {
+                expression: Fn.conditionEquals(availabilityZoneCountParameter.valueAsNumber, 3)
+            });
+            const availabilityZones = Fn.getAzs();
+            const selectedAvailabilityZones = [
+                Fn.select(0, availabilityZones),
+                Fn.select(1, availabilityZones),
+                Fn.select(2, availabilityZones)
+            ];
+
             vpc = new Vpc(this, `Vpc`, {
                 // Using 10.212.0.0/16 to avoid default VPC CIDR range conflicts when using VPC peering
                 ipAddresses: IpAddresses.cidr('10.212.0.0/16'),
                 ipProtocol: IpProtocol.DUAL_STACK,
                 vpcName: `migration-assistant-vpc-${stageParameter.valueAsString}`,
-                maxAzs: 2
+                availabilityZones: selectedAvailabilityZones
             });
+
+            applyConditionToResources(vpc.publicSubnets[2], useThirdAvailabilityZone);
+            applyConditionToResources(vpc.privateSubnets[2], useThirdAvailabilityZone);
+
+            vpcSubnetIds = [
+                vpc.privateSubnets[0].subnetId,
+                vpc.privateSubnets[1].subnetId,
+                Fn.conditionIf(
+                    useThirdAvailabilityZone.logicalId,
+                    vpc.privateSubnets[2].subnetId,
+                    Aws.NO_VALUE
+                ).toString()
+            ];
+            const vpcRouteTableIds = [
+                vpc.privateSubnets[0].routeTable.routeTableId,
+                vpc.privateSubnets[1].routeTable.routeTableId,
+                Fn.conditionIf(
+                    useThirdAvailabilityZone.logicalId,
+                    vpc.privateSubnets[2].routeTable.routeTableId,
+                    Aws.NO_VALUE
+                ).toString()
+            ];
 
             vpc.publicSubnets.forEach((subnet, index) => {
                 Tags.of(subnet)
                     .add("Name", `migration-assistant-public-subnet-${index + 1}-${stageParameter.valueAsString}`);
+                Tags.of(subnet).add('kubernetes.io/role/elb', '1');
             });
             vpc.privateSubnets.forEach((subnet, index) => {
                 Tags.of(subnet)
                     .add("Name", `migration-assistant-private-subnet-${index + 1}-${stageParameter.valueAsString}`);
+                Tags.of(subnet).add(`kubernetes.io/cluster/${eksClusterName}`, 'shared');
+                Tags.of(subnet).add('kubernetes.io/role/internal-elb', '1');
+            });
+
+            // The EKS L2 otherwise adds explicit dependencies on every route in the VPC.
+            // Use an imported view so the conditionally absent third-AZ routes do not block
+            // a two-AZ deployment; the subnet ID references still provide the required ordering.
+            vpcForEks = Vpc.fromVpcAttributes(this, 'CreatedVPCForEKS', {
+                vpcId: vpc.vpcId,
+                availabilityZones: selectedAvailabilityZones
             });
 
             // S3 used for storage and retrieval of snapshot data for backfills
-            new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
+            const s3VpcEndpoint = new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
                 service: GatewayVpcEndpointAwsService.S3,
                 vpc: vpc,
                 subnets: [{ subnets: vpc.privateSubnets }],
             });
+            (s3VpcEndpoint.node.defaultChild as CfnVPCEndpoint).routeTableIds = vpcRouteTableIds;
 
             const serviceEndpoints = [
                 // Logs and disk usage scales based on total data transfer
@@ -122,10 +186,11 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             ];
 
             serviceEndpoints.forEach(service => {
-                new InterfaceVpcEndpoint(this, `${service.shortName}VpcEndpoint`, {
+                const endpoint = new InterfaceVpcEndpoint(this, `${service.shortName}VpcEndpoint`, {
                     service,
                     vpc: vpc,
                 });
+                (endpoint.node.defaultChild as CfnVPCEndpoint).subnetIds = vpcSubnetIds;
             })
         }
         else {
@@ -144,6 +209,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
 
             importedVPCParameters.push(vpcIdParameter.logicalId, subnetIdsParameter.logicalId)
             vpc = importVPC(this, vpcIdParameter);
+            vpcForEks = vpc;
 
             // Optional VPC endpoint creation for imported VPCs with private subnets
             const vpcEndpointParameters: string[] = [];
@@ -306,9 +372,8 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             importedVPCParameters.push(...vpcEndpointParameters)
         }
 
-        const eksClusterName = `migration-eks-cluster-${stackMarker}`
         const eksInfra = new EKSInfra(this, 'EKSInfra', {
-            vpc,
+            vpc: vpcForEks,
             vpcSubnetIds,
             clusterName: eksClusterName,
             stackName: Fn.ref('AWS::StackName'),

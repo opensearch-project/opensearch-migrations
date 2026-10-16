@@ -129,7 +129,6 @@ def call(Map config = [:]) {
                                 def bootstrap = resolveBootstrap(
                                     useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
                                     build: params.BUILD,
-                                    skipTestImages: true,
                                     version: params.VERSION,
                                     useGeneralNodePool: true
                                 )

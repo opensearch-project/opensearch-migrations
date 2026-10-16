@@ -4,14 +4,19 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
+import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
@@ -53,11 +58,16 @@ class OpenSearchDocumentSinkTest {
         verify(client).sendBulkRequestRaw(eq("search-1"), eq(docs), isNull(), eq(false), any(), eq("search"));
     }
 
-    @Test
-    void writeBatch_noTransformer_usesRawPath() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void writeBatch_noTransformer_usesRawPath(boolean loadedIdentity) {
         when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any(), any())).thenReturn(OK);
-        var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
-        var docs = List.of(doc("d1", "{\"a\":1}"), doc("d2", "{\"b\":2}"));
+        var sink = new OpenSearchDocumentSink(client,
+            loadedIdentity ? () -> new TransformationLoader().getTransformerFactoryLoader(null) : null,
+            false, DocumentExceptionAllowlist.empty(), null);
+        var versioned = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "d1", null,
+            "{\"a\":1}".getBytes(), null, DocumentChangeType.INDEX, 7L));
+        var docs = List.of(versioned, doc("d2", "{\"b\":2}"));
 
         var result = sink.writeBatch("idx", docs).block();
 

@@ -43,7 +43,10 @@ targetClusters:
 # An auto-created Strimzi cluster. Swap in an `existing:` block to point at a Kafka you already run.
 kafkaClusterConfiguration:
   default:
-    autoCreate: {}
+    autoCreate:
+      topicSpecOverrides:
+        # Two active capture proxies plus the workflow's one-pod rolling-surge slot.
+        partitions: 3
 
 traffic:
   proxies:
@@ -52,7 +55,7 @@ traffic:
       proxyConfig:
         listenPort: 9201
         noCapture: false
-        podReplicas: 1
+        podReplicas: 2
         # kind has no load-balancer controller, and the workflow's readiness gate waits for a
         # LoadBalancer to report ingress — so LoadBalancer would hang there until it times out.
         # On a cloud cluster, change this to LoadBalancer (or pass your own config with -f).
@@ -63,5 +66,5 @@ traffic:
       fromCapturedTraffic: capture-proxy
       toTarget: target1
       replayerConfig:
+        podReplicas: 2
         speedupFactor: 2
-        observedPacketConnectionTimeout: 30
