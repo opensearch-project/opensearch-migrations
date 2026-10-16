@@ -9,7 +9,10 @@ import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 
@@ -17,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
@@ -56,6 +60,41 @@ class OpenSearchDocumentSinkTest {
 
         verify(client).sendBulkRequestRaw(eq("ts-1"), eq(docs), isNull(), eq(true), any(), eq("ts"));
         verify(client).sendBulkRequestRaw(eq("search-1"), eq(docs), isNull(), eq(false), any(), eq("search"));
+    }
+
+    @SuppressWarnings("unchecked")
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void writeBatch_collectionRoutedWithRenamingTransformer_routesBySourceIndex(boolean nativeTransformer) {
+        ArgumentCaptor<List<BulkOperationSpec>> captor = ArgumentCaptor.forClass(List.class);
+        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any(), any())).thenReturn(OK);
+        IJsonTransformer renamer = nativeTransformer
+            ? (BulkOperationTransformer) ops -> {
+                ops.forEach(op -> ((IndexOp) op).getOperation().setIndex("renamed"));
+                return ops;
+            }
+            : input -> {
+                for (var m : (List<Map<String, Object>>) input) {
+                    ((Map<String, Object>) m.get("operation")).put("_index", "renamed");
+                }
+                return input;
+            };
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d+\", \"collection\": \"$1\"}]}").orElseThrow();
+        var routedTarget = new CollectionRoutedTarget(routing, collection -> collection.equals("ts"));
+        var sink = new OpenSearchDocumentSink(client, () -> renamer, false, DocumentExceptionAllowlist.empty(), null, routedTarget);
+        var docs = List.of(doc("d1", "{\"a\":1}"));
+
+        sink.writeBatch("ts-1", docs).block();
+        sink.writeBatch("search-1", docs).block();
+
+        verify(client).sendBulkRequest(eq("ts-1"), anyList(), isNull(), eq(true), any(), eq("ts"));
+        verify(client).sendBulkRequest(eq("search-1"), anyList(), isNull(), eq(false), any(), eq("search"));
+        verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any(), any());
+        assertEquals(2, captor.getAllValues().size());
+        for (var sent : captor.getAllValues()) {
+            assertEquals("renamed", ((IndexOp) sent.get(0)).getOperation().getIndex());
+        }
     }
 
     @ParameterizedTest
