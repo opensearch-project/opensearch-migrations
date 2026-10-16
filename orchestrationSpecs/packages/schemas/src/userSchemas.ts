@@ -165,27 +165,41 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
 
-// Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
+// Provider-agnostic repository config. The URI scheme (s3://, gs://, or azure://) determines the backend.
 // S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
+// Azure: storage account is 3-24 lowercase alphanumerics and the container is 3-63 lowercase
+// alphanumerics and hyphens, with no leading, trailing, or consecutive hyphen. The container's
+// `(?:-?[a-z0-9]){2,62}` tail encodes all three hyphen rules at once: each repetition may carry at
+// most one hyphen and must end in an alphanumeric. This is the only place Azure naming rules are
+// checked; AzureUri on the Java side splits the URI without validating either name.
 export const REPO_CONFIG = z.object({
-    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
-        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. " +
-            "The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. " +
-            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client."),
+    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\/\/[a-z0-9]{3,24}\/[a-z0-9](?:-?[a-z0-9]){2,62})(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
+        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', " +
+            "or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. " +
+            "The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. " +
+            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client. " +
+            "For Azure Blob Storage, the source cluster must have the `repository-azure` plugin installed with a configured client."),
     awsRegion: z.string().default("").optional()
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
-            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
+            "Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. " +
+            "Honored by the tools that read a snapshot repository directly, for every scheme. " +
+            "Snapshot creation registers the repository on the cluster instead, and only repository-s3 " +
+            "has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."),
     s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
-            "Used for s3:// URIs only; ignored for gs://. " +
+            "Used for s3:// URIs only; ignored for gs:// and azure://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
-    "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
+    "The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. " +
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
-    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity).");
+    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). " +
+    "For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its " +
+    "keystore, while the migration tools' own Azure reader authenticates separately from the " +
+    "AZURE_STORAGE_ACCOUNT_KEY or AZURE_STORAGE_SAS_TOKEN environment variable, falling back to the " +
+    "ambient Azure identity chain when neither is set.");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
@@ -1324,7 +1338,7 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
     z.record(z.string(), REPO_CONFIG)
-    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
+    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3://, gs://, or azure://).");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()

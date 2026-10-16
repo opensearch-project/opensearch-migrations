@@ -26,10 +26,10 @@ public class MigrateOrEvaluateArgs {
     public String snapshotName;
 
     @Parameter(names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path"},
-        description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)")
+        description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path, azure://account/container/path (or bare absolute path)")
     public String repoUri;
 
-    @Parameter(names = {"--local-dir", "--s3-local-dir", "--gcs-local-dir"},
+    @Parameter(names = {"--local-dir", "--s3-local-dir", "--gcs-local-dir", "--azure-local-dir"},
         description = "The absolute path to the directory on local disk to download remote repo files to")
     public String localDir;
 
@@ -39,7 +39,7 @@ public class MigrateOrEvaluateArgs {
 
     @Parameter(required = false,
             names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
-            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS, Azurite for Azure)"))
     public String endpoint = null;
 
     @ParametersDelegate

@@ -248,8 +248,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "properties": {
                                   "repoPathUri": {
                                     "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                                   },
                                   "awsRegion": {
                                     "type": "string",
@@ -260,19 +260,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                     "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
                                     "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                                     "default": "",
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
                                   }
                                 },
                                 "required": [
                                   "repoPathUri"
                                 ],
-                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately from the AZURE_STORAGE_ACCOUNT_KEY or AZURE_STORAGE_SAS_TOKEN environment variable, falling back to the ambient Azure identity chain when neither is set."
                               },
                               "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
                             },
@@ -407,8 +407,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "properties": {
                                   "repoPathUri": {
                                     "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                                   },
                                   "awsRegion": {
                                     "type": "string",
@@ -419,19 +419,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                     "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
                                     "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                                     "default": "",
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
                                   }
                                 },
                                 "required": [
                                   "repoPathUri"
                                 ],
-                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately from the AZURE_STORAGE_ACCOUNT_KEY or AZURE_STORAGE_SAS_TOKEN environment variable, falling back to the ambient Azure identity chain when neither is set."
                               },
                               "description": "Solr backup repositories registered with the source cluster."
                             },
@@ -1644,8 +1644,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "properties": {
                           "repoPathUri": {
                             "type": "string",
-                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                            "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                            "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                           },
                           "awsRegion": {
                             "type": "string",
@@ -2738,8 +2738,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -3812,8 +3812,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -3824,19 +3824,19 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                         },
                         "s3RoleArn": {
                           "type": "string",
                           "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                           "default": "",
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
                         }
                       },
                       "required": [
                         "repoPathUri"
                       ],
-                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately from the AZURE_STORAGE_ACCOUNT_KEY or AZURE_STORAGE_SAS_TOKEN environment variable, falling back to the ambient Azure identity chain when neither is set."
                     },
                     "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
                   },
@@ -3971,8 +3971,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -3983,19 +3983,19 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                         },
                         "s3RoleArn": {
                           "type": "string",
                           "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                           "default": "",
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
                         }
                       },
                       "required": [
                         "repoPathUri"
                       ],
-                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately from the AZURE_STORAGE_ACCOUNT_KEY or AZURE_STORAGE_SAS_TOKEN environment variable, falling back to the ambient Azure identity chain when neither is set."
                     },
                     "description": "Solr backup repositories registered with the source cluster."
                   },

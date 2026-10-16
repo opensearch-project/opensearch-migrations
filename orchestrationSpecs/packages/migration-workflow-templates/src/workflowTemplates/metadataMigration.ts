@@ -92,8 +92,16 @@ const COMMON_METADATA_PARAMETERS = {
 };
 
 // Provider-agnostic repo param dict. The URI scheme in repoPathUri determines the backend.
-// `s3Region`, `s3Endpoint`, and `s3RoleArn` are only emitted when non-empty; the Java tools
-// ignore them for gs:// URIs.
+// `s3Region`, `s3Endpoint`, and `s3RoleArn` are only emitted when non-empty, so a gs:// or
+// azure:// repo that sets none of them emits just `repoUri`, plus `localDir` when the caller asks
+// for it.
+//
+// The keys keep their `s3` prefix to match the CLI flag names, but they are not all s3-only. The
+// snapshot repo code path ignores `s3Region` and `s3RoleArn` outside s3://. `s3Endpoint` binds to
+// the tools' scheme-neutral `endpoint` parameter, which the snapshot readers (metadata migration
+// and document backfill) honor for every scheme; only create-snapshot ignores it for gs:// and
+// azure://, because it registers the repository on the cluster and repository-s3 is the only
+// OpenSearch repository plugin with a repository-level endpoint setting.
 export function makeRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof REPO_CONFIG>>,
     includeLocalDir: boolean) {

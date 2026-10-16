@@ -7,7 +7,7 @@ from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.cluster import AuthMethod, Cluster, NoTargetClusterDefinedError
 from console_link.models.schema_tools import list_schema
-from console_link.models.snapshot import GcsSnapshot, S3Snapshot, Snapshot, FileSystemSnapshot
+from console_link.models.snapshot import AzureSnapshot, GcsSnapshot, S3Snapshot, Snapshot, FileSystemSnapshot
 
 logger = logging.getLogger(__name__)
 MAX_FILENAME_LEN = 255
@@ -45,6 +45,21 @@ FROM_SNAPSHOT_SCHEMA = {
             'schema': {
                 'repo_uri': {'type': 'string', 'required': True},
                 'endpoint': {'type': 'string', 'required': False},
+            }
+        },
+        # Azure Blob Storage. The azure block deliberately has no 'endpoint' field, unlike gcs
+        # above. MetadataMigration itself would accept one for an azure:// repo (see
+        # _add_azure_args), but this release ships no cluster-side azure emulator wiring for
+        # the create-snapshot side to match, the way clusterWorkflows.yaml sets
+        # gcs.client.default.endpoint for fake-gcs-server. Until that exists there is no
+        # configuration in which an azure endpoint here would be useful, so rejecting the key
+        # beats accepting one that could only have come from a mistake. Add the field when the
+        # cluster-side wiring lands.
+        "azure": {
+            'type': 'dict',
+            "required": False,
+            'schema': {
+                'repo_uri': {'type': 'string', 'required': True},
             }
         }
     },
@@ -118,12 +133,7 @@ class Metadata:
             self._init_from_config()
         else:
             logger.debug("Using independently specified snapshot")
-            if isinstance(snapshot, S3Snapshot):
-                self._init_from_s3_snapshot(snapshot)
-            elif isinstance(snapshot, FileSystemSnapshot):
-                self._init_from_fs_snapshot(snapshot)
-            elif isinstance(snapshot, GcsSnapshot):
-                self._init_from_gcs_snapshot(snapshot)
+            self._init_from_snapshot_object(snapshot)
 
         if config["from_snapshot"] is not None and "local_dir" in config["from_snapshot"]:
             self._local_dir = config["from_snapshot"]["local_dir"]
@@ -136,10 +146,25 @@ class Metadata:
             logger.debug(f"AWS region: {self._aws_region}")
         elif self._snapshot_location == 'gcs':
             logger.debug(f"GCS URI: {self._gcs_uri}")
+        elif self._snapshot_location == 'azure':
+            logger.debug(f"Azure URI: {self._azure_uri}")
         else:
             logger.debug(f"Local dir: {self._local_dir}")
 
         logger.info("Metadata migration configuration defined")
+
+    def _init_from_snapshot_object(self, snapshot: Optional[Snapshot]) -> None:
+        # Extracted from __init__ to keep its cognitive complexity under the limit; adding the
+        # azure arm pushed it over. No behaviour change, including the absent else: a snapshot
+        # type with no arm here leaves the snapshot fields unset, exactly as before.
+        if isinstance(snapshot, S3Snapshot):
+            self._init_from_s3_snapshot(snapshot)
+        elif isinstance(snapshot, FileSystemSnapshot):
+            self._init_from_fs_snapshot(snapshot)
+        elif isinstance(snapshot, GcsSnapshot):
+            self._init_from_gcs_snapshot(snapshot)
+        elif isinstance(snapshot, AzureSnapshot):
+            self._init_from_azure_snapshot(snapshot)
 
     def _init_from_config(self) -> None:
         config = self._config
@@ -148,6 +173,8 @@ class Metadata:
             self._snapshot_location = 's3'
         elif 'gcs' in from_snapshot:
             self._snapshot_location = 'gcs'
+        elif 'azure' in from_snapshot:
+            self._snapshot_location = 'azure'
         else:
             self._snapshot_location = 'fs'
         self._snapshot_name = from_snapshot["snapshot_name"]
@@ -157,9 +184,15 @@ class Metadata:
         elif self._snapshot_location == 's3':
             self._s3_uri = from_snapshot["s3"]["repo_uri"]
             self._aws_region = from_snapshot["s3"]["aws_region"]
-        else:
+        elif self._snapshot_location == 'azure':
+            self._azure_uri = from_snapshot["azure"]["repo_uri"]
+        elif self._snapshot_location == 'gcs':
             self._gcs_uri = from_snapshot["gcs"]["repo_uri"]
             self._gcs_endpoint = from_snapshot["gcs"].get("endpoint")
+        else:
+            # gcs used to be the fall-through here, so a location this branch did not know about
+            # failed with a KeyError naming gcs. Name the real location instead.
+            raise ValueError(f"Unsupported snapshot location: {self._snapshot_location}")
 
     def _init_from_s3_snapshot(self, snapshot: S3Snapshot) -> None:
         self._snapshot_name = snapshot.snapshot_name
@@ -178,6 +211,11 @@ class Metadata:
         self._snapshot_location = "gcs"
         self._gcs_uri = snapshot.gcs_repo_uri
         self._gcs_endpoint = snapshot.gcs_endpoint
+
+    def _init_from_azure_snapshot(self, snapshot: AzureSnapshot) -> None:
+        self._snapshot_name = snapshot.snapshot_name
+        self._snapshot_location = "azure"
+        self._azure_uri = snapshot.azure_repo_uri
 
     def _append_args(self, commands: Dict[str, Any], args_to_add: List[str]) -> None:
         if args_to_add is None:
@@ -240,14 +278,7 @@ class Metadata:
             "--cluster-awareness-attributes": self._awareness_attributes
         })
 
-        if self._snapshot_location == 's3':
-            self._add_s3_args(command_args=command_args)
-        elif self._snapshot_location == 'gcs':
-            self._add_gcs_args(command_args=command_args)
-        elif self._snapshot_location == 'fs':
-            command_args.update({
-                "--repo-uri": f"file://{self._repo_path}",
-            })
+        self._add_snapshot_location_args(command_args)
 
         if self._target_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
@@ -309,6 +340,21 @@ class Metadata:
                                  "metadata object is required to perform metadata migrations e.g. version: \"ES_6.8\" ")
         return version
 
+    def _add_snapshot_location_args(self, command_args: Dict[str, Any]) -> None:
+        # Extracted from migrate_or_evaluate to keep its cognitive complexity under the limit;
+        # adding the azure arm pushed it over. No behaviour change, including the absent else:
+        # an unrecognised location contributes no repo arguments, exactly as before.
+        if self._snapshot_location == 's3':
+            self._add_s3_args(command_args=command_args)
+        elif self._snapshot_location == 'gcs':
+            self._add_gcs_args(command_args=command_args)
+        elif self._snapshot_location == 'azure':
+            self._add_azure_args(command_args=command_args)
+        elif self._snapshot_location == 'fs':
+            command_args.update({
+                "--repo-uri": f"file://{self._repo_path}",
+            })
+
     def _add_s3_args(self, command_args: Dict[str, Any]) -> None:
         command_args.update({
             "--local-dir": self._local_dir,
@@ -329,3 +375,13 @@ class Metadata:
             command_args.update({
                 "--endpoint": self._gcs_endpoint,
             })
+
+    def _add_azure_args(self, command_args: Dict[str, Any]) -> None:
+        # The complete azure argument surface on read paths is --local-dir plus --repo-uri.
+        # MetadataMigration does accept an --endpoint for azure:// repos (it forwards it to
+        # AzureRepo.create), but the console has no azure endpoint to forward: see the azure
+        # block in FROM_SNAPSHOT_SCHEMA for why the key is not part of the config.
+        command_args.update({
+            "--local-dir": self._local_dir,
+            "--repo-uri": self._azure_uri,
+        })

@@ -65,9 +65,30 @@ public class ClusterReaderExtractorTest {
     }
 
     @Test
+    void testExtractClusterReader_invalidAzureSnapshot_missingLocalDir() {
+        var args = new MigrateOrEvaluateArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        var extractor = new ClusterReaderExtractor(args);
+
+        var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
+        assertThat(exception.getMessage(), equalTo("If an Azure repo is being used, --local-dir must be set"));
+    }
+
+    @Test
     void testExtractClusterReader_validGcsSnapshot_missingVersion() {
         var args = new MigrateOrEvaluateArgs();
         args.repoUri = "gs://foo/bar";
+        args.localDir = "fizz.buzz";
+        var extractor = new ClusterReaderExtractor(args);
+
+        var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
+        assertThat(exception.getMessage(), equalTo("Unable to read from snapshot without --source-version parameter"));
+    }
+
+    @Test
+    void testExtractClusterReader_validAzureSnapshot_missingVersion() {
+        var args = new MigrateOrEvaluateArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
         args.localDir = "fizz.buzz";
         var extractor = new ClusterReaderExtractor(args);
 

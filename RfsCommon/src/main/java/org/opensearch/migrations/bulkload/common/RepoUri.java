@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
-public sealed interface RepoUri permits RepoUri.FileRepoUri, RepoUri.S3RepoUri, RepoUri.GcsRepoUri {
+public sealed interface RepoUri
+    permits RepoUri.FileRepoUri, RepoUri.S3RepoUri, RepoUri.GcsRepoUri, RepoUri.AzureRepoUri {
 
     static RepoUri parse(String uri) {
         if (uri.startsWith("file://")) {
@@ -12,11 +13,15 @@ public sealed interface RepoUri permits RepoUri.FileRepoUri, RepoUri.S3RepoUri, 
         if (uri.startsWith("gs://")) {
             return new GcsRepoUri(uri);
         }
+        if (uri.startsWith("azure://")) {
+            return new AzureRepoUri(new AzureUri(uri), uri);
+        }
         if (uri.startsWith("/")) {
             return new FileRepoUri(uri, "file://" + uri);
         }
         throw new IllegalArgumentException(
-            "Unrecognized repo URI scheme: '" + uri + "'. Expected file://, s3://, gs://, or an absolute path."
+            "Unrecognized repo URI scheme: '" + uri + "'. Expected file://, s3://, gs://, azure://, "
+                + "or an absolute path."
         );
     }
 
@@ -25,4 +30,5 @@ public sealed interface RepoUri permits RepoUri.FileRepoUri, RepoUri.S3RepoUri, 
     record FileRepoUri(String path, String rawUri) implements RepoUri {}
     record S3RepoUri(S3Uri s3Uri, String rawUri) implements RepoUri {}
     record GcsRepoUri(String rawUri) implements RepoUri {}
+    record AzureRepoUri(AzureUri azureUri, String rawUri) implements RepoUri {}
 }

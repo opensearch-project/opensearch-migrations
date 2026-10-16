@@ -1,0 +1,53 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation project(':RfsCommon')
+    implementation project(':RfsHttp')
+    implementation project(':RfsPipeline')
+    implementation project(':SearchSnapshotExtractor')
+
+    implementation libs.jackson.databind
+    implementation libs.jackson.core
+    implementation libs.jackson.dataformat.smile
+    implementation libs.slf4j.api
+
+    // The Azure SDK defaults to a netty transport that wants a newer netty than the
+    // repo-wide pin in boms-netty. The JDK HttpClient transport covers everything the
+    // snapshot reader does, so netty is excluded and the JDK transport supplied instead.
+    implementation(libs.azure.storage.blob) {
+        exclude group: 'com.azure', module: 'azure-core-http-netty'
+    }
+    implementation(libs.azure.identity) {
+        exclude group: 'com.azure', module: 'azure-core-http-netty'
+    }
+    implementation libs.azure.core.http.jdk.httpclient
+
+    testImplementation testFixtures(project(':RFS'))
+    testImplementation testFixtures(project(':coreUtilities'))
+    testImplementation testFixtures(project(':testHelperFixtures'))
+
+    testImplementation libs.hamcrest
+    testImplementation libs.mockito.core
+    testImplementation libs.mockito.junit.jupiter
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+    testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
+
+    testRuntimeOnly libs.junit.jupiter.engine
+}
+
+// AzureRepoIntegrationTest talks to Azurite over plain HTTP, and the Azure SDK refuses to send a
+// bearer token over HTTP. Supplying Azurite's development account key makes AzureRepo.create take
+// its shared-key branch instead of the ambient-identity fallback, so the test still exercises the
+// real endpoint resolution. This is a fixed emulator constant published in Microsoft's docs, not a
+// secret; it matches ACCOUNT_KEY in AzureRepoIntegrationTest.
+tasks.named('isolatedTest') {
+    environment 'AZURE_STORAGE_ACCOUNT_KEY',
+        'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=='
+}

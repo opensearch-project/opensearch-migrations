@@ -94,6 +94,20 @@ public class TestCreateSnapshotArgs {
     }
 
     @Test
+    void azureRepoWithoutRegion_passesArgValidation() {
+        var ex = assertThrows(Exception.class, () ->
+            CreateSnapshot.main(new String[]{
+                "--snapshot-name", "snap",
+                "--snapshot-repo-name", "repo",
+                "--source-host", "http://localhost:9200",
+                "--repo-uri", "azure://mystorageacct/my-container/path"
+            })
+        );
+        // azure:// requires no --s3-region either, so the same expectation holds.
+        assertThat(ex, not(instanceOf(ParameterException.class)));
+    }
+
+    @Test
     void solrSourceWithGcsRepo_throwsParameterException() {
         var args = new CreateSnapshot.Args();
         args.sourceArgs.host = "http://localhost:8983";
@@ -107,6 +121,23 @@ public class TestCreateSnapshotArgs {
         // than discovering collections against a (non-existent) Solr at localhost.
         var ex = assertThrows(ParameterException.class, () -> new SolrBackupStrategy(args));
         assertThat(ex.getMessage(), containsString("gs://"));
+    }
+
+    @Test
+    void solrSourceWithAzureRepo_throwsParameterException() {
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = "http://localhost:8983";
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = "snap";
+        args.snapshotRepoName = "repo";
+        args.repoUri = "azure://mystorageacct/snapshot-container/path";
+
+        // Same fail-fast contract as the gs:// case: the constructor must reject the scheme
+        // before any Solr request, because the downstream Solr read paths handle only
+        // file:// and s3:// and could never read what this backup would write.
+        var ex = assertThrows(ParameterException.class, () -> new SolrBackupStrategy(args));
+        assertThat(ex.getMessage(), containsString("azure://"));
     }
 
     @Test
