@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * ES/OpenSearch adapter for {@link GlobalMetadataSink}. Writes global metadata (templates)
@@ -43,6 +44,7 @@ public class OpenSearchMetadataSink implements GlobalMetadataSink {
     @Override
     public Mono<Void> createIndex(IndexMetadataSnapshot metadata) {
         return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER, null))
+            .subscribeOn(Schedulers.boundedElastic())
             .then();
     }
 
