@@ -81,6 +81,9 @@ def pytest_addoption(parser):
                      help="Specify the Migration ALB endpoint for the source capture proxy")
     parser.addoption("--target_proxy_alb_endpoint", action="store", default=None,
                      help="Specify the Migration ALB endpoint for the target proxy")
+    parser.addoption("--replayer_group_id", action="store", default=None,
+                     help="Kafka consumer group of the deployed traffic replayer "
+                          "(default: logging-group-<unique_id>)")
     parser.addoption("--image_registry_prefix", action="store", default="",
                      help="Registry prefix for custom ES cluster images (e.g. 'localhost:5000/')")
     parser.addoption("--speedup_factor", type=int, default=20,

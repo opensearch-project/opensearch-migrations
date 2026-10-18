@@ -22,6 +22,7 @@ CREATE_TOPIC_OPERATION = "Create Topic"
 LIST_TOPICS_OPERATION = "List Topics"
 DESCRIBE_CONSUMER_GROUP_OPERATION = "Describe Consumer Group"
 LIST_CONSUMER_GROUPS_OPERATION = "List Consumer Groups"
+RESET_CONSUMER_GROUP_OFFSETS_OPERATION = "Reset Consumer Group Offsets"
 DESCRIBE_TOPIC_RECORDS_OPERATION = "Describe Topic Records"
 DESCRIBE_REPLAY_PROGRESS_OPERATION = "Describe Replay Progress"
 GET_OFFSET_SHELL_CLASS = 'org.apache.kafka.tools.GetOffsetShell'
@@ -266,6 +267,12 @@ class Kafka(ABC):
         pass
 
     @abstractmethod
+    def reset_consumer_group_offsets_to_latest(self, group_name: str,
+                                               topic_name='logging-traffic-topic') -> CommandResult:
+        """Point an inactive (or not yet created) consumer group at the end of every partition of the topic."""
+        pass
+
+    @abstractmethod
     def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
         pass
 
@@ -295,6 +302,14 @@ class MSK(Kafka):
                    '--command-config', resolve_msk_auth_config()]
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, LIST_TOPICS_OPERATION)
+
+    def reset_consumer_group_offsets_to_latest(self, group_name: str,
+                                               topic_name='logging-traffic-topic') -> CommandResult:
+        command = [resolve_kafka_tool(KAFKA_CONSUMER_GROUPS_SCRIPT), '--bootstrap-server', f'{self.brokers}',
+                   '--group', group_name, '--topic', topic_name, '--reset-offsets', '--to-latest', '--execute',
+                   '--command-config', resolve_msk_auth_config()]
+        logger.info(f"Executing command: {command}")
+        return get_result_for_command(command, RESET_CONSUMER_GROUP_OFFSETS_OPERATION)
 
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
         command = [resolve_kafka_tool(KAFKA_CONSUMER_GROUPS_SCRIPT), '--bootstrap-server', f'{self.brokers}',
@@ -353,6 +368,13 @@ class StandardKafka(Kafka):
         command = self._base_command(KAFKA_TOPICS_SCRIPT) + ['--list']
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, LIST_TOPICS_OPERATION)
+
+    def reset_consumer_group_offsets_to_latest(self, group_name: str,
+                                               topic_name='logging-traffic-topic') -> CommandResult:
+        command = self._base_command(KAFKA_CONSUMER_GROUPS_SCRIPT) + [
+            '--group', group_name, '--topic', topic_name, '--reset-offsets', '--to-latest', '--execute']
+        logger.info(f"Executing command: {command}")
+        return get_result_for_command(command, RESET_CONSUMER_GROUP_OFFSETS_OPERATION)
 
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
         command = self._base_command(KAFKA_CONSUMER_GROUPS_SCRIPT) + [
@@ -445,6 +467,14 @@ class ScramKafka(Kafka):
                    '--list'] + self._cmd_config_args()
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "List Topics")
+
+    def reset_consumer_group_offsets_to_latest(self, group_name: str,
+                                               topic_name='logging-traffic-topic') -> CommandResult:
+        command = [resolve_kafka_tool(KAFKA_CONSUMER_GROUPS_SCRIPT), '--bootstrap-server', self.brokers,
+                   '--group', group_name, '--topic', topic_name, '--reset-offsets', '--to-latest',
+                   '--execute'] + self._cmd_config_args()
+        logger.info(f"Executing command: {command}")
+        return get_result_for_command(command, RESET_CONSUMER_GROUP_OFFSETS_OPERATION)
 
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
         command = [resolve_kafka_tool(KAFKA_CONSUMER_GROUPS_SCRIPT), '--bootstrap-server', self.brokers,

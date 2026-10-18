@@ -103,7 +103,8 @@ def call(Map config = [:]) {
             jobName: config.jobName ?: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,
             defaultGitBranch: config.defaultGitBranch ?: 'main',
-            integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202',
+            integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202' +
+                    " --replayer_group_id logging-group-${testUniqueId}",
             preDeployStep: { Map args ->
                 def activeUpdateStacks = sh(
                         script: "aws cloudformation list-stacks " +
