@@ -47,6 +47,18 @@ class SourceInternalIndexSettingsTest {
     }
 
     @Test
+    void strip_keepsBlocksAllocationRulesAndMappingSettings() {
+        var json = "{\"blocks\":{\"write\":\"true\"},\"routing\":{\"allocation\":{\"require\":{\"_name\":\"node-1\"}}},"
+            + "\"mapping\":{\"single_type\":\"true\"},\"mapper\":{\"dynamic\":\"false\"}}";
+        var settings = parse(json);
+
+        var removed = SourceInternalIndexSettings.strip(settings);
+
+        assertThat(removed, empty());
+        assertThat(settings, equalTo(parse(json)));
+    }
+
+    @Test
     void strip_keepsUserSettingsAndUntouchedEmptyObjects() {
         var json = "{\"mapping\":{\"total_fields\":{\"limit\":\"2000\"}},\"routing\":{\"allocation\":{\"total_shards_per_node\":\"2\"}},"
             + "\"analysis\":{},\"number_of_replicas\":\"1\"}";
