@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.util.Collections;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -33,24 +34,24 @@ public final class InternalIndexSettingNames {
     );
 
     /** {@link #EXACT} plus whole objects removed by the pipeline's index creator. */
-    public static final Set<String> EXTENDED_EXACT = union(EXACT, Set.of(
+    public static final Set<String> EXTENDED_EXACT = Collections.unmodifiableSet(union(EXACT, Set.of(
         "version",
         "mapping",
         "mapper"
-    ));
+    )));
 
     /** {@link #PREFIXES} plus write blocks and node allocation rules removed by the pipeline's index creator. */
-    public static final Set<String> EXTENDED_PREFIXES = union(PREFIXES, Set.of(
+    public static final Set<String> EXTENDED_PREFIXES = Collections.unmodifiableSet(union(PREFIXES, Set.of(
         "blocks.",                      // blocks.write, blocks.read_only, ...
         "resize.",                      // resize.source.name, resize.source.uuid
         "routing.allocation.include.",
         "routing.allocation.require.",
         "routing.allocation.exclude."
-    ));
+    )));
 
     private InternalIndexSettingNames() {}
 
     private static Set<String> union(Set<String> base, Set<String> additions) {
-        return Stream.concat(base.stream(), additions.stream()).collect(Collectors.toUnmodifiableSet());
+        return Stream.concat(base.stream(), additions.stream()).collect(Collectors.toSet());
     }
 }
