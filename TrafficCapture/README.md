@@ -309,11 +309,13 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
 
 </details>
 
-Each source and target response carries two times in whole milliseconds, both measured from the request's last
-byte: `first_byte_ms` to the first byte of the final (non-interim) response, and `response_time_ms` to its last
-byte. Source times come from the capture's timestamps; target times come from when the replayer finished sending
-the request and received the response's packets, so they reflect the replay's load and speedup. `first_byte_ms` is
-absent when it can't be determined.
+Each source and target response carries two times in whole milliseconds, both measured from when the request's
+last bytes were sent to that cluster: `first_byte_ms` to the first byte of the final (non-interim) response, and
+`response_time_ms` to its last byte. Source times start when the capture proxy finished forwarding the request to
+the source, so they exclude the proxy's wait for Kafka to acknowledge a mutating request before forwarding it, and
+end at the captured response timestamps. Target times come from when the replayer finished sending the request and
+received the response's packets, so they reflect the replay's load and speedup. Both fields are absent when they
+can't be determined, for example when the source responded before the request was fully forwarded.
 
 ### Capture Kafka Offloader
 
