@@ -1,5 +1,9 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import java.time.Instant;
+
+import org.opensearch.migrations.trafficcapture.netty.SourceForwardingCompletion;
+
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
@@ -51,6 +55,8 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
             log.debug("Writing data to backside handler " + outboundChannel);
             outboundChannel.writeAndFlush(msg).addListener((ChannelFutureListener) future -> {
                 if (future.isSuccess()) {
+                    // Before the next read, so a completed request's forward is captured ahead of the next request.
+                    SourceForwardingCompletion.reportWriteCompleted(ctx.channel(), Instant.now());
                     ctx.channel().read(); // kickoff another read for the frontside
                 } else {
                     log.debug(

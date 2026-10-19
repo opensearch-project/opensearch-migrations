@@ -262,7 +262,7 @@ public class TrafficStreamDumper {
         if (obs.hasRequestDropped()) return "DROPPED";
         if (obs.hasConnectionException()) return "EXCEPTION";
         if (obs.hasSegmentEnd()) return "SEGMENT_END"; // shouldn't normally appear; absorbed during coalescing
-        if (obs.hasRequestReleasedDownstream()) return "REQUEST_RELEASED";
+        if (obs.hasRequestForwarded()) return "REQUEST_FORWARDED";
         return "UNKNOWN";
     }
 }

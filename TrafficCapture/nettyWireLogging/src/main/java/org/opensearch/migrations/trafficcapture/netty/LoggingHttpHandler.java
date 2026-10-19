@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -231,6 +232,11 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     private boolean contextsClosed;
     private CloseReason closeReason = CloseReason.NORMAL;
     private int bytesWrittenAwaitingResponseContext;
+    /**
+     * One entry per message forwarded to the source and not yet written, in forwarding order: whether that message
+     * completes a request whose end-of-message indicator was captured.
+     */
+    private final ArrayDeque<Boolean> forwardsAwaitingWriteCompletion = new ArrayDeque<>();
 
     private record ClassifiedResponseBytes(boolean interim, byte[] data) {}
 
@@ -273,6 +279,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         trafficOffloader.bindToConnectionEventLoop(
             ctx.executor(),
             this::reportAsynchronousCaptureFailure
+        );
+        SourceForwardingCompletion.setListener(
+            ctx.channel(),
+            timestamp -> onForwardedWriteCompleted(ctx, timestamp)
         );
         connectionDeadline = ctx.executor().schedule(
             () -> {
@@ -444,7 +454,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         HttpRequest httpRequest
     ) throws Exception {
         messageContext = messageContext.createWaitingForResponseContext();
-        forwardSourceTrafficOrClose(ctx, msg);
+        forwardSourceTrafficOrClose(ctx, msg, shouldCapture);
     }
 
     @Override
@@ -494,7 +504,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                 ReferenceCountUtil.release(msg);
             }
         } else {
-            forwardSourceTrafficOrClose(ctx, msg);
+            forwardSourceTrafficOrClose(ctx, msg, false);
         }
     }
 
@@ -647,14 +657,38 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         });
     }
 
-    private void forwardSourceTrafficOrClose(ChannelHandlerContext ctx, Object msg) throws Exception {
+    /**
+     * @param completesCapturedRequest whether {@code msg} ends a request whose end-of-message indicator was
+     *                                 captured, so that its completed write is captured as the request's forward
+     */
+    private void forwardSourceTrafficOrClose(
+        ChannelHandlerContext ctx,
+        Object msg,
+        boolean completesCapturedRequest
+    ) throws Exception {
         var forwarded = captureProcessState.forwardSourceTrafficIfPermitted(() -> {
+            // Queued first: the write can complete, and report back, before channelRead returns.
+            forwardsAwaitingWriteCompletion.add(completesCapturedRequest);
             super.channelRead(ctx, msg);
             return null;
         });
         if (!forwarded) {
             rejectSourceTraffic(ctx, msg);
         }
+    }
+
+    /**
+     * The forwarding handler wrote one forwarded message to the source. When it completed a captured request,
+     * capture when the request's last bytes reached the source, which is where its source response time starts.
+     */
+    private void onForwardedWriteCompleted(ChannelHandlerContext ctx, Instant timestamp) {
+        var completesCapturedRequest = forwardsAwaitingWriteCompletion.poll();
+        if (!Boolean.TRUE.equals(completesCapturedRequest)
+            || captureCloseFuture != null
+            || !captureProcessState.shouldCapture()) {
+            return;
+        }
+        runRequiredCaptureOperation(ctx, () -> trafficOffloader.addRequestForwardedEvent(timestamp));
     }
 
     private void rejectSourceTraffic(ChannelHandlerContext ctx, Object msg) {
