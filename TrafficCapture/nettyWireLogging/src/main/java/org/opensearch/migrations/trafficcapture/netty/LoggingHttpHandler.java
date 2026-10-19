@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -233,10 +232,11 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     private CloseReason closeReason = CloseReason.NORMAL;
     private int bytesWrittenAwaitingResponseContext;
     /**
-     * One entry per message forwarded to the source and not yet written, in forwarding order: whether that message
-     * completes a request whose end-of-message indicator was captured.
+     * Whether the message forwarded to the source and not yet written completes a request whose end-of-message
+     * indicator was captured. One message at most is in flight: the client channel reads only after the forwarding
+     * handler's previous write completes.
      */
-    private final ArrayDeque<Boolean> forwardsAwaitingWriteCompletion = new ArrayDeque<>();
+    private boolean forwardInFlightCompletesCapturedRequest;
 
     private record ClassifiedResponseBytes(boolean interim, byte[] data) {}
 
@@ -667,8 +667,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         boolean completesCapturedRequest
     ) throws Exception {
         var forwarded = captureProcessState.forwardSourceTrafficIfPermitted(() -> {
-            // Queued first: the write can complete, and report back, before channelRead returns.
-            forwardsAwaitingWriteCompletion.add(completesCapturedRequest);
+            // Set first: the write can complete, and report back, before channelRead returns.
+            forwardInFlightCompletesCapturedRequest = completesCapturedRequest;
             super.channelRead(ctx, msg);
             return null;
         });
@@ -682,8 +682,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
      * capture when the request's last bytes reached the source, which is where its source response time starts.
      */
     private void onForwardedWriteCompleted(ChannelHandlerContext ctx, Instant timestamp) {
-        var completesCapturedRequest = forwardsAwaitingWriteCompletion.poll();
-        if (!Boolean.TRUE.equals(completesCapturedRequest)
+        var completesCapturedRequest = forwardInFlightCompletesCapturedRequest;
+        forwardInFlightCompletesCapturedRequest = false;
+        if (!completesCapturedRequest
             || captureCloseFuture != null
             || !captureProcessState.shouldCapture()) {
             return;

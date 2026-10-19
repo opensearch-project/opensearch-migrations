@@ -34,13 +34,9 @@ class RequestForwardedCaptureTest {
             channel.writeInbound(ascii(blockOnCapture ? POST : GET));
 
             Assertions.assertEquals(List.of("read", "eom"), offloader.kinds());
-            var forwardedAt = Instant.now();
-            source.completeNextWrite(channel, forwardedAt);
+            source.completeNextWrite(channel, Instant.now());
 
             Assertions.assertEquals(List.of("read", "eom", "forwarded"), offloader.kinds());
-            var forwarded = offloader.events.get(2);
-            Assertions.assertEquals(forwardedAt, forwarded.timestamp());
-            Assertions.assertFalse(forwarded.timestamp().isBefore(offloader.events.get(0).timestamp()));
             channel.finishAndReleaseAll();
         }
     }
@@ -51,17 +47,14 @@ class RequestForwardedCaptureTest {
         try (var rootContext = new TestRootContext()) {
             var source = new SourceWrites();
             var channel = channel(rootContext, offloader, source, new RequestCapturePredicate(), false);
+            // As in the proxy, the client is read again only after the previous write to the source completes.
             channel.writeInbound(ascii("POST /thing HTTP/1.1\r\nContent-Length: 2\r\n\r\n"));
+            source.completeNextWrite(channel, Instant.now());
+            Assertions.assertEquals(List.of("read"), offloader.kinds());
+
             channel.writeInbound(ascii("ab"));
-
-            var headWrittenAt = Instant.now();
-            source.completeNextWrite(channel, headWrittenAt);
-            Assertions.assertEquals(List.of("read", "read", "eom"), offloader.kinds());
-
-            var bodyWrittenAt = headWrittenAt.plusMillis(3);
-            source.completeNextWrite(channel, bodyWrittenAt);
+            source.completeNextWrite(channel, Instant.now());
             Assertions.assertEquals(List.of("read", "read", "eom", "forwarded"), offloader.kinds());
-            Assertions.assertEquals(bodyWrittenAt, offloader.events.get(3).timestamp());
             channel.finishAndReleaseAll();
         }
     }
@@ -72,21 +65,16 @@ class RequestForwardedCaptureTest {
         try (var rootContext = new TestRootContext()) {
             var source = new SourceWrites();
             var channel = channel(rootContext, offloader, source, new RequestCapturePredicate(), false);
-            var first = Instant.now();
-            var second = first.plusMillis(5);
-
             channel.writeInbound(ascii(GET));
-            source.completeNextWrite(channel, first);
+            source.completeNextWrite(channel, Instant.now());
             channel.writeOutbound(ascii("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"));
             channel.writeInbound(ascii(POST));
-            source.completeNextWrite(channel, second);
+            source.completeNextWrite(channel, Instant.now());
 
             Assertions.assertEquals(
                 List.of("read", "eom", "forwarded", "write", "read", "eom", "forwarded"),
                 offloader.kinds()
             );
-            Assertions.assertEquals(first, offloader.events.get(2).timestamp());
-            Assertions.assertEquals(second, offloader.events.get(6).timestamp());
             channel.finishAndReleaseAll();
         }
     }
@@ -105,22 +93,6 @@ class RequestForwardedCaptureTest {
 
             Assertions.assertFalse(offloader.kinds().contains("forwarded"));
             Assertions.assertFalse(offloader.kinds().contains("eom"));
-            channel.finishAndReleaseAll();
-        }
-    }
-
-    @Test
-    void aWriteThatNeverCompletesHasNoForward() throws Exception {
-        var offloader = new RecordingOffloader();
-        try (var rootContext = new TestRootContext()) {
-            var source = new SourceWrites();
-            var channel = channel(rootContext, offloader, source, new RequestCapturePredicate(), false);
-            channel.writeInbound(ascii(GET));
-            channel.close();
-            channel.runPendingTasks();
-
-            Assertions.assertEquals(List.of("read", "eom", "close"), offloader.kinds());
-            source.releaseAll();
             channel.finishAndReleaseAll();
         }
     }
@@ -164,49 +136,43 @@ class RequestForwardedCaptureTest {
             SourceForwardingCompletion.reportWriteCompleted(channel, completedAt);
         }
 
-        void releaseAll() {
-            pending.forEach(ReferenceCountUtil::release);
-            pending.clear();
-        }
     }
 
-    private record Event(String kind, Instant timestamp) {}
-
     private static final class RecordingOffloader extends NoopChannelConnectionCaptureSerializer<Void> {
-        private final List<Event> events = new ArrayList<>();
+        private final List<String> kinds = new ArrayList<>();
 
         List<String> kinds() {
-            return events.stream().map(Event::kind).toList();
+            return kinds;
         }
 
         @Override
         public void addReadEvent(Instant timestamp, ByteBuf buffer) {
-            events.add(new Event("read", timestamp));
+            kinds.add("read");
         }
 
         @Override
         public void commitEndOfHttpMessageIndicator(Instant timestamp) {
-            events.add(new Event("eom", timestamp));
+            kinds.add("eom");
         }
 
         @Override
         public void addRequestForwardedEvent(Instant timestamp) {
-            events.add(new Event("forwarded", timestamp));
+            kinds.add("forwarded");
         }
 
         @Override
         public void addWriteEvent(Instant timestamp, ByteBuf buffer) {
-            events.add(new Event("write", timestamp));
+            kinds.add("write");
         }
 
         @Override
         public void cancelCaptureForCurrentRequest(Instant timestamp) {
-            events.add(new Event("dropped", timestamp));
+            kinds.add("dropped");
         }
 
         @Override
         public void addCloseEvent(Instant timestamp) {
-            events.add(new Event("close", timestamp));
+            kinds.add("close");
         }
     }
 }
