@@ -23,6 +23,9 @@ set -eu
 : "${RFS_MONITOR_WORKFLOW_UID_LABEL:?}"
 : "${RFS_MONITOR_SESSION_LABEL:?}"
 : "${MIGRATION_RESOURCE_UID_LABEL:?}"
+: "${COMPONENT_LABEL:?}"
+: "${MONITOR_COMPONENT:?}"
+: "${MONITOR_TASK:?}"
 
 : "${STARTUP_GRACE_SECONDS:=600}"
 CLAIMED_AT="$(date -u +%s)"
@@ -51,6 +54,8 @@ metadata:
     workflows.argoproj.io/workflow: "${WORKFLOW_NAME}"
     migrations.opensearch.org/from-snapshot-migration: "${FROM_SNAPSHOT_MIGRATION_LABEL}"
     ${RESOURCE_UID_LABEL}: "${SM_UID}"
+    ${COMPONENT_LABEL}: "${MONITOR_COMPONENT}"
+    migrations.opensearch.org/task: "${MONITOR_TASK}"
 spec:
   schedule: "*/1 * * * *"
   concurrencyPolicy: Forbid
@@ -64,6 +69,8 @@ spec:
         workflows.argoproj.io/workflow: "${WORKFLOW_NAME}"
         migrations.opensearch.org/from-snapshot-migration: "${FROM_SNAPSHOT_MIGRATION_LABEL}"
         ${RESOURCE_UID_LABEL}: "${SM_UID}"
+        ${COMPONENT_LABEL}: "${MONITOR_COMPONENT}"
+        migrations.opensearch.org/task: "${MONITOR_TASK}"
     spec:
       template:
         metadata:
@@ -73,6 +80,8 @@ spec:
             workflows.argoproj.io/workflow: "${WORKFLOW_NAME}"
             migrations.opensearch.org/from-snapshot-migration: "${FROM_SNAPSHOT_MIGRATION_LABEL}"
             ${RESOURCE_UID_LABEL}: "${SM_UID}"
+            ${COMPONENT_LABEL}: "${MONITOR_COMPONENT}"
+            migrations.opensearch.org/task: "${MONITOR_TASK}"
         spec:
           serviceAccountName: argo-workflow-executor
           restartPolicy: Never

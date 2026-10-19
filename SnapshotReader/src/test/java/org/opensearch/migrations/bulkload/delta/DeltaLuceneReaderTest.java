@@ -101,6 +101,9 @@ class DeltaLuceneReaderTest {
 
     private static LuceneLeafReader leaf(String name, String segmentId, String... ids) throws IOException {
         var leaf = mock(LuceneLeafReader.class);
+        when(leaf.openDocumentReader()).thenReturn(leaf::document);
+        when(leaf.openNumericValueReader("_version"))
+            .thenReturn(docId -> (Long) leaf.getNumericValue(docId, "_version"));
         when(leaf.getSegmentName()).thenReturn(name);
         when(leaf.getSegmentId()).thenReturn(segmentId);
         when(leaf.maxDoc()).thenReturn(ids.length);

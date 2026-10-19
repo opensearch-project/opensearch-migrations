@@ -2,6 +2,7 @@ import {z} from "zod";
 import {
     ChecksumDependency,
     FieldMeta,
+    OTEL_EXPORT_CONTROL_FIELD_MASK,
     USER_CREATE_SNAPSHOT_OPTIONS,
     USER_METADATA_OPTIONS,
     USER_PROXY_OPTIONS,
@@ -46,6 +47,12 @@ interface InternalProjectedField {
     invariant?: FieldInvariant;
 }
 
+// Export enablement is normalized to endpoint presence before Argo/resource projection.
+const USER_PROXY_RESOURCE_OPTIONS = z.object(USER_PROXY_OPTIONS.shape)
+    .omit(OTEL_EXPORT_CONTROL_FIELD_MASK);
+const USER_CREATE_SNAPSHOT_RESOURCE_OPTIONS = z.object(USER_CREATE_SNAPSHOT_OPTIONS.shape)
+    .omit(OTEL_EXPORT_CONTROL_FIELD_MASK);
+
 export interface ResourceProjection {
     kind: string;
     plural: string;
@@ -67,7 +74,7 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
     {
         resourceKind: "CaptureProxy",
         sourceSchema: "USER_PROXY_OPTIONS",
-        schema: USER_PROXY_OPTIONS,
+        schema: USER_PROXY_RESOURCE_OPTIONS,
     },
     {
         resourceKind: "TrafficReplay",
@@ -78,7 +85,7 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
     {
         resourceKind: "DataSnapshot",
         sourceSchema: "USER_CREATE_SNAPSHOT_OPTIONS",
-        schema: USER_CREATE_SNAPSHOT_OPTIONS,
+        schema: USER_CREATE_SNAPSHOT_RESOURCE_OPTIONS,
     },
     {
         resourceKind: "SnapshotMigration",

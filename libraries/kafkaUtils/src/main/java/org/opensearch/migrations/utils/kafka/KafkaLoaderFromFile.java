@@ -10,6 +10,7 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.admin.Admin;
 
 @Slf4j
 public class KafkaLoaderFromFile {
@@ -36,6 +37,11 @@ public class KafkaLoaderFromFile {
                 arity = 1,
                 description = "The number of records to batch when sending to Kafka.")
         public int batchSize = DEFAULT_BATCH_SIZE;
+        @Parameter(required = false,
+                names = { "--consumerGroupProgress" },
+                arity = 1,
+                description = "Describe offset and replay-time progress for this consumer group.")
+        public String consumerGroupProgress;
         @ParametersDelegate
         public KafkaConfig.KafkaParameters kafkaParameters = new KafkaConfig.KafkaParameters();
     }
@@ -48,7 +54,11 @@ public class KafkaLoaderFromFile {
             if (p.kafkaParameters.kafkaBrokers == null) {
                 throw new ParameterException("Missing required parameter: --kafkaBrokers");
             }
-            if (!p.stdin && p.inputFile == null) {
+            if (p.consumerGroupProgress != null && (p.stdin || p.inputFile != null)) {
+                throw new ParameterException(
+                        "--consumerGroupProgress cannot be combined with --inputFile or --stdin");
+            }
+            if (p.consumerGroupProgress == null && !p.stdin && p.inputFile == null) {
                 throw new ParameterException("Must specify either --inputFile or --stdin");
             }
             if (p.stdin && p.inputFile != null) {
@@ -66,6 +76,13 @@ public class KafkaLoaderFromFile {
 
     public static void main(String[] args) throws Exception {
         var params = parseArgs(args);
+        if (params.consumerGroupProgress != null) {
+            try (var admin = Admin.create(KafkaConfig.buildAdminProperties(params.kafkaParameters))) {
+                System.out.print(KafkaConsumerGroupProgress.render(
+                        KafkaConsumerGroupProgress.query(admin, params.consumerGroupProgress)));
+            }
+            return;
+        }
         var kafkaLoader = new KafkaLoader(
                 params.kafkaParameters.kafkaPropertyFile,
                 params.kafkaParameters.kafkaBrokers,

@@ -225,15 +225,15 @@ public class TransformationLoader {
     public IJsonTransformer getTransformerFactoryLoader(String newHostName, String userAgent, String fullConfig) {
         try {
             var loadedTransformers = getTransformerFactoryFromServiceLoader(fullConfig);
-            return new JsonCompositeTransformer(
+            var transformers = Stream.concat(
+                loadedTransformers,
                 Stream.concat(
-                    loadedTransformers,
-                    Stream.concat(
-                        Optional.ofNullable(userAgent).stream().map(UserAgentTransformer::new),
-                        Optional.ofNullable(newHostName).stream().map(HostTransformer::new)
-                    )
-                ).toArray(IJsonTransformer[]::new)
-            );
+                    Optional.ofNullable(userAgent).stream().map(UserAgentTransformer::new),
+                    Optional.ofNullable(newHostName).stream().map(HostTransformer::new)
+                )
+            ).toArray(IJsonTransformer[]::new);
+            // Preserve native capabilities directly when no composition is needed.
+            return transformers.length == 1 ? transformers[0] : new JsonCompositeTransformer(transformers);
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Could not parse the transformer configuration as a json list", e);
         }

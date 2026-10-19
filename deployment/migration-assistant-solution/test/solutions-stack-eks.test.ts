@@ -21,12 +21,13 @@ describe('Solutions stack', () => {
         verifyResources(template, {
             vpcCount: 1,
             vpcEndpointCount: 5,
-            subnetCount: 4,
-            natGatewayCount: 2
+            subnetCount: 6,
+            natGatewayCount: 3
         });
         verifyParameters(template, {
             vpcIdEnabled: false,
-            vpcSubnetsEnabled: false
+            vpcSubnetsEnabled: false,
+            availabilityZoneCountEnabled: true
         })
     });
 
@@ -44,7 +45,8 @@ describe('Solutions stack', () => {
         });
         verifyParameters(template, {
             vpcIdEnabled: true,
-            vpcSubnetsEnabled: true
+            vpcSubnetsEnabled: true,
+            availabilityZoneCountEnabled: false
         })
     });
 
@@ -59,12 +61,13 @@ describe('Solutions stack', () => {
         verifyResources(template, {
             vpcCount: 1,
             vpcEndpointCount: 5,
-            subnetCount: 4,
-            natGatewayCount: 2
+            subnetCount: 6,
+            natGatewayCount: 3
         });
         verifyParameters(template, {
             vpcIdEnabled: false,
-            vpcSubnetsEnabled: false
+            vpcSubnetsEnabled: false,
+            availabilityZoneCountEnabled: true
         })
     });
 
@@ -81,6 +84,44 @@ describe('Solutions stack', () => {
         });
         const template = Template.fromStack(stack).toJSON();
         expect(template).toMatchSnapshot();
+    });
+
+    test('third Availability Zone resources and references are conditional', () => {
+        const stack = new SolutionsInfrastructureEKSStack(new App(), 'TestMigrationAssistantStack', defaultProperties);
+        const resources = Template.fromStack(stack).toJSON().Resources as
+            Record<string, TemplateResourceJson>;
+
+        const thirdAzResources = Object.entries(resources)
+            .filter(([logicalId]) => /Vpc(?:Public|Private)Subnet3/.test(logicalId));
+        expect(thirdAzResources.length).toBeGreaterThan(0);
+        expect(thirdAzResources.every(([, resource]) =>
+            resource.Condition === 'UseThirdAvailabilityZone'
+        )).toBe(true);
+
+        const thirdPrivateSubnetId = thirdAzResources.find(([logicalId, resource]) =>
+            /VpcPrivateSubnet3Subnet/.test(logicalId) && resource.Type === 'AWS::EC2::Subnet'
+        )?.[0];
+        expect(thirdPrivateSubnetId).toBeDefined();
+
+        const conditionalThirdSubnet = {
+            "Fn::If": [
+                "UseThirdAvailabilityZone",
+                {"Ref": thirdPrivateSubnetId},
+                {"Ref": "AWS::NoValue"}
+            ]
+        };
+        const cluster = Object.values(resources).find(resource =>
+            resource.Type === 'AWS::EKS::Cluster'
+        );
+        expect(cluster?.Properties?.ResourcesVpcConfig?.SubnetIds?.[2]).toEqual(conditionalThirdSubnet);
+
+        const interfaceEndpoints = Object.values(resources).filter(resource =>
+            resource.Type === 'AWS::EC2::VPCEndpoint'
+            && resource.Properties?.VpcEndpointType === 'Interface'
+        );
+        expect(interfaceEndpoints.every(endpoint =>
+            JSON.stringify(endpoint.Properties?.SubnetIds?.[2]) === JSON.stringify(conditionalThirdSubnet)
+        )).toBe(true);
     });
 
     /**
@@ -111,9 +152,13 @@ describe('Solutions stack', () => {
     }
     interface TemplateResourceJson {
         Type: string;
+        Condition?: string;
         Properties?: {
             PolicyDocument?: { Statement?: PolicyStatementJson[] };
             PolicyName?: string;
+            ResourcesVpcConfig?: { SubnetIds?: unknown[] };
+            SubnetIds?: unknown[];
+            VpcEndpointType?: string;
         };
     }
 
@@ -201,11 +246,28 @@ describe('Solutions stack', () => {
         template.resourceCountIs('AWS::IAM::Role', 4);
     }
 
-    function verifyParameters(template: Template, props: { vpcIdEnabled: boolean, vpcSubnetsEnabled: boolean}) {
+    function verifyParameters(template: Template, props: {
+        vpcIdEnabled: boolean,
+        vpcSubnetsEnabled: boolean,
+        availabilityZoneCountEnabled: boolean
+    }) {
         template.hasParameter('Stage', {
             Type: 'String',
             Default: "dev",
         });
+        if (props.availabilityZoneCountEnabled) {
+            template.hasParameter('AvailabilityZoneCount', {
+                Type: 'Number',
+                Default: 3,
+                AllowedValues: ["2", "3"],
+            });
+            template.hasCondition('UseThirdAvailabilityZone', {
+                "Fn::Equals": [
+                    {"Ref": "AvailabilityZoneCount"},
+                    3
+                ]
+            });
+        }
         if (props.vpcIdEnabled) {
             template.hasParameter('VPCId', {
                 Type: 'AWS::EC2::VPC::Id'

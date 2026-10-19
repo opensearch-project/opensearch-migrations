@@ -36,6 +36,10 @@ public class ByteBufList extends AbstractReferenceCounted {
         return data.size();
     }
 
+    public long readableBytes() {
+        return data.stream().mapToLong(ByteBuf::readableBytes).sum();
+    }
+
     public Stream<ByteBuf> streamUnretained() {
         return data.stream().map(ByteBuf::duplicate);
     }

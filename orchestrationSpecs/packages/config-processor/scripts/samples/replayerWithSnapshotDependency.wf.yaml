@@ -24,7 +24,6 @@ targetClusters:
   target:
     endpoint: https://opensearch-cluster-master-headless:9200
     allowInsecure: true
-    version: OS 2.11
     authConfig:
       basic:
         secretName: target-creds
@@ -42,7 +41,7 @@ traffic:
         listenPort: 9201
   replayers:
     replay1:
-      fromProxy: proxy1
+      fromCapturedTraffic: proxy1
       toTarget: target
       dependsOnSnapshotMigrations:
         - source: source

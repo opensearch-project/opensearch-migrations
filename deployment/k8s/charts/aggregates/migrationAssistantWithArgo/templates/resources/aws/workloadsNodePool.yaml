@@ -1,41 +1,91 @@
-{{- if .Values.cluster.useCustomKarpenterNodePool }}
+{{- define "migration.workloadNodePool" -}}
+{{- $root := .root -}}
+{{- $base := $root.Values.workloadsNodePool -}}
+{{- $pool := .pool -}}
+{{- $dedicated := .dedicated -}}
+{{- $architectures := ternary $pool.architectures $base.architectures (hasKey $pool "architectures") -}}
+{{- $capacityTypes := ternary $pool.capacityTypes $base.capacityTypes (hasKey $pool "capacityTypes") -}}
+{{- $instanceCategories := ternary $pool.instanceCategories $base.instanceCategories (hasKey $pool "instanceCategories") -}}
+{{- $minInstanceGeneration := ternary $pool.minInstanceGeneration $base.minInstanceGeneration (hasKey $pool "minInstanceGeneration") -}}
+{{- $instanceSizes := ternary $pool.instanceSizes $base.instanceSizes (hasKey $pool "instanceSizes") -}}
+{{- $disruption := ternary $pool.disruption $base.disruption (hasKey $pool "disruption") -}}
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
-  name: general-work-pool
+  name: {{ $pool.name }}
 spec:
-  weight: 100
+  weight: {{ default 100 $pool.weight }}
+  {{- with $pool.limits }}
   limits:
-    cpu: {{ .Values.workloadsNodePool.limits.cpu }}
-    memory: {{ .Values.workloadsNodePool.limits.memory }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   template:
+    metadata:
+      labels:
+        migrations.opensearch.org/workload-pool: {{ $pool.name }}
     spec:
+      {{- if $dedicated }}
+      taints:
+        - key: migrations.opensearch.org/workload-pool
+          value: {{ $pool.name }}
+          effect: NoSchedule
+      {{- end }}
       nodeClassRef:
         group: eks.amazonaws.com
         kind: NodeClass
-        name: {{ .Values.aws.nodeClassName }}
+        name: {{ $root.Values.aws.nodeClassName }}
       requirements:
+        {{- if $capacityTypes }}
         - key: karpenter.sh/capacity-type
           operator: In
-          values: ["on-demand"]
+          values: {{ $capacityTypes | toJson }}
+        {{- end }}
+        {{- if $instanceCategories }}
         - key: eks.amazonaws.com/instance-category
           operator: In
-          values: ["c", "m", "r"]
+          values: {{ $instanceCategories | toJson }}
+        {{- end }}
+        {{- if $minInstanceGeneration }}
         - key: eks.amazonaws.com/instance-generation
-          operator: Gt
-          values: ["4"]
-        {{- if .Values.workloadsNodePool.architectures }}
+          operator: Gte
+          values: [{{ $minInstanceGeneration | quote }}]
+        {{- end }}
+        {{- if $architectures }}
         - key: kubernetes.io/arch
           operator: In
-          values: {{ .Values.workloadsNodePool.architectures | toJson }}
+          values: {{ $architectures | toJson }}
         {{- end }}
+        {{- if $instanceSizes }}
         - key: eks.amazonaws.com/instance-size
           operator: In
-          values: ["medium", "large", "xlarge", "2xlarge", "4xlarge"]
+          values: {{ $instanceSizes | toJson }}
+        {{- end }}
         - key: kubernetes.io/os
           operator: In
           values: ["linux"]
+  {{- with $disruption }}
   disruption:
-    consolidationPolicy: WhenEmpty
-    consolidateAfter: 30m
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}
+
+{{- if .Values.cluster.useCustomKarpenterNodePool }}
+{{- $mode := .Values.workloadsNodePool.mode | default "isolated" -}}
+{{- if not (has $mode (list "shared" "isolated")) -}}
+{{- fail (printf "workloadsNodePool.mode must be shared or isolated, got %q" $mode) -}}
+{{- end -}}
+{{- $shared := dict "name" (.Values.workloadsNodePool.name | default "general-work-pool") "limits" (.Values.workloadsNodePool.limits | default dict) -}}
+{{ include "migration.workloadNodePool" (dict "root" . "pool" $shared "dedicated" false) }}
+{{ range $name := list "k6" }}
+{{ $pool := get $.Values.workloadsNodePool.dedicatedPools $name }}
+---
+{{ include "migration.workloadNodePool" (dict "root" $ "pool" $pool "dedicated" true) }}
+{{ end }}
+{{ if eq $mode "isolated" }}
+{{ range $name := list "kafka" "proxy" "replayer" }}
+{{ $pool := get $.Values.workloadsNodePool.dedicatedPools $name }}
+---
+{{ include "migration.workloadNodePool" (dict "root" $ "pool" $pool "dedicated" true) }}
+{{ end }}
+{{ end }}
+{{ end }}

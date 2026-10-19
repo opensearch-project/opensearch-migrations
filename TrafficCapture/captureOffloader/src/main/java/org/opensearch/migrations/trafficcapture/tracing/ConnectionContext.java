@@ -40,7 +40,7 @@ public class ConnectionContext extends BaseSpanContext<IRootOffloaderContext>
         private final LongUpDownCounter activeConnectionsCounter;
 
         protected MetricInstruments(Meter meter, String activityName) {
-            super(meter, activityName);
+            super(meter, activityName, LONG_DURATION_BUCKETS_MS);
             activeConnectionsCounter = meter.upDownCounterBuilder(ConnectionContext.ACTIVE_CONNECTION)
                 .setUnit("count")
                 .build();

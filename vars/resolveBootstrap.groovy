@@ -14,7 +14,6 @@ def call(Map config = [:]) {
     def version = config.containsKey('version') ? config.version : 'latest'
     def useRelease = config.containsKey('useReleaseBootstrap') ? config.useReleaseBootstrap : false
     def build = config.containsKey('build') ? config.build : false
-    def skipTestImages = config.containsKey('skipTestImages') ? config.skipTestImages : false
     def loadTestImages = config.containsKey('loadTestImages') ? config.loadTestImages : false
     def useGeneralNodePool = config.containsKey('useGeneralNodePool') ? config.useGeneralNodePool : false
 
@@ -35,7 +34,6 @@ def call(Map config = [:]) {
     def flags = []
     if (build) {
         flags << '--build'
-        if (skipTestImages) flags << '--skip-test-images'
         // The load-test images (migrations/k6_runner) are a separate gradle aggregate.
         // --build alone does not build them, and no release publishes them.
         if (loadTestImages) flags << '--with-load-test-images'

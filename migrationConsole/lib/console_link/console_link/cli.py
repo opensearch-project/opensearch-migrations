@@ -1450,21 +1450,44 @@ def completion(ctx, config_file, json, shell):
 @click.group(name="tuples")
 @click.pass_obj
 def tuples_group(ctx):
-    """ All commands related to tuples. """
+    """Read the traffic replayer's result tuples (source vs. target request and response)."""
     pass
 
 
-@tuples_group.command()
-@click.option('--in', 'inputfile',
-              type=click.File('r'),
-              default=sys.stdin)
-@click.option('--out', 'outputfile',
-              type=click.File('a'),
-              default=sys.stdout)
-def show(inputfile, outputfile):
-    tuples_.convert(inputfile, outputfile)
+@tuples_group.command(name="show")
+@click.option('--replayer', help='TrafficReplay name; not needed when only one replayer is deployed.')
+@click.option('--source', 'source_label', help='Choose the replayer by its source cluster label.')
+@click.option('--target', 'target_label', help='Choose the replayer by its target cluster label.')
+@click.option('--limit', type=click.IntRange(min=1), default=20, show_default=True,
+              help='Show at most this many of the newest tuples.')
+@click.option('--since', help='Only tuple files written in this window, e.g. 15m, 2h, 1d.')
+@click.option('--pretty', is_flag=True, default=False, help='Indent each tuple.')
+@click.option('--in', 'inputfile', type=click.File('rb'),
+              help='Read a tuple file (gzipped or plain JSON lines) instead of a replayer\'s tuples.')
+@click.option('--out', 'outputfile', type=click.File('a'), default=sys.stdout,
+              help='Append to this file instead of printing.')
+def show_tuples_cmd(replayer, source_label, target_label, limit, since, pretty, inputfile, outputfile):
+    """Show result tuples, newest last.
+
+    Reads the selected replayer's tuples from the console's /artifacts mount when they're in the
+    deployment's default bucket, and from S3 otherwise. Bodies are shown as the replayer decoded them;
+    binary bodies that turn out to be text are decoded too."""
+    if inputfile is not None:
+        n = tuples_.write_tuples(tuples_.read_tuples(inputfile), outputfile, pretty)
+    else:
+        try:
+            since_time = tuples_.parse_since(since)
+            replay = tuples_.select_traffic_replay(
+                tuples_.list_traffic_replays(), replayer, source_label, target_label)
+            location = tuples_.tuple_location(replay)
+        except (ValueError, tuples_.TupleSelectionError) as e:
+            raise click.ClickException(str(e))
+        tuples = tuples_.newest_tuples(tuples_.tuple_source(location), limit=limit, since=since_time)
+        if not tuples:
+            click.echo(f"No tuples found under {location.describe()}.", err=True)
+        n = tuples_.write_tuples(tuples, outputfile, pretty)
     if outputfile != sys.stdout:
-        click.echo(f"Converted tuples output to {outputfile.name}")
+        click.echo(f"Wrote {n} tuples to {outputfile.name}")
 
 
 #################################################
@@ -1473,6 +1496,7 @@ cli.add_command(cluster_group)
 cli.add_command(completion)
 cli.add_command(kafka_group)
 cli.add_command(failed_document_stream_group)
+cli.add_command(tuples_group)
 
 if not DISABLE_LEGACY_COMMANDS:
     cli.add_command(snapshot_group)
@@ -1480,7 +1504,6 @@ if not DISABLE_LEGACY_COMMANDS:
     cli.add_command(replay_group)
     cli.add_command(metadata_group)
     cli.add_command(metrics_group)
-    cli.add_command(tuples_group)
 
 if __name__ == "__main__":
     main()

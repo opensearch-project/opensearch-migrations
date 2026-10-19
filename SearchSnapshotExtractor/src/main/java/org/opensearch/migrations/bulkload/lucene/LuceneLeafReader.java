@@ -21,6 +21,15 @@ public interface LuceneLeafReader {
 
     public LuceneDocument document(int luceneDocId) throws IOException;
 
+    default DocumentReader openDocumentReader() throws IOException {
+        return this::document;
+    }
+
+    @FunctionalInterface
+    interface DocumentReader {
+        LuceneDocument document(int docId) throws IOException;
+    }
+
     public BitSetConverter.FixedLengthBitSet getLiveDocs();
 
     public int maxDoc();
@@ -83,6 +92,15 @@ public interface LuceneLeafReader {
      */
     default void initDocValueIterators(Iterable<DocValueFieldInfo> fields) throws IOException {}
 
+    default NumericValueReader openNumericValueReader(String fieldName) throws IOException {
+        var view = newView();
+        return docId -> (Long) view.getNumericValue(docId, fieldName);
+    }
+
+    @FunctionalInterface
+    interface NumericValueReader {
+        Long get(int docId) throws IOException;
+    }
 
     default Object getNumericValue(int docId, String fieldName) throws IOException { return null; }
     default Object getSortedValue(int docId, String fieldName) throws IOException { return null; }
