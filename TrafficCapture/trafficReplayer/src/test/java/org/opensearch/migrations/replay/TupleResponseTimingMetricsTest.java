@@ -40,7 +40,10 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class TupleResponseTimingMetricsTest {
+    /** When the proxy finished writing the source request to the source: where the source spans start. */
     private static final Instant SOURCE_REQUEST_END = Instant.EPOCH.plusSeconds(100);
+    /** The proxy's last read of the request from the client, earlier than the forward; spans never use it. */
+    private static final Instant SOURCE_REQUEST_LAST_READ = SOURCE_REQUEST_END.minusMillis(7);
     private static final Instant TARGET_REQUEST_SENT = Instant.EPOCH.plusSeconds(500);
     private static final double TOLERANCE = 1e-9;
     private static final List<String> TIMING_METRICS = List.of(
@@ -203,6 +206,34 @@ class TupleResponseTimingMetricsTest {
         ))));
 
         assertNoTimingMetrics(metrics);
+    }
+
+    @Test
+    void missingRequestForwardRecordsNoTimingMetrics() {
+        var metrics = recordTuple(fixture -> fixture.sourceResponse = unforwardedSourceResponse(
+            200,
+            micros(SOURCE_REQUEST_END, 1_000),
+            micros(SOURCE_REQUEST_END, 2_000)
+        ));
+
+        assertNoTimingMetrics(metrics);
+    }
+
+    @Test
+    void tupleJsonOmitsTheSourceSpansWhenTheRequestForwardIsMissing() {
+        var fixture = new Fixture();
+        fixture.sourceResponse = unforwardedSourceResponse(
+            200,
+            micros(SOURCE_REQUEST_END, 1_000),
+            micros(SOURCE_REQUEST_END, 2_000)
+        );
+        fixture.run();
+
+        var sourceResponse = (Map<?, ?>) fixture.tuple.get("sourceResponse");
+        Assertions.assertFalse(sourceResponse.containsKey(ParsedHttpMessagesAsDicts.FIRST_BYTE_MS_KEY));
+        Assertions.assertFalse(sourceResponse.containsKey(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY));
+        var targetResponse = (Map<?, ?>) ((List<?>) fixture.tuple.get("targetResponses")).get(0);
+        Assertions.assertEquals(2L, targetResponse.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY));
     }
 
     @Test
@@ -374,7 +405,18 @@ class TupleResponseTimingMetricsTest {
     }
 
     private static HttpMessageAndTimestamp.Response sourceResponse(int status, Instant firstData, Instant last) {
-        var response = new HttpMessageAndTimestamp.Response(SOURCE_REQUEST_END);
+        var response = unforwardedSourceResponse(status, firstData, last);
+        response.setRequestForwardedTimestamp(SOURCE_REQUEST_END);
+        return response;
+    }
+
+    /** A source response whose request-forwarded observation never arrived. */
+    private static HttpMessageAndTimestamp.Response unforwardedSourceResponse(
+        int status,
+        Instant firstData,
+        Instant last
+    ) {
+        var response = new HttpMessageAndTimestamp.Response(SOURCE_REQUEST_LAST_READ);
         if (firstData != null) {
             response.noteDataTimestamp(firstData);
         }
@@ -437,9 +479,9 @@ class TupleResponseTimingMetricsTest {
                 var producer = ByteBufListProducer.of(packets);
                 producer.trackOwnership(root.getResourceOwnershipMetrics());
                 var preparedRequest = new NettyPacketToHttpConsumer.PreparedRequest(producer, Duration.ZERO);
-                var sourceRequest = new HttpMessageAndTimestamp.Request(SOURCE_REQUEST_END.minusMillis(1));
+                var sourceRequest = new HttpMessageAndTimestamp.Request(SOURCE_REQUEST_LAST_READ.minusMillis(1));
                 sourceRequest.add(bytes("GET /test HTTP/1.1\r\nHost: source\r\n\r\n"));
-                sourceRequest.setLastPacketTimestamp(SOURCE_REQUEST_END);
+                sourceRequest.setLastPacketTimestamp(SOURCE_REQUEST_LAST_READ);
                 var terminal = targetAttempts.reversed().stream()
                     .filter(TargetAttemptOutcome.TargetResponseObtained.class::isInstance)
                     .map(attempt -> (TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse>) attempt)

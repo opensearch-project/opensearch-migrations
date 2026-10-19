@@ -9,6 +9,7 @@
 package org.opensearch.migrations.replay.intake;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -132,6 +133,14 @@ public final class SourceConnectionState {
     private boolean framedResponseComplete;
     private boolean responseFramingFallback;
     private ReplayRequestId framedResponseCompletedAwaitingNextRequest;
+    /**
+     * One entry per end-of-message indicator in this lifetime whose request-forwarded observation hasn't
+     * arrived, in order. The entry holds the reconstituted request, or null for an end-of-message indicator that
+     * reconstituted none, so that each forward still pairs with its own end-of-message indicator.
+     */
+    private final ArrayDeque<AwaitingForward> requestsAwaitingForward = new ArrayDeque<>();
+    private boolean endOfMessageSeenThisLifetime;
+    private ReplayRequestId requestReconstitutedByThisObservation;
     private Lifetime lifetime = Lifetime.OPEN;
     private Instant latestObservationTime = Instant.EPOCH;
 
@@ -224,8 +233,12 @@ public final class SourceConnectionState {
         if (observation.hasRequestDropped()) {
             return applyRequestDropped();
         }
+        if (observation.hasRequestForwarded()) {
+            return applyRequestForwarded(observation);
+        }
 
-        return switch (phase) {
+        requestReconstitutedByThisObservation = null;
+        var outcome = switch (phase) {
             case DISCARDING_INHERITED_TAIL -> applyWhileDiscardingInheritedTail(observation);
             case BETWEEN_REQUESTS ->
                 applyBetweenRequests(observation, containingRecord, logAppendTimeMillis, trafficContext);
@@ -234,6 +247,41 @@ public final class SourceConnectionState {
             case ASSEMBLING_RESPONSE ->
                 applyToResponse(observation, containingRecord, logAppendTimeMillis, trafficContext);
         };
+        if (observation.hasEndOfMessageIndicator()) {
+            endOfMessageSeenThisLifetime = true;
+            requestsAwaitingForward.add(new AwaitingForward(requestReconstitutedByThisObservation));
+        }
+        return outcome;
+    }
+
+    /** An end-of-message indicator still owed its request-forwarded observation; null when it reconstituted none. */
+    private record AwaitingForward(ReplayRequestId requestId) {}
+
+    /**
+     * Records when the proxy finished writing a request to the source, which is where the source's response
+     * spans start. Each forward belongs to the oldest end-of-message indicator still awaiting one. A forward is
+     * never guaranteed to arrive, but it always precedes the next request's reads, so one with nothing awaiting
+     * it is out of order, unless this lifetime has seen no end-of-message indicator yet and the forward belongs
+     * to a request that ended before the lifetime began. A response that already completed keeps no forward.
+     */
+    private ObservationOutcome applyRequestForwarded(TrafficObservation observation) {
+        var awaiting = requestsAwaitingForward.poll();
+        if (awaiting == null) {
+            if (!endOfMessageSeenThisLifetime) {
+                return ObservationOutcome.none();
+            }
+            throw new CaptureProtocolViolation(
+                "RequestForwarded for " + connectionProcessingId
+                    + " arrived with no end-of-message indicator awaiting it"
+            );
+        }
+        if (awaiting.requestId() != null) {
+            var response = responseStateByRequest.get(awaiting.requestId());
+            if (response != null) {
+                response.setRequestForwardedTimestamp(timestampOf(observation));
+            }
+        }
+        return ObservationOutcome.none();
     }
 
     /**
@@ -475,6 +523,7 @@ public final class SourceConnectionState {
 
         incomingRequest = null;
         responseBeingAssembledFor = replayRequestId;
+        requestReconstitutedByThisObservation = replayRequestId;
         responseRequestMethod = requestMethod(request);
         responseStateByRequest.put(
             replayRequestId,
@@ -716,6 +765,8 @@ public final class SourceConnectionState {
         IReplayContexts.ITrafficStreamsLifecycleContext trafficContext
     ) {
         if (incomingRequest == null) {
+            // A forward always precedes the next request's reads, so none still awaited can arrive now.
+            requestsAwaitingForward.clear();
             incomingRequest = new HttpMessageAndTimestamp.Request(firstPacketTimestamp);
             if (trafficContext != null) {
                 requestContext = trafficContext.createRequestContext(

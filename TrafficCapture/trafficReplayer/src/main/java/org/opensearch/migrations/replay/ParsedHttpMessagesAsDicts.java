@@ -43,9 +43,15 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
-    /** Whole ms from the request's last byte to the last byte of its final response, on source and target. */
+    /**
+     * Whole ms from when the request's last bytes were written to the cluster to the last byte of its final
+     * response, on source and target; absent when unknown.
+     */
     public static final String RESPONSE_TIME_MS_KEY = "response_time_ms";
-    /** Whole ms from the request's last byte to the first byte of its final response; absent when unknown. */
+    /**
+     * Whole ms from when the request's last bytes were written to the cluster to the first byte of its final
+     * response; absent when unknown.
+     */
     public static final String FIRST_BYTE_MS_KEY = "first_byte_ms";
     public static final String EXCEPTION_KEY_STRING = "Exception";
     public static final String REQUEST_URI_KEY = "Request-URI";
@@ -98,7 +104,9 @@ public class ParsedHttpMessagesAsDicts {
         }
     }
 
-    /** From the captured timestamps of the source request's last packet and its final response's packets. */
+    /**
+     * From the captured time the proxy finished writing the request to the source and its final response's packets.
+     */
     public static Optional<ResponseTiming> sourceResponseTiming(
         RequestReplayOwner.RequestResult<
             HttpMessageAndTimestamp.Request,
@@ -113,7 +121,7 @@ public class ParsedHttpMessagesAsDicts {
         }
         var response = complete.response();
         return ResponseTiming.between(
-            result.sourceRequest().getLastPacketTimestamp(),
+            response.getRequestForwardedTimestamp(),
             response.getFirstDataTimestamp(),
             response.getLastPacketTimestamp()
         );
@@ -207,7 +215,7 @@ public class ParsedHttpMessagesAsDicts {
         return Optional.of(convertResponse(
             context,
             response.packetBytes,
-            result.sourceRequest().getLastPacketTimestamp(),
+            response.getRequestForwardedTimestamp(),
             response.getFirstDataTimestamp(),
             response.getLastPacketTimestamp()
         ));
@@ -395,7 +403,7 @@ public class ParsedHttpMessagesAsDicts {
                     map.put(HTTP_VERSION_KEY, message.protocol());
                     map.put(STATUS_CODE_KEY, Integer.parseInt(message.code()));
                     map.put("Reason-Phrase", message.reason());
-                    map.put(RESPONSE_TIME_MS_KEY, millisBetween(requestEnd, responseEnd).orElse(0L));
+                    millisBetween(requestEnd, responseEnd).ifPresent(ms -> map.put(RESPONSE_TIME_MS_KEY, ms));
                     millisBetween(requestEnd, responseStart).ifPresent(ms -> map.put(FIRST_BYTE_MS_KEY, ms));
                     context.setHttpVersion(message.protocol());
                     encodeBinaryPayloadIfExists(message);

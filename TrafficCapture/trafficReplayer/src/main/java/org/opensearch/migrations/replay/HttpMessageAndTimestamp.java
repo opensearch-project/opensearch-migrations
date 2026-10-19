@@ -35,6 +35,14 @@ public class HttpMessageAndTimestamp {
     }
 
     public static class Response extends HttpMessageAndTimestamp {
+        /**
+         * When the proxy finished writing this response's request to the source, from its request-forwarded
+         * observation; null when that observation didn't arrive before the response completed.
+         */
+        @Getter
+        @Setter
+        private Instant requestForwardedTimestamp;
+
         public Response(Instant firstPacketTimestamp) {
             super(firstPacketTimestamp);
         }
