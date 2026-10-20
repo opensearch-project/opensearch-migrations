@@ -28,6 +28,7 @@
 
 * This [Kubernetes Guide](deployment/k8s/README.md) shows you how to create a minikube cluster locally and deploy the Migration Assistant to it.
 * This [AWS EKS Guide](deployment/k8s/aws/README.md) shows you how to deploy an EKS cluster and deploy the Migration Assistant to it.
+* New to the team? This [end-to-end walkthrough](deployment/k8s/aws/quickstarts/selfManagedEsToAmazonOpenSearch/README.md) deploys the Migration Assistant on EKS, creates a self-managed Elasticsearch source and an Amazon OpenSearch Service domain or Serverless collection target, runs capture and replay, and shows how to observe it.
 
 See the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
 to learn more about how to use the migration console and its workflow commands.

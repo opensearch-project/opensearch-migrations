@@ -180,6 +180,15 @@ tasks.register('testConfigProcessor', NpmTask) {
     inputs.files(fileTree(configProcessorP.dir("tests").asFile) {
         exclude "integ/**"
     })
+    // tests/sampleConfigs.test.ts validates the package's sample migration configs, plus those in
+    // the directories passed in SAMPLE_CONFIG_DIRS: the configs beside the k8s deployment docs.
+    def externalSampleConfigDirs = [
+        rootProject.file("deployment/k8s/configs"),
+        rootProject.file("deployment/k8s/aws/quickstarts"),
+    ]
+    inputs.files(fileTree(configProcessorP.dir("scripts").asFile) { include "**/*.yaml" })
+    externalSampleConfigDirs.each { dir -> inputs.files(fileTree(dir) { include "**/*.yaml" }) }
+    environment.put("SAMPLE_CONFIG_DIRS", externalSampleConfigDirs.collect { it.absolutePath }.join(File.pathSeparator))
     inputs.files(
         configProcessorP.file("jest.config.js"),
         schemasP.file("package.json"),

@@ -29,9 +29,9 @@ STRIMZI_VERSION = "v1beta2"
 TERMINAL_PHASES = {"Succeeded", "Failed", "Error", "Terminated"}
 FAILED_PHASES = TERMINAL_PHASES - {"Succeeded"}
 POD_SELECTORS = {
-    "proxy": "migrations/proxy=capture-proxy",
+    "proxy": "migrations.opensearch.org/component=capture-proxy",
     "kafka": "strimzi.io/cluster=default,strimzi.io/component-type=kafka",
-    "replayer": "app=replayer",
+    "replayer": "migrations.opensearch.org/component=traffic-replayer",
 }
 _TOPIC_PARTITION = re.compile(
     r"Partition:\s*(?P<partition>\d+).*?"

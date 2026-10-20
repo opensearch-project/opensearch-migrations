@@ -11,6 +11,10 @@ FROM ${BUILDER_IMAGE} AS builder
 ARG K6_OPERATOR_COMMIT=3f43f7a5915587851f27063b8e28694a29a53f43
 ARG K6_OPERATOR_SOURCE_SHA256=87808985b4c5519b13673d1c1227250e6d215a710f04d5fe7c65c370105c7c0e
 
+# Unset (and empty) means the Go default. Networks that block proxy.golang.org pass their own
+# mirror through, as for the k6 runner image (see ../Dockerfile).
+ARG GOPROXY
+
 RUN apk add --no-cache curl patch
 WORKDIR /workspace
 

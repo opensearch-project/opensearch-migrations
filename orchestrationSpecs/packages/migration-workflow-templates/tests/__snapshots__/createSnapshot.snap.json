@@ -133,6 +133,7 @@
             "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
             "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
             "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}",
+            "migrations.opensearch.org/component": "snapshot-create",
             "migrations.opensearch.org/migration-resource-uid": "{{inputs.parameters.dataSnapshotUid}}"
           },
           "annotations": {
@@ -267,6 +268,18 @@
             {
               "name": "MIGRATION_RESOURCE_UID_LABEL",
               "value": "migrations.opensearch.org/migration-resource-uid"
+            },
+            {
+              "name": "COMPONENT_LABEL",
+              "value": "migrations.opensearch.org/component"
+            },
+            {
+              "name": "MONITOR_COMPONENT",
+              "value": "snapshot-monitor"
+            },
+            {
+              "name": "MONITOR_TASK",
+              "value": "snapshot"
             },
             {
               "name": "WORKFLOW_SCRIPTS_ROOT",
