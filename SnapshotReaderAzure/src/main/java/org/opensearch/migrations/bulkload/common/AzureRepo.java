@@ -164,12 +164,16 @@ public class AzureRepo implements SourceRepo {
             .addArgument(localPath)
             .log();
 
-        var blobClient = containerClient.getBlobClient(azureUri.key);
-        // BlobClientBase.exists() returns a boxed java.lang.Boolean, so compare rather than unbox.
-        if (!Boolean.TRUE.equals(blobClient.exists())) {
-            throw new CouldNotReadFromAzure(azureUri.containerName, azureUri.key);
+        try {
+            containerClient.getBlobClient(azureUri.key).downloadToFile(localPath.toString(), true);
+        } catch (BlobStorageException e) {
+            // A failed download (missing blob, access denied, or a service error that exhausted
+            // the client's retries) is a non-retriable snapshot read failure. Classify it so the
+            // worker surfaces the snapshot path + cause and exits with the dedicated code instead
+            // of dying with a generic, unlabeled error. Local filesystem errors are not
+            // BlobStorageException and keep their own classification.
+            throw new CouldNotReadFromAzure(azureUri.containerName, azureUri.key, e);
         }
-        blobClient.downloadToFile(localPath.toString(), true);
     }
 
     protected AzureUri makeAzureUri(Path filePath) {
@@ -268,8 +272,8 @@ public class AzureRepo implements SourceRepo {
     }
 
     public static class CouldNotReadFromAzure extends RfsException implements SnapshotReadFailure {
-        public CouldNotReadFromAzure(String container, String key) {
-            super("Failed to read blob from Azure container: " + container + ", key: " + key);
+        public CouldNotReadFromAzure(String container, String key, Throwable cause) {
+            super("Failed to read blob from Azure container: " + container + ", key: " + key, cause);
         }
     }
 }

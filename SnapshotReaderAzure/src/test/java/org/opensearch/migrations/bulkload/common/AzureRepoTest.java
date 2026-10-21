@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -19,6 +21,8 @@ import com.azure.storage.blob.models.ListBlobsOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -28,6 +32,7 @@ import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.sameInstance;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -83,7 +88,6 @@ public class AzureRepoTest {
     @BeforeEach
     void setUp() {
         lenient().when(mockContainerClient.getBlobClient(anyString())).thenReturn(mockBlobClient);
-        lenient().when(mockBlobClient.exists()).thenReturn(true);
 
         testRepo = Mockito.spy(
             new TestableAzureRepo(testDir, testRepoUri, mockContainerClient, mockFileFinder)
@@ -244,14 +248,20 @@ public class AzureRepoTest {
         assertThat(thrown.getMessage(), containsString("container-name"));
     }
 
-    @Test
-    void EnsureFileExistsLocally_ThrowsCouldNotReadFromAzureWhenBlobMissing() {
+    @ParameterizedTest
+    @ValueSource(ints = {403, 404, 503})
+    void EnsureFileExistsLocally_WrapsBlobStorageExceptionInCouldNotReadFromAzure(int statusCode) {
+        // Denied access, a blob missing on the service, and a service error that exhausted the
+        // client's retries all surface from the download as BlobStorageException. Each must be
+        // classified as a snapshot read failure that keeps the service error as its cause.
         String snapshotId = "snap1";
         Path expectedPath = testDir.resolve("snap-" + snapshotId + ".dat");
         when(mockFileFinder.getSnapshotMetadataFilePath(testDir, snapshotId)).thenReturn(expectedPath);
         doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
-        // The blob is absent on the service, so the download must not be attempted.
-        when(mockBlobClient.exists()).thenReturn(false);
+        HttpResponse response = mock(HttpResponse.class);
+        lenient().when(response.getStatusCode()).thenReturn(statusCode);
+        BlobStorageException azureFailure = new BlobStorageException("service failure", response, null);
+        when(mockBlobClient.downloadToFile(anyString(), Mockito.anyBoolean())).thenThrow(azureFailure);
 
         var thrown = assertThrows(
             CouldNotReadFromAzure.class,
@@ -259,8 +269,29 @@ public class AzureRepoTest {
         );
 
         assertThat(thrown, instanceOf(SnapshotReadFailure.class));
+        assertThat(thrown.getCause(), sameInstance(azureFailure));
         assertThat(thrown.getMessage(), containsString("container-name"));
-        verify(mockBlobClient, Mockito.never()).downloadToFile(anyString(), Mockito.anyBoolean());
+        assertThat(thrown.getMessage(), containsString("directory/snap-snap1.dat"));
+    }
+
+    @Test
+    void EnsureFileExistsLocally_LeavesLocalFilesystemFailuresUnclassified() {
+        // A failure writing the downloaded file is a local problem, not a problem reading the
+        // snapshot, so it must not be reported as a snapshot read failure.
+        String snapshotId = "snap1";
+        Path expectedPath = testDir.resolve("snap-" + snapshotId + ".dat");
+        when(mockFileFinder.getSnapshotMetadataFilePath(testDir, snapshotId)).thenReturn(expectedPath);
+        doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
+        UncheckedIOException localFailure = new UncheckedIOException(new IOException("disk full"));
+        when(mockBlobClient.downloadToFile(anyString(), Mockito.anyBoolean())).thenThrow(localFailure);
+
+        var thrown = assertThrows(
+            UncheckedIOException.class,
+            () -> testRepo.getSnapshotMetadataFilePath(snapshotId)
+        );
+
+        assertThat(thrown, sameInstance(localFailure));
+        assertNull(SnapshotReadFailures.find(thrown));
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.azure.core.util.BinaryData;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
+import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.common.StorageSharedKeyCredential;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -19,6 +20,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -119,6 +123,24 @@ public class AzureRepoIntegrationTest {
         Path metaFile = repo.getIndexMetadataFilePath("idx1", "snap1");
         assertTrue(Files.exists(metaFile));
         assertEquals("nested-contents", Files.readString(metaFile));
+    }
+
+    @Test
+    void missingBlobThrowsCouldNotReadFromAzureAndLeavesNoLocalFile(@TempDir Path tempDir) {
+        var repo = createRepo(tempDir, "absent");
+
+        // The reader downloads without a separate existence check, so the service's 404 must be
+        // what gets classified. A partial file left behind would be mistaken for a completed
+        // download on the next read, since files already present locally are not fetched again.
+        var thrown = assertThrows(
+            AzureRepo.CouldNotReadFromAzure.class,
+            () -> repo.getIndexMetadataFilePath("idx1", "snap1")
+        );
+
+        assertInstanceOf(BlobStorageException.class, thrown.getCause());
+        assertEquals(404, ((BlobStorageException) thrown.getCause()).getStatusCode());
+        assertNotNull(SnapshotReadFailures.find(thrown));
+        assertFalse(Files.exists(tempDir.resolve("indices/idx1/meta-snap1.dat")));
     }
 
     @Test
