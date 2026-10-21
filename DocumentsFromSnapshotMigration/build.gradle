@@ -55,6 +55,11 @@ dependencies {
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter
     testImplementation libs.json
+    // AzureSnapshotMigrationTest uploads its fixture to Azurite. The netty transport is excluded for
+    // the same reason as in SnapshotReaderAzure, which supplies the JDK transport at runtime.
+    testImplementation(libs.azure.storage.blob) {
+        exclude group: 'com.azure', module: 'azure-core-http-netty'
+    }
 
     testRuntimeOnly libs.junit.jupiter.engine
 
@@ -87,4 +92,13 @@ tasks.register('copyDockerRuntimeJars', Sync) {
 
 tasks.named('slowTest') {
     testLogging.showStandardStreams = false
+}
+
+// AzureSnapshotMigrationTest reads from Azurite over plain HTTP, where the Azure SDK refuses to send a
+// bearer token, so AzureRepo.create needs its shared-key branch. MetadataMigration runs in the test
+// JVM and the RfsMigrateDocuments subprocess inherits this environment. This is Azurite's fixed
+// development key, published in Microsoft's docs, not a secret; it matches SnapshotReaderAzure's.
+tasks.named('isolatedTest') {
+    environment 'AZURE_STORAGE_ACCOUNT_KEY',
+        'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=='
 }
