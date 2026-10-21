@@ -29,7 +29,7 @@ public class MigrateOrEvaluateArgs {
         description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path, azure://account/container/path (or bare absolute path)")
     public String repoUri;
 
-    @Parameter(names = {"--local-dir", "--s3-local-dir", "--gcs-local-dir", "--azure-local-dir"},
+    @Parameter(names = {"--local-dir", "--s3-local-dir", "--gcs-local-dir"},
         description = "The absolute path to the directory on local disk to download remote repo files to")
     public String localDir;
 

@@ -164,7 +164,7 @@ public class RfsMigrateDocuments {
         public String repoUri = null;
 
         @Parameter(required = false,
-            names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir", "--azure-local-dir", "--azureLocalDir" },
+            names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir" },
             description = ("The absolute path to the directory on local disk to download remote repo files to.  " +
                 "Required for s3://, gs://, and azure:// repos."))
         public String localDir = null;
