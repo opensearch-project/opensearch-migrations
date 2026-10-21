@@ -91,8 +91,7 @@ class ExternalVersioningMigrationTest {
                     var sink = new OpenSearchDocumentSink(client, () -> transformer,
                         false, DocumentExceptionAllowlist.empty(), null);
                     var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE, 1, 1);
-                    // Global snapshot state can also include system indices such as .geoip_databases.
-                    var cursors = pipeline.migrateCollection(INDEX).collectList().block();
+                    var cursors = pipeline.migrateAll().collectList().block();
                     assertNotNull(cursors);
                     assertEquals(VERSIONS.size(), cursors.stream().mapToLong(cursor -> cursor.docsInBatch()).sum());
                 }

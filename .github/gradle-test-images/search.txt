@@ -9,8 +9,3 @@ amazoncorretto:8-alpine|mirror.gcr.io/library/amazoncorretto:8-alpine
 amazoncorretto:11-al2023-headless|mirror.gcr.io/library/amazoncorretto:11-al2023-headless
 amazoncorretto:17-al2023-headless|mirror.gcr.io/library/amazoncorretto:17-al2023-headless
 amazoncorretto:21-al2023-headless|mirror.gcr.io/library/amazoncorretto:21-al2023-headless
-public.ecr.aws/docker/library/amazonlinux:2023|mirror.gcr.io/library/amazonlinux:2023
-public.ecr.aws/docker/library/amazoncorretto:8-alpine|mirror.gcr.io/library/amazoncorretto:8-alpine
-public.ecr.aws/docker/library/amazoncorretto:11-al2023-headless|mirror.gcr.io/library/amazoncorretto:11-al2023-headless
-public.ecr.aws/docker/library/amazoncorretto:17-al2023-headless|mirror.gcr.io/library/amazoncorretto:17-al2023-headless
-public.ecr.aws/docker/library/amazoncorretto:21-al2023-headless|mirror.gcr.io/library/amazoncorretto:21-al2023-headless
