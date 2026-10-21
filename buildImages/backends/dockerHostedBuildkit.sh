@@ -45,7 +45,7 @@ ptc_rewrite_image() {
 
 get_docker_network_dns_servers() {
   local resolv_conf dns_line registry_image
-  registry_image="$(ptc_rewrite_image registry:2)"
+  registry_image="$(ptc_rewrite_image public.ecr.aws/docker/library/registry:2)"
   resolv_conf="$(docker run --rm --network "${EXTERNAL_DOCKER_NETWORK}" "${registry_image}" cat /etc/resolv.conf 2>/dev/null || true)"
   dns_line="$(printf '%s\n' "${resolv_conf}" | sed -n 's/^# ExtServers: \[\(.*\)\]$/\1/p' | head -n1)"
 
@@ -111,7 +111,7 @@ ensure_registry_container() {
   local registry_image state run_output
   state="$(docker inspect -f '{{.State.Running}}' "${EXTERNAL_REGISTRY_NAME}" 2>/dev/null || true)"
   if [[ -z "${state}" ]]; then
-    registry_image="$(ptc_rewrite_image registry:2)"
+    registry_image="$(ptc_rewrite_image public.ecr.aws/docker/library/registry:2)"
     # Bind on 0.0.0.0 so the registry is reachable at the host gateway IP from
     # inside any cluster node container, without docker network connect.
     # The registry-data volume persists across runs so image layers are reused.
