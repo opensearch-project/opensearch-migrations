@@ -50,6 +50,7 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> previousShardEntryCache = new HashMap<>();
 
     private final Map<Partition, Long> liveDocCounts = new ConcurrentHashMap<>();
+    private final Map<Partition, Long> previousLiveDocCounts = new ConcurrentHashMap<>();
 
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
@@ -191,11 +192,19 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     @Override
     public OptionalLong countLiveDocuments(Partition partition) {
-        if (isDeltaMode()) {
-            return OptionalLong.empty();
-        }
         var cached = liveDocCounts.get(partition);
         return cached == null ? OptionalLong.empty() : OptionalLong.of(cached);
+    }
+
+    @Override
+    public OptionalLong countPreviousLiveDocuments(Partition partition) {
+        var cached = previousLiveDocCounts.get(partition);
+        return cached == null ? OptionalLong.empty() : OptionalLong.of(cached);
+    }
+
+    @Override
+    public boolean requiresOrderedWrites() {
+        return isDeltaMode();
     }
 
     @Override
@@ -218,11 +227,19 @@ public class LuceneSnapshotSource implements DocumentSource {
             var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
             if (previousEntry == null) {
                 log.info("No previous partition for {} — treating as full read (all additions)", partition);
+                previousLiveDocCounts.put(partition, 0L);
+                if (deltaMode == DeltaMode.DELETES_ONLY) {
+                    return Flux.empty();
+                }
                 return readRegularDocuments(entry, partition, startingPosition);
             }
             log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
             // Delta doc numbers can overlap across snapshots; resume by stream ordinal.
-            return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
+            return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory,
+                    (previous, current) -> {
+                        previousLiveDocCounts.put(partition, previous);
+                        liveDocCounts.put(partition, current);
+                    })
                 .index()
                 .skip(startingPosition)
                 .map(indexed -> {
@@ -265,5 +282,6 @@ public class LuceneSnapshotSource implements DocumentSource {
         shardEntryCache.clear();
         previousShardEntryCache.clear();
         liveDocCounts.clear();
+        previousLiveDocCounts.clear();
     }
 }

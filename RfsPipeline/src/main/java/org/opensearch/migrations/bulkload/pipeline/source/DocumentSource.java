@@ -54,6 +54,15 @@ public interface DocumentSource extends AutoCloseable {
         return OptionalLong.empty();
     }
 
+    default OptionalLong countPreviousLiveDocuments(Partition partition) {
+        return OptionalLong.empty();
+    }
+
+    /** Whether operations on the same document can depend on an earlier batch. */
+    default boolean requiresOrderedWrites() {
+        return false;
+    }
+
     @Override
     default void close() throws Exception {
         // Default no-op for sources that don't hold resources

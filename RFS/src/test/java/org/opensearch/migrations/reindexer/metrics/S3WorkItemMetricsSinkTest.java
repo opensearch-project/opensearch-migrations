@@ -1,4 +1,4 @@
-package org.opensearch.migrations.reindexer.doccount;
+package org.opensearch.migrations.reindexer.metrics;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -10,12 +10,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-class S3ShardDocCountSinkTest {
+class S3WorkItemMetricsSinkTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -55,8 +57,9 @@ class S3ShardDocCountSinkTest {
         }
     }
 
-    private static ShardDocCountRecord countRecord(String index, int shard, long total) {
-        return ShardDocCountRecord.builder()
+    private static WorkItemMetricsRecord countRecord(String index, int shard, long total) {
+        return WorkItemMetricsRecord.builder()
+            .commitId("commit-" + shard)
             .sessionId("sess-1")
             .workerId("worker-1")
             .workItemId("wi-1")
@@ -64,12 +67,14 @@ class S3ShardDocCountSinkTest {
             .shardNumber(shard)
             .snapshotName("snap-1")
             .liveLuceneDocCount(total)
+            .metrics(new MigrationMetrics(new MigrationMetrics.Source(total, 0, total * 10),
+                new MigrationMetrics.Requests(1, 2, 200, 300)))
             .timestamp("2026-07-29T00:00:00Z")
             .build();
     }
 
-    private static S3ShardDocCountSink sink(CapturingUploader uploader) {
-        return S3ShardDocCountSink.builder()
+    private static S3WorkItemMetricsSink sink(CapturingUploader uploader) {
+        return S3WorkItemMetricsSink.builder()
             .bucket("my-bucket")
             .prefix("counts")
             .sessionId("sess-1")
@@ -97,6 +102,9 @@ class S3ShardDocCountSinkTest {
         Assertions.assertEquals(1, records.get(1).get("shardNumber").asInt());
         Assertions.assertEquals("idx", records.get(0).get("indexName").asText());
         Assertions.assertEquals("snap-1", records.get(0).get("snapshotName").asText());
+        Assertions.assertEquals("commit-0", records.get(0).get("commitId").asText());
+        Assertions.assertEquals(5, records.get(0).path("metrics").path("source").path("upserts").asLong());
+        Assertions.assertEquals(2, records.get(0).path("metrics").path("requests").path("attempts").asLong());
     }
 
     @Test
@@ -108,7 +116,7 @@ class S3ShardDocCountSinkTest {
         }
         Assertions.assertEquals(1, uploader.keys.size());
         var key = uploader.keys.get(0);
-        Assertions.assertTrue(key.startsWith("counts/session=sess-1/worker=worker-1/shard-doc-counts-"),
+        Assertions.assertTrue(key.startsWith("counts/session=sess-1/worker=worker-1/committed-metrics-"),
             "unexpected key layout: " + key);
         Assertions.assertTrue(key.endsWith(".ndjson.gz"), "unexpected key suffix: " + key);
     }
@@ -117,7 +125,7 @@ class S3ShardDocCountSinkTest {
     void unknownCountsAreNullAndEmptyShardCountsAreZero() throws Exception {
         var uploader = new CapturingUploader();
         try (var s = sink(uploader)) {
-            s.write(ShardDocCountRecord.builder().indexName("unknown").build()).block();
+            s.write(WorkItemMetricsRecord.builder().indexName("unknown").build()).block();
             s.write(countRecord("empty", 0, 0)).block();
             s.flush().block();
         }
@@ -130,7 +138,7 @@ class S3ShardDocCountSinkTest {
     void flushWaitsForUploadCompletion() throws Exception {
         var started = new CountDownLatch(1);
         var uploaded = new CompletableFuture<Void>();
-        try (var sink = S3ShardDocCountSink.builder()
+        try (var sink = S3WorkItemMetricsSink.builder()
             .bucket("bucket").sessionId("session").workerId("worker")
             .uploader((bucket, key, file) -> {
                 started.countDown();
@@ -181,7 +189,7 @@ class S3ShardDocCountSinkTest {
     @Test
     void emptyPrefixIsHandled() throws Exception {
         var uploader = new CapturingUploader();
-        var s = S3ShardDocCountSink.builder()
+        var s = S3WorkItemMetricsSink.builder()
             .bucket("b").prefix("").sessionId("s").workerId("w")
             .uploader(uploader.asUploader()).build();
         try (s) {

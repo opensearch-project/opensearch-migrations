@@ -14,10 +14,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -60,11 +60,11 @@ import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
-import org.opensearch.migrations.reindexer.doccount.S3ShardDocCountSink;
-import org.opensearch.migrations.reindexer.doccount.ShardDocCountRecord;
-import org.opensearch.migrations.reindexer.doccount.ShardDocCountSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.metrics.S3WorkItemMetricsSink;
+import org.opensearch.migrations.reindexer.metrics.WorkItemMetricsRecord;
+import org.opensearch.migrations.reindexer.metrics.WorkItemMetricsSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -84,6 +84,8 @@ import com.beust.jcommander.IValueValidator;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -324,18 +326,18 @@ public class RfsMigrateDocuments {
         public FailedDocumentStreamArgs failedDocumentStreamArgs = new FailedDocumentStreamArgs();
 
         @ParametersDelegate
-        public ShardDocCountArgs shardDocCountArgs = new ShardDocCountArgs();
+        public WorkItemMetricsArgs committedMetricsArgs = new WorkItemMetricsArgs();
 
     }
 
-    public static class ShardDocCountArgs {
+    public static class WorkItemMetricsArgs {
         @Parameter(required = false,
-            names = { "--shard-doc-count-s3-prefix" },
-            description = "S3 key prefix for full-snapshot shard counts used to validate backfills. "
+            names = { "--committed-metrics-s3-prefix" },
+            description = "S3 key prefix for backfill metrics and snapshot counts. "
                 + "Uses the configured failed document stream bucket, region and endpoint. "
                 + "Records land at <prefix>/session=<sessionId>/worker=<workerId>/... "
-                + "Deduplicate retries before summing by index. Counts are always logged.")
-        public String shardDocCountS3Prefix = "rfs-shard-doc-counts/";
+                + "Aggregate only records whose commit IDs are recorded in the work coordinator.")
+        public String committedMetricsS3Prefix = "rfs-committed-metrics/";
     }
 
     /**
@@ -582,7 +584,8 @@ public class RfsMigrateDocuments {
             LeaseExpireTrigger processManager,
             AtomicReference<WorkItemCursor> progressCursor,
             AtomicReference<Runnable> cancellationRunnableRef,
-            WorkItemTimeProvider workItemTimeProvider
+            WorkItemTimeProvider workItemTimeProvider,
+            BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter
         ) throws IOException, InterruptedException, NoWorkLeftException;
     }
 
@@ -692,6 +695,13 @@ public class RfsMigrateDocuments {
         var coordinatorFactory = new WorkCoordinatorFactory(
             coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
         var cleanShutdownCompleted = new AtomicBoolean(false);
+        var sessionId = resolveSessionId(arguments, workerId);
+        var metricsSink = buildWorkItemMetricsSink(arguments, workerId, sessionId);
+        var metricsReporter = committedMetricsReporter(metricsSink, sessionId, workerId, arguments.snapshotName,
+            arguments.experimental.previousSnapshotName, arguments.experimental.experimentalDeltaMode);
+        if (metricsSink != null) {
+            System.out.println("RFS_COMMITTED_METRICS_LOCATION=" + metricsSink.getLocation());
+        }
 
         try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
@@ -711,16 +721,17 @@ public class RfsMigrateDocuments {
                         cleanShutdownCompleted,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
                         context.getWorkCoordinationContext()::createReleaseWorkItemContext,
-                        failedDocumentStreamSink),
+                        failedDocumentStreamSink, metricsReporter),
                 Clock.systemUTC());) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Thread.currentThread().setName("Cleanup-Hook-Thread");
                 log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
                 try {
+                    Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run);
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
                             context.getWorkCoordinationContext()::createReleaseWorkItemContext,
-                            failedDocumentStreamSink);
+                            failedDocumentStreamSink, metricsReporter);
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
                     log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
@@ -728,15 +739,7 @@ public class RfsMigrateDocuments {
                 } catch (Exception e) {
                     log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
                 } finally {
-                    // Close the failed document stream sink so any buffered records get flushed to S3 before
-                    // the JVM exits. Safe to call even if completeWorkItem was never reached.
-                    if (failedDocumentStreamSink != null) {
-                        try {
-                            failedDocumentStreamSink.close();
-                        } catch (Exception e) {
-                            log.atError().setCause(e).setMessage("Error closing failed document stream sink during shutdown").log();
-                        }
-                    }
+                    closeSinks(metricsSink, failedDocumentStreamSink);
                     LogManager.shutdown();
                 }
             }));
@@ -744,20 +747,10 @@ public class RfsMigrateDocuments {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId);
 
             var status = sourceFactory.buildAndRun(
-                workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider);
+                workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider,
+                metricsReporter);
             cleanShutdownCompleted.set(true);
-            // Close the failed document stream sink on the normal (WORK_COMPLETED) path too. This flushes
-            // any buffered records and shuts down the sink's worker thread. The shutdown hook also closes
-            // it, but only fires on JVM termination signals; the WORK_COMPLETED path returns from main()
-            // without System.exit and relies on natural JVM shutdown, so we must release the sink here so
-            // it can't delay exit (the sink worker is a daemon as a backstop, but closing is cleaner).
-            if (failedDocumentStreamSink != null) {
-                try {
-                    failedDocumentStreamSink.close();
-                } catch (Exception e) {
-                    log.atWarn().setCause(e).setMessage("Error closing failed document stream sink after work completion").log();
-                }
-            }
+            closeSinks(metricsSink, failedDocumentStreamSink);
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
                 System.exit(NO_WORK_AVAILABLE_EXIT_CODE);
@@ -780,6 +773,18 @@ public class RfsMigrateDocuments {
             }
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
+        }
+    }
+
+    private static void closeSinks(AutoCloseable... sinks) {
+        for (var sink : sinks) {
+            if (sink != null) {
+                try {
+                    sink.close();
+                } catch (Exception e) {
+                    log.warn("Error closing {}", sink.getClass().getSimpleName(), e);
+                }
+            }
         }
     }
 
@@ -813,7 +818,7 @@ public class RfsMigrateDocuments {
         boolean emitDocType,
         RootDocumentMigrationContext context
     ) {
-        return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
+        return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider, metricsReporter) -> {
             DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
 
             var luceneDirPath = Paths.get(arguments.luceneDir);
@@ -871,7 +876,7 @@ public class RfsMigrateDocuments {
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
                 useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
-                workItemTimeProvider, arguments, context);
+                workItemTimeProvider, arguments, context, metricsReporter);
         };
     }
 
@@ -887,20 +892,12 @@ public class RfsMigrateDocuments {
         AtomicReference<Runnable> cancellationRunnableRef,
         WorkItemTimeProvider workItemTimeProvider,
         Args arguments,
-        RootDocumentMigrationContext context
+        RootDocumentMigrationContext context,
+        BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter
     ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, processManager, documentSource,
             arguments.indexAllowlist, context);
-
-        var workerId = ProcessHelpers.getNodeInstanceName();
-        var sessionId = resolveSessionId(arguments, workerId);
-        var shardDocCountSink = buildShardDocCountSink(arguments, workerId, sessionId);
-        if (shardDocCountSink != null) {
-            log.atInfo().setMessage("shard doc count sink enabled: location={}")
-                .addArgument(shardDocCountSink.getLocation()).log();
-            System.out.println("RFS_SHARD_DOC_COUNT_LOCATION=" + shardDocCountSink.getLocation());
-        }
 
         var runner = DocumentMigrationBootstrap.builder()
             .documentSource(documentSource)
@@ -916,41 +913,40 @@ public class RfsMigrateDocuments {
             .maxInitialLeaseDuration(arguments.initialLeaseDuration)
             .cursorConsumer(progressCursor::set)
             .cancellationTriggerConsumer(cancellationRunnableRef::set)
-            .shardDocCountReporter(shardDocCountReporter(shardDocCountSink, sessionId, workerId, arguments.snapshotName))
+            .metricsReporter(metricsReporter)
             .build();
 
-        try {
-            return runner.migrateOneShard(context::createReindexContext);
-        } finally {
-            if (shardDocCountSink != null) {
-                try {
-                    shardDocCountSink.close();
-                } catch (Exception e) {
-                    log.atWarn().setCause(e)
-                        .setMessage("Error closing shard doc count sink").log();
-                }
-            }
-        }
+        return runner.migrateOneShard(context::createReindexContext);
     }
 
-    static BiConsumer<WorkItem, OptionalLong> shardDocCountReporter(
-        ShardDocCountSink sink, String sessionId, String workerId, String snapshotName
+    static BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> committedMetricsReporter(
+        WorkItemMetricsSink sink, String sessionId, String workerId, String snapshotName,
+        String previousSnapshotName, DeltaMode deltaMode
     ) {
-        if (sink == null) {
-            return (workItem, luceneTotal) -> { };
-        }
-        return (workItem, luceneTotal) -> {
-            var countRecord = ShardDocCountRecord.builder()
+        var mapper = new ObjectMapper();
+        return (workItem, cursor) -> {
+            var record = WorkItemMetricsRecord.builder()
+                .commitId(UUID.randomUUID().toString())
                 .sessionId(sessionId)
                 .workerId(workerId)
                 .workItemId(workItem.toString())
                 .indexName(workItem.getIndexName())
                 .shardNumber(workItem.getShardNumber())
                 .snapshotName(snapshotName)
-                .liveLuceneDocCount(luceneTotal.isPresent() ? luceneTotal.getAsLong() : null)
+                .previousSnapshotName(previousSnapshotName)
+                .deltaMode(deltaMode == null ? null : deltaMode.name())
+                .fromPosition(Math.max(0, workItem.getStartingDocId()))
+                .nextPosition(cursor.getProgressCheckpointNum())
+                .shardComplete(cursor.isShardComplete())
+                .metrics(cursor.getMetrics())
+                .liveLuceneDocCount(cursor.getLiveLuceneDocCount())
+                .previousLiveLuceneDocCount(cursor.getPreviousLiveLuceneDocCount())
                 .timestamp(Instant.now().toString())
                 .build();
-            sink.write(countRecord).then(Mono.defer(sink::flush)).block(Duration.ofMinutes(5));
+            if (sink != null) {
+                sink.write(record).then(Mono.defer(sink::flush)).block(Duration.ofMinutes(5));
+            }
+            return mapper.convertValue(record, new TypeReference<Map<String, Object>>() {});
         };
     }
 
@@ -1068,7 +1064,7 @@ public class RfsMigrateDocuments {
             .build();
     }
 
-    static ShardDocCountSink buildShardDocCountSink(Args arguments, String workerId, String sessionId) {
+    static WorkItemMetricsSink buildWorkItemMetricsSink(Args arguments, String workerId, String sessionId) {
         String bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
         if (bucket == null || bucket.isBlank()) {
             return null;
@@ -1089,9 +1085,9 @@ public class RfsMigrateDocuments {
         }
         var s3Client = s3ClientBuilder.build();
 
-        return S3ShardDocCountSink.builder()
+        return S3WorkItemMetricsSink.builder()
             .bucket(bucket)
-            .prefix(arguments.shardDocCountArgs.shardDocCountS3Prefix)
+            .prefix(arguments.committedMetricsArgs.committedMetricsS3Prefix)
             .sessionId(sessionId)
             .workerId(workerId)
             .uploader(RotatingGzipS3ObjectWriter.s3ObjectUploader(s3Client))
@@ -1189,7 +1185,8 @@ public class RfsMigrateDocuments {
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
             Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
-            FailedDocumentStreamSink failedDocumentStreamSink
+            FailedDocumentStreamSink failedDocumentStreamSink,
+            BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
             log.atInfo().setMessage("Clean shutdown already completed").log();
@@ -1226,11 +1223,9 @@ public class RfsMigrateDocuments {
         // current flush-before-complete gate the watermark equals the progress cursor; capturing
         // it after the flush makes that invariant explicit.)
         var failedDocumentStreamWatermark = progressCursor.get();
-        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, failedDocumentStreamWatermark);
 
-        coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemId, successorWorkItem, 1, contextSupplier
-        );
+        commitProgress(coordinator, workItemAndDuration, failedDocumentStreamWatermark,
+            1, null, contextSupplier, metricsReporter);
         cleanShutdownCompleted.set(true);
     }
 
@@ -1292,7 +1287,8 @@ public class RfsMigrateDocuments {
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
             Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
-            FailedDocumentStreamSink failedDocumentStreamSink) {
+            FailedDocumentStreamSink failedDocumentStreamSink,
+            BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
                 .log();
@@ -1314,7 +1310,8 @@ public class RfsMigrateDocuments {
                 log.atWarn().setMessage("Work Item: {}").addArgument(workItemAndDuration.getWorkItem())
                         .log();
                 var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
-                if (successorWorkItemIds.size() == 1 && workItemId.equals(successorWorkItemIds.get(0))) {
+                if (!progressCursor.isShardComplete() && successorWorkItemIds.size() == 1
+                    && workItemId.equals(successorWorkItemIds.get(0))) {
                     log.atWarn().setMessage("No real progress was made for work item: {}. Will retry with larger timeout").addArgument(workItemId).log();
                 } else {
                     log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
@@ -1332,13 +1329,9 @@ public class RfsMigrateDocuments {
                     // failed document stream — that cursor is the failed document stream watermark, and successorWorkItemIds (computed
                     // from it above) checkpoints the successor to exactly that point, never past
                     // what we've persisted.
-                    coordinator.createSuccessorWorkItemsAndMarkComplete(
-                            workItemId,
-                            successorWorkItemIds,
-                            successorNextAcquisitionLeaseExponent,
-                            workItemAndDuration.getLeaseExpirationTime(),
-                            contextSupplier
-                    );
+                    commitProgress(coordinator, workItemAndDuration, progressCursor,
+                        successorNextAcquisitionLeaseExponent, workItemAndDuration.getLeaseExpirationTime(),
+                        contextSupplier, metricsReporter);
                 }
             } else {
                 // We held the lease but never produced a checkpoint — the most common cause is
@@ -1366,6 +1359,27 @@ public class RfsMigrateDocuments {
         }
         cleanShutdownCompleted.set(true);
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+    }
+
+    static void commitProgress(
+        IWorkCoordinator coordinator,
+        IWorkCoordinator.WorkItemAndDuration work,
+        WorkItemCursor cursor,
+        int nextLeaseExponent,
+        Instant deadline,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
+        BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter
+    ) throws IOException, InterruptedException {
+        var metrics = metricsReporter.apply(work.getWorkItem(), cursor);
+        var workItemId = work.getWorkItem().toString();
+        if (cursor.isShardComplete()) {
+            try (var context = contextSupplier.get()) {
+                coordinator.completeWorkItem(workItemId, metrics, context::getCompleteWorkItemContext);
+            }
+        } else {
+            coordinator.createSuccessorWorkItemsAndMarkComplete(workItemId,
+                getSuccessorWorkItemIds(work, cursor), nextLeaseExponent, deadline, metrics, contextSupplier);
+        }
     }
 
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
@@ -1430,8 +1444,6 @@ public class RfsMigrateDocuments {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
         var workItem = workItemAndDuration.getWorkItem();
-        // Set successor as same last checkpoint Num, this will ensure we process every document fully in cases where there is a 1:many doc split
-        // Re-process same checkpoint to handle 1:many doc splits correctly
         var successorStartingCheckpointNum = progressCursor.getProgressCheckpointNum();
         var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
                 .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
@@ -1462,7 +1474,7 @@ public class RfsMigrateDocuments {
         boolean useServerGeneratedIds,
         RootDocumentMigrationContext context
     ) {
-        return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
+        return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider, metricsReporter) -> {
             DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
 
             // Check the coordinator for pending work before any S3 setup so a pod restart
@@ -1503,7 +1515,7 @@ public class RfsMigrateDocuments {
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
                 useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
-                workItemTimeProvider, arguments, context);
+                workItemTimeProvider, arguments, context, metricsReporter);
         };
     }
 

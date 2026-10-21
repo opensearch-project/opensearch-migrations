@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -11,6 +12,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
@@ -22,10 +24,90 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
-/** Sparse positions, inclusive resume, and ordered checkpoints under concurrent writes. */
+/** Sparse positions and non-overlapping checkpoints under concurrent writes. */
 class ProgressCursorPositionTest {
 
     private static final String IDX = "idx";
+
+    @Test
+    void completedRequestsBeyondAGapDoNotAdvanceCommittedMetrics() throws Exception {
+        var started = new CountDownLatch(3);
+        var firstEmitted = new CountDownLatch(1);
+        var completions = List.of(Sinks.<BatchResult>one(), Sinks.<BatchResult>one(), Sinks.<BatchResult>one());
+        var cursors = new CopyOnWriteArrayList<ProgressCursor>();
+        var batchSizes = new CopyOnWriteArrayList<Integer>();
+        var source = new SparseSource(List.of(0, 1, 2, 3, 4), true) {
+            @Override
+            public Flux<Document> readDocuments(Partition partition, long start) {
+                return super.readDocuments(partition, start).map(doc -> new Document(doc.id(),
+                    new byte[doc.position().orElseThrow() == 0 ? 10 : 1], doc.operation(),
+                    doc.hints(), doc.sourceMetadata()));
+            }
+        };
+        var sink = new CountingSink() {
+            int next;
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                batchSizes.add(batch.size());
+                var result = completions.get(next++);
+                started.countDown();
+                return result.asMono();
+            }
+        };
+        var subscription = new DocumentMigrationPipeline(source, sink, 3, 10)
+            .migratePartition(partition(), IDX, 0)
+            .subscribe(cursor -> {
+                cursors.add(cursor);
+                firstEmitted.countDown();
+            });
+        try {
+            Assertions.assertTrue(started.await(10, TimeUnit.SECONDS));
+            Assertions.assertEquals(List.of(1, 3, 1), batchSizes);
+            completions.get(2).tryEmitValue(new BatchResult(1, 1,
+                new MigrationMetrics.Requests(1, 1, 100, 10)));
+            Assertions.assertTrue(cursors.isEmpty());
+            completions.get(0).tryEmitValue(new BatchResult(1, 10,
+                new MigrationMetrics.Requests(1, 2, 200, 20)));
+            Assertions.assertTrue(firstEmitted.await(10, TimeUnit.SECONDS));
+            Assertions.assertEquals(1, cursors.size());
+            Assertions.assertEquals(1, cursors.get(0).nextPosition());
+            Assertions.assertEquals(new MigrationMetrics(
+                new MigrationMetrics.Source(1, 0, 10), new MigrationMetrics.Requests(1, 2, 200, 20)),
+                cursors.get(0).metrics());
+        } finally {
+            subscription.dispose();
+        }
+    }
+
+    @Test
+    void orderedSourcesFinishEarlierBatchesBeforeSendingLaterBatches() throws Exception {
+        var source = new SparseSource(List.of(0, 1), true) {
+            @Override
+            public boolean requiresOrderedWrites() {
+                return true;
+            }
+        };
+        var firstStarted = new CountDownLatch(1);
+        var firstCompleted = Sinks.<BatchResult>one();
+        var started = new CopyOnWriteArrayList<String>();
+        var sink = new CountingSink() {
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                started.add(batch.get(0).id());
+                firstStarted.countDown();
+                return started.size() == 1 ? firstCompleted.asMono() : Mono.just(new BatchResult(1, 1));
+            }
+        };
+        var result = new DocumentMigrationPipeline(source, sink, 1, 100)
+            .migratePartition(partition(), IDX, 0).collectList().toFuture();
+        Assertions.assertTrue(firstStarted.await(10, TimeUnit.SECONDS));
+        Assertions.assertEquals(List.of("doc-0"), started);
+        firstCompleted.tryEmitValue(new BatchResult(1, 1));
+        var cursors = result.get(10, TimeUnit.SECONDS);
+        Assertions.assertEquals(List.of("doc-0", "doc-1"), started);
+        Assertions.assertEquals(2, cursors.get(1).metrics().source().upserts());
+    }
 
     @Test
     void fallbackOffsetsAdvanceInSourceOrderWhenWritesCompleteInReverseOrder() throws Exception {
@@ -50,7 +132,7 @@ class ProgressCursorPositionTest {
         }
         var cursors = future.get(10, TimeUnit.SECONDS);
         Assertions.assertEquals(List.of(11L, 12L, 13L),
-            cursors.stream().map(ProgressCursor::lastDocProcessed).toList());
+            cursors.stream().map(ProgressCursor::nextPosition).toList());
     }
 
     @Test
@@ -62,12 +144,12 @@ class ProgressCursorPositionTest {
     }
 
     @Test
-    void handoffAfterAMultiDocumentBatchReplaysOnlyItsLastDocument() {
+    void handoffAfterAMultiDocumentBatchStartsAtTheNextDocument() {
         var source = new SparseSource(List.of(3, 7, 9, 15, 20), true);
         var first = run(source, new CountingSink(), 3, 0).get(0);
         var secondSink = new CountingSink();
-        run(source, secondSink, 2, first.lastDocProcessed());
-        Assertions.assertEquals(List.of("doc-9", "doc-15", "doc-20"), secondSink.written);
+        run(source, secondSink, 2, first.nextPosition());
+        Assertions.assertEquals(List.of("doc-15", "doc-20"), secondSink.written);
     }
 
     private static Partition partition() {
@@ -145,39 +227,35 @@ class ProgressCursorPositionTest {
         var cursors = run(new SparseSource(List.of(3, 7, 9), true), new CountingSink(), 1, 0);
 
         Assertions.assertNotNull(cursors);
-        Assertions.assertEquals(List.of(3L, 7L, 9L),
-            cursors.stream().map(ProgressCursor::lastDocProcessed).toList(),
-            "seek position must be the Lucene doc number of the last doc in each batch");
+        Assertions.assertEquals(List.of(4L, 8L, 10L),
+            cursors.stream().map(ProgressCursor::nextPosition).toList(),
+            "resume after the last source document, including sparse Lucene positions");
     }
 
     @Test
-    void cursorIsLastPositionOfTheBatchWhenBatching() {
+    void cursorFollowsTheLastPositionOfTheBatch() {
         // batch size 2 -> batches are [3,7] and [9]
         var cursors = run(new SparseSource(List.of(3, 7, 9), true), new CountingSink(), 2, 0);
 
         Assertions.assertNotNull(cursors);
-        Assertions.assertEquals(List.of(7L, 9L),
-            cursors.stream().map(ProgressCursor::lastDocProcessed).toList(),
-            "each cursor is the position of the LAST document in its batch");
+        Assertions.assertEquals(List.of(8L, 10L),
+            cursors.stream().map(ProgressCursor::nextPosition).toList(),
+            "each cursor is immediately after the last document in its batch");
     }
 
     @Test
-    void resumingAtTheCursorReplaysOnlyTheCheckpointDoc() {
+    void resumingAtTheCursorDoesNotReplayCompletedDocuments() {
         var sink = new CountingSink();
         var cursors = run(new SparseSource(List.of(3, 7, 9), true), sink, 1, 0);
         Assertions.assertNotNull(cursors);
         Assertions.assertEquals(List.of("doc-3", "doc-7", "doc-9"), sink.written);
 
-        long resume = cursors.get(cursors.size() - 1).lastDocProcessed();
-        Assertions.assertEquals(9L, resume, "checkpoint is the true Lucene position");
+        long resume = cursors.get(cursors.size() - 1).nextPosition();
+        Assertions.assertEquals(10L, resume);
 
-        // Successors deliberately restart AT the last checkpoint (see
-        // RfsMigrateDocuments.getSuccessorWorkItemIds) to handle 1:many doc splits, so
-        // exactly one document is replayed -- bounded, not the whole shard.
         var sink2 = new CountingSink();
         run(new SparseSource(List.of(3, 7, 9), true), sink2, 1, resume);
-        Assertions.assertEquals(List.of("doc-9"), sink2.written,
-            "only the checkpoint doc is replayed; pre-fix a cursor of 3 replayed all three");
+        Assertions.assertTrue(sink2.written.isEmpty());
     }
 
     @Test
@@ -196,18 +274,16 @@ class ProgressCursorPositionTest {
 
         Assertions.assertNotNull(cursors);
         Assertions.assertEquals(List.of(1L, 2L, 3L),
-            cursors.stream().map(ProgressCursor::lastDocProcessed).toList(),
+            cursors.stream().map(ProgressCursor::nextPosition).toList(),
             "no position metadata -> fall back to counting emitted docs");
     }
 
     @Test
     void denseSourceIsUnaffectedByTheFix() {
-        // No nested children: positions 0..4 all emit. Cursor tracks position, which for a
-        // dense source is also the doc ordinal -- this is why the bug went unnoticed.
         var cursors = run(new SparseSource(List.of(0, 1, 2, 3, 4), true), new CountingSink(), 1, 0);
 
         Assertions.assertNotNull(cursors);
-        Assertions.assertEquals(List.of(0L, 1L, 2L, 3L, 4L),
-            cursors.stream().map(ProgressCursor::lastDocProcessed).toList());
+        Assertions.assertEquals(List.of(1L, 2L, 3L, 4L, 5L),
+            cursors.stream().map(ProgressCursor::nextPosition).toList());
     }
 }

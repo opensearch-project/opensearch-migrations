@@ -27,7 +27,7 @@ import static org.mockito.Mockito.when;
 class LuceneSnapshotSourceCheckpointTest {
     @ParameterizedTest
     @CsvSource({"false, 0", "false, 14", "true, 0", "true, 14"})
-    void reportsSnapshotCountAfterResumedReadButExcludesDeltaFallback(boolean delta, long liveCount) {
+    void reportsSnapshotCountAfterResumedReadIncludingNewDeltaShards(boolean delta, long liveCount) {
         var extractor = mock(SnapshotExtractor.class);
         var current = new SnapshotExtractor.ShardEntry("current", "idx", "id", 0, mock(ShardMetadata.class));
         when(extractor.listShards("current", "idx")).thenReturn(List.of(current));
@@ -45,7 +45,7 @@ class LuceneSnapshotSourceCheckpointTest {
             var partition = source.listPartitions("idx").get(0);
             assertTrue(source.countLiveDocuments(partition).isEmpty(), "the reader has not opened yet");
             source.readDocuments(partition, 9).blockLast();
-            assertEquals(delta ? OptionalLong.empty() : OptionalLong.of(liveCount),
+            assertEquals(OptionalLong.of(liveCount),
                 source.countLiveDocuments(partition));
         }
     }
@@ -58,7 +58,7 @@ class LuceneSnapshotSourceCheckpointTest {
         when(extractor.listShards("current", "idx")).thenReturn(List.of(current));
         when(extractor.listShards("previous", "idx")).thenReturn(List.of(previous));
         // Two snapshot coordinate systems: additions can have smaller doc numbers than deletions.
-        when(extractor.readDeltaDocuments(eq(current), eq(previous), any(), any(), any())).thenReturn(Flux.just(
+        when(extractor.readDeltaDocuments(eq(current), eq(previous), any(), any(), any(), any())).thenReturn(Flux.just(
             new LuceneDocumentChange(80, "deleted", null, null, null, DocumentChangeType.DELETE),
             new LuceneDocumentChange(2, "added", null, new byte[] {1}, null, DocumentChangeType.INDEX),
             new LuceneDocumentChange(7, "updated", null, new byte[] {1}, null, DocumentChangeType.INDEX)));

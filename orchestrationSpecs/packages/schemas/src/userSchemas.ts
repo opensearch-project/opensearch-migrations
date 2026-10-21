@@ -1140,11 +1140,11 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("S3 key prefix for the failed document stream where terminal document failures are persisted. " +
             "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
             "Defaults to 'rfs-failed-document-stream/'."),
-    shardDocCountS3Prefix: z.string().default("rfs-shard-doc-counts/").optional()
-        .describe("S3 key prefix for full-snapshot shard counts used to validate backfills. Uses the configured " +
+    committedMetricsS3Prefix: z.string().default("rfs-committed-metrics/").optional()
+        .describe("S3 key prefix for backfill metrics and snapshot counts. Uses the configured " +
             "failed document stream bucket, region and endpoint, under <prefix>/session=<workflow-uid>/. " +
-            "Deduplicate retries before summing by index. Counts are always logged. " +
-            "Defaults to 'rfs-shard-doc-counts/'."),
+            "Aggregate only records whose commit IDs are recorded in the work coordinator. " +
+            "Defaults to 'rfs-committed-metrics/'."),
     failedDocumentStreamS3Bucket: z.string().optional()
         .describe("S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal " +
             "document failures are not recorded; there is no separate enable flag and no default bucket."),

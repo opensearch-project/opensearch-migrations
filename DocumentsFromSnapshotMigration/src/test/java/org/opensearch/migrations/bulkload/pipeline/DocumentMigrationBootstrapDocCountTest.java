@@ -53,7 +53,12 @@ class DocumentMigrationBootstrapDocCountTest {
         var bootstrap = DocumentMigrationBootstrap.builder()
             .documentSource(source)
             .targetClient(mock(OpenSearchClient.class))
-            .shardDocCountReporter((wi, total) -> count.set(total))
+            .cursorConsumer(cursor -> {
+                if (cursor.isShardComplete()) {
+                    count.set(cursor.getLiveLuceneDocCount() == null
+                        ? OptionalLong.empty() : OptionalLong.of(cursor.getLiveLuceneDocCount()));
+                }
+            })
             .build();
         var workItem = new WorkItemAndDuration(Instant.now().plusSeconds(60),
             new WorkItemAndDuration.WorkItem("idx", 0, startingPosition));

@@ -2393,9 +2393,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": "rfs-failed-document-stream/"
                     },
-                    "shardDocCountS3Prefix": {
+                    "committedMetricsS3Prefix": {
                       "type": "string",
-                      "default": "rfs-shard-doc-counts/"
+                      "default": "rfs-committed-metrics/"
                     },
                     "failedDocumentStreamS3Bucket": {
                       "type": "string",
@@ -5404,10 +5404,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": "rfs-failed-document-stream/",
                         "description": "S3 key prefix for the failed document stream where terminal document failures are persisted. Each RFS run writes under <prefix>/session=<workflow-uid>/. Defaults to 'rfs-failed-document-stream/'."
                       },
-                      "shardDocCountS3Prefix": {
+                      "committedMetricsS3Prefix": {
                         "type": "string",
-                        "default": "rfs-shard-doc-counts/",
-                        "description": "S3 key prefix for full-snapshot shard counts used to validate backfills. Uses the configured failed document stream bucket, region and endpoint, under <prefix>/session=<workflow-uid>/. Deduplicate retries before summing by index. Counts are always logged. Defaults to 'rfs-shard-doc-counts/'."
+                        "default": "rfs-committed-metrics/",
+                        "description": "S3 key prefix for backfill metrics and snapshot counts. Uses the configured failed document stream bucket, region and endpoint, under <prefix>/session=<workflow-uid>/. Aggregate only records whose commit IDs are recorded in the work coordinator. Defaults to 'rfs-committed-metrics/'."
                       },
                       "failedDocumentStreamS3Bucket": {
                         "type": "string",

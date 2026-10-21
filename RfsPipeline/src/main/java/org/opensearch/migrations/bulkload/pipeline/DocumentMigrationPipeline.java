@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
@@ -97,7 +98,7 @@ public class DocumentMigrationPipeline {
         this.maxDocsPerBatch = maxDocsPerBatch;
         this.maxBytesPerBatch = maxBytesPerBatch;
         this.partitionConcurrency = partitionConcurrency;
-        this.batchConcurrency = batchConcurrency;
+        this.batchConcurrency = source.requiresOrderedWrites() ? 1 : batchConcurrency;
     }
 
     /** Snapshot of pipeline progress, safe to read from any thread. */
@@ -130,8 +131,6 @@ public class DocumentMigrationPipeline {
      */
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
         return Flux.defer(() -> {
-            // Subscription-local state: a retry must start from the original checkpoint.
-            final long[] fallbackPosition = { startingPosition };
             currentPartition.set(partition);
             return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
@@ -140,23 +139,28 @@ public class DocumentMigrationPipeline {
                     activeBatches.incrementAndGet();
                     // Preserve the source position before handing the batch to the sink.
                     var lastPosition = batch.get(batch.size() - 1).position();
+                    var sourceMetrics = MigrationMetrics.Source.fromDocuments(batch);
                     return Mono.defer(() -> sink.writeBatch(collectionName, batch))
-                        .map(result -> new CompletedBatch(lastPosition, batch.size(), result))
+                        .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
                         .doFinally(s -> activeBatches.decrementAndGet());
                 }, batchConcurrency)
                 // Advance checkpoints in emission order; writes may complete out of order.
-                .map(batch -> {
+                .scan(new ProgressCursor(partition, startingPosition, 0, 0, MigrationMetrics.ZERO), (previous, batch) -> {
                     var result = batch.result();
-                    fallbackPosition[0] += batch.sourceDocs();
+                    var sourceMetrics = batch.sourceMetrics();
                     totalDocs.addAndGet(result.docsInBatch());
                     totalBytes.addAndGet(result.bytesInBatch());
                     return new ProgressCursor(
                         partition,
-                        batch.lastPosition().orElse(fallbackPosition[0]),
+                        batch.lastPosition().isPresent()
+                            ? Math.addExact(batch.lastPosition().getAsLong(), 1)
+                            : Math.addExact(previous.nextPosition(), Math.addExact(sourceMetrics.upserts(), sourceMetrics.deletes())),
                         result.docsInBatch(),
-                        result.bytesInBatch()
+                        result.bytesInBatch(),
+                        previous.metrics().plus(new MigrationMetrics(sourceMetrics, result.requests()))
                     );
                 })
+                .skip(1)
                 .onErrorMap(e -> !(e instanceof PipelineException),
                     e -> new PipelineException("Failed migrating partition " + partition, e));
         });
@@ -164,7 +168,9 @@ public class DocumentMigrationPipeline {
 
     // Sonar flags the compiler-generated record constructor parameters as unused.
     @SuppressWarnings("java:S1172")
-    private record CompletedBatch(OptionalLong lastPosition, int sourceDocs, BatchResult result) {}
+    private record CompletedBatch(
+        OptionalLong lastPosition, MigrationMetrics.Source sourceMetrics, BatchResult result
+    ) {}
 
     /**
      * Migrate all partitions for a collection. Creates the collection first, then migrates

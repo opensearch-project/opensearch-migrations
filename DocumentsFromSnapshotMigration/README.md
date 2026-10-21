@@ -338,11 +338,10 @@ Common exception types that can be allowlisted:
 
 **Note:** Use this feature carefully. Allowlisting exceptions means those errors will be silently treated as success, which may mask legitimate issues if used incorrectly.
 
-## Shard document counts
+## Committed metrics
 
-For a full snapshot, Document Backfill logs each shard's live Lucene document
-count and can export it to S3. Sum one count per snapshot shard by index to
-validate the target's `_cat/indices docs.count`, even when the source has kept
-ingesting. See [snapshot document counts](../docs/shardDocumentCounts.md) for
-aggregation, retry handling, and comparison requirements. Delta backfills are
-excluded.
+Document Backfill commits source operations, request totals, and snapshot counts
+with each work-item checkpoint. Sum the committed ranges to measure completed
+work, and use snapshot counts to validate the target even while the source keeps
+ingesting. See [committed metrics](../docs/committedMetrics.md) for S3 exports,
+aggregation, delta counts, and target comparison requirements.

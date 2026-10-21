@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -211,6 +212,18 @@ public class SnapshotExtractor {
         Path workDir,
         Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
     ) {
+        return readDeltaDocuments(currentShard, previousShard, deltaMode, workDir, deltaContextFactory,
+            (previous, current) -> {});
+    }
+
+    public Flux<LuceneDocumentChange> readDeltaDocuments(
+        ShardEntry currentShard,
+        ShardEntry previousShard,
+        DeltaMode deltaMode,
+        Path workDir,
+        Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory,
+        BiConsumer<Long, Long> liveDocCounts
+    ) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -245,8 +258,12 @@ public class SnapshotExtractor {
 
         DeltaLuceneReader.DeltaResult deltaResult;
         try (var deltaContext = deltaContextFactory.get()) {
+            liveDocCounts.accept(LuceneReader.countLiveDocs(previousReader), LuceneReader.countLiveDocs(currentReader));
             deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
                 previousReader, currentReader, 0, deltaContext);
+        } catch (RuntimeException | Error e) {
+            LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader).run();
+            throw e;
         }
 
         var deletions = switch (deltaMode) {

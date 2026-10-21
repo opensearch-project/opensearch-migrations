@@ -28,6 +28,7 @@ import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.parsing.BulkResponseParser.ItemFailure;
@@ -525,20 +526,22 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
-        final var pendingDocs = new ArrayList<BulkOperationSpec>(docs);
-        return executeBulkWithRetry(
-            indexName,
-            () -> {
-                List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
-                    ? pendingDocs.stream().map(this::stripDocumentId).collect(Collectors.toList())
-                    : pendingDocs;
-                return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
-            },
-            pendingDocs,
-            () -> {},
-            context,
-            allowlist
-        );
+        return Mono.defer(() -> {
+            final var pendingDocs = new ArrayList<BulkOperationSpec>(docs);
+            return executeBulkWithRetry(
+                indexName,
+                () -> {
+                    List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
+                        ? pendingDocs.stream().map(this::stripDocumentId).collect(Collectors.toList())
+                        : pendingDocs;
+                    return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
+                },
+                pendingDocs,
+                () -> {},
+                context,
+                allowlist
+            );
+        });
     }
 
     /**
@@ -549,35 +552,37 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
-        final var pendingRawDocs = new ArrayList<>(docs);
-        final var pendingOps = new ArrayList<BulkOperationSpec>();
+        return Mono.defer(() -> {
+            final var pendingRawDocs = new ArrayList<>(docs);
+            final var pendingOps = new ArrayList<BulkOperationSpec>();
 
-        // On first error, convert raw docs to ops for compaction tracking
-        Runnable lazyConvert = () -> {
-            if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
-                for (var doc : pendingRawDocs) {
-                    pendingOps.add(docToBulkOp(doc, indexName));
-                }
-                pendingRawDocs.clear();
-            }
-        };
-
-        return executeBulkWithRetry(
-            indexName,
-            () -> {
+            // On first error, convert raw docs to ops for compaction tracking
+            Runnable lazyConvert = () -> {
                 if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
-                    return buildRawNdjsonBytes(pendingRawDocs, indexName, allowServerGeneratedIds);
+                    for (var doc : pendingRawDocs) {
+                        pendingOps.add(docToBulkOp(doc, indexName));
+                    }
+                    pendingRawDocs.clear();
                 }
-                List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
-                    ? pendingOps.stream().map(this::stripDocumentId).collect(Collectors.toList())
-                    : pendingOps;
-                return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
-            },
-            pendingOps,
-            lazyConvert,
-            context,
-            allowlist
-        );
+            };
+
+            return executeBulkWithRetry(
+                indexName,
+                () -> {
+                    if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
+                        return buildRawNdjsonBytes(pendingRawDocs, indexName, allowServerGeneratedIds);
+                    }
+                    List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
+                        ? pendingOps.stream().map(this::stripDocumentId).collect(Collectors.toList())
+                        : pendingOps;
+                    return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
+                },
+                pendingOps,
+                lazyConvert,
+                context,
+                allowlist
+            );
+        });
     }
 
     /**
@@ -599,10 +604,18 @@ public abstract class OpenSearchClient {
         DocumentExceptionAllowlist allowlist
     ) {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
-
+        var totals = new RequestTotals();
         return Mono.defer(() -> {
             var bodyBytes = bodyBuilder.get();
+            if (bodyBytes.length == 0) {
+                return Mono.just(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"));
+            }
+            totals.attempts++;
+            totals.bytes += bodyBytes.length;
+            long start = System.nanoTime();
             return postBulkRequest(indexName, bodyBytes, context)
+                .doOnSuccess(response -> totals.durationNanos += System.nanoTime() - start)
+                .doOnError(error -> totals.durationNanos += System.nanoTime() - start)
                 .flatMap(response -> {
                     var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
 
@@ -651,7 +664,16 @@ public abstract class OpenSearchClient {
                     .addArgument(indexName)
                     .log();
             }
-        });
+        })
+        .map(response -> new BulkResponse(response.statusCode, response.statusText, response.headers, response.body,
+            new MigrationMetrics.Requests(
+                1, totals.attempts, totals.bytes, totals.durationNanos)));
+    }
+
+    private static final class RequestTotals {
+        long attempts;
+        long bytes;
+        long durationNanos;
     }
 
     private Mono<HttpResponse> postBulkRequest(String indexName, byte[] bodyBytes,
@@ -671,7 +693,7 @@ public abstract class OpenSearchClient {
     private static BulkOperationSpec docToBulkOp(Document doc, String indexName) {
         return BulkOperationConverter.fromDocument(doc, indexName);
     }
-    
+
     /**
      * Partitions the bulk response into success / non-retryable / retryable buckets,
      * emits one failed document stream record per non-retryable failure, and compacts {@code pendingDocs}
@@ -864,8 +886,17 @@ public abstract class OpenSearchClient {
     }
 
     public static class BulkResponse extends HttpResponse {
+        public final MigrationMetrics.Requests requests;
+
         public BulkResponse(int statusCode, String statusText, Map<String, String> headers, String body) {
+            this(statusCode, statusText, headers, body,
+                MigrationMetrics.Requests.ZERO);
+        }
+
+        public BulkResponse(int statusCode, String statusText, Map<String, String> headers, String body,
+                            MigrationMetrics.Requests requests) {
             super(statusCode, statusText, headers, body);
+            this.requests = requests;
         }
 
         public boolean hasBadStatusCode() {

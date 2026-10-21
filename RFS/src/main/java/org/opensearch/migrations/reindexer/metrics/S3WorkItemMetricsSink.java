@@ -1,4 +1,4 @@
-package org.opensearch.migrations.reindexer.doccount;
+package org.opensearch.migrations.reindexer.metrics;
 
 import java.time.Duration;
 import java.time.ZoneOffset;
@@ -16,19 +16,19 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
-/** Writes shard counts as gzip NDJSON; flush before completing the work item. */
-public class S3ShardDocCountSink implements ShardDocCountSink {
+/** Writes prepared work-item metrics as gzip NDJSON. */
+public class S3WorkItemMetricsSink implements WorkItemMetricsSink {
     private static final DateTimeFormatter TIMESTAMP_FORMAT =
         DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
     private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     private final String location;
-    private final RotatingGzipS3ObjectWriter<ShardDocCountRecord> writer;
-    private final Scheduler scheduler = Schedulers.newSingle("shard-doc-count-sink", true);
+    private final RotatingGzipS3ObjectWriter<WorkItemMetricsRecord> writer;
+    private final Scheduler scheduler = Schedulers.newSingle("committed-metrics-sink", true);
     private final AtomicBoolean closed = new AtomicBoolean();
 
     @Builder
-    public S3ShardDocCountSink(
+    public S3WorkItemMetricsSink(
         String bucket,
         String prefix,
         String sessionId,
@@ -41,12 +41,12 @@ public class S3ShardDocCountSink implements ShardDocCountSink {
             uploader,
             bucket,
             (now, seq) -> normalizedPrefix + "session=" + sessionId + "/worker=" + workerId
-                + "/shard-doc-counts-" + TIMESTAMP_FORMAT.format(now) + "-" + seq + ".ndjson.gz",
+                + "/committed-metrics-" + TIMESTAMP_FORMAT.format(now) + "-" + seq + ".ndjson.gz",
             MAPPER::writeValueAsBytes,
             RotationPolicy.ofBytes(0),
             Duration.ZERO,
             1,
-            "sdc-");
+            "metrics-");
     }
 
     private static String normalizePrefix(String prefix) {
@@ -55,9 +55,9 @@ public class S3ShardDocCountSink implements ShardDocCountSink {
     }
 
     @Override
-    public Mono<Void> write(ShardDocCountRecord countRecord) {
+    public Mono<Void> write(WorkItemMetricsRecord record) {
         return onWriter(() -> {
-            var appended = writer.write(countRecord);
+            var appended = writer.write(record);
             // A successful append remains pending until flush uploads its object.
             return appended.isCompletedExceptionally() ? Mono.fromFuture(appended) : Mono.empty();
         });
@@ -70,7 +70,7 @@ public class S3ShardDocCountSink implements ShardDocCountSink {
 
     private Mono<Void> onWriter(Supplier<Mono<Void>> operation) {
         return Mono.defer(() -> closed.get()
-            ? Mono.error(new IllegalStateException("S3ShardDocCountSink is closed"))
+            ? Mono.error(new IllegalStateException("S3WorkItemMetricsSink is closed"))
             : Mono.defer(operation).subscribeOn(scheduler));
     }
 

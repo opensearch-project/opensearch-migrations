@@ -204,12 +204,19 @@ class OpenSearchClientTest {
             false,
             DocumentExceptionAllowlist.empty()
         );
-        responseMono.block();
-
-        // Assertions
-        // StepVerifier.create(responseMono).expectComplete().verify();
-
-        verify(restClient, times(4)).postAsyncBytes(any(), any(), any(), any());
+        var response = responseMono.block();
+        var requests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(4)).postAsyncBytes(any(), requests.capture(), any(), any());
+        assertEquals(1, response.requests.batches());
+        assertEquals(4, response.requests.attempts());
+        assertEquals(requests.getAllValues().stream().mapToLong(bytes -> bytes.length).sum(), response.requests.bytes());
+        org.junit.jupiter.api.Assertions.assertTrue(response.requests.durationNanos() > 0);
+        var second = responseMono.block();
+        assertEquals(1, second.requests.attempts());
+        var allRequests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(5)).postAsyncBytes(any(), allRequests.capture(), any(), any());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(
+            allRequests.getAllValues().get(0), allRequests.getAllValues().get(4));
         verifyNoInteractions(failedRequestLogger);
     }
 

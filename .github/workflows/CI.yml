@@ -62,6 +62,8 @@ jobs:
       - name: Analysing the code with flake8
         run: |
           flake8 $(git ls-files '*.py')
+      - name: Test committed metrics aggregation
+        run: python3 -m unittest discover -s dev-tools -p 'test_aggregate_committed_metrics.py'
 
   python-tests:
     runs-on: ubuntu-22.04
