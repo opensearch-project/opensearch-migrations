@@ -85,10 +85,10 @@ public class WorkCoordinatorTest {
         var parent = workId("index", 0, 0);
         var successor = workId("index", 0, 1);
         var parentMetrics = Map.<String, Object>of(
-            "commitId", "parent-commit", "fromPosition", 0, "nextPosition", 1,
+            "workItemId", parent, "fromPosition", 0, "nextPosition", 1,
             "metrics", Map.of("source", Map.of("upserts", 1, "deletes", 0, "bytes", 10)));
         var successorMetrics = Map.<String, Object>of(
-            "commitId", "successor-commit", "fromPosition", 1, "nextPosition", 4,
+            "workItemId", successor, "fromPosition", 1, "nextPosition", 4,
             "metrics", Map.of("source", Map.of("upserts", 3, "deletes", 0, "bytes", 30)));
         var client = httpClientSupplier.get();
         AbstractedHttpClient crashingClient = (method, path, headers, body) -> {

@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Aggregate coordinator search hits or Console archives; optionally verify prepared S3 exports."""
+"""Aggregate committed work-item metrics from one coordinator run or its Console archive."""
 
 import argparse
 from collections import defaultdict
@@ -31,35 +30,31 @@ def coordinator_hits(values):
             yield from ({"_id": work_id, "_source": source} for work_id, source in value.items())
 
 
+def completed_record(hit):
+    source = hit["_source"]
+    if source.get("completedAt") is None:
+        raise ValueError(f"Work item is not complete: {hit['_id']}")
+    if hit["_id"] == "shard_setup":
+        return None
+    record = source.get("committed_metrics")
+    if record is None:
+        raise ValueError(f"Work item has no committed metrics: {hit['_id']}")
+    if record["workItemId"] != hit["_id"] or record["schemaVersion"] != 1:
+        raise ValueError("Unrecognized committed metrics identity or schema")
+    return record
+
+
 def committed_records(values):
     records = {}
     for hit in coordinator_hits(values):
-        if hit["_id"] == "shard_setup":
+        record = completed_record(hit)
+        if record is None:
             continue
-        source = hit["_source"]
-        record = source.get("committed_metrics")
-        if record is None or source.get("completedAt") is None:
-            raise ValueError(f"Work item is not complete: {hit['_id']}")
-        if record["workItemId"] != hit["_id"] or record["schemaVersion"] != 1:
-            raise ValueError("Unrecognized committed metrics identity or schema")
-        key = (record["sessionId"], record["snapshotName"], record["workItemId"])
+        key = (record["snapshotName"], record["workItemId"])
         if key in records and records[key] != record:
-            raise ValueError(f"Conflicting commits for {hit['_id']}")
+            raise ValueError(f"Conflicting metrics for {hit['_id']}")
         records[key] = record
     return list(records.values())
-
-
-def verify_exports(records, exports):
-    expected = {record["commitId"]: record for record in records}
-    found = set()
-    for record in exports:
-        commit_id = record["commitId"]
-        if commit_id in expected:
-            if record != expected[commit_id]:
-                raise ValueError(f"S3 record differs from its committed value: {commit_id}")
-            found.add(commit_id)
-    if found != expected.keys():
-        raise ValueError("S3 export is missing committed work items")
 
 
 def validate_shard(identity, work):
@@ -95,38 +90,39 @@ def add_snapshot_counts(totals, final):
 def derive_averages_and_deltas(totals):
     source, requests = totals["source"], totals["requests"]
     totals["averageSourceDocumentBytes"] = source["bytes"] / source["upserts"] if source["upserts"] else None
-    attempts = requests["attempts"]
-    totals["averageRequestBytes"] = requests["bytes"] / attempts if attempts else None
-    totals["averageRequestDurationNanos"] = requests["durationNanos"] / attempts if attempts else None
+    total = requests["total"]
+    totals["averageRequestBytes"] = requests["bytes"] / total if total else None
+    totals["averageRequestDurationMillis"] = requests["durationMillis"] / total if total else None
     current, previous = totals["liveLuceneDocCount"], totals["previousLiveLuceneDocCount"]
     totals["snapshotLiveLuceneDelta"] = current - previous if current is not None and previous is not None else None
     totals["sourceRootDocumentDelta"] = (
         source["upserts"] - source["deletes"] if totals["deltaMode"] == "UPDATES_AND_DELETES" else None)
 
 
-def aggregate(records, expected_shards):
+def aggregate(records, expected_shards=None):
     shards = defaultdict(list)
     for record in records:
-        shards[(record["sessionId"], record["snapshotName"], record["indexName"], record["shardNumber"])].append(record)
-    if len(shards) != expected_shards:
+        shards[(record["snapshotName"], record["indexName"], record["shardNumber"])].append(record)
+    if expected_shards is not None and len(shards) != expected_shards:
         raise ValueError(f"Expected {expected_shards} snapshot shards; found {len(shards)}")
     indices = {}
     for identity, work in sorted(shards.items()):
         work.sort(key=lambda record: record["fromPosition"])
         validate_shard(identity, work)
         final = work[-1]
-        key = (*identity[:3], final["previousSnapshotName"], final["deltaMode"])
+        key = identity[:2]
         totals = indices.setdefault(key, {
-            "sessionId": identity[0], "snapshotName": identity[1], "indexName": identity[2],
-            "previousSnapshotName": key[3], "deltaMode": key[4], "shards": 0,
+            "snapshotName": identity[0], "indexName": identity[1],
+            "previousSnapshotName": final["previousSnapshotName"], "deltaMode": final["deltaMode"], "shards": 0,
             "source": dict.fromkeys(("upserts", "deletes", "bytes"), 0),
-            "requests": dict.fromkeys(("batches", "attempts", "bytes", "durationNanos"), 0),
+            "requests": dict.fromkeys(("batches", "total", "retries", "bytes", "durationMillis"), 0),
             "liveLuceneDocCount": 0, "previousLiveLuceneDocCount": 0,
         })
         totals["shards"] += 1
         for record in work:
-            if (record["previousSnapshotName"], record["deltaMode"]) != key[3:]:
-                raise ValueError(f"Snapshot mode changed within shard {identity}")
+            if (record["previousSnapshotName"], record["deltaMode"]) != (
+                    totals["previousSnapshotName"], totals["deltaMode"]):
+                raise ValueError(f"Snapshot mode changed within index {key}")
             add_metrics(totals, record["metrics"])
         add_snapshot_counts(totals, final)
     for totals in indices.values():
@@ -134,17 +130,29 @@ def aggregate(records, expected_shards):
     return list(indices.values())
 
 
+def archive_summary(values, expected_shards=None):
+    try:
+        if not any(hit["_source"].get("committed_metrics") is not None for hit in coordinator_hits(values)):
+            return None
+        totals = aggregate(committed_records(values), expected_shards)
+        return {"schemaVersion": 1, "complete": True, "indices": totals}
+    except (ValueError, KeyError, TypeError) as error:
+        return {"schemaVersion": 1, "complete": False, "reason": str(error)}
+
+
+def write_archive_summary(backup_path):
+    path = Path(backup_path)
+    summary = archive_summary(read_json(path))
+    if summary is not None:
+        path.with_suffix(".metrics.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("coordinator", type=Path, nargs="+",
-                        help="JSON search responses, NDJSON hits, or Console archives")
-    parser.add_argument("--expected-shards", type=int, required=True, help="Number of migrated source snapshot shards")
-    parser.add_argument("--s3-records", type=Path, nargs="*", help="Downloaded JSON/NDJSON files, optionally gzipped")
+    parser.add_argument("archive", type=Path, help="Console archive or coordinator search results")
+    parser.add_argument("--expected-shards", type=int, help="Optional independent source shard count")
     args = parser.parse_args()
-    records = committed_records(value for path in args.coordinator for value in read_json(path))
-    if args.s3_records is not None:
-        verify_exports(records, (value for path in args.s3_records for value in read_json(path)))
-    print(json.dumps(aggregate(records, args.expected_shards), indent=2))
+    print(json.dumps(archive_summary(read_json(args.archive), args.expected_shards), indent=2))
 
 
 if __name__ == "__main__":

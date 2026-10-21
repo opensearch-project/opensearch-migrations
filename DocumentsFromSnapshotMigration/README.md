@@ -343,5 +343,5 @@ Common exception types that can be allowlisted:
 Document Backfill commits source operations, request totals, and snapshot counts
 with each work-item checkpoint. Sum the committed ranges to measure completed
 work, and use snapshot counts to validate the target even while the source keeps
-ingesting. See [committed metrics](../docs/committedMetrics.md) for S3 exports,
+ingesting. See [committed metrics](../docs/committedMetrics.md) for coordinator archives,
 aggregation, delta counts, and target comparison requirements.

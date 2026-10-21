@@ -188,7 +188,8 @@ class OpenSearchClientTest {
         var finalDocSuccess = bulkItemResponse(false, List.of(itemEntry(docId2)));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
-        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bothDocsFail).delayElement(Duration.ofMillis(20)))
             .thenReturn(Mono.just(oneFailure))
             .thenReturn(Mono.just(server500))
             .thenReturn(Mono.just(finalDocSuccess));
@@ -208,11 +209,13 @@ class OpenSearchClientTest {
         var requests = ArgumentCaptor.forClass(byte[].class);
         verify(restClient, times(4)).postAsyncBytes(any(), requests.capture(), any(), any());
         assertEquals(1, response.requests.batches());
-        assertEquals(4, response.requests.attempts());
+        assertEquals(4, response.requests.total());
+        assertEquals(3, response.requests.retries());
         assertEquals(requests.getAllValues().stream().mapToLong(bytes -> bytes.length).sum(), response.requests.bytes());
-        org.junit.jupiter.api.Assertions.assertTrue(response.requests.durationNanos() > 0);
+        org.junit.jupiter.api.Assertions.assertTrue(response.requests.durationMillis() >= 10);
         var second = responseMono.block();
-        assertEquals(1, second.requests.attempts());
+        assertEquals(1, second.requests.total());
+        assertEquals(0, second.requests.retries());
         var allRequests = ArgumentCaptor.forClass(byte[].class);
         verify(restClient, times(5)).postAsyncBytes(any(), allRequests.capture(), any(), any());
         org.junit.jupiter.api.Assertions.assertArrayEquals(

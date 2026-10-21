@@ -667,7 +667,8 @@ public abstract class OpenSearchClient {
         })
         .map(response -> new BulkResponse(response.statusCode, response.statusText, response.headers, response.body,
             new MigrationMetrics.Requests(
-                1, totals.attempts, totals.bytes, totals.durationNanos)));
+                1, totals.attempts, Math.max(0, totals.attempts - 1),
+                totals.bytes, Duration.ofNanos(totals.durationNanos).toMillis())));
     }
 
     private static final class RequestTotals {

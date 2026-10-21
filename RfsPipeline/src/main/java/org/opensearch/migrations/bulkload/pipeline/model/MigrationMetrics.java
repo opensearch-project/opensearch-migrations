@@ -44,18 +44,19 @@ public record MigrationMetrics(Source source, Requests requests) {
     }
 
     /** HTTP attempts for completed logical batches, including retries; bytes are uncompressed NDJSON. */
-    public record Requests(long batches, long attempts, long bytes, long durationNanos) {
-        public static final Requests ZERO = new Requests(0, 0, 0, 0);
+    public record Requests(long batches, long total, long retries, long bytes, long durationMillis) {
+        public static final Requests ZERO = new Requests(0, 0, 0, 0, 0);
 
         public Requests {
-            if (batches < 0 || attempts < 0 || bytes < 0 || durationNanos < 0) {
+            if (batches < 0 || total < 0 || retries < 0 || bytes < 0 || durationMillis < 0) {
                 throw new IllegalArgumentException("Request totals must be nonnegative");
             }
         }
 
         public Requests plus(Requests other) {
-            return new Requests(Math.addExact(batches, other.batches), Math.addExact(attempts, other.attempts),
-                Math.addExact(bytes, other.bytes), Math.addExact(durationNanos, other.durationNanos));
+            return new Requests(Math.addExact(batches, other.batches), Math.addExact(total, other.total),
+                Math.addExact(retries, other.retries),
+                Math.addExact(bytes, other.bytes), Math.addExact(durationMillis, other.durationMillis));
         }
     }
 }

@@ -198,7 +198,6 @@ exports[`resolved migration resources extracts resolved resource parameters from
       ],
       "documentBackfillAllowLooseVersionMatching": true,
       "documentBackfillAllowedDocExceptionTypes": [],
-      "documentBackfillCommittedMetricsS3Prefix": "rfs-committed-metrics/",
       "documentBackfillCoordinatorRetryInitialDelayMs": 1000,
       "documentBackfillCoordinatorRetryMaxDelayMs": 64000,
       "documentBackfillCoordinatorRetryMaxRetries": 7,

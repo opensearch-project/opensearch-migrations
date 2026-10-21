@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
@@ -62,11 +61,8 @@ import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
-import org.opensearch.migrations.reindexer.metrics.S3WorkItemMetricsSink;
 import org.opensearch.migrations.reindexer.metrics.WorkItemMetricsRecord;
-import org.opensearch.migrations.reindexer.metrics.WorkItemMetricsSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
-import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
@@ -91,7 +87,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.MDC;
-import reactor.core.publisher.Mono;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 
@@ -324,20 +319,6 @@ public class RfsMigrateDocuments {
 
         @ParametersDelegate
         public FailedDocumentStreamArgs failedDocumentStreamArgs = new FailedDocumentStreamArgs();
-
-        @ParametersDelegate
-        public WorkItemMetricsArgs committedMetricsArgs = new WorkItemMetricsArgs();
-
-    }
-
-    public static class WorkItemMetricsArgs {
-        @Parameter(required = false,
-            names = { "--committed-metrics-s3-prefix" },
-            description = "S3 key prefix for backfill metrics and snapshot counts. "
-                + "Uses the configured failed document stream bucket, region and endpoint. "
-                + "Records land at <prefix>/session=<sessionId>/worker=<workerId>/... "
-                + "Aggregate only records whose commit IDs are recorded in the work coordinator.")
-        public String committedMetricsS3Prefix = "rfs-committed-metrics/";
     }
 
     /**
@@ -695,13 +676,8 @@ public class RfsMigrateDocuments {
         var coordinatorFactory = new WorkCoordinatorFactory(
             coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
         var cleanShutdownCompleted = new AtomicBoolean(false);
-        var sessionId = resolveSessionId(arguments, workerId);
-        var metricsSink = buildWorkItemMetricsSink(arguments, workerId, sessionId);
-        var metricsReporter = committedMetricsReporter(metricsSink, sessionId, workerId, arguments.snapshotName,
+        var metricsReporter = committedMetricsReporter(arguments.snapshotName,
             arguments.experimental.previousSnapshotName, arguments.experimental.experimentalDeltaMode);
-        if (metricsSink != null) {
-            System.out.println("RFS_COMMITTED_METRICS_LOCATION=" + metricsSink.getLocation());
-        }
 
         try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
@@ -739,7 +715,15 @@ public class RfsMigrateDocuments {
                 } catch (Exception e) {
                     log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
                 } finally {
-                    closeSinks(metricsSink, failedDocumentStreamSink);
+                    // Close the failed document stream sink so any buffered records get flushed to S3 before
+                    // the JVM exits. Safe to call even if completeWorkItem was never reached.
+                    if (failedDocumentStreamSink != null) {
+                        try {
+                            failedDocumentStreamSink.close();
+                        } catch (Exception e) {
+                            log.atError().setCause(e).setMessage("Error closing failed document stream sink during shutdown").log();
+                        }
+                    }
                     LogManager.shutdown();
                 }
             }));
@@ -750,7 +734,18 @@ public class RfsMigrateDocuments {
                 workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider,
                 metricsReporter);
             cleanShutdownCompleted.set(true);
-            closeSinks(metricsSink, failedDocumentStreamSink);
+            // Close the failed document stream sink on the normal (WORK_COMPLETED) path too. This flushes
+            // any buffered records and shuts down the sink's worker thread. The shutdown hook also closes
+            // it, but only fires on JVM termination signals; the WORK_COMPLETED path returns from main()
+            // without System.exit and relies on natural JVM shutdown, so we must release the sink here so
+            // it can't delay exit (the sink worker is a daemon as a backstop, but closing is cleaner).
+            if (failedDocumentStreamSink != null) {
+                try {
+                    failedDocumentStreamSink.close();
+                } catch (Exception e) {
+                    log.atWarn().setCause(e).setMessage("Error closing failed document stream sink after work completion").log();
+                }
+            }
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
                 System.exit(NO_WORK_AVAILABLE_EXIT_CODE);
@@ -773,18 +768,6 @@ public class RfsMigrateDocuments {
             }
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
-        }
-    }
-
-    private static void closeSinks(AutoCloseable... sinks) {
-        for (var sink : sinks) {
-            if (sink != null) {
-                try {
-                    sink.close();
-                } catch (Exception e) {
-                    log.warn("Error closing {}", sink.getClass().getSimpleName(), e);
-                }
-            }
         }
     }
 
@@ -920,15 +903,11 @@ public class RfsMigrateDocuments {
     }
 
     static BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> committedMetricsReporter(
-        WorkItemMetricsSink sink, String sessionId, String workerId, String snapshotName,
-        String previousSnapshotName, DeltaMode deltaMode
+        String snapshotName, String previousSnapshotName, DeltaMode deltaMode
     ) {
         var mapper = new ObjectMapper();
         return (workItem, cursor) -> {
             var record = WorkItemMetricsRecord.builder()
-                .commitId(UUID.randomUUID().toString())
-                .sessionId(sessionId)
-                .workerId(workerId)
                 .workItemId(workItem.toString())
                 .indexName(workItem.getIndexName())
                 .shardNumber(workItem.getShardNumber())
@@ -941,11 +920,7 @@ public class RfsMigrateDocuments {
                 .metrics(cursor.getMetrics())
                 .liveLuceneDocCount(cursor.getLiveLuceneDocCount())
                 .previousLiveLuceneDocCount(cursor.getPreviousLiveLuceneDocCount())
-                .timestamp(Instant.now().toString())
                 .build();
-            if (sink != null) {
-                sink.write(record).then(Mono.defer(sink::flush)).block(Duration.ofMinutes(5));
-            }
             return mapper.convertValue(record, new TypeReference<Map<String, Object>>() {});
         };
     }
@@ -1061,36 +1036,6 @@ public class RfsMigrateDocuments {
             .region(region)
             .uploader(S3FailedDocumentStreamSink.s3ClientUploader(s3Client))
             .maxBufferBytes(arguments.failedDocumentStreamArgs.failedDocumentStreamMaxBufferBytes)
-            .build();
-    }
-
-    static WorkItemMetricsSink buildWorkItemMetricsSink(Args arguments, String workerId, String sessionId) {
-        String bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
-        if (bucket == null || bucket.isBlank()) {
-            return null;
-        }
-        var region = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region != null
-            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region
-            : arguments.s3Region;
-        if (region == null) {
-            return null;
-        }
-
-        var s3ClientBuilder = S3AsyncClient.builder().region(Region.of(region));
-        var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
-            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
-            : arguments.endpoint;
-        if (endpoint != null && !endpoint.isBlank()) {
-            s3ClientBuilder.endpointOverride(URI.create(endpoint));
-        }
-        var s3Client = s3ClientBuilder.build();
-
-        return S3WorkItemMetricsSink.builder()
-            .bucket(bucket)
-            .prefix(arguments.committedMetricsArgs.committedMetricsS3Prefix)
-            .sessionId(sessionId)
-            .workerId(workerId)
-            .uploader(RotatingGzipS3ObjectWriter.s3ObjectUploader(s3Client))
             .build();
     }
 
