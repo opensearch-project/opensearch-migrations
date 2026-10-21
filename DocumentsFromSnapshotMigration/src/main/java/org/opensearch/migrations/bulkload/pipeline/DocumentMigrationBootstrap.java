@@ -29,24 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/**
- * Top-level wiring for the clean pipeline approach. Connects all adapters and provides
- * work-coordinated execution for horizontal scaling.
- *
- * <pre>
- * var runner = DocumentMigrationBootstrap.builder()
- *     .extractor(snapshotExtractor)
- *     .targetClient(openSearchClient)
- *     .snapshotName("my-snapshot")
- *     .workDir(Paths.get("/tmp/lucene"))
- *     .workCoordinator(scopedWorkCoordinator)
- *     .maxInitialLeaseDuration(Duration.ofMinutes(10))
- *     .cursorConsumer(progressCursor::set)
- *     .cancellationTriggerConsumer(cancellationRef::set)
- *     .build();
- * runner.migrateOneShard(contextSupplier);
- * </pre>
- */
+/** Coordinates source reads, target writes, and work leases. */
 @Slf4j
 @Builder
 @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
@@ -217,10 +200,6 @@ public class DocumentMigrationBootstrap {
             long start = System.currentTimeMillis();
             latch.await(); // Bridge reactive→sync: block until pipeline subscription completes
             long durationMs = System.currentTimeMillis() - start;
-            // shardLiveLuceneDocs is the whole shard, matching _cat/indices docs.count: nested
-            // children are separate Lucene documents and are counted. The other figures cover only
-            // this lease generation, so they are named accordingly -- a shard that outlives its
-            // lease is reported once per generation and the values must not be summed.
             var shardLiveLuceneDocs = documentSource.countLiveDocuments(partition);
             log.atInfo()
                 .setMessage("Partition migration stats: index={}, shard={}, sourcePartition={}, docsThisGeneration={}, "
@@ -233,7 +212,7 @@ public class DocumentMigrationBootstrap {
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)
                 .addArgument(durationMs)
-                .addArgument(() -> shardLiveLuceneDocs.isPresent()
+                .addArgument(shardLiveLuceneDocs.isPresent()
                     ? Long.toString(shardLiveLuceneDocs.getAsLong()) : "unknown")
                 .log();
 

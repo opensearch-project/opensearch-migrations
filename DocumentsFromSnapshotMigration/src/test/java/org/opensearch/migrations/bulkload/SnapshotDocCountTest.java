@@ -47,8 +47,6 @@ public class SnapshotDocCountTest extends SourceTestBase {
     private File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        // Lucene 9 (OS 2.19) and Lucene 8 (ES 7.10) sources. Root-only markers differ by
-        // Lucene generation, so cover more than one.
         return Stream.of(
             Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_4),
             Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V2_19_4)
@@ -106,9 +104,6 @@ public class SnapshotDocCountTest extends SourceTestBase {
                 "{\"settings\":{\"number_of_shards\":" + SHARDS + ",\"number_of_replicas\":0},"
                 + "\"mappings\":{\"properties\":{" + properties + "}}}");
 
-            // 5 root documents with varying numbers of nested children, including one with
-            // none. Children are indexed as separate Lucene docs in the same block as their
-            // root, so docs.count will exceed _count.
             int[] childCounts = { 2, 3, 0, 1, 4 };
             int expectedChildren = 0;
             for (int i = 0; i < childCounts.length; i++) {
@@ -124,9 +119,6 @@ public class SnapshotDocCountTest extends SourceTestBase {
             }
             sourceOps.refresh(NESTED_INDEX);
 
-            // Update one root so the shard also carries deleted Lucene docs. The update
-            // replaces the whole block (root + its children), so liveDocs is non-null and the
-            // count must ignore the dead docs.
             sourceOps.createDocument(NESTED_INDEX, "root0",
                 "{\"title\":\"doc 0 updated\",\"answers\":[{\"user\":\"z\",\"score\":9}]}");
             sourceOps.refresh(NESTED_INDEX);
@@ -134,8 +126,6 @@ public class SnapshotDocCountTest extends SourceTestBase {
 
             int expectedRoots = childCounts.length;
 
-            // Establish the divergence really exists on this source, so a green assertion
-            // below cannot be an artifact of a fixture without nested children.
             int sourceCount = countViaCountApi(sourceOps, NESTED_INDEX);
             int sourceDocsCount = docsCountViaCat(sourceOps, NESTED_INDEX);
             log.info("source _count={}, source docs.count={}, expectedRoots={}, expectedChildren={}",
@@ -149,7 +139,6 @@ public class SnapshotDocCountTest extends SourceTestBase {
             Assertions.assertTrue(sourceDocsCount > sourceCount,
                 "the two counts must diverge for this test to be meaningful");
 
-            // === Snapshot and migrate ===
             var snapshotName = "nested_snap";
             var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                 .host(sourceCluster.getUrl())
@@ -167,7 +156,6 @@ public class SnapshotDocCountTest extends SourceTestBase {
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
 
-            // Ongoing ingestion changes the live source; it must not change this backfill's baseline.
             sourceOps.createDocument(NESTED_INDEX, "after-snapshot",
                 "{\"title\":\"new\",\"answers\":[{\"user\":\"later\",\"score\":1}]}");
             sourceOps.refresh(NESTED_INDEX);
@@ -211,7 +199,6 @@ public class SnapshotDocCountTest extends SourceTestBase {
                     "sum one count per shard to recover the snapshot's index count");
             }
 
-            // docs.count includes nested children, unlike _count.
             targetOps.refresh();
             int targetCount = countViaCountApi(targetOps, NESTED_INDEX);
 
