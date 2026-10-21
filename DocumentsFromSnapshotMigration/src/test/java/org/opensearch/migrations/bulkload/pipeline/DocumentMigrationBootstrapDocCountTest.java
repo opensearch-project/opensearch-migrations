@@ -1,10 +1,10 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
@@ -15,7 +15,6 @@ import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration;
-import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import org.junit.jupiter.api.Test;
@@ -30,10 +29,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class DocumentMigrationBootstrapDocCountTest {
-    private record Counts(OptionalLong source, OptionalLong lucene, long thisGeneration, OptionalLong prior) {}
-    private record Result(List<WorkItemCursor> cursors, Counts counts) {}
+    private record Result(int documentsRead, OptionalLong snapshotCount) {}
 
-    private Result migrate(int roots, WorkItemAndDuration workItem, OptionalLong luceneCount) {
+    private Result migrate(int roots, long startingPosition, OptionalLong luceneCount) {
         var partition = new EsShardPartition("snap", "idx", 0);
         var documents = IntStream.range(0, roots)
             .mapToObj(i -> new Document("doc-" + i, new byte[] {1}, Document.Operation.UPSERT,
@@ -44,60 +42,44 @@ class DocumentMigrationBootstrapDocCountTest {
         when(source.countLiveDocuments(partition)).thenReturn(luceneCount);
         when(source.readDocuments(any(), anyLong())).thenAnswer(call -> Flux.fromIterable(documents)
             .filter(doc -> doc.position().orElseThrow() >= call.<Long>getArgument(1)));
+        var processed = new AtomicInteger();
         var sink = mock(DocumentSink.class);
         when(sink.writeBatch(any(), any())).thenAnswer(call -> {
             List<Document> batch = call.getArgument(1);
+            processed.addAndGet(batch.size());
             return Mono.just(new BatchResult(batch.size(), batch.size()));
         });
-        var cursors = new ArrayList<WorkItemCursor>();
-        var counts = new AtomicReference<Counts>();
+        var count = new AtomicReference<OptionalLong>();
         var bootstrap = DocumentMigrationBootstrap.builder()
             .documentSource(source)
             .targetClient(mock(OpenSearchClient.class))
-            .cursorConsumer(cursors::add)
-            .shardDocCountReporter((wi, total, lucene, thisGen, prior) ->
-                counts.set(new Counts(total, lucene, thisGen, prior)))
+            .shardDocCountReporter((wi, total) -> count.set(total))
             .build();
+        var workItem = new WorkItemAndDuration(Instant.now().plusSeconds(60),
+            new WorkItemAndDuration.WorkItem("idx", 0, startingPosition));
         try (var context = DocumentMigrationTestContext.factory().noOtelTracking().createReindexContext()) {
             bootstrap.runPartitionMigration(workItem, new PipelineConfig(source, sink, 10, 1000, 3), context);
         }
-        return new Result(cursors, counts.get());
-    }
-
-    private static WorkItemAndDuration workItem(long position, OptionalLong count) {
-        return new WorkItemAndDuration(Instant.now().plusSeconds(60),
-            new WorkItemAndDuration.WorkItem("idx", 0, position), count);
+        return new Result(processed.get(), count.get());
     }
 
     @Test
-    void multiDocumentBatchesPreserveTheTotalAcrossThreeGenerations() {
-        var first = migrate(30, workItem(0, OptionalLong.of(0)), OptionalLong.of(150));
-        var checkpoint = first.cursors().get(0);
-        assertEquals(49, checkpoint.getProgressCheckpointNum());
-        assertEquals(OptionalLong.of(9), checkpoint.getDocsBeforeCheckpoint());
-        var second = migrate(30, workItem(checkpoint.getProgressCheckpointNum(),
-            checkpoint.getDocsBeforeCheckpoint()), OptionalLong.of(150));
-        assertEquals(OptionalLong.of(30), second.counts().source());
-        assertEquals(21, second.counts().thisGeneration());
-        checkpoint = second.cursors().get(0);
-        var third = migrate(30, workItem(checkpoint.getProgressCheckpointNum(),
-            checkpoint.getDocsBeforeCheckpoint()), OptionalLong.of(150));
-        assertEquals(OptionalLong.of(30), third.counts().source());
-        assertEquals(OptionalLong.of(150), third.counts().lucene());
+    void snapshotCountIsIndependentOfResumePosition() {
+        var full = migrate(5, 0, OptionalLong.of(25));
+        var resumed = migrate(5, 14, OptionalLong.of(25));
+        assertEquals(5, full.documentsRead());
+        assertEquals(3, resumed.documentsRead());
+        assertEquals(full.snapshotCount(), resumed.snapshotCount());
+        assertEquals(OptionalLong.of(25), resumed.snapshotCount());
     }
 
     @Test
-    void unknownCountsStayUnknownAcrossHandoffs() {
-        var result = migrate(30, workItem(49, OptionalLong.empty()), OptionalLong.empty());
-        assertTrue(result.counts().source().isEmpty());
-        assertTrue(result.counts().lucene().isEmpty());
-        assertTrue(result.counts().prior().isEmpty());
-        assertTrue(result.cursors().stream().allMatch(c -> c.getDocsBeforeCheckpoint().isEmpty()));
+    void unavailableCountStaysUnknown() {
+        assertTrue(migrate(5, 0, OptionalLong.empty()).snapshotCount().isEmpty());
     }
 
     @Test
-    void anEmptyShardReportsKnownZeroCounts() {
-        var result = migrate(0, workItem(0, OptionalLong.of(0)), OptionalLong.of(0));
-        assertEquals(new Counts(OptionalLong.of(0), OptionalLong.of(0), 0, OptionalLong.of(0)), result.counts());
+    void emptyShardReportsZero() {
+        assertEquals(OptionalLong.of(0), migrate(0, 0, OptionalLong.of(0)).snapshotCount());
     }
 }

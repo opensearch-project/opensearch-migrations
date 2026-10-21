@@ -340,7 +340,9 @@ Common exception types that can be allowlisted:
 
 ## Shard document counts
 
-Document Backfill logs source-document totals across lease generations and the
-live Lucene count when available. It can also export these counts to S3. See
-[shard document counts](../docs/shardDocumentCounts.md) for configuration, count
-semantics, and retry handling.
+For a full snapshot, Document Backfill logs each shard's live Lucene document
+count and can export it to S3. Sum one count per snapshot shard by index to
+validate the target's `_cat/indices docs.count`, even when the source has kept
+ingesting. See [snapshot document counts](../docs/shardDocumentCounts.md) for
+aggregation, retry handling, and comparison requirements. Delta backfills are
+excluded.

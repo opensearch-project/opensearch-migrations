@@ -5407,7 +5407,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "shardDocCountS3Prefix": {
                         "type": "string",
                         "default": "rfs-shard-doc-counts/",
-                        "description": "S3 key prefix for completed shard counts. Uses the configured failed document stream bucket, region and endpoint. Records include source documents processed and the live Lucene count when available, under <prefix>/session=<workflow-uid>/. Counts are always logged. Defaults to 'rfs-shard-doc-counts/'."
+                        "description": "S3 key prefix for full-snapshot shard counts used to validate backfills. Uses the configured failed document stream bucket, region and endpoint, under <prefix>/session=<workflow-uid>/. Deduplicate retries before summing by index. Counts are always logged. Defaults to 'rfs-shard-doc-counts/'."
                       },
                       "failedDocumentStreamS3Bucket": {
                         "type": "string",

@@ -28,17 +28,16 @@ class ShardDocCountReporterTest {
         when(sink.write(any())).thenReturn(Mono.empty());
         when(sink.flush()).thenReturn(Mono.empty());
         var workItem = new WorkItem("idx", 2, 42L);
-        RfsMigrateDocuments.shardDocCountReporter(sink, "session", "worker")
-            .report(workItem, OptionalLong.empty(), OptionalLong.empty(), 5, OptionalLong.empty());
+        RfsMigrateDocuments.shardDocCountReporter(sink, "session", "worker", "snapshot")
+            .report(workItem, OptionalLong.empty());
         var captured = ArgumentCaptor.forClass(ShardDocCountRecord.class);
         verify(sink).write(captured.capture());
         var record = captured.getValue();
         assertEquals("session", record.getSessionId());
         assertEquals("worker", record.getWorkerId());
         assertEquals(workItem.toString(), record.getWorkItemId());
-        assertNull(record.getSourceDocCount());
         assertNull(record.getLiveLuceneDocCount());
-        assertNull(record.getDocsPriorGenerations());
+        assertEquals("snapshot", record.getSnapshotName());
     }
 
     @Test
@@ -50,7 +49,7 @@ class ShardDocCountReporterTest {
             assertTrue(written.get());
             return Mono.error(new IOException("upload failed"));
         });
-        assertThrows(Exception.class, () -> RfsMigrateDocuments.shardDocCountReporter(sink, "s", "w")
-            .report(new WorkItem("idx", 0, 0L), OptionalLong.of(0), OptionalLong.of(0), 0, OptionalLong.of(0)));
+        assertThrows(Exception.class, () -> RfsMigrateDocuments.shardDocCountReporter(sink, "s", "w", "snapshot")
+            .report(new WorkItem("idx", 0, 0L), OptionalLong.of(0)));
     }
 }

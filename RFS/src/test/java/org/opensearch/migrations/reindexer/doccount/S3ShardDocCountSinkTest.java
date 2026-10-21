@@ -60,21 +60,14 @@ class S3ShardDocCountSinkTest {
     }
 
     private static ShardDocCountRecord countRecord(String index, int shard, long total) {
-        // Lucene total exceeds the root total, as it does on any shard with nested documents.
-        return countRecord(index, shard, total, total * 3);
-    }
-
-    private static ShardDocCountRecord countRecord(String index, int shard, long total, long luceneTotal) {
         return ShardDocCountRecord.builder()
             .sessionId("sess-1")
             .workerId("worker-1")
             .workItemId("wi-1")
             .indexName(index)
             .shardNumber(shard)
-            .sourceDocCount(total)
-            .liveLuceneDocCount(luceneTotal)
-            .docsThisGeneration(total)
-            .docsPriorGenerations(0L)
+            .snapshotName("snap-1")
+            .liveLuceneDocCount(total)
             .timestamp("2026-07-29T00:00:00Z")
             .build();
     }
@@ -103,20 +96,12 @@ class S3ShardDocCountSinkTest {
 
         var records = uploader.records();
         Assertions.assertEquals(2, records.size(), "both records must be durable after flush");
-        Assertions.assertEquals(5, records.get(0).get("sourceDocCount").asLong());
+        Assertions.assertEquals(5, records.get(0).get("liveLuceneDocCount").asLong());
         Assertions.assertEquals(0, records.get(0).get("shardNumber").asInt());
-        Assertions.assertEquals(7, records.get(1).get("sourceDocCount").asLong());
+        Assertions.assertEquals(7, records.get(1).get("liveLuceneDocCount").asLong());
         Assertions.assertEquals(1, records.get(1).get("shardNumber").asInt());
         Assertions.assertEquals("idx", records.get(0).get("indexName").asText());
-        Assertions.assertFalse(records.get(0).has("shardComplete"));
-
-        // Both counts must round-trip: the root count comparable to _count, and the Lucene count
-        // comparable to _cat/indices docs.count.
-        Assertions.assertEquals(15, records.get(0).get("liveLuceneDocCount").asLong());
-        Assertions.assertEquals(21, records.get(1).get("liveLuceneDocCount").asLong());
-        Assertions.assertTrue(
-            records.get(0).get("liveLuceneDocCount").asLong() > records.get(0).get("sourceDocCount").asLong(),
-            "the Lucene count must be able to exceed the root count in the serialized record");
+        Assertions.assertEquals("snap-1", records.get(0).get("snapshotName").asText());
     }
 
     @Test
@@ -138,13 +123,11 @@ class S3ShardDocCountSinkTest {
         var uploader = new CapturingUploader();
         try (var s = sink(uploader)) {
             s.write(ShardDocCountRecord.builder().indexName("unknown").build()).block();
-            s.write(countRecord("empty", 0, 0, 0)).block();
+            s.write(countRecord("empty", 0, 0)).block();
             s.flush().block();
         }
         var records = uploader.records();
-        Assertions.assertTrue(records.get(0).get("sourceDocCount").isNull());
         Assertions.assertTrue(records.get(0).get("liveLuceneDocCount").isNull());
-        Assertions.assertEquals(0, records.get(1).get("sourceDocCount").asLong());
         Assertions.assertEquals(0, records.get(1).get("liveLuceneDocCount").asLong());
     }
 

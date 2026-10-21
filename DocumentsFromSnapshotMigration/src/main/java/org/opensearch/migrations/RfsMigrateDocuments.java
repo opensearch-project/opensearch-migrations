@@ -327,10 +327,10 @@ public class RfsMigrateDocuments {
     public static class ShardDocCountArgs {
         @Parameter(required = false,
             names = { "--shard-doc-count-s3-prefix" },
-            description = "S3 key prefix for completed shard counts, written under the same "
-                + "bucket/region/endpoint already resolved for the failed document stream. Records land at "
-                + "<prefix>/session=<sessionId>/worker=<workerId>/... One record per shard, so volume is bounded "
-                + "by shard count. Counts are always logged regardless of this setting.")
+            description = "S3 key prefix for full-snapshot shard counts used to validate backfills. "
+                + "Uses the configured failed document stream bucket, region and endpoint. "
+                + "Records land at <prefix>/session=<sessionId>/worker=<workerId>/... "
+                + "Deduplicate retries before summing by index. Counts are always logged.")
         public String shardDocCountS3Prefix = "rfs-shard-doc-counts/";
     }
 
@@ -912,7 +912,7 @@ public class RfsMigrateDocuments {
             .maxInitialLeaseDuration(arguments.initialLeaseDuration)
             .cursorConsumer(progressCursor::set)
             .cancellationTriggerConsumer(cancellationRunnableRef::set)
-            .shardDocCountReporter(shardDocCountReporter(shardDocCountSink, sessionId, workerId))
+            .shardDocCountReporter(shardDocCountReporter(shardDocCountSink, sessionId, workerId, arguments.snapshotName))
             .build();
 
         try {
@@ -935,22 +935,20 @@ public class RfsMigrateDocuments {
      * successor re-emits rather than the record being lost.
      */
     static DocumentMigrationBootstrap.ShardDocCountReporter shardDocCountReporter(
-        ShardDocCountSink sink, String sessionId, String workerId
+        ShardDocCountSink sink, String sessionId, String workerId, String snapshotName
     ) {
         if (sink == null) {
-            return (workItem, total, luceneTotal, thisGen, priorGen) -> { };
+            return (workItem, luceneTotal) -> { };
         }
-        return (workItem, total, luceneTotal, thisGen, priorGen) -> {
+        return (workItem, luceneTotal) -> {
             var countRecord = ShardDocCountRecord.builder()
                 .sessionId(sessionId)
                 .workerId(workerId)
                 .workItemId(workItem.toString())
                 .indexName(workItem.getIndexName())
                 .shardNumber(workItem.getShardNumber())
-                .sourceDocCount(total.isPresent() ? total.getAsLong() : null)
+                .snapshotName(snapshotName)
                 .liveLuceneDocCount(luceneTotal.isPresent() ? luceneTotal.getAsLong() : null)
-                .docsThisGeneration(thisGen)
-                .docsPriorGenerations(priorGen.isPresent() ? priorGen.getAsLong() : null)
                 .timestamp(Instant.now().toString())
                 .build();
             sink.write(countRecord).then(Mono.defer(sink::flush)).block(Duration.ofMinutes(5));
@@ -1238,9 +1236,7 @@ public class RfsMigrateDocuments {
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, failedDocumentStreamWatermark);
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemId, successorWorkItem, 1, null,
-                failedDocumentStreamWatermark.getDocsBeforeCheckpoint(),
-                contextSupplier
+                workItemId, successorWorkItem, 1, contextSupplier
         );
         cleanShutdownCompleted.set(true);
     }
@@ -1348,7 +1344,6 @@ public class RfsMigrateDocuments {
                             successorWorkItemIds,
                             successorNextAcquisitionLeaseExponent,
                             workItemAndDuration.getLeaseExpirationTime(),
-                            progressCursor.getDocsBeforeCheckpoint(),
                             contextSupplier
                     );
                 }

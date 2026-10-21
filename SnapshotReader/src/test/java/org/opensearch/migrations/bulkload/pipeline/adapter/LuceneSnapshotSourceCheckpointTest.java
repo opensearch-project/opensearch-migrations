@@ -2,6 +2,8 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.OptionalLong;
+import java.util.function.LongConsumer;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
@@ -11,6 +13,8 @@ import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import reactor.core.publisher.Flux;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,6 +25,31 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class LuceneSnapshotSourceCheckpointTest {
+    @ParameterizedTest
+    @CsvSource({"false, 0", "false, 14", "true, 0", "true, 14"})
+    void reportsSnapshotCountAfterResumedReadButExcludesDeltaFallback(boolean delta, long liveCount) {
+        var extractor = mock(SnapshotExtractor.class);
+        var current = new SnapshotExtractor.ShardEntry("current", "idx", "id", 0, mock(ShardMetadata.class));
+        when(extractor.listShards("current", "idx")).thenReturn(List.of(current));
+        when(extractor.listShards("previous", "idx")).thenReturn(List.of());
+        when(extractor.readDocuments(eq(current), any(), eq(9), any(), eq(false), any()))
+            .thenAnswer(call -> Flux.defer(() -> {
+                call.<LongConsumer>getArgument(5).accept(liveCount);
+                return Flux.empty();
+            }));
+        var builder = LuceneSnapshotSource.builder(extractor, "current", Path.of("/unused"));
+        if (delta) {
+            builder.delta("previous", DeltaMode.UPDATES_AND_DELETES, () -> null);
+        }
+        try (var source = builder.build()) {
+            var partition = source.listPartitions("idx").get(0);
+            assertTrue(source.countLiveDocuments(partition).isEmpty(), "the reader has not opened yet");
+            source.readDocuments(partition, 9).blockLast();
+            assertEquals(delta ? OptionalLong.empty() : OptionalLong.of(liveCount),
+                source.countLiveDocuments(partition));
+        }
+    }
+
     @Test
     void deltaResumeUsesStreamOrderAcrossDeletionsAndAdditions() {
         var extractor = mock(SnapshotExtractor.class);

@@ -1141,9 +1141,9 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
             "Defaults to 'rfs-failed-document-stream/'."),
     shardDocCountS3Prefix: z.string().default("rfs-shard-doc-counts/").optional()
-        .describe("S3 key prefix for completed shard counts. Uses the configured failed document stream bucket, " +
-            "region and endpoint. Records include source documents processed and the live Lucene count when " +
-            "available, under <prefix>/session=<workflow-uid>/. Counts are always logged. " +
+        .describe("S3 key prefix for full-snapshot shard counts used to validate backfills. Uses the configured " +
+            "failed document stream bucket, region and endpoint, under <prefix>/session=<workflow-uid>/. " +
+            "Deduplicate retries before summing by index. Counts are always logged. " +
             "Defaults to 'rfs-shard-doc-counts/'."),
     failedDocumentStreamS3Bucket: z.string().optional()
         .describe("S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal " +

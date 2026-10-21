@@ -1,23 +1,26 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.utils.FileSystemUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,31 +34,14 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.lifecycle.Startables;
 
-/**
- * Verifies that the per-shard live document count reported by the backfill equals the
- * source's {@code <index>/_count} for an index containing nested documents.
- *
- * <p>This is the case that distinguishes the three counts a cluster exposes. For an index
- * with nested documents:
- * <ul>
- *   <li>{@code <index>/_count} counts root documents only — the number we must report</li>
- *   <li>{@code _cat/indices docs.count} counts roots AND nested children</li>
- *   <li>Lucene's {@code numDocs()} likewise counts children</li>
- * </ul>
- * Nested children are separate Lucene documents that carry no stored {@code _id}, so
- * {@code LuceneReader.getDocument} skips them and they never reach the target. The test
- * asserts the migration's own reported total lands on the first of those three numbers, and
- * additionally asserts the source really does exhibit the divergence — otherwise the test
- * could pass against a fixture that never had nested children at all.
- */
+/** Validates a full backfill against the snapshot baseline while the live source keeps changing. */
 @Slf4j
 @Tag("isolatedTest")
-public class NestedDocCountTest extends SourceTestBase {
+public class SnapshotDocCountTest extends SourceTestBase {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String NESTED_INDEX = "nested_docs";
-    private static final int SHARDS = 1;
-
+    private static final int SHARDS = 2;
 
     @TempDir
     private File localDirectory;
@@ -71,7 +57,7 @@ public class NestedDocCountTest extends SourceTestBase {
 
     @ParameterizedTest(name = "Source {0} to Target {1}")
     @MethodSource("scenarios")
-    public void liveDocCountExcludesNestedChildren(
+    public void snapshotBaselineMatchesTargetWhileSourceContinuesIngesting(
         final SearchClusterContainer.ContainerVersion sourceVersion,
         final SearchClusterContainer.ContainerVersion targetVersion
     ) {
@@ -95,11 +81,8 @@ public class NestedDocCountTest extends SourceTestBase {
             Startables.deepStart(sourceCluster, targetCluster).join();
 
             var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
-            boolean typedMappings = VersionMatchers.isES_7_X.test(sourceVersion)
-                ? false
-                : org.opensearch.migrations.UnboundVersionMatchers.isBelowES_7_X.test(sourceVersion);
-
             String properties =
                 "    \"title\": {\"type\": \"text\"}," +
                 "    \"answers\": {" +
@@ -109,15 +92,19 @@ public class NestedDocCountTest extends SourceTestBase {
                 "        \"score\": {\"type\": \"integer\"}" +
                 "      }" +
                 "    }";
-            String mappings = typedMappings
-                ? "{\"" + sourceOps.defaultDocType() + "\": {\"properties\": {" + properties + "}}}"
-                : "{\"properties\": {" + properties + "}}";
+            String mappings = "{\"properties\": {" + properties + "}}";
 
             sourceOps.createIndex(NESTED_INDEX,
                 "{" +
                 "  \"settings\": {\"number_of_shards\": " + SHARDS + ", \"number_of_replicas\": 0}," +
                 "  \"mappings\": " + mappings +
                 "}");
+
+            // Preserve nested mappings, as metadata migration would. Dynamic object mappings
+            // would produce a different Lucene count even with identical root documents.
+            targetOps.createIndex(NESTED_INDEX,
+                "{\"settings\":{\"number_of_shards\":" + SHARDS + ",\"number_of_replicas\":0},"
+                + "\"mappings\":{\"properties\":{" + properties + "}}}");
 
             // 5 root documents with varying numbers of nested children, including one with
             // none. Children are indexed as separate Lucene docs in the same block as their
@@ -150,7 +137,7 @@ public class NestedDocCountTest extends SourceTestBase {
             // Establish the divergence really exists on this source, so a green assertion
             // below cannot be an artifact of a fixture without nested children.
             int sourceCount = countViaCountApi(sourceOps, NESTED_INDEX);
-            int sourceDocsCount = docsCountViaStats(sourceOps, NESTED_INDEX);
+            int sourceDocsCount = docsCountViaCat(sourceOps, NESTED_INDEX);
             log.info("source _count={}, source docs.count={}, expectedRoots={}, expectedChildren={}",
                 sourceCount, sourceDocsCount, expectedRoots, expectedChildren);
 
@@ -180,28 +167,56 @@ public class NestedDocCountTest extends SourceTestBase {
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
 
+            // Ongoing ingestion changes the live source; it must not change this backfill's baseline.
+            sourceOps.createDocument(NESTED_INDEX, "after-snapshot",
+                "{\"title\":\"new\",\"answers\":[{\"user\":\"later\",\"score\":1}]}");
+            sourceOps.refresh(NESTED_INDEX);
+            Assertions.assertTrue(docsCountViaCat(sourceOps, NESTED_INDEX) > sourceDocsCount);
+
             var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(sourceVersion, true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
             var runCounter = new AtomicInteger();
-            waitForRfsCompletion(() -> migrateDocumentsSequentially(
-                sourceRepo,
-                snapshotName,
-                List.of(),
-                targetCluster,
-                runCounter,
-                new Random(1),
-                testContext,
-                sourceVersion,
-                targetCluster.getContainerVersion().getVersion(),
-                null
-            ));
+            try (var logs = new CloseableLogSetup(DocumentMigrationBootstrap.class.getName())) {
+                waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                    sourceRepo,
+                    snapshotName,
+                    List.of(),
+                    targetCluster,
+                    runCounter,
+                    new Random(1),
+                    testContext,
+                    sourceVersion,
+                    targetCluster.getContainerVersion().getVersion(),
+                    null
+                ));
+                var countsByShard = new HashMap<Integer, Long>();
+                var pattern = Pattern.compile("Partition migration stats: index=" + NESTED_INDEX
+                    + ", shard=(\\d+),.*shardLiveLuceneDocs=(\\d+)");
+                logs.getLogEvents().forEach(line -> {
+                    var match = pattern.matcher(line);
+                    if (match.find()) {
+                        var shard = Integer.parseInt(match.group(1));
+                        var count = Long.parseLong(match.group(2));
+                        var previous = countsByShard.putIfAbsent(shard, count);
+                        if (previous != null) {
+                            Assertions.assertEquals(previous.longValue(), count,
+                                "retry records must describe the same snapshot shard");
+                        }
+                    }
+                });
+                Assertions.assertEquals(SHARDS, countsByShard.size(), "every snapshot shard needs a count");
+                Assertions.assertEquals(sourceDocsCount,
+                    countsByShard.values().stream().mapToLong(Long::longValue).sum(),
+                    "sum one count per shard to recover the snapshot's index count");
+            }
 
-            // === The assertion this test exists for ===
-            var targetOps = new ClusterOperations(targetCluster);
+            // docs.count includes nested children, unlike _count.
             targetOps.refresh();
             int targetCount = countViaCountApi(targetOps, NESTED_INDEX);
 
+            Assertions.assertEquals(sourceDocsCount, docsCountViaCat(targetOps, NESTED_INDEX),
+                "the target's docs.count must match the snapshot baseline, including nested children");
             Assertions.assertEquals(sourceCount, targetCount,
                 "documents actually migrated must equal the source's live root-document count");
             Assertions.assertEquals(expectedRoots, targetCount,
@@ -219,10 +234,9 @@ public class NestedDocCountTest extends SourceTestBase {
     }
 
     @SneakyThrows
-    private static int docsCountViaStats(ClusterOperations ops, String index) {
-        var response = ops.get("/" + index + "/_stats/docs");
-        Assertions.assertEquals(200, response.getKey(), "unexpected _stats response: " + response.getValue());
-        return MAPPER.readTree(response.getValue())
-            .path("indices").path(index).path("primaries").path("docs").path("count").asInt();
+    private static int docsCountViaCat(ClusterOperations ops, String index) {
+        var response = ops.get("/_cat/indices/" + index + "?format=json&h=index,docs.count");
+        Assertions.assertEquals(200, response.getKey(), "unexpected _cat/indices response: " + response.getValue());
+        return MAPPER.readTree(response.getValue()).get(0).get("docs.count").asInt();
     }
 }

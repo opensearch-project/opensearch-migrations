@@ -129,29 +129,7 @@ public class DocumentMigrationPipeline {
      * @return a Flux of progress cursors, one per batch written
      */
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
-        return migratePartition(partition, collectionName, startingPosition, 0L);
-    }
-
-    /**
-     * Migrate all documents for a single partition, carrying forward a document total from
-     * a previous lease generation.
-     *
-     * @param partition        the partition to migrate
-     * @param collectionName   the target collection name
-     * @param startingPosition the source position to resume from (0 for start)
-     * @param docsAlreadyEmitted documents already emitted for this partition by previous lease
-     *                           generations, making {@link ProgressCursor#cumulativeDocsEmitted()}
-     *                           a partition-wide total rather than a per-generation subtotal
-     * @return a Flux of progress cursors, one per batch written
-     */
-    public Flux<ProgressCursor> migratePartition(
-        Partition partition, String collectionName, long startingPosition, long docsAlreadyEmitted
-    ) {
-        if (docsAlreadyEmitted < 0) {
-            throw new IllegalArgumentException("docsAlreadyEmitted must be >= 0, got " + docsAlreadyEmitted);
-        }
         return Flux.defer(() -> {
-            final long[] emitted = { docsAlreadyEmitted };
             // Subscription-local state: a retry must start from the original checkpoint.
             final long[] fallbackPosition = { startingPosition };
             currentPartition.set(partition);
@@ -171,15 +149,12 @@ public class DocumentMigrationPipeline {
                 // Accumulate only here, after earlier batches have completed successfully.
                 .map(batch -> {
                     var result = batch.result();
-                    emitted[0] += batch.sourceDocs();
                     fallbackPosition[0] += batch.sourceDocs();
                     totalDocs.addAndGet(result.docsInBatch());
                     totalBytes.addAndGet(result.bytesInBatch());
                     return new ProgressCursor(
                         partition,
                         batch.lastPosition().orElse(fallbackPosition[0]),
-                        emitted[0],
-                        emitted[0] - (batch.lastPosition().isPresent() ? 1 : 0),
                         result.docsInBatch(),
                         result.bytesInBatch()
                     );
@@ -189,6 +164,8 @@ public class DocumentMigrationPipeline {
         });
     }
 
+    // Sonar flags the compiler-generated record constructor parameters as unused.
+    @SuppressWarnings("java:S1172")
     private record CompletedBatch(OptionalLong lastPosition, int sourceDocs, BatchResult result) {}
 
     /**
