@@ -722,11 +722,7 @@ def test_metadata_init_with_partial_azure_config_fails():
     assert 'repo_uri' in excinfo.value.args[0]['from_snapshot'][0]['azure'][0]
 
 
-def test_metadata_init_with_azure_config_rejects_endpoint():
-    # The azure block has no `endpoint` field, so supplying one must be rejected as an unknown
-    # field rather than silently ignored. MetadataMigration would accept an azure endpoint on
-    # the CLI; the omission is because nothing in this release can produce one. See the azure
-    # block in Metadata's schema.
+def test_metadata_init_with_azure_endpoint_in_config_stores_endpoint():
     config = {
         "from_snapshot": {
             "snapshot_name": "reindex_from_snapshot",
@@ -736,9 +732,39 @@ def test_metadata_init_with_azure_config_rejects_endpoint():
             },
         }
     }
-    with pytest.raises(ValueError) as excinfo:
-        Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
-    assert 'endpoint' in excinfo.value.args[0]['from_snapshot'][0]['azure'][0]
+    metadata = Metadata(config, create_valid_cluster(), create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+    assert metadata._azure_uri == "azure://myaccount/my-container/path"
+    assert metadata._azure_endpoint == "http://azurite:10000"
+
+
+def test_metadata_with_azure_snapshot_and_endpoint_passes_endpoint_flag(mocker):
+    # Importing a snapshot that already sits in an emulator needs no cluster-side repository
+    # wiring, so the endpoint must reach MetadataMigration's reader.
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/azure",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+                "endpoint": "http://azurite:10000",
+            },
+        },
+    }
+    target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
+
+    mock = mocker.patch("subprocess.run")
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    metadata.migrate()
+
+    mock.assert_called_once()
+    actual_args = mock.call_args.args[0]
+    assert "--endpoint" in actual_args
+    endpoint_idx = actual_args.index("--endpoint")
+    assert actual_args[endpoint_idx + 1] == "http://azurite:10000"
+    repo_uri_idx = actual_args.index("--repo-uri")
+    assert actual_args[repo_uri_idx + 1] == "azure://myaccount/my-container/path"
 
 
 def test_metadata_init_with_azure_external_snapshot_succeeds(azure_snapshot):
@@ -786,9 +812,9 @@ def test_metadata_with_azure_snapshot_makes_correct_subprocess_call(mocker):
         "--source-version", MOCK_SOURCE_VERSION,
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
     )
-    # Neither the endpoint nor the region flag belongs on the azure path. Both are real flags
-    # that _add_s3_args emits, so an azure config picking up either would mean the dispatch in
-    # _add_snapshot_args sent it down the wrong branch.
+    # With no endpoint configured, neither the endpoint nor the region flag belongs on the azure
+    # path. Both are real flags that _add_s3_args emits, so an azure config picking up either
+    # would mean the dispatch in _add_snapshot_args sent it down the wrong branch.
     actual_args = mock.call_args.args[0]
     assert "--endpoint" not in actual_args
     assert "--s3-region" not in actual_args

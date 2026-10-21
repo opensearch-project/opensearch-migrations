@@ -47,19 +47,16 @@ FROM_SNAPSHOT_SCHEMA = {
                 'endpoint': {'type': 'string', 'required': False},
             }
         },
-        # Azure Blob Storage. The azure block deliberately has no 'endpoint' field, unlike gcs
-        # above. MetadataMigration itself would accept one for an azure:// repo (see
-        # _add_azure_args), but this release ships no cluster-side azure emulator wiring for
-        # the create-snapshot side to match, the way clusterWorkflows.yaml sets
-        # gcs.client.default.endpoint for fake-gcs-server. Until that exists there is no
-        # configuration in which an azure endpoint here would be useful, so rejecting the key
-        # beats accepting one that could only have come from a mistake. Add the field when the
-        # cluster-side wiring lands.
+        # Azure Blob Storage. This block reads an existing repository, so an endpoint here is
+        # forwarded to MetadataMigration's reader (for example an Azurite emulator holding an
+        # imported snapshot). It is independent of snapshot creation, which registers the
+        # repository on the cluster and has no repository-level endpoint setting for azure.
         "azure": {
             'type': 'dict',
             "required": False,
             'schema': {
                 'repo_uri': {'type': 'string', 'required': True},
+                'endpoint': {'type': 'string', 'required': False},
             }
         }
     },
@@ -186,6 +183,7 @@ class Metadata:
             self._aws_region = from_snapshot["s3"]["aws_region"]
         elif self._snapshot_location == 'azure':
             self._azure_uri = from_snapshot["azure"]["repo_uri"]
+            self._azure_endpoint = from_snapshot["azure"].get("endpoint")
         elif self._snapshot_location == 'gcs':
             self._gcs_uri = from_snapshot["gcs"]["repo_uri"]
             self._gcs_endpoint = from_snapshot["gcs"].get("endpoint")
@@ -377,11 +375,11 @@ class Metadata:
             })
 
     def _add_azure_args(self, command_args: Dict[str, Any]) -> None:
-        # The complete azure argument surface on read paths is --local-dir plus --repo-uri.
-        # MetadataMigration does accept an --endpoint for azure:// repos (it forwards it to
-        # AzureRepo.create), but the console has no azure endpoint to forward: see the azure
-        # block in FROM_SNAPSHOT_SCHEMA for why the key is not part of the config.
         command_args.update({
             "--local-dir": self._local_dir,
             "--repo-uri": self._azure_uri,
         })
+        if hasattr(self, '_azure_endpoint') and self._azure_endpoint:
+            command_args.update({
+                "--endpoint": self._azure_endpoint,
+            })
