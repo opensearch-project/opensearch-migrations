@@ -248,7 +248,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "properties": {
                                   "repoPathUri": {
                                     "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                                     "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                                   },
                                   "awsRegion": {
@@ -407,7 +407,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "properties": {
                                   "repoPathUri": {
                                     "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                                     "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                                   },
                                   "awsRegion": {
@@ -1644,7 +1644,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "properties": {
                           "repoPathUri": {
                             "type": "string",
-                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                             "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                           },
                           "awsRegion": {
@@ -2738,7 +2738,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                           "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
@@ -3812,7 +3812,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                           "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
@@ -3971,7 +3971,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/[a-z0-9](?:-?[a-z0-9]){2,62})(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
                           "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {

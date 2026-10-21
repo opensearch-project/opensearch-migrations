@@ -168,12 +168,14 @@ export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/
 // Provider-agnostic repository config. The URI scheme (s3://, gs://, or azure://) determines the backend.
 // S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
 // Azure: storage account is 3-24 lowercase alphanumerics and the container is 3-63 lowercase
-// alphanumerics and hyphens, with no leading, trailing, or consecutive hyphen. The container's
-// `(?:-?[a-z0-9]){2,62}` tail encodes all three hyphen rules at once: each repetition may carry at
-// most one hyphen and must end in an alphanumeric. This is the only place Azure naming rules are
-// checked; AzureUri on the Java side splits the URI without validating either name.
+// alphanumerics and hyphens, with no leading, trailing, or consecutive hyphen. The container is
+// checked in two independent parts: the lookahead bounds its length in characters, stopping at the
+// next `/` or the end, and `[a-z0-9]+(?:-[a-z0-9]+)*` encodes the three hyphen rules. Counting
+// repetitions of a hyphen-optional group instead would bound groups, not characters. This is the
+// only place Azure naming rules are checked; AzureUri on the Java side splits the URI without
+// validating either name.
 export const REPO_CONFIG = z.object({
-    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\/\/[a-z0-9]{3,24}\/[a-z0-9](?:-?[a-z0-9]){2,62})(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
+    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\/\/[a-z0-9]{3,24}\/(?=[a-z0-9-]{3,63}(?:\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
         .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', " +
             "or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. " +
             "The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. " +

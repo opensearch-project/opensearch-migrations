@@ -19,7 +19,9 @@ describe("repoPathUri", () => {
             [`azure://${"a".repeat(24)}/mycontainer`, "maximum-length account"],
             [`azure://myaccount/${"c".repeat(63)}`, "maximum-length container"],
             ["azure://account1/my-container-1", "digits and interior hyphens"],
-            [`azure://myaccount/a${"-b".repeat(31)}`, "alternating hyphens up to the length limit"],
+            ["azure://myaccount/a-b", "minimum-length container with a hyphen"],
+            [`azure://myaccount/a${"-b".repeat(31)}`, "63-character hyphenated container"],
+            [`azure://myaccount/a${"-b".repeat(31)}/snapshots`, "63-character hyphenated container with a path"],
         ])("accepts %s (%s)", (uri) => {
             expect(accepts(uri)).toBe(true);
         });
@@ -33,6 +35,9 @@ describe("repoPathUri", () => {
             ["azure://my-account/mycontainer", "hyphen in the account"],
             ["azure://myaccount/ab", "container shorter than 3 characters"],
             [`azure://myaccount/${"c".repeat(64)}`, "container longer than 63 characters"],
+            [`azure://myaccount/a${"-b".repeat(31)}c`, "64-character hyphenated container"],
+            [`azure://myaccount/a${"-b".repeat(32)}`, "65-character hyphenated container"],
+            [`azure://myaccount/a${"-b".repeat(62)}`, "125-character hyphenated container"],
             ["azure://myaccount/MyContainer", "uppercase in the container"],
             ["azure://myaccount/-mycontainer", "leading hyphen in the container"],
             ["azure://myaccount/mycontainer-", "trailing hyphen in the container"],
