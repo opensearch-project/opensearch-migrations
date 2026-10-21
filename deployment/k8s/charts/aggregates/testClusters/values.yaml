@@ -5,10 +5,42 @@ conditionalPackageInstalls:
 
 useDedicatedKarpenterPool: false
 
+# EKS Auto Mode NodeClass that the dedicated search NodePool references. "default" is the one EKS
+# provisions for its built-in NodePools; it only exists while at least one of those is enabled, and
+# it cannot carry user tags. Set this to the migration assistant release's aws.nodeClassName when
+# deploying onto a cluster bootstrapped with --tags.
+nodeClassName: default
+
 # Override to restrict instance types in the dedicated search NodePool.
 # If empty, allows any c/m/r instance gen 6+.
 # nodePoolInstanceTypes:
 #   - m6i.2xlarge
+
+# nginx front end for an Elasticsearch image without built-in security (elasticsearch-oss).
+# Rendered by templates/nginxFrontend.yaml; wired into the source pod by valuesOss.yaml (local) and valuesEks.yaml (EKS).
+nginxFrontend:
+  enabled: false
+  name: source-nginx
+  listenPort: 9200          # the chart's httpPort, so the source Services route to nginx
+  upstreamPort: 9201        # Elasticsearch's http.port, bound to 127.0.0.1
+  clientMaxBodySize: 200m
+  accessLog: false
+  basicAuth:
+    enabled: true
+    username: admin
+    password: admin
+  tls:
+    enabled: true
+    # Services the certificate must cover (short names; namespace forms are added).
+    serviceNames:
+      - elasticsearch-master
+      - elasticsearch-master-headless
+    certManager:
+      enabled: true
+      # The Migration Assistant chart creates this CA issuer.
+      issuerRef:
+        kind: ClusterIssuer
+        name: migrations-ca
 
 source:
   http:

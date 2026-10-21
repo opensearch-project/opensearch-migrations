@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 @Slf4j
@@ -125,6 +126,39 @@ class TypeMappingsSanitizationTransformerTest {
         log.atInfo().setMessage("resultStr = {}").setMessage(OBJECT_MAPPER.writeValueAsString(resultObj)).log();
         Assertions.assertEquals(JsonNormalizer.fromString(expectedString),
             JsonNormalizer.fromObject(resultObj));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "/indexa/type2/someuser, /indexa_2/_doc/someuser",
+        "/time-nov11/cpu/doc2?routing=abc&refresh=true, /time-nov11-cpu/_doc/doc2?routing=abc&refresh=true",
+        "/indexa/type2/some%2Fuser, /indexa_2/_doc/some%2Fuser"
+    })
+    void testDeleteDoc(String sourceUri, String targetUri) {
+        var request = new LinkedHashMap<String, Object>(Map.of(
+            JsonKeysForHttpMessage.METHOD_KEY, "DELETE",
+            JsonKeysForHttpMessage.URI_KEY, sourceUri
+        ));
+        var expected = Map.of(
+            JsonKeysForHttpMessage.METHOD_KEY, "DELETE",
+            JsonKeysForHttpMessage.URI_KEY, targetUri
+        );
+        Assertions.assertEquals(JsonNormalizer.fromObject(expected),
+            JsonNormalizer.fromObject(indexTypeMappingRewriter.transformJson(request)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/indexa", "/indexa/_alias/old-alias", "/_snapshot/repository/snapshot",
+        "/_tasks/node:1", "/indexa/_mapping/type1", "/indexa/_doc/1"
+    })
+    void testDeleteNonDocumentOrTypelessRequestIsPreserved(String uri) {
+        var request = Map.<String, Object>of(
+            JsonKeysForHttpMessage.METHOD_KEY, "DELETE",
+            JsonKeysForHttpMessage.URI_KEY, uri
+        );
+        Assertions.assertEquals(JsonNormalizer.fromObject(request),
+            JsonNormalizer.fromObject(indexTypeMappingRewriter.transformJson(new LinkedHashMap<>(request))));
     }
 
     @ParameterizedTest

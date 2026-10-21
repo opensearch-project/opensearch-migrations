@@ -468,8 +468,24 @@ resource "helm_release" "migration_assistant" {
     }
   ]
 
+  # The default node pool must be listed, not just the cluster and the Kafka pool.
+  #
+  # Terraform destroys in reverse dependency order, so anything named here is torn down
+  # after this release is uninstalled. Omitting the default pool leaves Terraform free to
+  # delete it first. Every chart workload then becomes unschedulable, because the only
+  # nodes left are the Kafka pool's, which are tainted and dedicated. The uninstall waits
+  # for workloads that can never start and fails with:
+  #
+  #   Error: Error uninstalling release
+  #   Unable to uninstall Helm release ma: timed out waiting for the condition
+  #
+  # The release is then stuck: it cannot be uninstalled, and `tofu destroy` cannot
+  # proceed without `terraform state rm helm_release.migration_assistant`. A failed
+  # uninstall also skips PVC deletion, so the Prometheus PersistentVolume orphans as a
+  # 50 GiB persistent disk that keeps billing after the cluster is gone.
   depends_on = [
     google_container_cluster.migration_standard,
+    google_container_node_pool.default,
     google_container_node_pool.kafka
   ]
 }

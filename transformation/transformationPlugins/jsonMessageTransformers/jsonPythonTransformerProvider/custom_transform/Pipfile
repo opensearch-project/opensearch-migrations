@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 pydantic = ">=2.0"
+"custom-transform" = {editable = true, path = "."}
 
 [dev-packages]
 pytest = "*"

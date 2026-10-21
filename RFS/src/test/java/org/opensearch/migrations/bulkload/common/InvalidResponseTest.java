@@ -224,6 +224,33 @@ class InvalidResponseTest {
     }
 
     @Test
+    void testGetIllegalArguments_versionParseError() {
+        var errorBody = "{\r\n" +
+            "  \"error\": {\r\n" +
+            "    \"root_cause\": [\r\n" +
+            "      {\r\n" +
+            "        \"type\": \"illegal_argument_exception\",\r\n" +
+            "        \"reason\": \"Failed to parse value [7090199] for setting [index.version.created]\"\r\n" +
+            "      }\r\n" +
+            "    ],\r\n" +
+            "    \"type\": \"illegal_argument_exception\",\r\n" +
+            "    \"reason\": \"Failed to parse value [7090199] for setting [index.version.created]\",\r\n" +
+            "    \"caused_by\": {\r\n" +
+            "      \"type\": \"unsupported_version_exception\",\r\n" +
+            "      \"reason\": \"unsupported_version_exception: Unsupported version [ES 7.9.1]\"\r\n" +
+            "    }\r\n" +
+            "  },\r\n" +
+            "  \"status\": 400\r\n" +
+            "}";
+        var response = new HttpResponse(400, "Bad Request", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getIllegalArguments();
+
+        assertThat(result, containsInAnyOrder("index.version.created"));
+    }
+
+    @Test
     void testGetUnsupportedMappingParameters_singleParam() {
         var errorBody = "{\r\n" +
             "  \"error\": {\r\n" +
@@ -633,6 +660,33 @@ class InvalidResponseTest {
         var result = iar.getIllegalArguments();
 
         assertThat(result, containsInAnyOrder("index.version.created"));
+    }
+
+    // --- getIllegalArguments: Serverless error reasons (opensearch-migrations#3440) ---
+    @Test
+    void testGetIllegalArguments_serverlessRoutingShardsTooSmall() {
+        var reason = "OpenSearch exception [type=illegal_argument_exception, reason=index.number_of_routing_shards [1] "
+            + "must be >= index.number_of_shards [8]]- server : [envoy]";
+        var errorBody = "{\"error\":{\"type\":\"illegal_argument_exception\",\"reason\":\"" + reason + "\"},\"status\":400}";
+        var response = new HttpResponse(400, "Bad Request", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getIllegalArguments();
+
+        assertThat(result, containsInAnyOrder("index.number_of_routing_shards"));
+    }
+
+    @Test
+    void testGetIllegalArguments_serverlessWrappedUnknownSetting() {
+        var reason = "OpenSearch exception [type=illegal_argument_exception, reason=unknown setting [index.creation_date] "
+            + "please check that any required plugins are installed]- server : [envoy]";
+        var errorBody = "{\"error\":{\"type\":\"illegal_argument_exception\",\"reason\":\"" + reason + "\"},\"status\":400}";
+        var response = new HttpResponse(400, "Bad Request", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getIllegalArguments();
+
+        assertThat(result, containsInAnyOrder("index.creation_date"));
     }
 
     // --- getIllegalArguments: invalid JSON triggers catch block ---

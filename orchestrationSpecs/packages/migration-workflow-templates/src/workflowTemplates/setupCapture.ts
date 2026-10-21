@@ -10,7 +10,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
-import {cloudProviderResolvedInput, CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {awsResourceTagsResolvedInput, cloudProviderResolvedInput, CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {
     ARGO_PROXY_WORKFLOW_OPTION_KEYS,
     ARGO_FILE_SOURCE_VOLUME,
@@ -40,6 +40,20 @@ import {
     SCALABLE_WORKLOAD_INPUTS,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
+import {
+    COMPONENT_LABEL,
+    COMPONENTS,
+    MIGRATION_RESOURCE_UID_LABEL,
+    WORKLOAD_SELECTOR_LABEL_KEYS,
+    workloadSelectorLabels,
+} from "./commonUtils/resourceLabels";
+import {
+    workloadNodePoolResolvedInput,
+    workloadNodeSelector,
+    workloadNodeTolerations,
+    workloadZoneSpreadConstraints,
+    workloadZoneSpreadResolvedInput,
+} from "./commonUtils/workloadNodePool";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -73,16 +87,33 @@ function makeOwnerReferences(
 function makeProxyServiceAnnotations(
     internetFacing: BaseExpression<boolean>,
     cloudProvider: BaseExpression<string>,
+    awsResourceTags: BaseExpression<string>,
 ) {
     const isGcp = expr.equals(cloudProvider, expr.literal("gcp"));
     const isAzure = expr.equals(cloudProvider, expr.literal("azure"));
 
-    const awsAnnotations = expr.makeDict({
+    // Deployer tags for the NLB and the target group, listeners and security group behind it. One
+    // comma-separated "Key=Value,Key2=Value2" string covers any number of tags, which is the format
+    // the annotation takes. This annotation is the only lever available: Auto Mode's load balancing
+    // controller is EKS-managed so its --default-tags flag is unreachable, and Services -- unlike
+    // Ingresses, which have IngressClassParams.spec.tags -- have no cluster-wide params object.
+    //
+    // Merged in rather than declared inline so that an unset tag string yields no annotation at all
+    // instead of an empty one, whose behaviour is not documented.
+    const tagAnnotations = expr.ternary(
+        expr.equals(awsResourceTags, expr.literal("")),
+        expr.makeDict({}),
+        expr.makeDict({
+            "service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags": awsResourceTags,
+        }),
+    );
+
+    const awsAnnotations = expr.mergeDicts(expr.makeDict({
         "service.beta.kubernetes.io/aws-load-balancer-type": expr.literal("external"),
         "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": expr.literal("ip"),
         "service.beta.kubernetes.io/aws-load-balancer-scheme":
             expr.ternary(internetFacing, expr.literal("internet-facing"), expr.literal("internal")),
-    });
+    }), tagAnnotations);
     const gcpAnnotations = expr.ternary(
         internetFacing,
         expr.makeDict({}),
@@ -112,6 +143,7 @@ function makeProxyServiceManifest(
     internetFacing: BaseExpression<boolean>,
     ownerUid: BaseExpression<string>,
     cloudProvider: BaseExpression<string>,
+    awsResourceTags: BaseExpression<string>,
 ) {
     return {
         apiVersion: "v1",
@@ -119,11 +151,11 @@ function makeProxyServiceManifest(
         metadata: {
             name: proxyName,
             ownerReferences: makeOwnerReferences(proxyName, ownerUid),
-            annotations: makeProxyServiceAnnotations(internetFacing, cloudProvider)
+            annotations: makeProxyServiceAnnotations(internetFacing, cloudProvider, awsResourceTags)
         },
         spec: {
             type: makeStringTypeProxy(serviceType),
-            selector: {"migrations/proxy": proxyName},
+            selector: workloadSelectorLabels(COMPONENTS.CAPTURE_PROXY, ownerUid),
             ports: [{
                 port: makeDirectTypeProxy(listenPort),
                 targetPort: makeDirectTypeProxy(listenPort),
@@ -159,8 +191,20 @@ function makeProxyParamsDict(
     const effectiveKafkaSecretName = expr.getLoose(kafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(kafkaConfig, "kafkaUserName");
     const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
+    const processConfig = expr.omit(
+        expr.get(config, "proxyConfig"),
+        ...ARGO_PROXY_WORKFLOW_OPTION_KEYS
+    );
+    const processConfigWithMetricsOptOut = expr.ternary(
+        expr.equals(
+            expr.dig(processConfig, ["otelMetricsCollectorEndpoint"], expr.literal("")),
+            expr.literal("")
+        ),
+        expr.omit(processConfig, "otelMetricsCollectorEndpoint"),
+        processConfig
+    );
     return expr.mergeDicts(
-        expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
+        processConfigWithMetricsOptOut,
         expr.mergeDicts(
             expr.ternary(expr.dig(config, ["proxyConfig", "noCapture"], false),
                 expr.makeDict({}),
@@ -231,6 +275,9 @@ function makeProxyDeploymentManifest(args: {
     workflowName: BaseExpression<string>,
     sourceK8sLabel: BaseExpression<string>,
     taskK8sLabel: BaseExpression<string>,
+    workloadNodePoolName: BaseExpression<string>,
+    workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }) {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const container: Record<string, any> = {
@@ -314,26 +361,38 @@ function makeProxyDeploymentManifest(args: {
             name: args.proxyName,
             ownerReferences: makeOwnerReferences(args.proxyName, args.ownerUid),
             labels: {
+                [COMPONENT_LABEL]: COMPONENTS.CAPTURE_PROXY,
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
             },
         },
         spec: {
             replicas: makeDirectTypeProxy(args.podReplicas),
             minReadySeconds: 2,
             strategy: {
-                type: "Recreate"
+                type: "RollingUpdate",
+                rollingUpdate: {
+                    maxSurge: "10%",
+                    maxUnavailable: "5%"
+                }
             },
-            selector: {matchLabels: {"migrations/proxy": args.proxyName}},
+            selector: {matchLabels: workloadSelectorLabels(COMPONENTS.CAPTURE_PROXY, args.ownerUid)},
             template: {
                 metadata: {labels: {
-                    "migrations/proxy": args.proxyName,
+                    [COMPONENT_LABEL]: COMPONENTS.CAPTURE_PROXY,
                     "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                     "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                     "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                    [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
                 }},
                 spec: {
+                    nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
+                    tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
+                    topologySpreadConstraints: makeDirectTypeProxy(
+                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, WORKLOAD_SELECTOR_LABEL_KEYS)
+                    ),
                     containers: [podConfig.container],
                     volumes: podConfig.volumes
                 }
@@ -402,6 +461,9 @@ export const SetupCapture = WorkflowBuilder.create({
         // global workflow arguments). Defined once — not threaded through the workflow —
         // so there is no scattered "aws" default to drift out of sync.
         .addInputsFromRecord(cloudProviderResolvedInput())
+        // Same story for the deployer's AWS tags: resolved here, at the only place that creates a
+        // load balancer, straight from the provider-config ConfigMap.
+        .addInputsFromRecord(awsResourceTagsResolvedInput())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -413,6 +475,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     expr.deserializeRecord(b.inputs.internetFacing),
                     b.inputs.ownerUid,
                     b.inputs.cloudProvider,
+                    b.inputs.awsResourceTags,
                 )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -429,8 +492,9 @@ export const SetupCapture = WorkflowBuilder.create({
             .setDefinition(makePodDisruptionBudgetDefinition({
                 name: b.inputs.proxyName,
                 minAvailable: workflowParameterAsNumber(b.inputs.minPodReplicas),
-                matchLabels: {"migrations/proxy": b.inputs.proxyName},
+                matchLabels: workloadSelectorLabels(COMPONENTS.CAPTURE_PROXY, b.inputs.ownerUid),
                 labels: {
+                    [COMPONENT_LABEL]: COMPONENTS.CAPTURE_PROXY,
                     "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
                     "migrations.opensearch.org/source": b.inputs.sourceK8sLabel,
                     "migrations.opensearch.org/task": b.inputs.taskK8sLabel,
@@ -459,6 +523,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "captureProxy")
         .addOptionalInput("tlsSecretName", c => "")
+        .addInputsFromRecord(workloadNodePoolResolvedInput("proxyNodePoolName"))
+        .addInputsFromRecord(workloadZoneSpreadResolvedInput())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
             .setDefinition({
@@ -485,6 +551,9 @@ export const SetupCapture = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
                     taskK8sLabel: b.inputs.taskK8sLabel,
+                    workloadNodePoolName: b.inputs.workloadNodePoolName,
+                    workloadZoneSpread: b.inputs.workloadZoneSpread,
+                    workloadZoneSpreadExtras: b.inputs.workloadZoneSpreadExtras,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -508,6 +577,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "captureProxy")
+        .addInputsFromRecord(workloadNodePoolResolvedInput("proxyNodePoolName"))
+        .addInputsFromRecord(workloadZoneSpreadResolvedInput())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
             .setDefinition({
@@ -535,6 +606,9 @@ export const SetupCapture = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
                     taskK8sLabel: b.inputs.taskK8sLabel,
+                    workloadNodePoolName: b.inputs.workloadNodePoolName,
+                    workloadZoneSpread: b.inputs.workloadZoneSpread,
+                    workloadZoneSpreadExtras: b.inputs.workloadZoneSpreadExtras,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

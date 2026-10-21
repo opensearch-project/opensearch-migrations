@@ -40,6 +40,24 @@ require_eks_context() {
   fi
 }
 
+# A buildkit pod that never becomes Ready almost always means no node was provisioned for it, and
+# the reason lives on the Karpenter NodeClaim rather than on the pod. On an EKS Auto Mode cluster the
+# usual causes are a NodePool pointing at a NodeClass that does not exist, or the launch itself being
+# rejected -- e.g. an SCP or IAM policy that requires tags on ec2:RunInstances. Both show up here as
+# a NodeClaim stuck without a providerID and an AccessDenied in its events, so dump enough to name
+# the failing action instead of leaving "0 replicas ready" as the only evidence.
+dump_node_provisioning_state() {
+  echo "=== node provisioning state (why no node?) ===" >&2
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodes -o wide >&2 || true
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodepools,nodeclasses -o wide >&2 || true
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodeclaims -o wide >&2 || true
+  # The launch error text is in the NodeClaim's events/conditions.
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} describe nodeclaims >&2 || true
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get events -A \
+    --sort-by=.lastTimestamp >&2 2>/dev/null | tail -60 >&2 || true
+  echo "=== end node provisioning state ===" >&2
+}
+
 ensure_eks_buildkit_release() {
   set_k8s_context_args
   require_eks_context
@@ -64,6 +82,52 @@ ensure_eks_buildkit_release() {
     ${BUILDKIT_HELM_ARGS:-}
 }
 
+run_with_optional_timeout() {
+  local timeout_value="$1"
+  shift
+
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "${timeout_value}" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_value}" "$@"
+  else
+    echo "No timeout command found; running without an external ${timeout_value} timeout." >&2
+    "$@"
+  fi
+}
+
+duration_to_seconds() {
+  local value="$1"
+  if [[ "${value}" =~ ^([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "${value}" =~ ^([0-9]+)([smh])$ ]]; then
+    local amount="${BASH_REMATCH[1]}"
+    local unit="${BASH_REMATCH[2]}"
+    case "${unit}" in
+      s) echo "${amount}" ;;
+      m) echo $((amount * 60)) ;;
+      h) echo $((amount * 3600)) ;;
+    esac
+    return 0
+  fi
+  echo "ERROR: Unsupported duration '${value}'. Use seconds, or an s/m/h suffix such as 900s, 15m, or 1h." >&2
+  return 1
+}
+
+# Older buildx versions return success from inspect even when a node failed to
+# bootstrap. Require both native builders to be running before starting a bake.
+buildx_nodes_are_ready() {
+  awk '
+    /^Name:/ { name = $2 }
+    /^Status:/ { status[name] = $2 }
+    END {
+      exit !(status["builder-amd64"] == "running" && status["builder-arm64"] == "running")
+    }
+  '
+}
+
 ensure_eks_buildx_builder() {
   local context builder_name namespace
   set_k8s_context_args
@@ -72,6 +136,14 @@ ensure_eks_buildx_builder() {
   context="$(get_k8s_build_context)"
   builder_name="builder-${context//[^a-zA-Z0-9_-]/-}"
   namespace="${BUILDKIT_NAMESPACE:-buildkit}"
+  local build_timeout="${BUILDKIT_BOOTSTRAP_TIMEOUT:-900s}"
+  local timeout_seconds
+  timeout_seconds="$(duration_to_seconds "${build_timeout}")"
+  local max_attempts="${BUILDKIT_BOOTSTRAP_ATTEMPTS:-0}"
+  if [[ ! "${max_attempts}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: BUILDKIT_BOOTSTRAP_ATTEMPTS must be a non-negative integer." >&2
+    return 1
+  fi
 
   docker buildx rm "${builder_name}" 2>/dev/null || true
 
@@ -110,46 +182,65 @@ ensure_eks_buildx_builder() {
   echo "BUILDX_BUILDER=${builder_name}"
   echo "Bootstrapping builder..."
 
-  # docker buildx inspect --bootstrap uses a hardcoded 110s timeout when it
-  # waits for the builder Deployments to become Ready. On EKS, the very first
-  # time the build-nodepool scales up, Karpenter cold-start routinely blows
-  # past 110s (node provisioning + image pull + container start), so the
-  # bootstrap fails with `expected 1 replicas to be ready, got 0` and the
-  # whole pipeline dies before any test runs.
-  #
-  # Do a longer kubectl-level pre-wait on every buildkit Deployment in the
-  # namespace first, then call buildx. The kubectl wait gives Karpenter the
-  # time it realistically needs; once pods are Available, buildx's internal
-  # 110s window is plenty. We still retry the bootstrap once in case a pod
-  # flaps between kubectl-wait and buildx-inspect.
-  local build_timeout="${BUILDKIT_BOOTSTRAP_TIMEOUT:-900s}"
-  local attempts="${BUILDKIT_BOOTSTRAP_ATTEMPTS:-2}"
+  # The kubernetes driver creates its builder Deployments as part of buildx
+  # bootstrap. Retry within the overall deadline to allow for nodepool cold
+  # starts; older buildx versions reject the Kubernetes driver's timeout option.
+  # A kubectl pre-wait cannot help before buildx has created anything.
+  local deadline=$(( $(date +%s) + timeout_seconds ))
   local attempt=1
   while true; do
-    echo "Pre-waiting up to ${build_timeout} for buildkit Deployments in '${namespace}' (attempt ${attempt}/${attempts})..."
-    kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
-      wait --for=condition=Available deployment --all -n "${namespace}" \
-      --timeout="${build_timeout}" || {
-        echo "Deployments not yet Available after kubectl wait; dumping state for diagnosis" >&2
-        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
-          get deployments,replicasets,pods -n "${namespace}" -o wide >&2 || true
-        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
-          describe pods -n "${namespace}" >&2 || true
-      }
-    if docker buildx inspect --bootstrap; then
-      break
-    fi
-    echo "buildx bootstrap failed on attempt ${attempt}/${attempts}" >&2
-    if [[ "${attempt}" -ge "${attempts}" ]]; then
-      echo "ERROR: buildx bootstrap exhausted ${attempts} attempt(s); dumping buildkit namespace state" >&2
+    local now remaining attempt_label builder_status
+    now="$(date +%s)"
+    remaining=$((deadline - now))
+    if [[ "${remaining}" -le 0 ]]; then
+      echo "ERROR: buildx bootstrap did not complete within ${build_timeout}; dumping buildkit namespace state" >&2
       kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
         get all -n "${namespace}" >&2 || true
       kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
         describe pods -n "${namespace}" >&2 || true
+      dump_node_provisioning_state
+      return 1
+    fi
+
+    if [[ "${max_attempts}" -gt 0 ]]; then
+      attempt_label="attempt ${attempt}/${max_attempts}"
+    else
+      attempt_label="attempt ${attempt}"
+    fi
+    echo "Bootstrapping buildx builder (${attempt_label}, ${remaining}s remaining of ${build_timeout})..."
+    if builder_status="$(run_with_optional_timeout "${remaining}s" docker buildx inspect "${builder_name}" --bootstrap 2>&1)"; then
+      printf '%s\n' "${builder_status}"
+      if buildx_nodes_are_ready <<< "${builder_status}"; then
+        break
+      fi
+      echo "buildx inspect returned success but both native builders are not running." >&2
+    else
+      printf '%s\n' "${builder_status}" >&2
+    fi
+    echo "buildx bootstrap failed on ${attempt_label}; current buildkit namespace state:" >&2
+    kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+      get deployments,replicasets,pods -n "${namespace}" -o wide >&2 || true
+
+    if [[ "${max_attempts}" -gt 0 && "${attempt}" -ge "${max_attempts}" ]]; then
+      echo "ERROR: buildx bootstrap exhausted ${max_attempts} attempt(s) before ${build_timeout}; dumping buildkit namespace state" >&2
+      kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+        get all -n "${namespace}" >&2 || true
+      kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+        describe pods -n "${namespace}" >&2 || true
+      dump_node_provisioning_state
       return 1
     fi
     attempt=$((attempt + 1))
-    sleep 10
+    now="$(date +%s)"
+    remaining=$((deadline - now))
+    if [[ "${remaining}" -le 0 ]]; then
+      continue
+    fi
+    if [[ "${remaining}" -lt 10 ]]; then
+      sleep "${remaining}"
+    else
+      sleep 10
+    fi
   done
 }
 

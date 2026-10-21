@@ -310,6 +310,45 @@ class SolrStandaloneBackupCreatorTest {
         assertFalse(creator.isBackupFinished());
     }
 
+    @Test
+    void customContextPathIsUsedForBackupAndStatus(@TempDir Path tempDir) {
+        getResponses.put("/tenant-a/solr/core1/replication",
+            "{\"status\":\"OK\",\"details\":{\"backup\":{\"status\":\"success\"}}}");
+
+        var creator = new SolrStandaloneBackupCreator(
+            baseUrl, "snap", tempDir.toString(),
+            List.of("core1"), noAuthContext(baseUrl), null, "/tenant-a/solr");
+        creator.createBackup();
+        assertTrue(creator.isBackupFinished());
+
+        assertThat(requestedPaths, hasItem("/tenant-a/solr/core1/replication"));
+        assertThat(requestedPaths, not(hasItem("/solr/core1/replication")));
+    }
+
+    @Test
+    void emptyContextPathServesSolrFromHostRoot(@TempDir Path tempDir) {
+        getResponses.put("/core1/replication", "{\"status\":\"OK\"}");
+
+        var creator = new SolrStandaloneBackupCreator(
+            baseUrl, "snap", tempDir.toString(),
+            List.of("core1"), noAuthContext(baseUrl), null, "");
+        creator.createBackup();
+
+        assertThat(requestedPaths, hasItem("/core1/replication"));
+    }
+
+    @Test
+    void nullContextPathKeepsStockSolrPrefix(@TempDir Path tempDir) {
+        getResponses.put("/solr/core1/replication", "{\"status\":\"OK\"}");
+
+        var creator = new SolrStandaloneBackupCreator(
+            baseUrl, "snap", tempDir.toString(),
+            List.of("core1"), noAuthContext(baseUrl), null, null);
+        creator.createBackup();
+
+        assertThat(requestedPaths, hasItem("/solr/core1/replication"));
+    }
+
     /**
      * Records every request and serves a per-path canned JSON body as
      * application/json. Returns 404 if no canned response is registered.

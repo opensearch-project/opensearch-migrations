@@ -7,6 +7,7 @@ import java.time.Instant;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 
@@ -26,7 +27,9 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -96,6 +99,58 @@ class RfsMigrateDocumentsHelpersTest {
         // as a single read-back avoids reflection on the sink's private fields.
         assertThat(sink.getLocation(),
             equalTo("s3://my-failed-document-stream-bucket/rfs-failed-document-stream/session=sess-A/"));
+    }
+
+    @Test
+    void buildFailedDocumentStreamSink_bucketFromInlineJsonConfigTurnsTheStreamOn() {
+        // The orchestrator sends options as ---INLINE-JSON with camelCase keys.
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON",
+                "{\"failedDocumentStreamS3Bucket\": \"from-json\", \"failedDocumentStreamS3Region\": \"us-east-1\"}"});
+
+        assertThat(args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket, equalTo("from-json"));
+        assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s"), notNullValue());
+    }
+
+    @Test
+    void buildFailedDocumentStreamSink_inlineJsonWithoutBucketLeavesTheStreamOff() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"failedDocumentStreamS3Region\": \"us-east-1\"}"});
+
+        assertThat(args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket, nullValue());
+        assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s"), nullValue());
+    }
+
+    @Test
+    void buildFailedDocumentStreamSink_returnsNullWhenBucketIsBlank() {
+        // A blank bucket reads as "not configured".
+        var args = new RfsMigrateDocuments.Args();
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "   ";
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Region = "us-east-1";
+
+        assertThat(RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s"), nullValue());
+    }
+
+    @Test
+    void failedDocumentStreamDisabledReason_namesTheMissingBucket() {
+        assertThat(RfsMigrateDocuments.FAILED_DOCUMENT_STREAM_DISABLED_REASON,
+            equalTo("failed document stream disabled: no --failed-document-stream-s3-bucket configured"));
+    }
+
+    @Test
+    void logFailedDocumentStreamStatus_reportsDisabledWhenSinkAbsent() {
+        assertDoesNotThrow(() -> RfsMigrateDocuments.logFailedDocumentStreamStatus(null, "sess-A"));
+    }
+
+    @Test
+    void logFailedDocumentStreamStatus_emitsLocationWhenSinkPresent() {
+        var sink = mock(FailedDocumentStreamSink.class);
+        when(sink.getLocation()).thenReturn("s3://bucket/prefix");
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.logFailedDocumentStreamStatus(sink, "sess-A"));
+        verify(sink, atLeastOnce()).getLocation();
     }
 
     @Test
@@ -267,6 +322,23 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void validateArgs_acceptsGcsRepoWithLocalDir() {
+        var args = validEsArgs();
+        args.repoUri = "gs://bucket/key";
+        args.localDir = "/tmp/gcs";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void validateArgs_rejectsGcsRepoWithoutLocalDir() {
+        var args = validEsArgs();
+        args.repoUri = "gs://bucket/key";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), equalTo("If a GCS repo is being used, --local-dir must be set."));
+    }
+
+    @Test
     void validateArgs_rejectsMissingSnapshotName() {
         var args = validEsArgs();
         args.snapshotName = null;
@@ -344,6 +416,21 @@ class RfsMigrateDocumentsHelpersTest {
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--coordinator-host"));
+    }
+
+    @Test
+    void validateArgs_solr_rejectsGcsRepoUpFront() {
+        // Solr supports only file:// and s3:// for its backup location. Without an
+        // exhaustive switch, gs:// passed validation here and failed much later in
+        // buildSolrSourceFactory, after the migration had already started.
+        var args = new RfsMigrateDocuments.Args();
+        args.sourceVersion = Version.fromString("SOLR_8.11");
+        args.repoUri = "gs://bucket/key";
+        args.localDir = "/tmp/gcs";
+        args.coordinatorArgs.host = "http://localhost:9200";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("file:// or s3://"));
     }
 
     @Test

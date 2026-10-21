@@ -9,6 +9,7 @@ import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
+import com.beust.jcommander.ParameterException;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
@@ -245,7 +246,8 @@ public class TestCreateSnapshotModeFlag {
         args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
         args.s3Region = REGION;
         args.endpoint = LOCAL_STACK.getEndpoint().toString();
-        args.mode = "import";  // IMPORT mode
+        args.mode = "import";
+        args.solrTopology = "cloud";  // IMPORT mode
         args.solrCollections = List.of("importcoll");
         args.noWait = false;
 
@@ -299,6 +301,7 @@ public class TestCreateSnapshotModeFlag {
         args.s3Region = REGION;
         args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
+        args.solrTopology = "standalone";
         args.solrCollections = List.of(collection);
         args.noWait = false;
 
@@ -338,6 +341,7 @@ public class TestCreateSnapshotModeFlag {
         args.s3Region = REGION;
         args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
+        args.solrTopology = "cloud";
         args.solrCollections = List.of("nobkpcoll");
         args.noWait = false;
 
@@ -411,6 +415,12 @@ public class TestCreateSnapshotModeFlag {
     void standalone_usesUnifiedCreateSnapshotPath_importMode(@TempDir Path tempRepo) throws Exception {
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+
+        // IMPORT adopts a backup that already exists, so seed one: a standalone replication backup
+        // is a flat Lucene index under snapshot.<name>/.
+        var index = tempRepo.resolve(Path.of("standalone_import_test", "dummy", "snapshot.dummy"));
+        Files.createDirectories(index);
+        Files.writeString(index.resolve("segments_1"), "seeded index data");
 
         var args = new CreateSnapshot.Args();
         args.sourceArgs.host = solrUrl;
@@ -500,6 +510,7 @@ public class TestCreateSnapshotModeFlag {
         args.s3Region = REGION;
         args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
+        args.solrTopology = "cloud";
         args.solrCollections = List.of("branchcoll");
         args.noWait = false;
 
@@ -522,24 +533,21 @@ public class TestCreateSnapshotModeFlag {
             "http://localhost:8983/solr/admin/collections?action=DELETE&name=branchcoll&wt=json");
     }
 
-    // ── IMPORT mode fails loudly when the schema cannot be obtained ───────────
-    //
-    // The canonical externally-managed scenario is "snapshot exists, source may be gone." If the
-    // live Solr source is unreachable, IMPORT mode cannot fetch the schema to upload — and silently
-    // continuing would let the downstream metadata migration produce empty/incorrect mappings with a
-    // green exit. IMPORT mode must instead fail loudly (SolrImportSchemaUnavailable). This is the
-    // regression guard for that behavior; it needs no live Solr container (the host is intentionally
-    // unreachable), only LocalStack for the S3 repo.
+    // ── Undetermined topology fails loudly ────────────────────────────────────
+    // Rather than guess standalone, an import that can classify neither the artifact nor the
+    // source demands --solr-topology.
 
     @Test
-    void importMode_unreachableSource_throwsInsteadOfSilentlyContinuing() throws Exception {
+    void undeterminedTopology_throwsInsteadOfGuessing() throws Exception {
         ensureBucket();
         String snapshotName = "import_unreachable_test";
         String subpath = "import-unreachable";
 
+        // Carries no layout markers, so topology stays undetermined — which is the point here.
+        putSnapshotPlaceholder(subpath, snapshotName);
+
         var args = new CreateSnapshot.Args();
-        // Unreachable Solr source: a routable-but-dead loopback port. isSolrCloud degrades to
-        // "assume standalone" without throwing, so run() proceeds to the schema-fetch step.
+        // Routable-but-dead loopback port: the probe gets connection refused, so detection throws.
         args.sourceArgs.host = "http://127.0.0.1:1";
         args.sourceArgs.insecure = true;
         args.sourceType = "solr";
@@ -549,9 +557,53 @@ public class TestCreateSnapshotModeFlag {
         args.s3Region = REGION;
         args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
-        // Specify collections explicitly so we skip live-cluster discovery and reach the
-        // schema-fetch-and-upload step (which is what must fail fatally when the source is gone).
         args.solrCollections = List.of("gonecoll");
+        args.noWait = false;
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
+
+        var ex = Assertions.assertThrows(ParameterException.class,
+            creator::run,
+            "An undeterminable topology must fail instead of assuming standalone");
+        Assertions.assertTrue(ex.getMessage().contains("--solr-topology"),
+            "Exception should name the flag that resolves it; got: " + ex.getMessage());
+
+        // And it must NOT have written a schema object to S3 (we never got past topology).
+        try (var s3 = testS3Client()) {
+            String configKey = subpath + "/" + snapshotName
+                + "/gonecoll/zk_backup_0/configs/gonecoll/managed-schema.xml";
+            Assertions.assertFalse(s3ObjectExists(s3, configKey),
+                "No schema should be uploaded when the source is unreachable");
+        }
+    }
+
+    // ── IMPORT still fails loudly when a reachable source can't provide the schema ──
+    // Detection passes, but the bogus core has no schema to fetch → SolrImportSchemaUnavailable.
+
+    @Test
+    void importMode_reachableSourceMissingSchema_throws() throws Exception {
+        ensureBucket();
+        String snapshotName = "import_missing_schema_test";
+        String subpath = "import-missing-schema";
+        String bogusCore = "does_not_exist_core";
+
+        // Validation runs before staging now, so the location must exist for the test to reach
+        // the schema-fetch failure it is actually about.
+        putSnapshotPlaceholder(subpath, snapshotName);
+
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = STANDALONE_SOLR.getSolrUrl();
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = snapshotName;
+        args.snapshotRepoName = "test";
+        args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.s3Region = REGION;
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.mode = "import";
+        args.solrTopology = "standalone";
+        args.solrCollections = List.of(bogusCore);
         args.noWait = false;
 
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
@@ -559,17 +611,9 @@ public class TestCreateSnapshotModeFlag {
 
         var ex = Assertions.assertThrows(SolrBackupStrategy.SolrImportSchemaUnavailable.class,
             creator::run,
-            "IMPORT mode must throw when the schema cannot be retrieved from an unreachable source");
-        Assertions.assertTrue(ex.getMessage().contains("gonecoll"),
-            "Exception should name the collection whose schema could not be obtained; got: " + ex.getMessage());
-
-        // And it must NOT have written a schema object to S3 (nothing was fetched to upload).
-        try (var s3 = testS3Client()) {
-            String configKey = subpath + "/" + snapshotName
-                + "/gonecoll/zk_backup_0/configs/gonecoll/managed-schema.xml";
-            Assertions.assertFalse(s3ObjectExists(s3, configKey),
-                "No schema should be uploaded when the source is unreachable");
-        }
+            "IMPORT mode must throw when a reachable source cannot provide the requested schema");
+        Assertions.assertTrue(ex.getMessage().contains(bogusCore),
+            "Exception should name the core whose schema could not be obtained; got: " + ex.getMessage());
     }
 
     // ── IMPORT mode fails loudly when the snapshot location has no data ───────
@@ -598,6 +642,7 @@ public class TestCreateSnapshotModeFlag {
         args.s3Region = REGION;
         args.endpoint = LOCAL_STACK.getEndpoint().toString();
         args.mode = "import";
+        args.solrTopology = "cloud";
         args.solrCollections = List.of("emptycoll");
         args.noWait = false;
 
@@ -614,6 +659,108 @@ public class TestCreateSnapshotModeFlag {
             "http://localhost:8983/solr/admin/collections?action=DELETE&name=emptycoll&wt=json");
     }
 
+    // ── Standalone data sits beside the snapshot dir, not inside it ───────────
+    // Solr's replication handler writes snapshot.<name>/ at the repo root, so a backup this tool
+    // created leaves no marker under <repo>/<snapshotName>/ for inference to find.
+
+    @Test
+    void importMode_infersStandaloneFromSiblingSnapshotDir(@TempDir Path tempRepo) throws Exception {
+        var snapshotName = "sibling_layout_test";
+        // What `--mode create` against a standalone source actually produces.
+        var index = tempRepo.resolve("snapshot." + snapshotName);
+        Files.createDirectories(index);
+        Files.writeString(index.resolve("segments_1"), "seeded index data");
+        // The snapshot dir itself holds only the staged config from that create run.
+        var staged = tempRepo.resolve(Path.of(snapshotName, "dummy", "zk_backup_0", "configs", "dummy"));
+        Files.createDirectories(staged);
+        Files.writeString(staged.resolve("managed-schema.xml"), "<schema/>");
+
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = STANDALONE_SOLR.getSolrUrl();
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = snapshotName;
+        args.snapshotRepoName = "test";
+        args.repoUri = tempRepo.toString();
+        args.mode = "import";
+        args.solrCollections = List.of("dummy");
+        args.noWait = false;
+
+        try (var logCapture = new CloseableLogSetup(SolrBackupStrategy.class.getName())) {
+            var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            // No --solr-topology: the sibling index is what must resolve it.
+            new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+            Assertions.assertTrue(logCapture.getLogEvents().stream()
+                    .anyMatch(m -> m.contains("topology=standalone")),
+                "The sibling snapshot.<name>/ index should identify a standalone backup");
+        }
+    }
+
+    // ── Standalone staging must not be able to manufacture a "valid" snapshot ──
+    // Staging writes zk_backup_0/configs/... under the snapshot location, so validating after it
+    // would let an absent backup pass on the strength of files this run just created.
+
+    @Test
+    void importMode_standaloneEmptyS3Location_throwsBeforeStaging() throws Exception {
+        ensureBucket();
+        String snapshotName = "import_standalone_empty_test";
+        String subpath = "import-standalone-empty";
+
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = STANDALONE_SOLR.getSolrUrl();
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = snapshotName;
+        args.snapshotRepoName = "test";
+        args.repoUri = "s3://" + BUCKET_NAME + "/" + subpath;
+        args.s3Region = REGION;
+        args.endpoint = LOCAL_STACK.getEndpoint().toString();
+        args.mode = "import";
+        args.solrTopology = "standalone";
+        args.solrCollections = List.of("dummy");
+        args.noWait = false;
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
+
+        Assertions.assertThrows(SolrBackupStrategy.SolrImportSnapshotUnavailable.class,
+            creator::run,
+            "An absent standalone backup must fail validation, not be created by schema staging");
+
+        try (var s3 = testS3Client()) {
+            String configKey = subpath + "/" + snapshotName
+                + "/dummy/zk_backup_0/configs/dummy/managed-schema.xml";
+            Assertions.assertFalse(s3ObjectExists(s3, configKey),
+                "Schema staging must not run before the snapshot location is validated");
+        }
+    }
+
+    @Test
+    void importMode_standaloneMissingFilesystemSnapshot_throwsBeforeStaging(@TempDir Path tempRepo) throws Exception {
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = STANDALONE_SOLR.getSolrUrl();
+        args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
+        args.snapshotName = "missing_standalone_snapshot";
+        args.snapshotRepoName = "test";
+        args.repoUri = tempRepo.toString();
+        args.mode = "import";
+        args.solrTopology = "standalone";
+        args.solrCollections = List.of("dummy");
+        args.noWait = false;
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
+
+        Assertions.assertThrows(SolrBackupStrategy.SolrImportSnapshotUnavailable.class,
+            creator::run,
+            "A missing standalone snapshot directory must fail validation, not be created by staging");
+
+        Assertions.assertFalse(Files.exists(tempRepo.resolve(args.snapshotName)),
+            "Schema staging must not create the snapshot directory it was supposed to validate");
+    }
+
     @Test
     void importMode_missingFilesystemSnapshot_throwsInsteadOfWarning(@TempDir Path tempRepo) throws Exception {
         // SolrCloud + filesystem: no synthetic config is written, so the snapshot dir stays absent.
@@ -627,6 +774,7 @@ public class TestCreateSnapshotModeFlag {
         args.snapshotRepoName = "test";
         args.repoUri = tempRepo.toString();
         args.mode = "import";
+        args.solrTopology = "cloud";
         args.solrCollections = List.of("branchcoll");
         args.noWait = false;
 

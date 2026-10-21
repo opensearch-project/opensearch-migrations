@@ -1,6 +1,9 @@
 # Generated data (re-create with: python3 data/generate_dataset.py)
 data/dataset.json
 
+# Solr collection backups written by the solr-migration-test-sets
+solr-migration-test-sets/backups/
+
 # Python
 __pycache__/
 *.pyc

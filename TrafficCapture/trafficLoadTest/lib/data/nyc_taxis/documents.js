@@ -8,6 +8,9 @@
 
 import { randomElement, randomInt, randomFloat, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
 
+// The index mapping this generator's documents are shaped for.
+export const mapping = open('./mapping.json');
+
 export const TRIP_TYPES      = ['1', '2'];
 export const PAYMENT_TYPES   = ['1', '2', '3', '4'];
 export const STORE_FWD_FLAGS = ['Y', 'N'];
@@ -70,8 +73,8 @@ export function randomUpdateBody() {
   return { total_amount: parseFloat((Math.random() * 45 + 5).toFixed(2)) };
 }
 
-export function randomBulkBatch(index, batchSize) {
-  return _randomBulkBatch(index, batchSize, randomDocument);
+export function randomBulkBatch(index, batchSize, idFn = null) {
+  return _randomBulkBatch(index, batchSize, randomDocument, idFn);
 }
 
 /**

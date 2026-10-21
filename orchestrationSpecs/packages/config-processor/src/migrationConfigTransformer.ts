@@ -33,6 +33,9 @@ type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type SolrBackupNormalizedConfig = {
     externalBackupName?: string;
     collectionAllowlist: string[];
+    topology?: "cloud" | "standalone";
+    otelTraceExportEnabled?: boolean;
+    otelMetricsExportEnabled?: boolean;
     otelTraceCollectorEndpoint?: string;
     otelMetricsCollectorEndpoint?: string;
     jvmArgs?: string;
@@ -92,8 +95,15 @@ async function rewriteRepoEndpointIfLocalStack(
     repoName: string
 ): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
-    // GCS repos have no LocalStack-equivalent; the endpoint check is a no-op
-    // for gs:// URIs and the resulting useLocalStack stays false.
+    // The localstack:// rewrite below is an S3 addressing workaround, not a
+    // generic emulator feature: resolving the host to an IP forces the AWS SDK
+    // out of virtual-host-style addressing. See MetadataMigration/DEVELOPER_GUIDE.md.
+    //
+    // Path-style emulators need none of this. fake-gcs-server is reached through
+    // a plain http:// endpoint (see the gcs/ chart templates), and GcsRepo.create
+    // infers "emulator" from a non-empty endpoint and installs NoCredentials.
+    // So the check below is a no-op for gs:// URIs and useLocalStack stays false,
+    // not because GCS lacks an emulator, but because it does not need the rewrite.
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
@@ -416,6 +426,7 @@ function prepareMetadataConfig(
     const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
+        resources: rest.resources,
         skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
         skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
@@ -429,29 +440,22 @@ function trimToUndefined(value: unknown): string | undefined {
 }
 
 /**
- * Resolve the failed-document-stream S3 bucket/region/endpoint to explicit values before the workflow
- * (and MigrationRun.spec) is created, so the effective destination is recorded in run history instead of
- * being discovered from pod env at runtime inside RFS.
+ * Resolve the failed-document-stream S3 region/endpoint before the workflow is created, so the
+ * destination is recorded in run history rather than discovered from pod env at runtime.
  *
- * Bucket and region/endpoint are resolved as a coupled unit: when the bucket falls through to the
- * deployment default we use the deployment region/endpoint (never the snapshot repo's), so a
- * deployment-default bucket can't be paired with the snapshot repo's region. The snapshot repo's
- * region/endpoint are only inherited when the user explicitly chose the bucket. All inputs are trimmed
- * so an empty string (e.g. from an absent ConfigMap key) is treated as absent.
+ * The bucket is the stream's on/off switch and comes from the user's config alone — no default.
  */
 export function resolveFailedDocumentStreamS3(
     rest: Record<string, unknown>,
     repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
     deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>
 ): Record<string, string | undefined> {
-    const userBucket = trimToUndefined(rest.failedDocumentStreamS3Bucket);
+    const bucket = trimToUndefined(rest.failedDocumentStreamS3Bucket);
     const userRegion = trimToUndefined(rest.failedDocumentStreamS3Region);
     const userEndpoint = trimToUndefined(rest.failedDocumentStreamS3Endpoint);
 
-    const bucket = userBucket ?? trimToUndefined(deploymentDefaults.defaultS3Bucket);
     if (!bucket) {
-        // No bucket resolvable -> failed document stream disabled. Clear any orphan region/endpoint
-        // so they don't land in resolved config without a bucket.
+        // Stream off; clear orphan region/endpoint.
         return {
             failedDocumentStreamS3Bucket: undefined,
             failedDocumentStreamS3Region: undefined,
@@ -459,17 +463,16 @@ export function resolveFailedDocumentStreamS3(
         };
     }
 
-    const userChoseBucket = userBucket !== undefined;
     const region = userRegion
-        ?? (userChoseBucket ? trimToUndefined(repoConfig?.awsRegion) : undefined)
+        ?? trimToUndefined(repoConfig?.awsRegion)
         ?? trimToUndefined(deploymentDefaults.defaultS3Region);
     const endpoint = userEndpoint
-        ?? (userChoseBucket ? trimToUndefined(repoConfig?.endpoint) : undefined)
+        ?? trimToUndefined(repoConfig?.endpoint)
         ?? trimToUndefined(deploymentDefaults.defaultS3Endpoint);
 
     if (!region) {
         throw new Error(
-            `failed document stream S3 bucket '${bucket}' was resolved but no region could be determined. ` +
+            `failed document stream S3 bucket '${bucket}' was set but no region could be determined. ` +
             `Set documentBackfillConfig.failedDocumentStreamS3Region, the snapshot repo's awsRegion, ` +
             `or the deployment default region.`
         );
@@ -627,6 +630,7 @@ function normalizeSnapshotInfo(
                     } = backup;
                     const {
                         collectionAllowlist,
+                        topology,
                         ...createBackupOptions
                     } = createBackupConfig;
                     const normalizedCollectionAllowlist = collectionAllowlist ?? [];
@@ -638,10 +642,12 @@ function normalizeSnapshotInfo(
                                 createSnapshotConfig: {
                                     ...createBackupOptions,
                                     solrCollections: normalizedCollectionAllowlist,
+                                    ...(topology ? {solrTopology: topology} : {}),
                                 },
                             },
                             solrBackupConfig: {
                                 collectionAllowlist: normalizedCollectionAllowlist,
+                                ...(topology ? {topology} : {}),
                             },
                         },
                     ];
@@ -779,6 +785,41 @@ function buildKafkaClientConfig(
     };
 }
 
+type WorkflowManagedTopicTimestampType = "LogAppendTime" | "CreateTime";
+
+function defaultWorkflowManagedTopicTimestampType(
+    kafkaConfig: ReturnType<typeof buildKafkaClientConfig>,
+    requiredTimestampType: WorkflowManagedTopicTimestampType
+) {
+    if (!kafkaConfig.managedByWorkflow) {
+        return kafkaConfig;
+    }
+    const topicSpecOverrides =
+        kafkaConfig.topicSpecOverrides ?? DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES;
+    const topicConfig = topicSpecOverrides.config ?? {};
+    const configuredTimestampType = topicConfig["message.timestamp.type"];
+    if (configuredTimestampType !== undefined) {
+        if (configuredTimestampType !== requiredTimestampType) {
+            throw new Error(
+                `Workflow-managed topic '${kafkaConfig.kafkaTopic}' requires `
+                + `'message.timestamp.type' to be '${requiredTimestampType}', but received `
+                + `'${String(configuredTimestampType)}'.`
+            );
+        }
+        return kafkaConfig;
+    }
+    return {
+        ...kafkaConfig,
+        topicSpecOverrides: {
+            ...topicSpecOverrides,
+            config: {
+                ...topicConfig,
+                "message.timestamp.type": requiredTimestampType,
+            },
+        },
+    };
+}
+
 function isGenerateSnapshot(config: WorkflowSnapshotNameConfig): config is WorkflowGeneratedSnapshotConfig {
     return 'createSnapshotConfig' in config;
 }
@@ -805,11 +846,13 @@ function solrCreateSnapshotConfigForBackup(snapshotDef: NormalizedSnapshotDefini
     const {
         externalBackupName: _externalBackupName,
         collectionAllowlist,
+        topology,
         ...runtimeOptions
     } = snapshotDef.solrBackupConfig;
     return {
         ...runtimeOptions,
         solrCollections: collectionAllowlist,
+        ...(topology ? {solrTopology: topology} : {}),
     };
 }
 
@@ -900,17 +943,19 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const proxiesWithChecksums = proxies.map(p => {
             const kafkaChecksum = kafkaChecksums.get(p.kafkaConfig.label) ?? '';
             const kafkaIdentity = MigrationConfigTransformer.kafkaClientIdentity(p.kafkaConfig as Record<string, unknown>);
+            const sourceConnectionIdentityWithoutAuth =
+                MigrationConfigTransformer.clusterConnectionIdentityWithoutAuth(p.sourceConnectionIdentity);
             const topicConfigChecksum = cs(
                 kafkaIdentity,
                 p.kafkaConfig.kafkaTopic,
                 p.kafkaConfig.topicSpecOverrides,
                 kafkaChecksum
             );
-            const sourceConnectionIdentityChecksum = cs(p.sourceConnectionIdentity);
+            const sourceConnectionIdentityChecksum = cs(sourceConnectionIdentityWithoutAuth);
             return {
                 ...p,
                 kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksum },
-                configChecksum: cs(p.sourceConnectionIdentity, p.proxyConfig, topicConfigChecksum),
+                configChecksum: cs(sourceConnectionIdentityWithoutAuth, p.proxyConfig, topicConfigChecksum),
                 topicConfigChecksum,
                 checksumForSnapshot: csDep(
                     PROXY_SCHEMA,
@@ -989,7 +1034,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
             const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
-            const sourceConnectionIdentity = m.sourceConnectionIdentity;
+            const sourceConnectionIdentityWithoutAuth =
+                MigrationConfigTransformer.clusterConnectionIdentityWithoutAuth(m.sourceConnectionIdentity);
             const targetConnectionIdentity = m.targetConnectionIdentity;
             const snapshotRepoIdentity = MigrationConfigTransformer.repoIdentity(
                 (m.snapshotConfig.repoConfig ?? {}) as Record<string, unknown>
@@ -1009,7 +1055,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 snapshotConfigChecksum,
                 resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
-                    sourceConnectionIdentity,
+                    sourceConnectionIdentityWithoutAuth,
                     m.metadataMigrationConfig,
                     m.documentBackfillConfig,
                     targetConnectionIdentity,
@@ -1019,7 +1065,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ),
                 checksumForReplayer: cs(targetConnectionIdentity, replayerMaterialPart),
                 workloadIdentityChecksum: cs(
-                    sourceConnectionIdentity,
+                    sourceConnectionIdentityWithoutAuth,
                     targetConnectionIdentity,
                     m.snapshotNameResolution,
                     snapshotRepoIdentity,
@@ -1136,9 +1182,16 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ...sourceCluster,
                 label: proxy.source,
             });
+            const kafkaConfig = buildKafkaClientConfig(
+                proxy.kafka ?? "default",
+                kafkaClusters,
+                topic
+            );
             return {
                 name: proxyName,
-                kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
+                kafkaConfig: proxy.proxyConfig.noCapture === true
+                    ? kafkaConfig
+                    : defaultWorkflowManagedTopicTimestampType(kafkaConfig, "LogAppendTime"),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
                 sourceConnectionIdentity,
                 proxyConfig: prepareProxyConfig(proxy.proxyConfig),
@@ -1454,7 +1507,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 awsRegion: s3.awsRegion,
                 ...(s3.endpoint ? { endpoint: s3.endpoint } : {}),
                 kafkaClusterName: kafkaCluster,
-                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
+                kafkaConfig: defaultWorkflowManagedTopicTimestampType(
+                    buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
+                    "CreateTime"
+                ),
             };
         });
     }
@@ -1555,7 +1611,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
+            solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
+        };
+    }
+
+    static clusterConnectionIdentityWithoutAuth(
+        connectionIdentity: Record<string, unknown>
+    ): Record<string, unknown> {
+        // Preserve the legacy no-auth hash shape so existing proxies do not redeploy
+        // once when source auth is removed from their deployment contract.
+        return {
+            label: connectionIdentity.label ?? "",
+            version: connectionIdentity.version ?? "",
+            endpoint: connectionIdentity.endpoint ?? "",
+            allowInsecure: connectionIdentity.allowInsecure ?? false,
+            solrContextPath: connectionIdentity.solrContextPath ?? "",
+            authType: "none",
+            authBasicSecretName: "",
+            authSigv4Region: "",
+            authSigv4Service: "",
+            authMtlsClientSecretName: "",
+            authMtlsCaCertHash: "",
         };
     }
 

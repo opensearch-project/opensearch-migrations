@@ -58,6 +58,28 @@ describe("Capture proxy Service load-balancer annotations are cloud-conditional"
         expect(m).toContain("(fromJSON(inputs.parameters.internetFacing)) ? ('internet-facing') : ('internal')");
     });
 
+    it("resolves awsResourceTags from the provider-config ConfigMap, defaulting to empty", () => {
+        const templates: any[] = setupCapture.spec?.templates ?? [];
+        const t = templates.find(x => x.name === "deployproxyservice");
+        const p = (t.inputs?.parameters ?? []).find((x: any) => x.name === "awsResourceTags");
+        expect(p).toBeDefined();
+        // Argo v4 errors on a missing configMapKeyRef key even with optional:true, so the chart
+        // always renders the key and the fallback here must be the empty string, not absent.
+        expect(p.value).toBe("");
+        expect(p.valueFrom.configMapKeyRef).toEqual({name: "provider-config", key: "awsResourceTags"});
+    });
+
+    it("tags the NLB from awsResourceTags, and omits the annotation when unset", () => {
+        const m = manifest();
+        // The annotation takes one comma-separated "Key=Value,Key2=Value2" string, so any number of
+        // tags rides on this single parameter -- see the ConfigMap rendering test in the chart.
+        expect(m).toContain('sprig.dict("service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags", inputs.parameters.awsResourceTags)');
+        // An unset tag string must produce no annotation at all rather than an empty one.
+        expect(m).toContain("(inputs.parameters.awsResourceTags == '') ? (sprig.dict())");
+        // Merged into the aws branch only -- gcp/azure must not receive an AWS annotation.
+        expect(m).toContain('sprig.merge(sprig.dict("service.beta.kubernetes.io/aws-load-balancer-type"');
+    });
+
     it("does not emit foreign-cloud annotation keys as static (non-conditional) manifest keys", () => {
         // Every cloud-specific key must live inside the runtime ternary expression,
         // never as a literal top-level annotation, so a cluster only ever receives

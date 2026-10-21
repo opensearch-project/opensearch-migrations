@@ -15,6 +15,7 @@ public class RootWireLoggingContext extends RootOtelContext implements IRootWire
     public final WireCaptureContexts.BlockingContext.MetricInstruments blockingInstruments;
     public final WireCaptureContexts.WaitingForResponseContext.MetricInstruments waitingForResponseInstruments;
     public final WireCaptureContexts.ResponseContext.MetricInstruments responseInstruments;
+    public final CaptureConnectionMetrics captureConnectionMetrics;
 
     public RootWireLoggingContext(OpenTelemetry openTelemetry, IContextTracker contextTracker) {
         this(openTelemetry, contextTracker, SCOPE_NAME);
@@ -28,6 +29,7 @@ public class RootWireLoggingContext extends RootOtelContext implements IRootWire
         blockingInstruments = WireCaptureContexts.BlockingContext.makeMetrics(meter);
         waitingForResponseInstruments = WireCaptureContexts.WaitingForResponseContext.makeMetrics(meter);
         responseInstruments = WireCaptureContexts.ResponseContext.makeMetrics(meter);
+        captureConnectionMetrics = new CaptureConnectionMetrics(meter);
     }
 
     @Override

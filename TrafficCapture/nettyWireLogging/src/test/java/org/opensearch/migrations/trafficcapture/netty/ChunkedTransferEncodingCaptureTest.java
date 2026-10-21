@@ -118,7 +118,8 @@ public class ChunkedTransferEncodingCaptureTest {
                     "c",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    x -> true
+                    x -> true,
+                    new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
                 )
             );
 

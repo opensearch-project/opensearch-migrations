@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.function.Predicate;
 
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -9,7 +10,7 @@ import org.opensearch.migrations.trafficcapture.netty.tracing.IWireCaptureContex
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpRequest;
-import lombok.Lombok;
+import io.netty.util.ReferenceCountUtil;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,9 +24,93 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         String connectionId,
         @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
         @NonNull RequestCapturePredicate requestCapturePredicate,
-        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock
+        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
+        @NonNull CaptureProcessState captureProcessState
     ) throws IOException {
-        super(rootContext, nodeId, connectionId, trafficOffloaderFactory, requestCapturePredicate);
+        this(
+            rootContext,
+            nodeId,
+            connectionId,
+            trafficOffloaderFactory,
+            requestCapturePredicate,
+            headerPredicateForWhenToBlock,
+            IncompleteRequestLimits.DEFAULT,
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            captureProcessState
+        );
+    }
+
+    public ConditionallyReliableLoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        @NonNull String nodeId,
+        String connectionId,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
+        @NonNull Duration maximumRequestAssemblyDuration,
+        @NonNull CaptureProcessState captureProcessState
+    ) throws IOException {
+        this(
+            rootContext,
+            nodeId,
+            connectionId,
+            trafficOffloaderFactory,
+            requestCapturePredicate,
+            headerPredicateForWhenToBlock,
+            new IncompleteRequestLimits(
+                maximumRequestAssemblyDuration,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
+            ),
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            captureProcessState
+        );
+    }
+
+    public ConditionallyReliableLoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        @NonNull String nodeId,
+        String connectionId,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
+        @NonNull IncompleteRequestLimits incompleteRequestLimits,
+        @NonNull CaptureProcessState captureProcessState
+    ) throws IOException {
+        this(
+            rootContext,
+            nodeId,
+            connectionId,
+            trafficOffloaderFactory,
+            requestCapturePredicate,
+            headerPredicateForWhenToBlock,
+            incompleteRequestLimits,
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            captureProcessState
+        );
+    }
+
+    public ConditionallyReliableLoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        @NonNull String nodeId,
+        String connectionId,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
+        @NonNull IncompleteRequestLimits incompleteRequestLimits,
+        @NonNull Duration maximumConnectionDuration,
+        @NonNull CaptureProcessState captureProcessState
+    ) throws IOException {
+        super(
+            rootContext,
+            nodeId,
+            connectionId,
+            trafficOffloaderFactory,
+            requestCapturePredicate,
+            incompleteRequestLimits,
+            maximumConnectionDuration,
+            captureProcessState
+        );
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
     }
 
@@ -39,27 +124,82 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         if (shouldCapture && shouldBlockPredicate.test(httpRequest)) {
             ((IWireCaptureContexts.IRequestContext) messageContext).onBlockingRequest();
             messageContext = messageContext.createBlockingContext();
-            trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
-                log.atInfo().setMessage("Done flushing").log();
-
-                if (t != null) {
-                    // This is a spot where we would benefit from having a behavioral policy that different users
-                    // could set as needed. Some users may be fine with just logging a failed offloading of a request
-                    // where other users may want to stop entirely. JIRA here:
-                    // https://opensearch.atlassian.net/browse/MIGRATIONS-1276
-                    log.atWarn().setCause(t)
-                        .setMessage("Error offloading the request, but forwarding it to the service anyway").log();
-                    messageContext.addCaughtException(t);
-                }
-                try {
-                    super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
-                } catch (Exception e) {
-                    throw Lombok.sneakyThrow(e);
-                }
-            });
+            trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, failure) ->
+                runOnEventLoop(
+                    ctx,
+                    () -> finishBlockedRequest(ctx, msg, shouldCapture, httpRequest, result, failure),
+                    msg
+                )
+            );
         } else {
             assert messageContext instanceof IWireCaptureContexts.IRequestContext;
             super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
+        }
+    }
+
+    private void finishBlockedRequest(
+        ChannelHandlerContext ctx,
+        Object msg,
+        boolean shouldCapture,
+        HttpRequest httpRequest,
+        T acknowledgement,
+        Throwable failure
+    ) {
+        var captureFailure = failure;
+        if (captureFailure == null) {
+            try {
+                trafficOffloader.validateCriticalMutationTrafficAcknowledgement(acknowledgement);
+            } catch (Throwable validationFailure) {
+                captureFailure = validationFailure;
+            }
+        }
+        if (captureFailure != null) {
+            messageContext.addCaughtException(captureFailure);
+            var resultingState = captureFailure instanceof Error
+                ? captureProcessState.unstableProcessFailed(captureFailure)
+                : captureProcessState.requiredCaptureFailed(captureFailure);
+            if (resultingState == CaptureProcessState.State.TERMINATING) {
+                log.atError()
+                    .setCause(captureFailure)
+                    .setMessage("Capture failed; refusing to forward the request before process termination")
+                    .log();
+                ReferenceCountUtil.release(msg);
+                ctx.close();
+                return;
+            }
+            log.atError()
+                .setCause(captureFailure)
+                .setMessage("Capture failed; forwarding in irreversible process-wide pass-through mode")
+                .log();
+        }
+        try {
+            super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
+        } catch (Error e) {
+            captureProcessState.unstableProcessFailed(e);
+            ReferenceCountUtil.release(msg);
+            ctx.close();
+        } catch (Exception e) {
+            ReferenceCountUtil.release(msg);
+            ctx.fireExceptionCaught(e);
+            ctx.close();
+        }
+    }
+
+    private static void runOnEventLoop(
+        ChannelHandlerContext ctx,
+        Runnable continuation,
+        Object retainedMessage
+    ) {
+        if (ctx.executor().inEventLoop()) {
+            continuation.run();
+            return;
+        }
+        try {
+            ctx.executor().execute(continuation);
+        } catch (RuntimeException e) {
+            ReferenceCountUtil.release(retainedMessage);
+            ctx.fireExceptionCaught(e);
+            ctx.close();
         }
     }
 }

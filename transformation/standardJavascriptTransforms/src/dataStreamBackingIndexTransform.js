@@ -37,6 +37,9 @@ function addVersionControlMetadata(document) {
                 document.operation["_index"] = dataStreamName;
                 // Set operation type to create for data stream append
                 document.operation.op_type = "create";
+                // Create-only writes cannot carry the snapshot's external version.
+                delete document.operation.version;
+                delete document.operation.version_type;
             }
         }
     }

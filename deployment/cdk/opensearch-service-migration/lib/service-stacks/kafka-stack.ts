@@ -9,7 +9,8 @@ import {KafkaYaml} from "../migration-services-yaml";
 
 export interface KafkaBrokerProps extends StackPropsExt {
     readonly vpcDetails: VpcDetails,
-    readonly fargateCpuArch: CpuArchitecture
+    readonly fargateCpuArch: CpuArchitecture,
+    readonly captureProxyDesiredCount?: number
 }
 
 /**
@@ -60,6 +61,8 @@ export class KafkaStack extends MigrationServiceCore {
                 "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS": "0",
                 "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR": "1",
                 "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
+                "KAFKA_NUM_PARTITIONS": Math.max((props.captureProxyDesiredCount ?? 0) + 1, 1).toString(),
+                "KAFKA_LOG_MESSAGE_TIMESTAMP_TYPE": "LogAppendTime",
                 "KAFKA_LOG_DIRS": '/tmp/kraft-combined-logs'
             },
             portMappings: [servicePort],

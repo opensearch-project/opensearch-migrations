@@ -14,7 +14,6 @@ import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
@@ -24,6 +23,8 @@ import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.data.workloads.Workloads;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+import org.opensearch.migrations.testfixtures.SupportedClusters;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.migrations.utils.FileSystemUtils;
 

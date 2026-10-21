@@ -1,16 +1,24 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Properties;
 
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class KafkaConfigTest {
+    @TempDir
+    Path tempDir;
 
     @Test
     void applySaslAuthProperties_SslSetsSecurityProtocol() {
@@ -64,5 +72,80 @@ public class KafkaConfigTest {
         var params = new KafkaConfig.KafkaParameters();
         params.kafkaAuthType = "kerberos";
         assertThrows(IllegalArgumentException.class, params::validateKafkaAuthFlags);
+    }
+
+    @Test
+    void producerPropertiesCannotWeakenOrderingSettings() throws IOException {
+        var propertyFile = tempDir.resolve("producer.properties");
+        Files.writeString(
+            propertyFile,
+            ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG
+                + "=false\n"
+                + ProducerConfig.ACKS_CONFIG
+                + "=1\n"
+                + ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION
+                + "=100\n"
+        );
+
+        var properties = KafkaConfig.buildKafkaProperties(
+            propertyFile.toString(),
+            "broker:9092",
+            "client",
+            KafkaConfig.AUTH_TYPE_NONE,
+            null,
+            null
+        );
+
+        assertEquals(true, properties.get(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG));
+        assertEquals("all", properties.get(ProducerConfig.ACKS_CONFIG));
+        assertEquals(5, properties.get(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION));
+    }
+
+    @Test
+    void membershipConsumerPropertiesSetGroupIdentityWithoutForcingAnAssignmentStrategy()
+        throws IOException {
+        var propertyFile = tempDir.resolve("consumer.properties");
+        Files.writeString(
+            propertyFile,
+            ConsumerConfig.GROUP_ID_CONFIG
+                + "=wrong-group\n"
+        );
+        var params = new KafkaConfig.KafkaParameters();
+        params.kafkaPropertyFile = propertyFile.toString();
+        params.kafkaBrokers = "broker:9092";
+        params.kafkaClientId = "capture";
+
+        var properties = KafkaConfig.buildMembershipConsumerProperties(
+            params,
+            "traffic"
+        );
+
+        assertEquals("broker:9092", properties.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
+        assertEquals("capture-membership", properties.get(ConsumerConfig.CLIENT_ID_CONFIG));
+        assertEquals("capture-proxy-membership-traffic", properties.get(ConsumerConfig.GROUP_ID_CONFIG));
+        assertEquals(false, properties.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
+        assertFalse(properties.containsKey(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG));
+    }
+
+    @Test
+    void membershipConsumerPropertiesPreserveAnExplicitKafkaAssignmentStrategy()
+        throws IOException {
+        var propertyFile = tempDir.resolve("consumer.properties");
+        Files.writeString(
+            propertyFile,
+            ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG
+                + "=org.apache.kafka.clients.consumer.RangeAssignor\n"
+        );
+        var params = new KafkaConfig.KafkaParameters();
+        params.kafkaPropertyFile = propertyFile.toString();
+        params.kafkaBrokers = "broker:9092";
+        params.kafkaClientId = "capture";
+
+        var properties = KafkaConfig.buildMembershipConsumerProperties(params, "traffic");
+
+        assertEquals(
+            "org.apache.kafka.clients.consumer.RangeAssignor",
+            properties.get(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG)
+        );
     }
 }

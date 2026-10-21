@@ -3,6 +3,7 @@ package org.opensearch.migrations.tracing;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.DoubleStream;
+import java.util.stream.Stream;
 
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
@@ -14,6 +15,24 @@ import lombok.extern.slf4j.Slf4j;
 public class CommonScopedMetricInstruments extends CommonMetricInstruments {
 
     public static final String DURATION_APPENDAGE = "Duration";
+
+    /**
+     * Bucket bounds in ms for every duration histogram: OpenTelemetry's defaults, extended from 10 s to 30 s so that
+     * a slow tail is distinguishable from the overflow bucket rather than folded into it.
+     */
+    public static final List<Double> DURATION_BUCKETS_MS = List.of(
+        0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0,
+        1_000.0, 2_500.0, 5_000.0, 7_500.0, 10_000.0, 15_000.0, 30_000.0
+    );
+
+    /**
+     * Bounds for durations that legitimately run past 30 s: lifetimes, end-to-end lag, and waits on a slow peer.
+     * Each added bound costs one series per histogram per process in Prometheus, so these are opted into.
+     */
+    public static final List<Double> LONG_DURATION_BUCKETS_MS = Stream.concat(
+        DURATION_BUCKETS_MS.stream(),
+        Stream.of(60_000.0, 120_000.0, 300_000.0, 600_000.0, 1_800_000.0, 3_600_000.0)
+    ).toList();
 
     @AllArgsConstructor
     public static class ScopeLabels {
@@ -54,8 +73,12 @@ public class CommonScopedMetricInstruments extends CommonMetricInstruments {
         this(meter, fromActivityName(activityName), getBuckets(firstBucketSize, lastBucketCeiling));
     }
 
+    public CommonScopedMetricInstruments(Meter meter, String activityName, List<Double> buckets) {
+        this(meter, fromActivityName(activityName), buckets);
+    }
+
     public CommonScopedMetricInstruments(Meter meter, ScopeLabels stockMetricLabels) {
-        this(meter, stockMetricLabels, null);
+        this(meter, stockMetricLabels, DURATION_BUCKETS_MS);
     }
 
     public CommonScopedMetricInstruments(Meter meter, ScopeLabels stockMetricLabels, List<Double> buckets) {

@@ -26,6 +26,20 @@
             "label": "Migration Qualifier",
             "defaultValue": "placeholder-qualifier",
             "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "CATCHUP_FLOOR_SECONDS",
+            "inputType": "select",
+            "id": "CATCHUP_FLOOR_SECONDS",
+            "label": "Catch-up lag floor",
+            "defaultValue": "5",
+            "values": [
+                { "label": "1 second", "value": "1" },
+                { "label": "5 seconds", "value": "5" },
+                { "label": "1 minute", "value": "60" }
+            ],
+            "visible": true
         }
     ],
     "widgets": [
@@ -175,14 +189,15 @@
             "properties": {
                 "metrics": [
                     [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "m4", "region": "REGION", "label": "Avg", "color": "#dbdb8d", "visible": false } ],
-                    [ { "expression": "FLOOR(METRICS()/1000)/60", "label": "Replay Lag", "id": "e2", "region": "REGION", "color": "#9edae5", "period": 60 } ]
+                    [ { "expression": "m4/1000", "label": "Mean replay lag", "id": "e2", "region": "REGION", "color": "#9edae5", "period": 60 } ],
+                    [ { "expression": "TIME_SERIES(CATCHUP_FLOOR_SECONDS)", "label": "Selected catch-up floor", "id": "e3", "region": "REGION", "color": "#ff7f0e", "period": 60 } ]
                 ],
                 "view": "timeSeries",
-                "title": "Replayer Performance Analysis",
+                "title": "Mean replay lag and CATCHUP_FLOOR_SECONDS-second catch-up floor",
                 "region": "REGION",
                 "yAxis": {
                     "left": {
-                        "label": "Lag (minutes)",
+                        "label": "Lag (seconds)",
                         "showUnits": false
                     }
                 },
@@ -323,7 +338,7 @@
             "x": 0,
             "type": "text",
             "properties": {
-                "markdown": "# Additional Replay Metrics",
+                "markdown": "# Additional Replay Metrics\nCatch-up estimates project when the recently observed mean replay lag will reach the selected floor. They are not authoritative Kafka backlog drain estimates; broker consumer lag remains CLI-derived.",
                 "background": "transparent"
             }
         },
@@ -335,16 +350,13 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "lag_avg_ms/1000", "label": "Expression3", "id": "e3", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
                     [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "lag_avg_ms", "region": "REGION", "label": "lag_avg_ms", "visible": false } ],
                     [ { "expression": "lag_avg_ms/1000", "label": "lag_avg_sec", "id": "lag_avg_sec", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ { "expression": "lag_avg_sec/3600", "label": "lag_avg_hr", "id": "lag_avg_hr", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ { "expression": "-1*RATE(lag_avg_sec)+1", "label": "Speedup Factor", "id": "speedup", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ { "expression": "IF(DIFF_TIME(speedup) > PERIOD(speedup), speedup, speedup)", "label": "Speedup Factor (cleaned)", "id": "speedup_cleaned", "region": "REGION", "period": 300, "visible": false } ],
-                    [ { "expression": "IF(speedup_cleaned > lag_avg_hr*60 , 0, IF(speedup_cleaned<=1, 0/0,  lag_avg_hr/(speedup_cleaned-1)))", "label": "catchup_hours", "id": "catchup_hours", "region": "REGION", "period": 300 } ]
+                    [ { "expression": "-1*RATE(lag_avg_sec)", "label": "lag_reduction_rate", "id": "lag_reduction_rate", "region": "REGION", "period": 300, "visible": false } ],
+                    [ { "expression": "IF(lag_avg_sec>CATCHUP_FLOOR_SECONDS, IF(lag_reduction_rate>0.01, ((lag_avg_sec-CATCHUP_FLOOR_SECONDS)/3600)/lag_reduction_rate, 0/0), 0/0)", "label": "catch-up hours", "id": "catchup_hours", "region": "REGION", "period": 300 } ]
                 ],
                 "view": "singleValue",
-                "title": "Time to catchup in hours",
+                "title": "Mean-lag catch-up ETA to CATCHUP_FLOOR_SECONDS-second floor",
                 "region": "REGION",
                 "yAxis": {
                     "left": {
@@ -370,15 +382,13 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "lag_avg_ms_ts/1000", "label": "Expression3", "id": "e3_ts", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
                     [ "OpenSearchMigrations", "lagBetweenSourceAndTargetRequests", "qualifier", "MA_QUALIFIER", "OTelLib", "replayer", { "id": "lag_avg_ms_ts", "region": "REGION", "label": "lag_avg_ms", "visible": false } ],
                     [ { "expression": "lag_avg_ms_ts/1000", "label": "lag_avg_sec", "id": "lag_avg_sec_ts", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ { "expression": "lag_avg_sec_ts/3600", "label": "lag_avg_hr", "id": "lag_avg_hr_ts", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ { "expression": "-1*RATE(lag_avg_sec_ts)+1", "label": "Speedup Factor", "id": "speedup_ts", "region": "REGION", "stat": "Average", "period": 300, "visible": false } ],
-                    [ { "expression": "IF(speedup_ts<=1, 0/0, lag_avg_hr_ts/(speedup_ts-1))", "label": "catchup_hours", "id": "catchup_hours_ts", "region": "REGION", "period": 300 } ]
+                    [ { "expression": "-1*RATE(lag_avg_sec_ts)", "label": "lag_reduction_rate", "id": "lag_reduction_rate_ts", "region": "REGION", "period": 300, "visible": false } ],
+                    [ { "expression": "IF(lag_avg_sec_ts>CATCHUP_FLOOR_SECONDS, IF(lag_reduction_rate_ts>0.01, ((lag_avg_sec_ts-CATCHUP_FLOOR_SECONDS)/3600)/lag_reduction_rate_ts, 0/0), 0/0)", "label": "catch-up hours", "id": "catchup_hours_ts", "region": "REGION", "period": 300 } ]
                 ],
                 "view": "timeSeries",
-                "title": "Time to catchup in hours (Historical)",
+                "title": "Historical mean-lag catch-up ETA to CATCHUP_FLOOR_SECONDS-second floor",
                 "region": "REGION",
                 "yAxis": {
                     "left": {
@@ -397,9 +407,9 @@
         },
         {
             "height": 6,
-            "width": 24,
+            "width": 16,
             "y": 7,
-            "x": 0,
+            "x": 8,
             "type": "metric",
             "properties": {
                 "metrics": [
@@ -422,6 +432,31 @@
                     "left": {
                         "min": 0,
                         "label": "MBps",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "height": 6,
+            "width": 8,
+            "y": 7,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"fullRequest\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60", "id": "e1", "label": "Capture requests/s", "region": "REGION" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "stat": "Sum",
+                "period": 60,
+                "title": "Capture Request Load (requests/s)",
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "label": "Requests/s",
                         "showUnits": false
                     }
                 }

@@ -5,6 +5,7 @@ import os
 import time
 import pytest
 import requests_mock
+from botocore.exceptions import ClientError
 from click.testing import CliRunner
 from types import SimpleNamespace
 from subprocess import CompletedProcess
@@ -727,6 +728,33 @@ def test_cli_cluster_generate_data_proxy(runner, mocker, proxy_enabled_yaml_path
 
     exists_mock.assert_called()
     bulk_insert_data.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_cli_cluster_generate_data_with_tenants(runner, mocker, proxy_enabled_yaml_path):
+    module_mock = mocker.patch('importlib.util.module_from_spec')
+    mocker.patch('importlib.util.spec_from_file_location').return_value.loader.exec_module = mocker.Mock()
+    mocker.patch('os.path.exists', return_value=True)
+    bulk_insert_data = mocker.Mock(return_value={
+        'total_inserted': 10,
+        'total_errors': 0,
+        'elapsed_time': 1.0,
+        'docs_per_sec': 10.0,
+        'estimated_size_mb': 0.1
+    })
+    module_mock.return_value.bulk_insert_data = bulk_insert_data
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'generate-data',
+         '--cluster', 'proxy', '--index-name', 'test-index', '--num-docs', '10',
+         '--num-tenants', '2'],
+        catch_exceptions=True
+    )
+
+    bulk_insert_data.assert_called_once()
+    assert bulk_insert_data.call_args.args[-1] == 2
+    assert "Tenants: 2" in result.output
     assert result.exit_code == 0
 
 
@@ -1656,34 +1684,24 @@ def test_completion_script(runner):
     assert result.exit_code == 0
 
 
-def test_tuple_converter(runner, tmp_path):
-    # The `multiple_tuples` and `multiple_tuples_parsed` files are formatted as "real" json objects so that
-    # they can be pretty-printed and examined, but they need to be converted to ndjson files to be used by the
-    # CLI command.
-
-    # Make the input file
-    input_tuples_file = f"{TEST_DATA_DIRECTORY}/multiple_tuples.json"
-    with open(input_tuples_file, 'r') as f:
-        input_tuples = json.load(f)
-    ndjson_input_file = f"{tmp_path}/tuples.ndjson"
-    with open(ndjson_input_file, 'w') as f:
-        f.write('\n'.join([json.dumps(record) for record in input_tuples]))
-
-    ndjson_output_file = f"{tmp_path}/converted_tuples.ndjson"
+def test_tuples_show_reads_a_gzipped_tuple_file(runner, tmp_path):
+    import gzip
+    tuple_line = {"connectionId": "c1", "numRequests": 1, "numErrors": 0,
+                  "sourceRequest": {"Request-URI": "/_bulk", "Method": "POST",
+                                    "payload": {"inlinedJsonSequenceBodies": [{"index": {"_index": "a"}}]}},
+                  "sourceResponse": {"Status-Code": 200, "payload": {"inlinedJsonBody": {"errors": False}}},
+                  "targetRequest": {"Request-URI": "/_bulk"},
+                  "targetResponses": [{"Status-Code": 200, "payload": {"inlinedJsonBody": {"errors": False}}}]}
+    tuple_file = tmp_path / "tuples-1.log.gz"
+    with gzip.open(tuple_file, "wt") as f:
+        f.write(json.dumps(tuple_line) + "\n")
+    output_file = tmp_path / "shown.ndjson"
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'tuples', 'show',
-                                 '--in', ndjson_input_file,
-                                 '--out', ndjson_output_file],
+                                 '--in', str(tuple_file), '--out', str(output_file)],
                            catch_exceptions=True)
-    assert ndjson_output_file in result.output
-    assert result.exit_code == 0
-
-    # Open the ndjson output file and compare it to the "real" output file
-    expected_output_file = f"{TEST_DATA_DIRECTORY}/multiple_tuples_parsed.json"
-    with open(expected_output_file, 'r') as f:
-        output_tuples = json.load(f)
-    expected_output_as_ndjson = [json.dumps(record) + "\n" for record in output_tuples]
-
-    assert open(ndjson_output_file).readlines() == expected_output_as_ndjson
+    assert result.exit_code == 0, result.output
+    assert "Wrote 1 tuples" in result.output
+    assert [json.loads(line) for line in output_file.read_text().splitlines()] == [tuple_line]
 
 
 # Tests for exception handling functionality
@@ -2056,7 +2074,7 @@ def test_backfill_status_appends_failed_document_stream_summary_when_configured(
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=True)
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=True)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'status'],
@@ -2066,19 +2084,19 @@ def test_backfill_status_appends_failed_document_stream_summary_when_configured(
     assert "Failed documents present: yes" in result.output
 
 
-def test_backfill_status_failed_document_stream_presence_unavailable_renders_placeholder(runner, mocker):
+def test_backfill_status_surfaces_unreadable_failed_document_stream(runner, mocker):
+    # A configured stream we cannot read must fail, not report a clean status.
     mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    # None means S3 was unreachable — we mustn't crash.
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=None)
+    err = ClientError({"Error": {"Code": "AccessDenied", "Message": "x"}}, "ListObjects")
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", side_effect=err)
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
-                                 'backfill', 'status'],
-                           catch_exceptions=False)
-    assert result.exit_code == 0
-    assert "Failed documents present: unavailable" in result.output
+                                 'backfill', 'status'])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ClientError)
 
 
 def test_backfill_status_no_failed_document_stream_section_when_not_configured(runner, mocker):
@@ -2117,7 +2135,7 @@ def test_backfill_status_json_deep_check_threads_presence_and_includes_keys(runn
                                      return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=True)
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=True)
 
     result = runner.invoke(
         cli,
@@ -2137,7 +2155,7 @@ def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
                                      return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=False)
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=False)
 
     result = runner.invoke(
         cli,
@@ -2151,24 +2169,22 @@ def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
     assert payload["failed_documents_present"] is False
 
 
-def test_backfill_status_json_deep_check_threads_unavailable_presence(runner, mocker):
-    # None => S3 unreachable; passed through as-is.
-    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
-                                     return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
+def test_backfill_status_json_deep_check_surfaces_unreadable_stream(runner, mocker):
+    # A configured stream we cannot read must fail rather than emit a clean payload.
+    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+                        return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=None)
+    err = ClientError({"Error": {"Code": "AccessDenied", "Message": "x"}}, "ListObjects")
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", side_effect=err)
 
     result = runner.invoke(
         cli,
         ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
          '--json', 'backfill', 'status', '--deep-check'],
-        catch_exceptions=False,
     )
-    assert result.exit_code == 0
-    assert mock_build.call_args.kwargs["has_failed_documents"] is None
-    payload = json.loads(result.output)
-    assert payload["failed_documents_present"] is None
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ClientError)
 
 
 def test_backfill_status_json_deep_check_omits_failed_document_stream_keys_when_not_configured(runner, mocker):
@@ -2202,7 +2218,7 @@ def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
                         side_effect=DeepStatusNotYetAvailable("not yet"))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
-    mocker.patch.object(cli_module.failed_document_stream_, "safe_has_records", return_value=False)
+    mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=False)
 
     result = runner.invoke(
         cli,

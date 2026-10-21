@@ -12,12 +12,13 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+import org.opensearch.migrations.testfixtures.SupportedClusters;
 import org.opensearch.migrations.utils.FileSystemUtils;
 
 import io.opentelemetry.sdk.metrics.data.LongPointData;
@@ -270,7 +271,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
 
-            // Run second time reversing base and current snapshot
+            // Run second time reversing base and current snapshot.
             targetClusterOperations.delete("/.migrations_working_state");
             {
                 final var testDocMigrationContext = DocumentMigrationTestContext.factory()
