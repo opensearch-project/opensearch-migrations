@@ -11,7 +11,7 @@ def imagePrefix = findProperty('esImagePrefix') ?: 'custom-elasticsearch'
 // ECR pull-through cache: auto-derived from ECR_PULL_THROUGH_ENDPOINT env var in root build.gradle.
 def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
 def ptc = new PullThroughCacheHelper(ptcEndpoint)
-def amazonlinuxImage = ptc.rewrite("docker.io/library/amazonlinux:2023")
+def amazonlinuxImage = ptc.rewrite("public.ecr.aws/docker/library/amazonlinux:2023")
 
 // Opt-in push: -PpushVersions=7.10,7.17
 def pushVersionsList = (findProperty('pushVersions') ?: '').toString()
@@ -29,7 +29,7 @@ def correttoVersion = { String minor ->
 // Single source of truth for Corretto version, base image, and JAVA_HOME
 // Corretto 8: amazoncorretto:8-alpine (small, no JavaFX/GTK bloat)
 // Corretto 11+: amazoncorretto headless images on AL2023
-def baseImage = { String corretto -> corretto == '8' ? ptc.rewrite("docker.io/library/amazoncorretto:8-alpine") : ptc.rewrite("docker.io/library/amazoncorretto:${corretto}-al2023-headless") }
+def baseImage = { String corretto -> corretto == '8' ? ptc.rewrite("public.ecr.aws/docker/library/amazoncorretto:8-alpine") : ptc.rewrite("public.ecr.aws/docker/library/amazoncorretto:${corretto}-al2023-headless") }
 def javaHomePath = { String corretto -> corretto == '8' ? '/usr/lib/jvm/java-8-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto" }
 
 versions.each { minor, info ->
