@@ -5,7 +5,7 @@ import reactor.core.publisher.Mono;
 /** Prepared exports. Flush before atomically recording their commit ID and metrics in the coordinator. */
 public interface WorkItemMetricsSink extends AutoCloseable {
 
-    Mono<Void> write(WorkItemMetricsRecord record);
+    Mono<Void> write(WorkItemMetricsRecord metricsRecord);
 
     Mono<Void> flush();
 

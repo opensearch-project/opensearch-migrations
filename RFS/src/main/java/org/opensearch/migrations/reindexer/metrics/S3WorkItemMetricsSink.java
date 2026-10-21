@@ -55,9 +55,9 @@ public class S3WorkItemMetricsSink implements WorkItemMetricsSink {
     }
 
     @Override
-    public Mono<Void> write(WorkItemMetricsRecord record) {
+    public Mono<Void> write(WorkItemMetricsRecord metricsRecord) {
         return onWriter(() -> {
-            var appended = writer.write(record);
+            var appended = writer.write(metricsRecord);
             // A successful append remains pending until flush uploads its object.
             return appended.isCompletedExceptionally() ? Mono.fromFuture(appended) : Mono.empty();
         });
