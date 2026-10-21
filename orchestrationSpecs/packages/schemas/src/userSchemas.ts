@@ -1323,7 +1323,8 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     collectionRouted: z.boolean().optional()
         .describe("Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), " +
             "which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration " +
-            "to this target must define staticCollectionRouting or regexCollectionRouting."),
+            "to this target must define staticCollectionRouting or regexCollectionRouting. " +
+            "Migration console cluster commands don't work against this target."),
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =

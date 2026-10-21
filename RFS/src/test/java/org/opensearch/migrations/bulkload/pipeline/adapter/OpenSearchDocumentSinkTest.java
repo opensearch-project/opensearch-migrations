@@ -11,11 +11,13 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -60,6 +62,32 @@ class OpenSearchDocumentSinkTest {
 
         verify(client).sendBulkRequestRaw(eq("ts-1"), eq(docs), isNull(), eq(true), any(), eq("ts"));
         verify(client).sendBulkRequestRaw(eq("search-1"), eq(docs), isNull(), eq(false), any(), eq("search"));
+    }
+
+    @Test
+    void createCollection_collectionRouted_createsIndexInItsCollection() {
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d+\", \"collection\": \"$1\"}]}").orElseThrow();
+        var routedTarget = new CollectionRoutedTarget(routing, collection -> false);
+        var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null, routedTarget);
+        var mappings = new ObjectMapper().createObjectNode().put("dynamic", true);
+
+        sink.createCollection(new CollectionMetadata("es-1", 1, Map.of(CollectionMetadata.ES_NUMBER_OF_SHARDS, 1))).block();
+        sink.createCollection(new CollectionMetadata("solr-1", 1, Map.of(CollectionMetadata.ES_MAPPINGS, mappings))).block();
+        sink.createCollection(new CollectionMetadata("plain-1", 1, Map.of())).block();
+
+        verify(client).createIndex(eq("es-1"), any(), isNull(), eq("es"));
+        verify(client).createIndex(eq("solr-1"), any(), isNull(), eq("solr"));
+        verify(client).createIndex(eq("plain-1"), any(), isNull(), eq("plain"));
+    }
+
+    @Test
+    void createCollection_notRouted_createsIndexWithoutCollection() {
+        var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
+
+        sink.createCollection(new CollectionMetadata("plain-1", 1, Map.of())).block();
+
+        verify(client).createIndex(eq("plain-1"), any(), isNull(), isNull());
     }
 
     @SuppressWarnings("unchecked")

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.lang.reflect.InvocationTargetException;
+import java.time.Duration;
 
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.UnboundVersionMatchers;
@@ -30,8 +31,11 @@ public class OpenSearchClientFactory {
             ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode >= 400 &&
             ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode < 500));
 
+    static final int COLLECTION_TYPE_PROBE_ATTEMPTS = 3;
+
     private final ConnectionContext connectionContext;
     private final int maxConnections;
+    Duration collectionTypeProbeRetryDelay = Duration.ofSeconds(2);
     private Version version;
     private CompressionMode compressionMode;
     RestClient client;
@@ -161,17 +165,45 @@ public class OpenSearchClientFactory {
 
     /**
      * Detects the type of one collection behind a per-account serverless endpoint, or of the
-     * endpoint's own collection when serverlessCollection is null.
+     * endpoint's own collection when serverlessCollection is null. Throws if a routed collection's
+     * type is still unknown after retries.
      */
     public ServerlessCollectionType detectServerlessCollectionType(String serverlessCollection) {
         if (version == null) {
             version = getClusterVersion();
         }
-        
+
         if (version.getFlavor() != Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
             return ServerlessCollectionType.NONE;
         }
-        
+
+        if (serverlessCollection == null) {
+            return probeServerlessCollectionType(null);
+        }
+        for (int attempt = 1; ; attempt++) {
+            var detected = probeServerlessCollectionType(serverlessCollection);
+            if (detected != ServerlessCollectionType.NONE) {
+                return detected;
+            }
+            if (attempt >= COLLECTION_TYPE_PROBE_ATTEMPTS) {
+                throw new UndeterminedCollectionTypeException(serverlessCollection, attempt);
+            }
+            log.atWarn().setMessage("Could not determine the type of serverless collection {} (attempt {} of {}), retrying")
+                .addArgument(serverlessCollection).addArgument(attempt).addArgument(COLLECTION_TYPE_PROBE_ATTEMPTS).log();
+            sleepBeforeProbeRetry();
+        }
+    }
+
+    private void sleepBeforeProbeRetry() {
+        try {
+            Thread.sleep(collectionTypeProbeRetryDelay.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting to retry the collection type probe", e);
+        }
+    }
+
+    private ServerlessCollectionType probeServerlessCollectionType(String serverlessCollection) {
         // Probe with invalid KNN mapping to detect collection type from error message
         String probeIndex = "migrations_type_probe_" + System.currentTimeMillis();
         String probeBody = "{\"settings\":{\"index.knn\":true},\"mappings\":{\"properties\":{\"v\":{\"type\":\"knn_vector\",\"dimension\":-1}}}}";
@@ -222,6 +254,14 @@ public class OpenSearchClientFactory {
         } else {
             log.debug("Could not determine serverless collection type from: {}", errorMessage);
             return ServerlessCollectionType.NONE;
+        }
+    }
+
+    public static class UndeterminedCollectionTypeException extends RuntimeException {
+        public UndeterminedCollectionTypeException(String serverlessCollection, int attempts) {
+            super("Could not determine the type of serverless collection '" + serverlessCollection + "' after "
+                + attempts + " attempts, so it isn't known whether it needs server-generated document IDs. "
+                + "Set --server-generated-ids to ALWAYS or NEVER to skip detection.");
         }
     }
 

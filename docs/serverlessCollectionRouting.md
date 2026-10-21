@@ -11,7 +11,9 @@ and can be search or vector search collections. Classic collections, including a
 have per-collection endpoints, so each one still needs its own target.
 
 Collection routing applies to metadata migration and document backfill. Traffic replay doesn't support it yet,
-so a replayer can't point at a collection-routed target.
+so a replayer can't point at a collection-routed target. The migration console's cluster commands, such as
+`connection-check` and `cat-indices`, don't send the collection header either, so they don't work against a
+collection-routed target.
 
 ## Configuration
 

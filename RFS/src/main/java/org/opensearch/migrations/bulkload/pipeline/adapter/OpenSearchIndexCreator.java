@@ -33,6 +33,16 @@ final class OpenSearchIndexCreator {
         ObjectMapper mapper,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
+        createIndex(client, metadata, mapper, context, null);
+    }
+
+    static void createIndex(
+        OpenSearchClient client,
+        IndexMetadataSnapshot metadata,
+        ObjectMapper mapper,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context,
+        String serverlessCollection
+    ) {
         ObjectNode body = mapper.createObjectNode();
         if (metadata.mappings() != null) {
             ObjectNode mappings = metadata.mappings().deepCopy();
@@ -48,7 +58,7 @@ final class OpenSearchIndexCreator {
         if (metadata.aliases() != null) {
             body.set("aliases", metadata.aliases());
         }
-        client.createIndex(metadata.indexName(), body, context);
+        client.createIndex(metadata.indexName(), body, context, serverlessCollection);
     }
 
     /**

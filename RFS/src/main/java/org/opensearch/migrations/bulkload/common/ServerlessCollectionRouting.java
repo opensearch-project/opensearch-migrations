@@ -203,10 +203,9 @@ public class ServerlessCollectionRouting {
      */
     public Set<String> resolveAll(Collection<String> sourceIndices) {
         var collections = new LinkedHashSet<String>();
-        var unmatched = new ArrayList<String>();
-        for (var index : sourceIndices) {
-            resolve(index).ifPresentOrElse(collections::add, () -> unmatched.add(index));
-        }
+        var unmatched = sourceIndices.stream().<String>mapMulti((index, sink) ->
+                resolve(index).ifPresentOrElse(collections::add, () -> sink.accept(index)))
+            .toList();
         if (!unmatched.isEmpty()) {
             throw new IllegalArgumentException("No collection routing entry matches source indices " + unmatched);
         }

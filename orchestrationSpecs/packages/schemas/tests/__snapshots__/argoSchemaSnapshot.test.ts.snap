@@ -2729,7 +2729,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "collectionRouted": {
                       "type": "boolean",
-                      "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting."
+                      "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. Migration console cluster commands don't work against this target."
                     },
                     "label": {
                       "type": "string",
@@ -3449,7 +3449,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "collectionRouted": {
                       "type": "boolean",
-                      "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting."
+                      "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. Migration console cluster commands don't work against this target."
                     },
                     "label": {
                       "type": "string",
@@ -4274,7 +4274,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           },
           "collectionRouted": {
             "type": "boolean",
-            "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting."
+            "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. Migration console cluster commands don't work against this target."
           }
         },
         "required": [

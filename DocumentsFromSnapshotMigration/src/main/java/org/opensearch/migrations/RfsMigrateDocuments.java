@@ -262,11 +262,12 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--collection-routing", "--collectionRouting" },
-            description = "Optional. JSON object mapping source indices to OpenSearch Serverless collections, e.g. " +
-                "{\"staticCollectionRouting\": [{\"sourceIndex\": \"shared-config\", \"collection\": \"common\"}], " +
-                "\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}. " +
-                "An exact static match wins, otherwise the first regex that matches the whole index name is used. " +
-                "Required when --target-collection-routed is set.")
+            description = """
+                Optional. JSON object mapping source indices to OpenSearch Serverless collections, e.g. \
+                {"staticCollectionRouting": [{"sourceIndex": "shared-config", "collection": "common"}], \
+                "regexCollectionRouting": [{"sourceIndex": "(.+)-\\\\d{4}", "collection": "$1"}]}. \
+                An exact static match wins, otherwise the first regex that matches the whole index name is used. \
+                Required when --target-collection-routed is set.""")
         public String collectionRouting;
 
         @Parameter(required = false,
