@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.pipeline.model;
 
 import java.util.Map;
 import java.util.Objects;
-import java.util.OptionalLong;
 
 /**
  * Source-agnostic document — the clean IR boundary between reading (any source)
@@ -34,8 +33,6 @@ public record Document(
 
     /** Well-known sourceMetadata keys for Lucene-based sources. */
     public static final String SOURCE_META_LUCENE_DOC_NUMBER = "luceneDocNumber";
-    /** Inclusive resume position when a source's stream is not ordered by Lucene doc number. */
-    public static final String SOURCE_META_POSITION = "sourcePosition";
     /** Snapshot document version, as a decimal string to preserve 64-bit precision in JavaScript. */
     public static final String SOURCE_META_VERSION = "_version";
 
@@ -57,14 +54,5 @@ public record Document(
     /** Returns the length of the source bytes, or 0 if source is null (e.g. DELETE operations). */
     public int sourceLength() {
         return source != null ? source.length : 0;
-    }
-
-    /** Inclusive source position, if available, for resuming this partition. */
-    public OptionalLong position() {
-        var raw = sourceMetadata.getOrDefault(SOURCE_META_POSITION, sourceMetadata.get(SOURCE_META_LUCENE_DOC_NUMBER));
-        if (raw instanceof Number n) {
-            return OptionalLong.of(n.longValue());
-        }
-        return OptionalLong.empty();
     }
 }

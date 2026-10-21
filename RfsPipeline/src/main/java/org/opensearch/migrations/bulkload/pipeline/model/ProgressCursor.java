@@ -6,11 +6,11 @@ import java.util.Objects;
  * Progress cursor emitted after each batch is written. Enables resumability —
  * a pipeline can restart from the last successful cursor.
  *
- * <p>The checkpoint is the source document's position, independent of batch statistics.
- * Sparse Lucene positions include nested children and deleted documents that are not emitted.
+ * <p>Constructed by the pipeline with cumulative offset tracking. The sink returns
+ * {@link BatchResult} with batch-local stats, and the pipeline wraps it into a cursor.
  *
  * @param partition        the partition this cursor belongs to, must not be null
- * @param lastDocProcessed inclusive source position, or exclusive ordinal for a positionless source
+ * @param lastDocProcessed cumulative offset of the last document processed
  * @param docsInBatch      the number of documents in this batch
  * @param bytesInBatch     the total bytes of document sources in this batch
  */

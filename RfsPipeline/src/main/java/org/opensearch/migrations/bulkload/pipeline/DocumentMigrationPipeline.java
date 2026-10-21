@@ -1,12 +1,10 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.Objects;
-import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
@@ -15,7 +13,6 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -123,48 +120,38 @@ public class DocumentMigrationPipeline {
     /**
      * Migrate all documents for a single partition from source to sink.
      *
-     * @param partition        the partition to migrate
-     * @param collectionName   the target collection name
-     * @param startingPosition the source position to resume from (0 for start)
+     * @param partition         the partition to migrate
+     * @param collectionName    the target collection name
+     * @param startingDocOffset the document offset to resume from (0 for start)
      * @return a Flux of progress cursors, one per batch written
      */
-    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
+    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingDocOffset) {
+        final long[] cumulativeOffset = { startingDocOffset };
         return Flux.defer(() -> {
-            // Subscription-local state: a retry must start from the original checkpoint.
-            final long[] fallbackPosition = { startingPosition };
             currentPartition.set(partition);
-            return source.readDocuments(partition, startingPosition)
+            return source.readDocuments(partition, startingDocOffset)
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
-                    // Preserve the source position before handing the batch to the sink.
-                    var lastPosition = batch.get(batch.size() - 1).position();
-                    return Mono.defer(() -> sink.writeBatch(collectionName, batch))
-                        .map(result -> new CompletedBatch(lastPosition, batch.size(), result))
+                    return sink.writeBatch(collectionName, batch)
+                        .map(result -> {
+                            cumulativeOffset[0] += result.docsInBatch();
+                            totalDocs.addAndGet(result.docsInBatch());
+                            totalBytes.addAndGet(result.bytesInBatch());
+                            return new ProgressCursor(
+                                partition,
+                                cumulativeOffset[0],
+                                result.docsInBatch(),
+                                result.bytesInBatch()
+                            );
+                        })
                         .doFinally(s -> activeBatches.decrementAndGet());
                 }, batchConcurrency)
-                // Advance checkpoints in emission order; writes may complete out of order.
-                .map(batch -> {
-                    var result = batch.result();
-                    fallbackPosition[0] += batch.sourceDocs();
-                    totalDocs.addAndGet(result.docsInBatch());
-                    totalBytes.addAndGet(result.bytesInBatch());
-                    return new ProgressCursor(
-                        partition,
-                        batch.lastPosition().orElse(fallbackPosition[0]),
-                        result.docsInBatch(),
-                        result.bytesInBatch()
-                    );
-                })
                 .onErrorMap(e -> !(e instanceof PipelineException),
                     e -> new PipelineException("Failed migrating partition " + partition, e));
         });
     }
-
-    // Sonar flags the compiler-generated record constructor parameters as unused.
-    @SuppressWarnings("java:S1172")
-    private record CompletedBatch(OptionalLong lastPosition, int sourceDocs, BatchResult result) {}
 
     /**
      * Migrate all partitions for a collection. Creates the collection first, then migrates

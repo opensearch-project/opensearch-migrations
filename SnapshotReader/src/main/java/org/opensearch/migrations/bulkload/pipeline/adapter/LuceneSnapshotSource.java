@@ -199,7 +199,7 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
-    public Flux<Document> readDocuments(Partition partition, long startingPosition) {
+    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
         var esPartition = (EsShardPartition) partition;
         var entry = resolveShardEntry(esPartition, shardEntryCache);
         if (entry == null) {
@@ -218,33 +218,26 @@ public class LuceneSnapshotSource implements DocumentSource {
             var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
             if (previousEntry == null) {
                 log.info("No previous partition for {} — treating as full read (all additions)", partition);
-                return readRegularDocuments(entry, partition, startingPosition);
+                return readRegularDocuments(entry, partition, startingDocOffset);
             }
-            log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
-            // Delta doc numbers can overlap across snapshots; resume by stream ordinal.
+            log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
-                .index()
-                .skip(startingPosition)
-                .map(indexed -> {
-                    var doc = luceneAdapter.fromLucene(indexed.getT2());
-                    var metadata = new HashMap<>(doc.sourceMetadata());
-                    metadata.put(Document.SOURCE_META_POSITION, indexed.getT1());
-                    return new Document(doc.id(), doc.source(), doc.operation(), doc.hints(), metadata);
-                });
+                .skip(startingDocOffset)
+                .map(luceneAdapter::fromLucene);
         }
 
-        return readRegularDocuments(entry, partition, startingPosition);
+        return readRegularDocuments(entry, partition, startingDocOffset);
     }
 
     private Flux<Document> readRegularDocuments(
-        SnapshotExtractor.ShardEntry entry, Partition partition, long startingPosition
+        SnapshotExtractor.ShardEntry entry, Partition partition, long startingDocOffset
     ) {
-        log.info("Reading documents from {} starting at Lucene docId {}", partition, startingPosition);
+        log.info("Reading documents from {} starting at docIdx {}", partition, startingDocOffset);
         var esPartition = (EsShardPartition) partition;
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingPosition), mappingContext, useRecoverySource,
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource,
                 count -> liveDocCounts.put(partition, count))
             .map(luceneAdapter::fromLucene);
     }
