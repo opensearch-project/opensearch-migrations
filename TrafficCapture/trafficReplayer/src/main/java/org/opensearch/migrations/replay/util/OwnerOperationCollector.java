@@ -28,8 +28,8 @@ public final class OwnerOperationCollector {
     public static final Duration DEFAULT_LONG_RUNNING_THRESHOLD = Duration.ofSeconds(30);
     public static final int MAX_LONG_RUNNING_DETAILS = 16;
 
-    // The warning targets compiler-generated members of this public diagnostic contract.
-    @SuppressWarnings("java:S1186")
+    // The warnings target compiler-generated members of this public diagnostic contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record Detail(
         @NonNull OutstandingOperationRegistry.Snapshot operation,
         @NonNull Duration elapsed
