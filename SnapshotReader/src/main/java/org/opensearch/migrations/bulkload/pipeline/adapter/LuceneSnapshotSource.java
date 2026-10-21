@@ -49,6 +49,8 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> shardEntryCache = new HashMap<>();
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> previousShardEntryCache = new HashMap<>();
 
+    private final Map<Partition, Long> liveDocCounts = new ConcurrentHashMap<>();
+
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
 
@@ -187,16 +189,12 @@ public class LuceneSnapshotSource implements DocumentSource {
         return IndexMetadataConverter.convert(collectionName, meta);
     }
 
-    /** Live Lucene doc count per partition, captured while the reader was open during the read. */
-    private final Map<String, Long> liveDocCounts = new ConcurrentHashMap<>();
-
     @Override
     public OptionalLong countLiveDocuments(Partition partition) {
-        // A delta stream is not the full snapshot's contribution to the target's docs.count.
         if (isDeltaMode()) {
             return OptionalLong.empty();
         }
-        var cached = liveDocCounts.get(partition.name());
+        var cached = liveDocCounts.get(partition);
         return cached == null ? OptionalLong.empty() : OptionalLong.of(cached);
     }
 
@@ -223,9 +221,7 @@ public class LuceneSnapshotSource implements DocumentSource {
                 return readRegularDocuments(entry, partition, startingPosition);
             }
             log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
-            // Deletions use the previous snapshot's doc numbers; additions use the current one's.
-            // Those positions can overlap and go backwards, so checkpoint the combined stream's
-            // ordinal instead. Keep the Lucene number as diagnostic metadata.
+            // Delta doc numbers can overlap across snapshots; resume by stream ordinal.
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
                 .index()
                 .skip(startingPosition)
@@ -249,7 +245,7 @@ public class LuceneSnapshotSource implements DocumentSource {
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
         return extractor.readDocuments(entry, workDir, Math.toIntExact(startingPosition), mappingContext, useRecoverySource,
-                count -> liveDocCounts.put(partition.name(), count))
+                count -> liveDocCounts.put(partition, count))
             .map(luceneAdapter::fromLucene);
     }
 

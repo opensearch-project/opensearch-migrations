@@ -59,11 +59,7 @@ public record Document(
         return source != null ? source.length : 0;
     }
 
-    /**
-     * Position of this document within its partition, used as the resume checkpoint. Empty for
-     * sources that expose no position, which makes the pipeline fall back to counting emitted
-     * documents for those.
-     */
+    /** Inclusive source position, if available, for resuming this partition. */
     public OptionalLong position() {
         var raw = sourceMetadata.getOrDefault(SOURCE_META_POSITION, sourceMetadata.get(SOURCE_META_LUCENE_DOC_NUMBER));
         if (raw instanceof Number n) {

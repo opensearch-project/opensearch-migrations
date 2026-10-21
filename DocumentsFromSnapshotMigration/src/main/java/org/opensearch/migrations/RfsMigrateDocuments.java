@@ -14,8 +14,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -46,6 +48,7 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration.WorkItem;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
@@ -63,6 +66,7 @@ import org.opensearch.migrations.reindexer.doccount.ShardDocCountSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
+import org.opensearch.migrations.s3sink.RotatingGzipS3ObjectWriter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
@@ -929,12 +933,7 @@ public class RfsMigrateDocuments {
         }
     }
 
-    /**
-     * No-op when the sink is disabled. The flush is synchronous and failures propagate: the reporter
-     * runs before the work item is marked complete, so a failed flush aborts the shard and a
-     * successor re-emits rather than the record being lost.
-     */
-    static DocumentMigrationBootstrap.ShardDocCountReporter shardDocCountReporter(
+    static BiConsumer<WorkItem, OptionalLong> shardDocCountReporter(
         ShardDocCountSink sink, String sessionId, String workerId, String snapshotName
     ) {
         if (sink == null) {
@@ -1069,11 +1068,6 @@ public class RfsMigrateDocuments {
             .build();
     }
 
-    /**
-     * Reuses the bucket/region/endpoint already resolved for the failed document stream, so counts land
-     * in the deployment's artifacts bucket without a second set of S3 flags. Returns null only when no
-     * bucket is resolvable at all, in which case counts are still logged.
-     */
     static ShardDocCountSink buildShardDocCountSink(Args arguments, String workerId, String sessionId) {
         String bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
         if (bucket == null || bucket.isBlank()) {
@@ -1100,8 +1094,7 @@ public class RfsMigrateDocuments {
             .prefix(arguments.shardDocCountArgs.shardDocCountS3Prefix)
             .sessionId(sessionId)
             .workerId(workerId)
-            .region(region)
-            .uploader(S3ShardDocCountSink.s3ClientUploader(s3Client))
+            .uploader(RotatingGzipS3ObjectWriter.s3ObjectUploader(s3Client))
             .build();
     }
 

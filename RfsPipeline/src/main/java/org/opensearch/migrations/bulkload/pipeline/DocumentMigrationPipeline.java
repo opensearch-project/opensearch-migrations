@@ -138,15 +138,13 @@ public class DocumentMigrationPipeline {
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
-                    // Captured before the write so the cursor reflects what was read even if the
-                    // sink reorders internally.
+                    // Preserve the source position before handing the batch to the sink.
                     var lastPosition = batch.get(batch.size() - 1).position();
                     return Mono.defer(() -> sink.writeBatch(collectionName, batch))
                         .map(result -> new CompletedBatch(lastPosition, batch.size(), result))
                         .doFinally(s -> activeBatches.decrementAndGet());
                 }, batchConcurrency)
-                // flatMapSequential orders emissions, not execution of its inner publishers.
-                // Accumulate only here, after earlier batches have completed successfully.
+                // Advance checkpoints in emission order; writes may complete out of order.
                 .map(batch -> {
                     var result = batch.result();
                     fallbackPosition[0] += batch.sourceDocs();

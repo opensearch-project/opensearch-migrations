@@ -29,7 +29,7 @@ class ShardDocCountReporterTest {
         when(sink.flush()).thenReturn(Mono.empty());
         var workItem = new WorkItem("idx", 2, 42L);
         RfsMigrateDocuments.shardDocCountReporter(sink, "session", "worker", "snapshot")
-            .report(workItem, OptionalLong.empty());
+            .accept(workItem, OptionalLong.empty());
         var captured = ArgumentCaptor.forClass(ShardDocCountRecord.class);
         verify(sink).write(captured.capture());
         var record = captured.getValue();
@@ -50,6 +50,6 @@ class ShardDocCountReporterTest {
             return Mono.error(new IOException("upload failed"));
         });
         assertThrows(Exception.class, () -> RfsMigrateDocuments.shardDocCountReporter(sink, "s", "w", "snapshot")
-            .report(new WorkItem("idx", 0, 0L), OptionalLong.of(0)));
+            .accept(new WorkItem("idx", 0, 0L), OptionalLong.of(0)));
     }
 }

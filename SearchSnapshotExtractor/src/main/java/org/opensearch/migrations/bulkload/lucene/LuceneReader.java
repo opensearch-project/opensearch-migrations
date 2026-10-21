@@ -100,11 +100,7 @@ public class LuceneReader {
             .subscribeOn(LUCENE_IO_SCHEDULER);
     }
 
-    /**
-     * Live Lucene document count, matching {@code _cat/indices docs.count} — includes nested
-     * children, since each is its own Lucene document. Uses segment live-doc bitsets
-     * without loading document contents.
-     */
+    /** Whole-shard live Lucene count, including nested children, from segment bitsets. */
     public static long countLiveDocs(LuceneDirectoryReader reader) {
         long live = 0;
         for (var leaf : reader.leaves()) {

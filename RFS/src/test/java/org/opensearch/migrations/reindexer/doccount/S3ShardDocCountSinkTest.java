@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,16 +15,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/**
- * Covers the per-shard doc-count sink against an in-memory uploader, so the record schema, the
- * NDJSON gzip layout, the S3 key layout and the flush-failure contract are all verified without
- * needing S3 or LocalStack.
- */
 class S3ShardDocCountSinkTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** Captures uploaded objects in memory instead of calling S3. */
     private static class CapturingUploader {
         final List<String> keys = new ArrayList<>();
         final List<byte[]> bodies = new ArrayList<>();
@@ -78,7 +74,6 @@ class S3ShardDocCountSinkTest {
             .prefix("counts")
             .sessionId("sess-1")
             .workerId("worker-1")
-            .region("us-east-1")
             .uploader(uploader.asUploader())
             .build();
     }
@@ -132,13 +127,34 @@ class S3ShardDocCountSinkTest {
     }
 
     @Test
+    void flushWaitsForUploadCompletion() throws Exception {
+        var started = new CountDownLatch(1);
+        var uploaded = new CompletableFuture<Void>();
+        try (var sink = S3ShardDocCountSink.builder()
+            .bucket("bucket").sessionId("session").workerId("worker")
+            .uploader((bucket, key, file) -> {
+                started.countDown();
+                return uploaded;
+            }).build()) {
+            try {
+                sink.write(countRecord("idx", 0, 5)).block();
+                var flushed = sink.flush().toFuture();
+                Assertions.assertTrue(started.await(10, TimeUnit.SECONDS));
+                Assertions.assertFalse(flushed.isDone());
+                uploaded.complete(null);
+                flushed.get(10, TimeUnit.SECONDS);
+            } finally {
+                uploaded.complete(null);
+            }
+        }
+    }
+
+    @Test
     void flushFailurePropagatesSoTheWorkItemIsNotCompleted() {
         var uploader = new CapturingUploader();
         uploader.fail = true;
         try (var s = sink(uploader)) {
             s.write(countRecord("idx", 0, 5)).block();
-            // The gating flush must surface the upload failure. Swallowing it here would let the
-            // caller mark the work item complete and silently lose the count.
             Assertions.assertThrows(Exception.class, () -> s.flush().block(),
                 "a failed upload must fail the gating flush");
         }
@@ -167,7 +183,7 @@ class S3ShardDocCountSinkTest {
         var uploader = new CapturingUploader();
         var s = S3ShardDocCountSink.builder()
             .bucket("b").prefix("").sessionId("s").workerId("w")
-            .region("us-east-1").uploader(uploader.asUploader()).build();
+            .uploader(uploader.asUploader()).build();
         try (s) {
             Assertions.assertEquals("s3://b/session=s/", s.getLocation());
             s.write(countRecord("idx", 0, 1)).block();

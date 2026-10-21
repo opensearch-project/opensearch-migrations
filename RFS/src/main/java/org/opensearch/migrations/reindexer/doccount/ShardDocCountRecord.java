@@ -15,6 +15,5 @@ public class ShardDocCountRecord {
     int shardNumber;
     /** Includes nested children; null when unavailable, zero for an empty shard. */
     Long liveLuceneDocCount;
-    /** ISO-8601, stored as a String so it round-trips without a JSR310 module. */
     String timestamp;
 }
