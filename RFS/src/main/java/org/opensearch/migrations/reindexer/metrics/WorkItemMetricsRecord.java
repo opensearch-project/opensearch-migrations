@@ -10,8 +10,7 @@ import lombok.Value;
 @Builder
 public class WorkItemMetricsRecord {
     @Builder.Default
-    int schemaVersion = 2;
-    String workItemId;
+    int schemaVersion = 1;
     String snapshotName;
     String indexName;
     int shardNumber;

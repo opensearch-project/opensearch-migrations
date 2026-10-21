@@ -85,10 +85,10 @@ public class WorkCoordinatorTest {
         var parent = workId("index", 0, 0);
         var successor = workId("index", 0, 1);
         var parentMetrics = Map.<String, Object>of(
-            "workItemId", parent, "fromPosition", 0, "nextPosition", 1,
+            "schemaVersion", 1, "fromPosition", 0, "nextPosition", 1,
             "metrics", Map.of("source", Map.of("upserts", 1, "deletes", 0, "bytes", 10)));
         var successorMetrics = Map.<String, Object>of(
-            "workItemId", successor, "fromPosition", 1, "nextPosition", 4,
+            "schemaVersion", 1, "fromPosition", 1, "nextPosition", 4,
             "metrics", Map.of("source", Map.of("upserts", 3, "deletes", 0, "bytes", 30)));
         var client = httpClientSupplier.get();
         AbstractedHttpClient crashingClient = (method, path, headers, body) -> {
@@ -107,8 +107,10 @@ public class WorkCoordinatorTest {
             Assertions.assertThrows(AssertionError.class, () ->
                 first.createSuccessorWorkItemsAndMarkComplete(parent, List.of(successor), 0, null,
                     parentMetrics, context::createSuccessorWorkItemsContext));
-            var frozen = mapper.readTree(client.makeJsonRequest(
-                "GET", first.getPathForGets(parent), null, null).getPayloadBytes()).path("_source");
+            var frozenDocument = mapper.readTree(client.makeJsonRequest(
+                "GET", first.getPathForGets(parent), null, null).getPayloadBytes());
+            Assertions.assertEquals(parent, frozenDocument.path("_id").asText());
+            var frozen = frozenDocument.path("_source");
             Assertions.assertEquals(mapper.valueToTree(parentMetrics), frozen.get("committed_metrics"));
             Assertions.assertEquals(successor, frozen.get("successor_items").asText());
             Assertions.assertFalse(frozen.has("completedAt"));
@@ -126,8 +128,10 @@ public class WorkCoordinatorTest {
 
             long total = 0;
             for (var entry : Map.of(parent, parentMetrics, successor, successorMetrics).entrySet()) {
-                var completed = mapper.readTree(client.makeJsonRequest(
-                    "GET", second.getPathForGets(entry.getKey()), null, null).getPayloadBytes()).path("_source");
+                var completedDocument = mapper.readTree(client.makeJsonRequest(
+                    "GET", second.getPathForGets(entry.getKey()), null, null).getPayloadBytes());
+                Assertions.assertEquals(entry.getKey(), completedDocument.path("_id").asText());
+                var completed = completedDocument.path("_source");
                 Assertions.assertTrue(completed.has("completedAt"));
                 Assertions.assertEquals(mapper.valueToTree(entry.getValue()), completed.get("committed_metrics"));
                 total += completed.path("committed_metrics").path("metrics").path("source").path("upserts").asLong();

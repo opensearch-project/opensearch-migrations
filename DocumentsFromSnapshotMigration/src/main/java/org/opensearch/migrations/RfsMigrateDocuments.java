@@ -910,7 +910,6 @@ public class RfsMigrateDocuments {
         var mapper = new ObjectMapper();
         return (workItem, cursor) -> {
             var record = WorkItemMetricsRecord.builder()
-                .workItemId(workItem.toString())
                 .indexName(workItem.getIndexName())
                 .shardNumber(workItem.getShardNumber())
                 .snapshotName(snapshotName)

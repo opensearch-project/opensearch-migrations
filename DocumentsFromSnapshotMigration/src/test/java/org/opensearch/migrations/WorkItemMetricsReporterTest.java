@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,8 +21,8 @@ class WorkItemMetricsReporterTest {
         var work = new WorkItem("idx", 2, 42L);
         var metrics = RfsMigrateDocuments.committedMetricsReporter("snapshot", null, null, () -> 1200)
             .apply(work, new WorkItemCursor(43, MigrationMetrics.ZERO, true, null));
-        assertEquals(2, metrics.get("schemaVersion"));
-        assertEquals(work.toString(), metrics.get("workItemId"));
+        assertEquals(1, metrics.get("schemaVersion"));
+        assertFalse(metrics.containsKey("workItemId"));
         assertEquals("snapshot", metrics.get("snapshotName"));
         assertEquals(42L, ((Number) metrics.get("fromPosition")).longValue());
         assertEquals(43L, ((Number) metrics.get("nextPosition")).longValue());

@@ -4,8 +4,10 @@ Use the snapshot RFS migrated as the validation baseline when the live source
 keeps ingesting. Each coordinator work-item document stores `committed_metrics`.
 The existing Migration Console archive preserves the complete document,
 including these metrics, in its existing
-`backfill_working_state/working_state_backup_<timestamp>.json` file. A later
-reporting or S3 publication job can consume that archive.
+`backfill_working_state/working_state_backup_<timestamp>.json` file. It stores
+batches of maps from document IDs to their `_source`: the work-item ID is each entry’s key,
+and `committed_metrics` is in its value. A later reporting or S3 publication job
+can consume that archive.
 
 ## Commit semantics
 
@@ -79,32 +81,38 @@ merge; they are not interchangeable with delta delete operations.
 
 ## Work-item examples
 
-These are the `committed_metrics` values inside coordinator `_source` documents,
-alongside existing lease/completion fields. The document ID remains the
-serialized work-item string. The metrics payload uses `schemaVersion: 2`; this
-is separate from the coordinator checkpoint `scriptVersion: "3.1"`.
+These are excerpts from coordinator document responses; existing lease and
+completion fields are omitted. `_id` is the serialized work-item ID, outside
+`_source`; it is preserved by the existing archive and is not duplicated in
+`committed_metrics`. This first published metrics format uses `schemaVersion: 1`,
+separate from the coordinator checkpoint `scriptVersion: "3.1"`.
 
 Full snapshot: five root documents with nine nested children give a whole-shard
 live Lucene count of 14, plus two tombstoned slots.
 
 ```json
 {
-  "schemaVersion": 2,
-  "workItemId": "b3JkZXJz__0__0",
-  "snapshotName": "full-001",
-  "indexName": "orders",
-  "shardNumber": 0,
-  "fromPosition": 0,
-  "nextPosition": 16,
-  "shardComplete": true,
-  "previousSnapshotName": null,
-  "deltaMode": null,
-  "metrics": {
-    "source": {"upserts": 5, "deletes": 0, "bytes": 500},
-    "target": {"upserts": 5, "deletes": 0, "bytes": 500},
-    "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 1500, "durationMillis": 90},
-    "workItem": {"durationMillis": 120000},
-    "snapshot": {"liveDocuments": 14, "nestedDocuments": 9, "tombstonedDocuments": 2}
+  "_id": "b3JkZXJz__0__0",
+  "_source": {
+    "scriptVersion": "3.1",
+    "committed_metrics": {
+      "schemaVersion": 1,
+      "snapshotName": "full-001",
+      "indexName": "orders",
+      "shardNumber": 0,
+      "fromPosition": 0,
+      "nextPosition": 16,
+      "shardComplete": true,
+      "previousSnapshotName": null,
+      "deltaMode": null,
+      "metrics": {
+        "source": {"upserts": 5, "deletes": 0, "bytes": 500},
+        "target": {"upserts": 5, "deletes": 0, "bytes": 500},
+        "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 1500, "durationMillis": 90},
+        "workItem": {"durationMillis": 120000},
+        "snapshot": {"liveDocuments": 14, "nestedDocuments": 9, "tombstonedDocuments": 2}
+      }
+    }
   }
 }
 ```
@@ -117,22 +125,27 @@ validating the current snapshot baseline.
 
 ```json
 {
-  "schemaVersion": 2,
-  "workItemId": "b3JkZXJz__0__0",
-  "snapshotName": "delta-002",
-  "indexName": "orders",
-  "shardNumber": 0,
-  "fromPosition": 0,
-  "nextPosition": 4,
-  "shardComplete": true,
-  "previousSnapshotName": "full-001",
-  "deltaMode": "UPDATES_AND_DELETES",
-  "metrics": {
-    "source": {"upserts": 3, "deletes": 1, "bytes": 300},
-    "target": {"upserts": 3, "deletes": 1, "bytes": 300},
-    "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 900, "durationMillis": 90},
-    "workItem": {"durationMillis": 90000},
-    "snapshot": {"liveDocuments": 16, "nestedDocuments": 9, "tombstonedDocuments": 4}
+  "_id": "b3JkZXJz__0__0",
+  "_source": {
+    "scriptVersion": "3.1",
+    "committed_metrics": {
+      "schemaVersion": 1,
+      "snapshotName": "delta-002",
+      "indexName": "orders",
+      "shardNumber": 0,
+      "fromPosition": 0,
+      "nextPosition": 4,
+      "shardComplete": true,
+      "previousSnapshotName": "full-001",
+      "deltaMode": "UPDATES_AND_DELETES",
+      "metrics": {
+        "source": {"upserts": 3, "deletes": 1, "bytes": 300},
+        "target": {"upserts": 3, "deletes": 1, "bytes": 300},
+        "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 900, "durationMillis": 90},
+        "workItem": {"durationMillis": 90000},
+        "snapshot": {"liveDocuments": 16, "nestedDocuments": 9, "tombstonedDocuments": 4}
+      }
+    }
   }
 }
 ```
