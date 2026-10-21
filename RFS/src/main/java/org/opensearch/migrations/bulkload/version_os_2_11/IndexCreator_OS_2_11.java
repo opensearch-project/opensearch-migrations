@@ -3,11 +3,13 @@ package org.opensearch.migrations.bulkload.version_os_2_11;
 import java.util.Map;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.common.SourceInternalIndexSettings;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
@@ -58,6 +60,14 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.getRawJson(), index.getId(), index.getName());
 
         ObjectNode settings = indexMetadata.getSettings();
+        var removedInternalSettings = SourceInternalIndexSettings.strip(settings);
+        if (!removedInternalSettings.isEmpty()) {
+            log.atDebug()
+                .setMessage("Removed source-internal settings from index '{}': {}")
+                .addArgument(index.getName())
+                .addArgument(removedInternalSettings)
+                .log();
+        }
 
         ObjectNode mappings = (ObjectNode) indexMetadata.getMappings();
         if (mappings != null) {
@@ -72,19 +82,29 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         // but the create index API expects them as settings. Without this mapping,
         // the target gets different defaults (e.g., routing_num_shards), causing issues
         // like documents with custom routing landing on different shards.
+        // OpenSearch Serverless picks its own shard count and rejects a routing shard count
+        // below it, so these fields are not copied for Serverless targets.
         var rawJson = index.getRawJson();
-        METADATA_TO_SETTINGS.forEach((metadataField, settingName) -> {
-            var value = rawJson.path(metadataField);
-            if (!value.isMissingNode()) {
-                settings.set(settingName, value);
-                log.atDebug()
-                    .setMessage("Copied metadata field '{}' as setting '{}' = {}")
-                    .addArgument(metadataField)
-                    .addArgument(settingName)
-                    .addArgument(value)
-                    .log();
-            }
-        });
+        if (isServerlessTarget()) {
+            log.atDebug()
+                .setMessage("Target is OpenSearch Serverless, not copying metadata fields {} into settings for index '{}'")
+                .addArgument(METADATA_TO_SETTINGS.keySet())
+                .addArgument(index.getName())
+                .log();
+        } else {
+            METADATA_TO_SETTINGS.forEach((metadataField, settingName) -> {
+                var value = rawJson.path(metadataField);
+                if (!value.isMissingNode()) {
+                    settings.set(settingName, value);
+                    log.atDebug()
+                        .setMessage("Copied metadata field '{}' as setting '{}' = {}")
+                        .addArgument(metadataField)
+                        .addArgument(settingName)
+                        .addArgument(value)
+                        .log();
+                }
+            });
+        }
 
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
@@ -102,6 +122,11 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             result.exception(e);
         }
         return result.build();
+    }
+
+    private boolean isServerlessTarget() {
+        var targetVersion = client.getClusterVersion();
+        return targetVersion != null && targetVersion.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH;
     }
 
     private void checkForReplicaCountIncompatibility(ObjectNode settings, AwarenessAttributeSettings awarenessAttributeSettings) throws IncompatibleReplicaCountException {
