@@ -1,8 +1,11 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
@@ -17,6 +20,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 /**
  * Pins the resume-cursor contract: {@link ProgressCursor#lastDocProcessed()} carries the
@@ -38,6 +42,53 @@ import reactor.core.publisher.Mono;
 class ProgressCursorPositionTest {
 
     private static final String IDX = "idx";
+
+    @Test
+    void cursorsAccumulateInSourceOrderWhenWritesCompleteInReverseOrder() throws Exception {
+        var writesStarted = new CountDownLatch(3);
+        var completions = List.of(Sinks.<BatchResult>one(), Sinks.<BatchResult>one(), Sinks.<BatchResult>one());
+        var sink = new CountingSink() {
+            int next;
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                var completion = completions.get(next++);
+                writesStarted.countDown();
+                return completion.asMono();
+            }
+        };
+        var future = new DocumentMigrationPipeline(
+            new SparseSource(List.of(3, 7, 9), true), sink, 1, 1000)
+            .migratePartition(partition(), IDX, 0, 10).collectList().toFuture();
+        Assertions.assertTrue(writesStarted.await(10, TimeUnit.SECONDS));
+        for (int i = 2; i >= 0; i--) {
+            completions.get(i).tryEmitValue(new BatchResult(1, 1));
+        }
+        var cursors = future.get(10, TimeUnit.SECONDS);
+        Assertions.assertEquals(List.of(3L, 7L, 9L),
+            cursors.stream().map(ProgressCursor::lastDocProcessed).toList());
+        Assertions.assertEquals(List.of(11L, 12L, 13L),
+            cursors.stream().map(ProgressCursor::cumulativeDocsEmitted).toList());
+    }
+
+    @Test
+    void resubscribingStartsWithTheOriginalCarriedTotal() {
+        var migration = new DocumentMigrationPipeline(
+            new SparseSource(List.of(3, 7, 9), true), new CountingSink(), 2, 1000)
+            .migratePartition(partition(), IDX, 0, 10).collectList();
+        Assertions.assertEquals(migration.block(Duration.ofSeconds(10)), migration.block(Duration.ofSeconds(10)));
+    }
+
+    @Test
+    void handoffAfterAMultiDocumentBatchReplaysOnlyItsLastDocument() {
+        var source = new SparseSource(List.of(3, 7, 9, 15, 20), true);
+        var first = run(source, new CountingSink(), 3, 0).get(0);
+        var secondSink = new CountingSink();
+        var second = run(source, secondSink, 2, first.lastDocProcessed(),
+            first.docsBeforeCheckpoint());
+        Assertions.assertEquals(List.of("doc-9", "doc-15", "doc-20"), secondSink.written);
+        Assertions.assertEquals(5L, second.get(second.size() - 1).cumulativeDocsEmitted());
+    }
 
     private static Partition partition() {
         return new EsShardPartition("snap", IDX, 0);
@@ -151,7 +202,7 @@ class ProgressCursorPositionTest {
         // Generation 2 resumes at the checkpoint position, carrying the running total.
         // The checkpoint doc (3) is replayed by design, so the carried-in total must be the
         // count BEFORE that doc to avoid double-counting it.
-        long carriedIn = checkpoint.cumulativeDocsEmitted() - checkpoint.docsInBatch();
+        long carriedIn = checkpoint.docsBeforeCheckpoint();
         Assertions.assertEquals(0L, carriedIn);
 
         var sink2 = new CountingSink();

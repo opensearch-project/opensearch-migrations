@@ -194,8 +194,7 @@ public class DocumentMigrationBootstrap {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                    cursorConsumer.accept(
-                        new WorkItemCursor(cursor.lastDocProcessed(), cursor.cumulativeDocsEmitted()));
+                    cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
                 },
                 error -> {
                     log.atError()
@@ -222,8 +221,7 @@ public class DocumentMigrationBootstrap {
             // children are separate Lucene documents and are counted. The other figures cover only
             // this lease generation, so they are named accordingly -- a shard that outlives its
             // lease is reported once per generation and the values must not be summed.
-            // -1 means the source cannot report the count cheaply.
-            long shardLiveLuceneDocs = documentSource.countLiveDocuments(partition).orElse(-1L);
+            var shardLiveLuceneDocs = documentSource.countLiveDocuments(partition);
             log.atInfo()
                 .setMessage("Partition migration stats: index={}, shard={}, docsThisGeneration={}, "
                     + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}, "
@@ -234,7 +232,8 @@ public class DocumentMigrationBootstrap {
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)
                 .addArgument(durationMs)
-                .addArgument(shardLiveLuceneDocs)
+                .addArgument(() -> shardLiveLuceneDocs.isPresent()
+                    ? Long.toString(shardLiveLuceneDocs.getAsLong()) : "unknown")
                 .log();
 
             var error = migrationError.get();

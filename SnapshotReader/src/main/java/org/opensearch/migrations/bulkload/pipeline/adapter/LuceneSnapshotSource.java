@@ -219,12 +219,18 @@ public class LuceneSnapshotSource implements DocumentSource {
                 return readRegularDocuments(entry, partition, startingPosition);
             }
             log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
-            // The checkpoint is a Lucene doc number, not an ordinal into this stream, so filter by
-            // position rather than skip(n). Documents exactly at the checkpoint are retained:
-            // successors restart at the last processed position to handle 1:many doc splits.
+            // Deletions use the previous snapshot's doc numbers; additions use the current one's.
+            // Those positions can overlap and go backwards, so checkpoint the combined stream's
+            // ordinal instead. Keep the Lucene number as diagnostic metadata.
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
-                .filter(change -> change.getLuceneDocNumber() >= startingPosition)
-                .map(luceneAdapter::fromLucene);
+                .index()
+                .skip(startingPosition)
+                .map(indexed -> {
+                    var doc = luceneAdapter.fromLucene(indexed.getT2());
+                    var metadata = new HashMap<>(doc.sourceMetadata());
+                    metadata.put(Document.SOURCE_META_POSITION, indexed.getT1());
+                    return new Document(doc.id(), doc.source(), doc.operation(), doc.hints(), metadata);
+                });
         }
 
         return readRegularDocuments(entry, partition, startingPosition);
