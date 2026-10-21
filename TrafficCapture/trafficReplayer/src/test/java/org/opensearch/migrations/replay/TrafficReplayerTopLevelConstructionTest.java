@@ -1210,6 +1210,8 @@ class TrafficReplayerTopLevelConstructionTest {
                 "the captured connection owner must remain after its first durable tuple"
             );
             await(harness.allTuplesDurable, "both tuples to become durable");
+            // The sink's latch fires before TupleWriter processes the completed write future.
+            awaitMetricValue(harness.telemetry, TupleDurabilityMetrics.MetricNames.WRITES_DURABLE, 2);
             harness.replayer.runActivityMonitorOnce();
 
             var connectionId = new ConnectionProcessingId(

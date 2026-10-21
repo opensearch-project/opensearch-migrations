@@ -30,7 +30,7 @@ def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString
 def ptc = new PullThroughCacheHelper(ptcEndpoint)
 def baseImageProvider = providers.environmentVariable('MIGRATION_COMPANION_BASE_IMAGE')
         .orElse(providers.gradleProperty('migrationCompanionBaseImage'))
-        .orElse(ptc.rewrite('docker.io/library/amazonlinux:2023'))
+        .orElse(ptc.rewrite('public.ecr.aws/docker/library/amazonlinux:2023'))
 
 def dockerContextDirProvider = layout.buildDirectory.dir('docker-context')
 def helmPackageDirProvider = rootProject.layout.projectDirectory.dir('deployment/k8s/build/helm-package')
