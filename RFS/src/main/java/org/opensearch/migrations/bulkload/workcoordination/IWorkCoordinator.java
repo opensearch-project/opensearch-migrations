@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.OptionalLong;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -146,7 +147,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      * Same as above, carrying forward the shard's emitted-document total so the successor
      * continues one running count.
      *
-     * <p>{@code docsEmitted} must exclude the checkpoint batch, since successors re-process the
+     * <p>{@code docsEmitted} must exclude the replayed checkpoint document, since successors re-process the
      * checkpoint and would otherwise count it twice. Written absolutely so retries are idempotent.
      */
     void createSuccessorWorkItemsAndMarkComplete(
@@ -154,7 +155,7 @@ public interface IWorkCoordinator extends AutoCloseable {
         List<String> successorWorkItemIds,
         int initialNextAcquisitionLeaseExponent,
         Instant deadline,
-        long docsEmitted,
+        OptionalLong docsEmitted,
         Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException;
 
@@ -229,14 +230,16 @@ public interface IWorkCoordinator extends AutoCloseable {
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
         final Instant leaseExpirationTime;
         final WorkItem workItem;
-        /** Emitted-document total inherited from previous lease generations; 0 when unknown. */
-        final long docsEmitted;
+        /** Source-document total before this work item's starting position, if known. */
+        final OptionalLong docsEmitted;
 
         public WorkItemAndDuration(Instant leaseExpirationTime, WorkItem workItem) {
-            this(leaseExpirationTime, workItem, 0L);
+            this(leaseExpirationTime, workItem,
+                workItem.getStartingDocId() == null || workItem.getStartingDocId() <= 0
+                    ? OptionalLong.of(0) : OptionalLong.empty());
         }
 
-        public WorkItemAndDuration(Instant leaseExpirationTime, WorkItem workItem, long docsEmitted) {
+        public WorkItemAndDuration(Instant leaseExpirationTime, WorkItem workItem, OptionalLong docsEmitted) {
             this.leaseExpirationTime = leaseExpirationTime;
             this.workItem = workItem;
             this.docsEmitted = docsEmitted;

@@ -15,9 +15,12 @@ import java.util.Objects;
  *                              {@link Document#position()}. This is what readers seek with; it is
  *                              not a document count, because positions are consumed without
  *                              emitting anything for nested child documents.
- * @param cumulativeDocsEmitted running total of documents emitted for this partition, including
+ * @param cumulativeDocsEmitted running total of source documents processed for this partition, including
  *                              any total carried in from a prior lease generation. Not a seek
  *                              position.
+ * @param docsBeforeCheckpoint  source documents strictly before the resume position. An explicit
+ *                              position replays the last source document, whereas the positionless
+ *                              fallback is the exclusive offset of the next document.
  * @param docsInBatch           the number of documents in this batch
  * @param bytesInBatch          the total bytes of document sources in this batch
  */
@@ -25,6 +28,7 @@ public record ProgressCursor(
     Partition partition,
     long lastDocProcessed,
     long cumulativeDocsEmitted,
+    long docsBeforeCheckpoint,
     long docsInBatch,
     long bytesInBatch
 ) {
@@ -39,6 +43,9 @@ public record ProgressCursor(
         if (cumulativeDocsEmitted < 0) {
             throw new IllegalArgumentException(
                 "cumulativeDocsEmitted must be >= 0, got " + cumulativeDocsEmitted);
+        }
+        if (docsBeforeCheckpoint < 0 || docsBeforeCheckpoint > cumulativeDocsEmitted) {
+            throw new IllegalArgumentException("docsBeforeCheckpoint must be between 0 and cumulativeDocsEmitted");
         }
     }
 }

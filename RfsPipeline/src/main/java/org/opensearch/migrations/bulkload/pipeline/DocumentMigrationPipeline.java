@@ -1,10 +1,12 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
@@ -13,6 +15,7 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -147,10 +150,10 @@ public class DocumentMigrationPipeline {
         if (docsAlreadyEmitted < 0) {
             throw new IllegalArgumentException("docsAlreadyEmitted must be >= 0, got " + docsAlreadyEmitted);
         }
-        final long[] emitted = { docsAlreadyEmitted };
-        // Used only when the source exposes no position; see Document#position().
-        final long[] fallbackPosition = { startingPosition };
         return Flux.defer(() -> {
+            final long[] emitted = { docsAlreadyEmitted };
+            // Subscription-local state: a retry must start from the original checkpoint.
+            final long[] fallbackPosition = { startingPosition };
             currentPartition.set(partition);
             return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
@@ -160,26 +163,33 @@ public class DocumentMigrationPipeline {
                     // Captured before the write so the cursor reflects what was read even if the
                     // sink reorders internally.
                     var lastPosition = batch.get(batch.size() - 1).position();
-                    return sink.writeBatch(collectionName, batch)
-                        .map(result -> {
-                            emitted[0] += result.docsInBatch();
-                            fallbackPosition[0] += result.docsInBatch();
-                            totalDocs.addAndGet(result.docsInBatch());
-                            totalBytes.addAndGet(result.bytesInBatch());
-                            return new ProgressCursor(
-                                partition,
-                                lastPosition.orElse(fallbackPosition[0]),
-                                emitted[0],
-                                result.docsInBatch(),
-                                result.bytesInBatch()
-                            );
-                        })
+                    return Mono.defer(() -> sink.writeBatch(collectionName, batch))
+                        .map(result -> new CompletedBatch(lastPosition, batch.size(), result))
                         .doFinally(s -> activeBatches.decrementAndGet());
                 }, batchConcurrency)
+                // flatMapSequential orders emissions, not execution of its inner publishers.
+                // Accumulate only here, after earlier batches have completed successfully.
+                .map(batch -> {
+                    var result = batch.result();
+                    emitted[0] += batch.sourceDocs();
+                    fallbackPosition[0] += batch.sourceDocs();
+                    totalDocs.addAndGet(result.docsInBatch());
+                    totalBytes.addAndGet(result.bytesInBatch());
+                    return new ProgressCursor(
+                        partition,
+                        batch.lastPosition().orElse(fallbackPosition[0]),
+                        emitted[0],
+                        emitted[0] - (batch.lastPosition().isPresent() ? 1 : 0),
+                        result.docsInBatch(),
+                        result.bytesInBatch()
+                    );
+                })
                 .onErrorMap(e -> !(e instanceof PipelineException),
                     e -> new PipelineException("Failed migrating partition " + partition, e));
         });
     }
+
+    private record CompletedBatch(OptionalLong lastPosition, int sourceDocs, BatchResult result) {}
 
     /**
      * Migrate all partitions for a collection. Creates the collection first, then migrates

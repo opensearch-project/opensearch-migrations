@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.pipeline;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -82,12 +83,13 @@ public class DocumentMigrationBootstrap {
      */
     @Builder.Default
     private final ShardDocCountReporter shardDocCountReporter =
-        (index, shard, total, luceneTotal, thisGen, priorGen) -> {};
+        (workItem, total, luceneTotal, thisGen, priorGen) -> {};
 
     @FunctionalInterface
     public interface ShardDocCountReporter {
-        void report(String indexName, int shardNumber, long liveDocCount, long liveLuceneDocCount,
-                    long docsThisGeneration, long docsPriorGenerations);
+        void report(IWorkCoordinator.WorkItemAndDuration.WorkItem workItem,
+                    OptionalLong sourceDocCount, OptionalLong liveLuceneDocCount,
+                    long docsThisGeneration, OptionalLong docsPriorGenerations);
     }
 
     /**
@@ -173,7 +175,7 @@ public class DocumentMigrationBootstrap {
         var partition = resolvePartition(wi);
         long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
             ? wi.getStartingDocId() : 0;
-        long docsAlreadyEmitted = workItem.getDocsEmitted();
+        var docsAlreadyEmitted = workItem.getDocsEmitted();
 
         var pipeline = new DocumentMigrationPipeline(
             pipelineConfig.source(), pipelineConfig.sink(),
@@ -189,7 +191,7 @@ public class DocumentMigrationBootstrap {
         var migrationError = new AtomicReference<Throwable>();
         var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
 
-        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset, docsAlreadyEmitted)
+        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset, docsAlreadyEmitted.orElse(0L))
             .subscribeOn(finishScheduler)
             .doFirst(() -> {
                 if (workItemTimeProvider != null) {
@@ -209,7 +211,8 @@ public class DocumentMigrationBootstrap {
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
                     cursorConsumer.accept(new WorkItemCursor(
-                        cursor.lastDocProcessed(), cursor.cumulativeDocsEmitted(), cursor.docsInBatch()));
+                        cursor.lastDocProcessed(), docsAlreadyEmitted.isPresent()
+                            ? OptionalLong.of(cursor.docsBeforeCheckpoint()) : OptionalLong.empty()));
                 },
                 error -> {
                     log.atError()
@@ -238,29 +241,27 @@ public class DocumentMigrationBootstrap {
                 throw new RfsException("Partition migration failed for " + wi, error);
             }
 
-            // shardMigratedDocs spans every lease generation, so on a completed shard it is
-            // comparable to the source's <index>/_count: nested children are read but never emitted
-            // and so are excluded from both. shardLiveLuceneDocs counts them, matching
-            // _cat/indices docs.count. Both are whole-shard; the docsThisGeneration/bytes/batches
-            // figures cover only this generation. -1 means the source cannot report the count.
-            long shardMigratedDocs = docsAlreadyEmitted + totalDocsMigrated.get();
-            long shardLiveLuceneDocs = documentSource.countLiveDocuments(partition).orElse(-1L);
+            // Source documents processed, including operations whose target write failed or was
+            // filtered/transformed. This equals _count only for a full snapshot with readable roots.
+            var shardSourceDocs = docsAlreadyEmitted.isPresent()
+                ? OptionalLong.of(docsAlreadyEmitted.getAsLong() + totalDocsMigrated.get()) : OptionalLong.empty();
+            var shardLiveLuceneDocs = documentSource.countLiveDocuments(partition);
             log.atInfo()
-                .setMessage("Partition migration stats: index={}, shard={}, shardMigratedDocs={}, "
+                .setMessage("Partition migration stats: index={}, shard={}, shardSourceDocs={}, "
                     + "shardLiveLuceneDocs={}, docsThisGeneration={}, docsPriorGenerations={}, "
                     + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}")
                 .addArgument(wi.getIndexName())
                 .addArgument(wi.getShardNumber())
-                .addArgument(shardMigratedDocs)
-                .addArgument(shardLiveLuceneDocs)
+                .addArgument(() -> formatCount(shardSourceDocs))
+                .addArgument(() -> formatCount(shardLiveLuceneDocs))
                 .addArgument(totalDocsMigrated::get)
-                .addArgument(docsAlreadyEmitted)
+                .addArgument(() -> formatCount(docsAlreadyEmitted))
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)
                 .addArgument(durationMs)
                 .log();
-            shardDocCountReporter.report(wi.getIndexName(), wi.getShardNumber(), shardMigratedDocs,
-                Math.max(0L, shardLiveLuceneDocs), totalDocsMigrated.get(), docsAlreadyEmitted);
+            shardDocCountReporter.report(wi, shardSourceDocs, shardLiveLuceneDocs,
+                totalDocsMigrated.get(), docsAlreadyEmitted);
 
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());
@@ -295,6 +296,10 @@ public class DocumentMigrationBootstrap {
         }
         throw new IllegalStateException("Shard index " + shardIdx + " out of range for " +
             wi.getIndexName() + " (has " + partitions.size() + " partitions)");
+    }
+
+    private static String formatCount(OptionalLong count) {
+        return count.isPresent() ? Long.toString(count.getAsLong()) : "unknown";
     }
 
     private static void closeQuietly(AutoCloseable closeable) {

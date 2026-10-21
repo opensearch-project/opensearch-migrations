@@ -7,8 +7,8 @@ import reactor.core.publisher.Mono;
  *
  * <p>{@link #flush()} must be awaited before the work coordinator marks the corresponding work item
  * complete, so a failed flush leaves the item incomplete and a successor re-emits. Records are
- * therefore at-least-once: consumers should prefer the highest {@code liveDocCount} per
- * (index, shard), or the record with {@code shardComplete=true}.
+ * therefore at-least-once. Deduplicate by (sessionId, indexName, shardNumber); records describe
+ * completed source reads, not successful target document counts. Unknown counts are null.
  */
 public interface ShardDocCountSink extends AutoCloseable {
 

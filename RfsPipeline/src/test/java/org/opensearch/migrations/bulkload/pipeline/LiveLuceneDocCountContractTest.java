@@ -20,7 +20,7 @@ import reactor.core.publisher.Flux;
  * {@code _cat/indices docs.count}.
  *
  * <p>Pins the contract that lets a source supply the second number. Sources that cannot produce it
- * cheaply return empty rather than paying for a scan, and the reporter then sees 0.
+ * cheaply return empty rather than paying for a scan, and the reporter preserves that absence.
  */
 class LiveLuceneDocCountContractTest {
 
@@ -68,13 +68,13 @@ class LiveLuceneDocCountContractTest {
         // 5 roots, each followed by 4 nested children: 25 live Lucene documents, 5 migrated.
         var source = sourceReporting(25L, 5);
 
-        Assertions.assertEquals(25L, source.countLiveDocuments(PARTITION).orElse(-1),
+        Assertions.assertEquals(25L, source.countLiveDocuments(PARTITION).orElseThrow(),
             "the Lucene total must count nested children, matching _cat/indices docs.count");
 
         long emitted = source.readDocuments(PARTITION, 0).count().block();
         Assertions.assertEquals(5L, emitted,
             "only root documents are emitted, matching _count");
-        Assertions.assertTrue(source.countLiveDocuments(PARTITION).orElse(0) > emitted,
+        Assertions.assertTrue(source.countLiveDocuments(PARTITION).orElseThrow() > emitted,
             "the two counts must differ on a nested shard; equality means the Lucene total is "
                 + "excluding nested children");
     }
@@ -105,8 +105,8 @@ class LiveLuceneDocCountContractTest {
 
         Assertions.assertTrue(source.countLiveDocuments(PARTITION).isEmpty(),
             "the default must be empty so a source never pays for a full scan to answer this");
-        Assertions.assertEquals(0L, source.countLiveDocuments(PARTITION).orElse(0L),
-            "callers treat empty as 0, meaning 'not reported'");
+        Assertions.assertEquals(OptionalLong.of(0), sourceReporting(0, 0).countLiveDocuments(PARTITION),
+            "an empty shard has a known zero count, distinct from an unavailable count");
     }
 
     @Test
@@ -115,7 +115,7 @@ class LiveLuceneDocCountContractTest {
         // distinction for so long.
         var source = sourceReporting(5L, 5);
         long emitted = source.readDocuments(PARTITION, 0).count().block();
-        Assertions.assertEquals(emitted, source.countLiveDocuments(PARTITION).orElse(-1),
+        Assertions.assertEquals(emitted, source.countLiveDocuments(PARTITION).orElseThrow(),
             "on a flat shard the Lucene total equals the migrated count");
     }
 }

@@ -337,3 +337,10 @@ Common exception types that can be allowlisted:
 - Other OpenSearch/Elasticsearch document-level exception types as needed
 
 **Note:** Use this feature carefully. Allowlisting exceptions means those errors will be silently treated as success, which may mask legitimate issues if used incorrectly.
+
+## Shard document counts
+
+Document Backfill logs source-document totals across lease generations and the
+live Lucene count when available. It can also export these counts to S3. See
+[shard document counts](../docs/shardDocumentCounts.md) for configuration, count
+semantics, and retry handling.
