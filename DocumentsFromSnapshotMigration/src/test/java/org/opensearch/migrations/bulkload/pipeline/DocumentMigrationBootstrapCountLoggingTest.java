@@ -44,7 +44,8 @@ class DocumentMigrationBootstrapCountLoggingTest {
                 new PipelineConfig(source, mock(DocumentSink.class), 10, 1000, 1), context);
             var expected = count.isPresent() ? Long.toString(count.getAsLong()) : "unknown";
             assertTrue(logs.getLogEvents().stream().anyMatch(line ->
-                line.contains("Partition migration stats:") && line.contains("shardLiveLuceneDocs=" + expected)));
+                line.contains("Partition migration stats:") && line.contains("sourcePartition=snap/idx/0")
+                    && line.contains("shardLiveLuceneDocs=" + expected)));
         }
     }
 }

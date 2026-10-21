@@ -22,29 +22,13 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
-/**
- * Pins the resume-cursor contract: {@link ProgressCursor#lastDocProcessed()} carries the
- * SOURCE POSITION of the last processed document (for Lucene sources, its doc number),
- * not a running count of emitted documents.
- *
- * <p>Why this matters. Every reader in the codebase interprets the resume checkpoint as a
- * Lucene doc id — {@code LuceneReader.readDocsFromSegment} computes
- * {@code position - segmentDocBase} and {@code getSegmentsFromStartingSegment} binary
- * searches it against segment doc bases. A running emitted-count silently disagrees with
- * that interpretation whenever the reader consumes a source position without emitting a
- * document, which is exactly what happens for nested child documents (they carry no
- * stored {@code _id}, so {@code LuceneReader.getDocument} returns null).
- *
- * <p>Before the fix, a shard of 3 roots interleaved with 4 nested children finished with a
- * cursor of 3 while the true Lucene position was 9 — so a resumed worker re-read and
- * re-migrated the entire shard. These tests fail against that behaviour.
- */
+/** Sparse positions, inclusive resume, and ordered checkpoints under concurrent writes. */
 class ProgressCursorPositionTest {
 
     private static final String IDX = "idx";
 
     @Test
-    void cursorsAccumulateInSourceOrderWhenWritesCompleteInReverseOrder() throws Exception {
+    void fallbackOffsetsAdvanceInSourceOrderWhenWritesCompleteInReverseOrder() throws Exception {
         var writesStarted = new CountDownLatch(3);
         var completions = List.of(Sinks.<BatchResult>one(), Sinks.<BatchResult>one(), Sinks.<BatchResult>one());
         var sink = new CountingSink() {
@@ -58,24 +42,22 @@ class ProgressCursorPositionTest {
             }
         };
         var future = new DocumentMigrationPipeline(
-            new SparseSource(List.of(3, 7, 9), true), sink, 1, 1000)
-            .migratePartition(partition(), IDX, 0, 10).collectList().toFuture();
+            new SparseSource(List.of(13, 17, 19), false), sink, 1, 1000)
+            .migratePartition(partition(), IDX, 10).collectList().toFuture();
         Assertions.assertTrue(writesStarted.await(10, TimeUnit.SECONDS));
         for (int i = 2; i >= 0; i--) {
             completions.get(i).tryEmitValue(new BatchResult(1, 1));
         }
         var cursors = future.get(10, TimeUnit.SECONDS);
-        Assertions.assertEquals(List.of(3L, 7L, 9L),
-            cursors.stream().map(ProgressCursor::lastDocProcessed).toList());
         Assertions.assertEquals(List.of(11L, 12L, 13L),
-            cursors.stream().map(ProgressCursor::cumulativeDocsEmitted).toList());
+            cursors.stream().map(ProgressCursor::lastDocProcessed).toList());
     }
 
     @Test
-    void resubscribingStartsWithTheOriginalCarriedTotal() {
+    void resubscribingStartsWithTheOriginalOffset() {
         var migration = new DocumentMigrationPipeline(
-            new SparseSource(List.of(3, 7, 9), true), new CountingSink(), 2, 1000)
-            .migratePartition(partition(), IDX, 0, 10).collectList();
+            new SparseSource(List.of(13, 17, 19), false), new CountingSink(), 2, 1000)
+            .migratePartition(partition(), IDX, 10).collectList();
         Assertions.assertEquals(migration.block(Duration.ofSeconds(10)), migration.block(Duration.ofSeconds(10)));
     }
 
@@ -84,10 +66,8 @@ class ProgressCursorPositionTest {
         var source = new SparseSource(List.of(3, 7, 9, 15, 20), true);
         var first = run(source, new CountingSink(), 3, 0).get(0);
         var secondSink = new CountingSink();
-        var second = run(source, secondSink, 2, first.lastDocProcessed(),
-            first.docsBeforeCheckpoint());
+        run(source, secondSink, 2, first.lastDocProcessed());
         Assertions.assertEquals(List.of("doc-9", "doc-15", "doc-20"), secondSink.written);
-        Assertions.assertEquals(5L, second.get(second.size() - 1).cumulativeDocsEmitted());
     }
 
     private static Partition partition() {
@@ -155,13 +135,8 @@ class ProgressCursorPositionTest {
 
     private static List<ProgressCursor> run(DocumentSource src, DocumentSink sink,
                                             int batchSize, long from) {
-        return run(src, sink, batchSize, from, 0L);
-    }
-
-    private static List<ProgressCursor> run(DocumentSource src, DocumentSink sink,
-                                            int batchSize, long from, long carriedIn) {
         var pipeline = new DocumentMigrationPipeline(src, sink, batchSize, 1_000_000L);
-        return pipeline.migratePartition(partition(), IDX, from, carriedIn).collectList().block();
+        return pipeline.migratePartition(partition(), IDX, from).collectList().block();
     }
 
     @Test
@@ -176,47 +151,6 @@ class ProgressCursorPositionTest {
     }
 
     @Test
-    void bothQuantitiesAreTrackedIndependently() {
-        var cursors = run(new SparseSource(List.of(3, 7, 9), true), new CountingSink(), 1, 0);
-
-        Assertions.assertNotNull(cursors);
-        // Seek position follows the sparse Lucene ids...
-        Assertions.assertEquals(List.of(3L, 7L, 9L),
-            cursors.stream().map(ProgressCursor::lastDocProcessed).toList(),
-            "lastDocProcessed = seekable source position");
-        // ...while the emitted count advances densely, one per document.
-        Assertions.assertEquals(List.of(1L, 2L, 3L),
-            cursors.stream().map(ProgressCursor::cumulativeDocsEmitted).toList(),
-            "cumulativeDocsEmitted = live non-nested docs actually sent to the target");
-    }
-
-    @Test
-    void emittedCountCarriesAcrossLeaseGenerations() {
-        // Generation 1 processes doc 3 only, then the lease expires.
-        var gen1 = run(new SparseSource(List.of(3, 7, 9), true), new CountingSink(), 1, 0);
-        Assertions.assertNotNull(gen1);
-        var checkpoint = gen1.get(0);
-        Assertions.assertEquals(3L, checkpoint.lastDocProcessed());
-        Assertions.assertEquals(1L, checkpoint.cumulativeDocsEmitted());
-
-        // Generation 2 resumes at the checkpoint position, carrying the running total.
-        // The checkpoint doc (3) is replayed by design, so the carried-in total must be the
-        // count BEFORE that doc to avoid double-counting it.
-        long carriedIn = checkpoint.docsBeforeCheckpoint();
-        Assertions.assertEquals(0L, carriedIn);
-
-        var sink2 = new CountingSink();
-        var gen2 = run(new SparseSource(List.of(3, 7, 9), true), sink2, 1,
-            checkpoint.lastDocProcessed(), carriedIn);
-
-        Assertions.assertNotNull(gen2);
-        Assertions.assertEquals(List.of("doc-3", "doc-7", "doc-9"), sink2.written,
-            "generation 2 replays the checkpoint doc, then continues");
-        Assertions.assertEquals(3L, gen2.get(gen2.size() - 1).cumulativeDocsEmitted(),
-            "final total is 3 -- the replayed checkpoint doc is not double-counted");
-    }
-
-    @Test
     void cursorIsLastPositionOfTheBatchWhenBatching() {
         // batch size 2 -> batches are [3,7] and [9]
         var cursors = run(new SparseSource(List.of(3, 7, 9), true), new CountingSink(), 2, 0);
@@ -225,9 +159,6 @@ class ProgressCursorPositionTest {
         Assertions.assertEquals(List.of(7L, 9L),
             cursors.stream().map(ProgressCursor::lastDocProcessed).toList(),
             "each cursor is the position of the LAST document in its batch");
-        Assertions.assertEquals(List.of(2L, 3L),
-            cursors.stream().map(ProgressCursor::cumulativeDocsEmitted).toList(),
-            "emitted total accumulates per batch");
     }
 
     @Test

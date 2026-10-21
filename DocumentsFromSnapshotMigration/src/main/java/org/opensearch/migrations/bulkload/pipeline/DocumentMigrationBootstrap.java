@@ -223,11 +223,12 @@ public class DocumentMigrationBootstrap {
             // lease is reported once per generation and the values must not be summed.
             var shardLiveLuceneDocs = documentSource.countLiveDocuments(partition);
             log.atInfo()
-                .setMessage("Partition migration stats: index={}, shard={}, docsThisGeneration={}, "
+                .setMessage("Partition migration stats: index={}, shard={}, sourcePartition={}, docsThisGeneration={}, "
                     + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}, "
                     + "shardLiveLuceneDocs={}")
                 .addArgument(wi.getIndexName())
                 .addArgument(wi.getShardNumber())
+                .addArgument(partition.name())
                 .addArgument(totalDocsMigrated::get)
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)

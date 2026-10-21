@@ -480,7 +480,7 @@ class SolrBackupSourceTest {
         var doc = SolrBackupSource.toDocument(change);
 
         assertThat(doc.position().isPresent(), equalTo(true));
-        assertThat(doc.position().get(), equalTo(42L));
+        assertThat(doc.position().orElseThrow(), equalTo(42L));
     }
 
     @Test
@@ -492,6 +492,6 @@ class SolrBackupSourceTest {
         var doc = SolrBackupSource.toDocument(change);
 
         assertThat(doc.id(), equalTo("solr_doc_7"));
-        assertThat(doc.position().get(), equalTo(7L));
+        assertThat(doc.position().orElseThrow(), equalTo(7L));
     }
 }

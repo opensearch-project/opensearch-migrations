@@ -43,11 +43,12 @@ public interface DocumentSource extends AutoCloseable {
     Flux<Document> readDocuments(Partition partition, long startingDocOffset);
 
     /**
-     * Total live documents in the partition, if the source can determine it cheaply.
+     * Total live documents in the whole partition, when available, independent of resume position.
      *
      * <p>For Lucene-backed sources this is the live Lucene document count, which counts nested
-     * children and so matches {@code _cat/indices docs.count} rather than {@code _count}. Empty when
-     * the source cannot report it without a full scan.
+     * children and so matches the shard's contribution to {@code _cat/indices docs.count}.
+     * The count may become available during {@link #readDocuments}; empty means unknown, while
+     * zero means a known empty partition.
      */
     default OptionalLong countLiveDocuments(Partition partition) {
         return OptionalLong.empty();

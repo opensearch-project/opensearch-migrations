@@ -340,11 +340,9 @@ Common exception types that can be allowlisted:
 
 ## Shard document counts
 
-The partition stats log includes `shardLiveLuceneDocs`: the snapshot shard's live
-Lucene count, including nested children, comparable to its contribution to
-`_cat/indices docs.count`. An empty shard reports `0`; sources without an
-available count report `unknown`.
-
-`docsThisGeneration`, `bytesThisGeneration`, and `batchesThisGeneration` cover
-only this worker's processing. Retries can overlap, so do not sum them to infer a
-whole-shard count or treat them as proof of successful target writes.
+For a full snapshot, Document Backfill logs each shard's live Lucene document
+count. Sum one count per snapshot shard by index to
+validate the target's `_cat/indices docs.count`, even when the source has kept
+ingesting. See [snapshot document counts](../docs/shardDocumentCounts.md) for
+aggregation, retry handling, and comparison requirements. Delta backfills are
+excluded.

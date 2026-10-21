@@ -192,6 +192,10 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     @Override
     public OptionalLong countLiveDocuments(Partition partition) {
+        // A delta stream is not the full snapshot's contribution to the target's docs.count.
+        if (isDeltaMode()) {
+            return OptionalLong.empty();
+        }
         var cached = liveDocCounts.get(partition.name());
         return cached == null ? OptionalLong.empty() : OptionalLong.of(cached);
     }

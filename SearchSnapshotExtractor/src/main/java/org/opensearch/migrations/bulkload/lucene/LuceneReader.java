@@ -102,8 +102,8 @@ public class LuceneReader {
 
     /**
      * Live Lucene document count, matching {@code _cat/indices docs.count} — includes nested
-     * children, since each is its own Lucene document. A popcount per segment bitset, so
-     * sub-millisecond even on a 60k-document shard.
+     * children, since each is its own Lucene document. Uses segment live-doc bitsets
+     * without loading document contents.
      */
     public static long countLiveDocs(LuceneDirectoryReader reader) {
         long live = 0;
