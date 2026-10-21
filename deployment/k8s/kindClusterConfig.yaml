@@ -1,9 +1,17 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+# Cloud nodes carry topology.kubernetes.io/zone; labeling these nodes as three zones lets the
+# workflows' zone spread for Kafka, capture proxies and replayers behave as it does on EKS.
 nodes:
     - role: control-plane
+      labels:
+        topology.kubernetes.io/zone: local-a
     - role: worker
+      labels:
+        topology.kubernetes.io/zone: local-b
     - role: worker
+      labels:
+        topology.kubernetes.io/zone: local-c
 containerdConfigPatches:
   - |-
     [plugins."io.containerd.grpc.v1.cri".registry]

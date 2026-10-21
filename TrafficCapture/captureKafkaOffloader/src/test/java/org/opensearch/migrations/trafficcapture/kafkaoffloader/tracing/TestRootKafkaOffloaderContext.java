@@ -15,6 +15,8 @@ public class TestRootKafkaOffloaderContext extends RootOtelContext
     public final KafkaRecordContext.MetricInstruments kafkaOffloadingInstruments;
     @Getter
     public final ConnectionContext.MetricInstruments connectionInstruments;
+    @Getter
+    public final CapturePublishingMetrics capturePublishingMetrics;
 
     private final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
 
@@ -40,5 +42,6 @@ public class TestRootKafkaOffloaderContext extends RootOtelContext
         final var meter = getMeterProvider().get("test");
         this.kafkaOffloadingInstruments = KafkaRecordContext.makeMetrics(meter);
         this.connectionInstruments = ConnectionContext.makeMetrics(meter);
+        this.capturePublishingMetrics = new CapturePublishingMetrics(meter);
     }
 }

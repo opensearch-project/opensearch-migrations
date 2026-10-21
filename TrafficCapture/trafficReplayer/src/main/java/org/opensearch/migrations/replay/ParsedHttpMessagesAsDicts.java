@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -7,16 +8,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.HttpByteBufFormatter.HttpMessageType;
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonResponseWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpRequestConvertHandler;
 import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpResponseConvertHandler;
 import org.opensearch.migrations.replay.datahandlers.http.NettyJsonBodyAccumulateHandler;
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.replay.util.RefSafeStreamUtils;
@@ -46,72 +48,116 @@ public class ParsedHttpMessagesAsDicts {
     public static final String METHOD_KEY = "Method";
     public static final String HTTP_VERSION_KEY = "HTTP-Version";
     public static final String PAYLOAD_KEY = "payload";
+    public static final String SOURCE_RESPONSE_STATUS_KEY = "sourceResponseStatus";
+    public static final String SOURCE_RESPONSE_STATUS_EXPIRED = "expired";
 
     public final Optional<Map<String, Object>> sourceRequestOp;
     public final Optional<Map<String, Object>> sourceResponseOp;
+    public final Optional<String> sourceResponseStatusOp;
     public final Optional<Map<String, Object>> targetRequestOp;
     public final List<Map<String, Object>> targetResponseList;
     public final IReplayContexts.ITupleHandlingContext context;
 
-    public ParsedHttpMessagesAsDicts(@NonNull SourceTargetCaptureTuple tuple) {
-        this(tuple, Optional.ofNullable(tuple.sourcePair));
-    }
-
-    protected ParsedHttpMessagesAsDicts(
-        @NonNull SourceTargetCaptureTuple tuple,
-        Optional<RequestResponsePacketPair> sourcePairOp
+    public ParsedHttpMessagesAsDicts(
+        @NonNull IReplayContexts.ITupleHandlingContext context,
+        @NonNull RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
     ) {
         this(
-            tuple.context,
-            getSourceRequestOp(tuple.context, sourcePairOp),
-            getSourceResponseOp(tuple, sourcePairOp),
-            getTargetRequestOp(tuple),
-            getTargetResponseOp(tuple)
+            context,
+            Optional.of(convertRequest(context, result.sourceRequest().packetBytes)),
+            getSourceResponseOp(context, result),
+            getSourceResponseStatusOp(result),
+            getTargetRequestOp(context, result.preparedRequest()),
+            getTargetResponseOp(context, result.targetAttemptHistory())
         );
     }
 
-    private static List<Map<String, Object>> getTargetResponseOp(SourceTargetCaptureTuple tuple) {
-        return tuple.responseList.stream()
-            .map(r -> convertResponse(tuple.context, r.targetResponseData, r.targetResponseDuration))
-            .collect(Collectors.toList());
+    private static List<Map<String, Object>> getTargetResponseOp(
+        IReplayContexts.ITupleHandlingContext context,
+        List<TargetAttemptOutcome<AggregatedRawResponse>> attempts
+    ) {
+        return attempts.stream().map(attempt -> switch (attempt) {
+            case TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> obtained -> {
+                var response = obtained.response();
+                var parsed = new LinkedHashMap<>(convertResponse(
+                    context,
+                    List.of(response.getCopyOfPackets()),
+                    response.getDuration()
+                ));
+                Optional.ofNullable(response.getError())
+                    .ifPresent(error -> parsed.put(EXCEPTION_KEY_STRING, error.toString()));
+                yield parsed;
+            }
+            case TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> missing ->
+                Map.<String, Object>of(EXCEPTION_KEY_STRING, missing.reason());
+        }).toList();
     }
 
-    private static Optional<Map<String, Object>> getTargetRequestOp(SourceTargetCaptureTuple tuple) {
-        return Optional.ofNullable(tuple.targetRequestData)
-            .map(ByteBufList::asByteArrayStream)
-            .map(d -> convertRequest(tuple.context, d.collect(Collectors.toList())));
+    private static Optional<Map<String, Object>> getTargetRequestOp(
+        IReplayContexts.ITupleHandlingContext context,
+        NettyPacketToHttpConsumer.PreparedRequest preparedRequest
+    ) {
+        if (preparedRequest == null) {
+            return Optional.empty();
+        }
+        try (var diagnostic = preparedRequest.request().retainDiagnosticCopy()) {
+            return Optional.of(convertRequest(
+                context,
+                diagnostic.packets().asByteArrayStream().toList()
+            ));
+        }
     }
 
     private static Optional<Map<String, Object>> getSourceResponseOp(
-        SourceTargetCaptureTuple tuple,
-        Optional<RequestResponsePacketPair> sourcePairOp
+        IReplayContexts.ITupleHandlingContext context,
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
     ) {
-        return sourcePairOp.flatMap(
-            p -> Optional.ofNullable(p.responseData)
-                .flatMap(d -> Optional.ofNullable(d.packetBytes))
-                .map(
-                    d -> convertResponse(
-                        tuple.context,
-                        d,
-                        // TODO: These durations are not measuring the same values!
-                        Duration.between(
-                            tuple.sourcePair.requestData.getLastPacketTimestamp(),
-                            tuple.sourcePair.responseData.getLastPacketTimestamp()
-                        )
-                    )
-                )
-        );
+        if (!(result.finalSourceResponse()
+            instanceof RequestReplayOwner.CompleteFinalSourceResponse<HttpMessageAndTimestamp.Response> complete)) {
+            return Optional.empty();
+        }
+        var response = complete.response();
+        return Optional.of(convertResponse(
+            context,
+            response.packetBytes,
+            responseDuration(result.sourceRequest(), response)
+        ));
     }
 
-    private static Optional<Map<String, Object>> getSourceRequestOp(
-        @NonNull IReplayContexts.ITupleHandlingContext context,
-        Optional<RequestResponsePacketPair> sourcePairOp
+    private static Optional<String> getSourceResponseStatusOp(
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
     ) {
-        return sourcePairOp.flatMap(
-            p -> Optional.ofNullable(p.requestData)
-                .flatMap(d -> Optional.ofNullable(d.packetBytes))
-                .map(d -> convertRequest(context, d))
-        );
+        if (result.finalSourceResponse()
+            instanceof RequestReplayOwner.IncompleteFinalSourceResponse<HttpMessageAndTimestamp.Response> incomplete) {
+            return Optional.of(incomplete.reason());
+        }
+        return Optional.empty();
+    }
+
+    private static Duration responseDuration(
+        HttpMessageAndTimestamp.Request request,
+        HttpMessageAndTimestamp.Response response
+    ) {
+        var requestEnd = request.getLastPacketTimestamp();
+        var responseEnd = response.getLastPacketTimestamp();
+        return requestEnd == null || responseEnd == null
+            ? Duration.ZERO
+            : Duration.between(requestEnd, responseEnd);
     }
 
     public ParsedHttpMessagesAsDicts(
@@ -121,28 +167,60 @@ public class ParsedHttpMessagesAsDicts {
         Optional<Map<String, Object>> targetRequestOp3,
         List<Map<String, Object>> targetResponseOps4
     ) {
+        this(
+            context,
+            sourceRequestOp1,
+            sourceResponseOp2,
+            Optional.empty(),
+            targetRequestOp3,
+            targetResponseOps4
+        );
+    }
+
+    private ParsedHttpMessagesAsDicts(
+        IReplayContexts.ITupleHandlingContext context,
+        Optional<Map<String, Object>> sourceRequestOp1,
+        Optional<Map<String, Object>> sourceResponseOp2,
+        Optional<String> sourceResponseStatusOp3,
+        Optional<Map<String, Object>> targetRequestOp4,
+        List<Map<String, Object>> targetResponseOps5
+    ) {
         this.context = context;
         this.sourceRequestOp = sourceRequestOp1;
         this.sourceResponseOp = sourceResponseOp2;
-        this.targetRequestOp = targetRequestOp3;
-        this.targetResponseList = targetResponseOps4;
-        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps4);
+        this.sourceResponseStatusOp = sourceResponseStatusOp3;
+        this.targetRequestOp = targetRequestOp4;
+        this.targetResponseList = targetResponseOps5;
+        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps5);
     }
 
     /**
      * Build the structured tuple map used by {@link org.opensearch.migrations.replay.sink.TupleSink} implementations.
      */
-    public Map<String, Object> toTupleMap(SourceTargetCaptureTuple tuple) {
+    public Map<String, Object> toTupleMap(
+        RequestReplayOwner.RequestResult<
+            HttpMessageAndTimestamp.Request,
+            NettyPacketToHttpConsumer.PreparedRequest,
+            AggregatedRawResponse,
+            HttpMessageAndTimestamp.Response
+        > result
+    ) {
         var map = new LinkedHashMap<String, Object>();
         sourceRequestOp.ifPresent(r -> map.put("sourceRequest", r));
         sourceResponseOp.ifPresent(r -> map.put("sourceResponse", r));
+        sourceResponseStatusOp.ifPresent(status -> map.put(SOURCE_RESPONSE_STATUS_KEY, status));
         targetRequestOp.ifPresent(r -> map.put("targetRequest", r));
         map.put("targetResponses", targetResponseList);
-        var key = tuple.getRequestKey();
-        map.put("connectionId", key.getTrafficStreamKey().getConnectionId() + "." + key.getSourceRequestIndex());
-        Optional.ofNullable(tuple.topLevelErrorCause).ifPresent(e -> map.put("error", e.toString()));
-        map.put("numRequests", tuple.responseList.size());
-        map.put("numErrors", tuple.responseList.stream().filter(r -> r.getErrorCause() != null).count());
+        map.put(
+            "connectionId",
+            result.requestId().connectionProcessingId().capturedConnectionId().connectionId()
+                + "." + result.requestId().capturedRequestOrdinal()
+        );
+        map.put("numRequests", result.targetAttemptHistory().size());
+        map.put(
+            "numErrors",
+            targetResponseList.stream().filter(r -> r.containsKey(EXCEPTION_KEY_STRING)).count()
+        );
         return map;
     }
 

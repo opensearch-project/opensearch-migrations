@@ -1,5 +1,5 @@
 /**
- * Shared document generation utilities used by all schema modules in lib/data/.
+ * Shared document generation utilities used by the flat schema modules (*_documents.js / *_queries.js).
  */
 
 export function randomElement(arr) {
@@ -18,10 +18,12 @@ export function randomFloat(min, max) {
  * Build a newline-delimited _bulk request body.
  * Returns { body: string, docCount: number }.
  */
-export function randomBulkBatch(index, batchSize, randomDocFn) {
+export function randomBulkBatch(index, batchSize, randomDocFn, idFn = null) {
   const lines = [];
   for (let i = 0; i < batchSize; i++) {
-    lines.push(JSON.stringify({ index: { _index: index } }));
+    const action = { _index: index };
+    if (idFn) action._id = idFn(i);
+    lines.push(JSON.stringify({ index: action }));
     lines.push(JSON.stringify(randomDocFn()));
   }
   lines.push(''); // _bulk requires a trailing newline

@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.solr;
 import java.net.URI;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 
 import lombok.Getter;
@@ -114,9 +115,32 @@ public class SolrSnapshotCreator {
         }
     }
 
-    /** True when the backup location is a cloud object-store URI (S3 or GCS). */
+    /**
+     * True when the backup location is a cloud object-store URI (S3 or GCS).
+     *
+     * <p>Switches over {@link RepoUri} rather than matching scheme prefixes so that adding a
+     * variant to the sealed type fails to compile here instead of silently answering "not cloud"
+     * and having the location treated as a filesystem path.
+     *
+     * <p>Stays total: callers pass a location Solr may handle as a plain path (a bare path for
+     * file repos, or a relative path for the legacy standalone replication handler), so a value
+     * {@link RepoUri#parse} rejects answers "not cloud" rather than propagating an exception.
+     */
     static boolean isCloudRepoUri(String location) {
-        return location != null && (location.startsWith("s3://") || location.startsWith("gs://"));
+        if (location == null) {
+            return false;
+        }
+        RepoUri parsed;
+        try {
+            parsed = RepoUri.parse(location);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        return switch (parsed) {
+            case RepoUri.S3RepoUri s -> true;
+            case RepoUri.GcsRepoUri g -> true;
+            case RepoUri.FileRepoUri f -> false;
+        };
     }
 
     /**

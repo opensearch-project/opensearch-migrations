@@ -166,6 +166,52 @@ class S3TupleSinkTest {
         }
     }
 
+    @Test
+    void tuplesAcceptedConcurrentlyFromManyThreadsAreAllUploaded() throws Exception {
+        var s3Client = mock(S3AsyncClient.class);
+        var uploadedBytes = new java.util.concurrent.atomic.AtomicLong();
+        when(s3Client.putObject(any(PutObjectRequest.class), any(AsyncRequestBody.class)))
+            .thenAnswer(invocation -> {
+                AsyncRequestBody body = invocation.getArgument(1);
+                uploadedBytes.addAndGet(body.contentLength().orElse(0L));
+                return CompletableFuture.completedFuture(PutObjectResponse.builder().build());
+            });
+        var threads = 8;
+        var perThread = 500;
+        var futures = new CopyOnWriteArrayList<CompletableFuture<Void>>();
+        try (var sink = makeSink(s3Client, 100)) {
+            var start = new java.util.concurrent.CountDownLatch(1);
+            var writers = new java.util.ArrayList<Thread>();
+            for (var t = 0; t < threads; t++) {
+                var writerIndex = t;
+                var writer = new Thread(() -> {
+                    try {
+                        start.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    for (var i = 0; i < perThread; i++) {
+                        var future = new CompletableFuture<Void>();
+                        futures.add(future);
+                        sink.accept(makeTuple("conn" + writerIndex + "." + i), future);
+                    }
+                });
+                writers.add(writer);
+                writer.start();
+            }
+            start.countDown();
+            for (var writer : writers) {
+                writer.join(10_000);
+            }
+            sink.flush();
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).get(10, TimeUnit.SECONDS);
+        }
+        assertEquals(threads * perThread, futures.size());
+        assertTrue(futures.stream().allMatch(f -> f.isDone() && !f.isCompletedExceptionally()));
+        assertTrue(uploadedBytes.get() > 0);
+    }
+
     private void waitForPutCalls(AtomicInteger putCallCount, int expectedCalls) throws InterruptedException {
         var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         while (putCallCount.get() < expectedCalls && System.nanoTime() < deadline) {

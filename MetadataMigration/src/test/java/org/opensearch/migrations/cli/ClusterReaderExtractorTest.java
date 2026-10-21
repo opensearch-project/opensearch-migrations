@@ -55,6 +55,27 @@ public class ClusterReaderExtractorTest {
     }
 
     @Test
+    void testExtractClusterReader_invalidGcsSnapshot_missingLocalDir() {
+        var args = new MigrateOrEvaluateArgs();
+        args.repoUri = "gs://foo/bar";
+        var extractor = new ClusterReaderExtractor(args);
+
+        var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
+        assertThat(exception.getMessage(), equalTo("If a GCS repo is being used, --local-dir must be set"));
+    }
+
+    @Test
+    void testExtractClusterReader_validGcsSnapshot_missingVersion() {
+        var args = new MigrateOrEvaluateArgs();
+        args.repoUri = "gs://foo/bar";
+        args.localDir = "fizz.buzz";
+        var extractor = new ClusterReaderExtractor(args);
+
+        var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
+        assertThat(exception.getMessage(), equalTo("Unable to read from snapshot without --source-version parameter"));
+    }
+
+    @Test
     void testExtractClusterReader_validLocalSnapshot_missingVersion() {
         var args = new MigrateOrEvaluateArgs();
         args.repoUri = "/foo/bar";

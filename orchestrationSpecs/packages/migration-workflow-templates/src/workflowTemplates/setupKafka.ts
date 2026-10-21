@@ -21,6 +21,13 @@ import {
 import {ResourceManagement} from "./resourceManagement";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {
+    workloadNodeAffinity,
+    workloadNodePoolResolvedInput,
+    workloadNodeTolerations,
+    workloadZoneSpreadConstraints,
+    workloadZoneSpreadResolvedInput,
+} from "./commonUtils/workloadNodePool";
 
 type KafkaConfig = z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>;
 const KAFKA_CLUSTER_LABEL = "migrations.opensearch.org/kafka-cluster";
@@ -107,12 +114,41 @@ function makeManagedKafkaUserManifest(args: {
     };
 }
 
+// Scope spread calculations to this Kafka cluster and pool without knowing their runtime names.
+const KAFKA_POOL_SELECTOR_KEYS = ["strimzi.io/cluster", "strimzi.io/pool-name"];
+// Prefer spreading brokers within each zone too, while keeping development clusters schedulable when
+// they have fewer nodes than broker replicas.
+function kafkaHostnameSpread() {
+    return expr.toArray(expr.makeDict({
+        maxSkew: 1,
+        topologyKey: "kubernetes.io/hostname",
+        whenUnsatisfiable: "ScheduleAnyway",
+        labelSelector: expr.makeDict({}),
+        matchLabelKeys: expr.literal(KAFKA_POOL_SELECTOR_KEYS),
+    }));
+}
+
 function makeDeployKafkaNodePool(args: {
     clusterName: BaseExpression<string>,
     nodePoolSpec: BaseExpression<Serialized<Record<string, any>>>,
     migrationRunNumber: BaseExpression<string>,
     ownerUid: BaseExpression<string>,
+    workloadNodePoolName: BaseExpression<string>,
+    workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }): Record<string, any> {
+    const scheduling = expr.ternary(
+        expr.isEmpty(args.workloadNodePoolName),
+        expr.makeDict({}),
+        expr.makeDict({
+            template: expr.makeDict({
+                pod: expr.makeDict({
+                    affinity: workloadNodeAffinity(args.workloadNodePoolName),
+                    tolerations: workloadNodeTolerations(args.workloadNodePoolName),
+                }),
+            }),
+        }),
+    );
     return {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "KafkaNodePool",
@@ -130,20 +166,35 @@ function makeDeployKafkaNodePool(args: {
         spec: makeDirectTypeProxy(
             expr.mergeDicts(
                 expr.mergeDicts(
-                    expr.makeDict({
-                        template: expr.makeDict({
-                            pod: expr.makeDict({
-                                metadata: expr.makeDict({
-                                    labels: expr.makeDict({
-                                        [MIGRATION_RESOURCE_UID_LABEL]: args.ownerUid,
+                    expr.mergeDicts(
+                        expr.makeDict({
+                            template: expr.makeDict({
+                                pod: expr.makeDict({
+                                    metadata: expr.makeDict({
+                                        labels: expr.makeDict({
+                                            [MIGRATION_RESOURCE_UID_LABEL]: args.ownerUid,
+                                        }),
                                     }),
                                 }),
                             }),
                         }),
-                    }),
+                        scheduling,
+                    ),
                     expr.deserializeRecord(args.nodePoolSpec)
                 ),
-                expr.makeDict({resources: expr.templateValue(DEFAULT_RESOURCES.KAFKA_BROKER)})
+                // sprig.merge gives the first argument precedence, so these generated defaults only fill
+                // what nodePoolSpecOverrides left unset: an explicit topologySpreadConstraints wins whole.
+                expr.makeDict({
+                    resources: expr.templateValue(DEFAULT_RESOURCES.KAFKA_BROKER),
+                    template: expr.makeDict({
+                        pod: expr.makeDict({
+                            topologySpreadConstraints: expr.concatArrays(
+                                workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, KAFKA_POOL_SELECTOR_KEYS),
+                                kafkaHostnameSpread(),
+                            ),
+                        }),
+                    }),
+                })
             )
         )
     };
@@ -389,6 +440,8 @@ exit 1
         .addRequiredInput("nodePoolSpec", typeToken<Serialized<Record<string, any>>>())
         .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
+        .addInputsFromRecord(workloadNodePoolResolvedInput("kafkaNodePoolName"))
+        .addInputsFromRecord(workloadZoneSpreadResolvedInput())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -398,6 +451,9 @@ exit 1
                     nodePoolSpec: b.inputs.nodePoolSpec,
                     migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
+                    workloadNodePoolName: b.inputs.workloadNodePoolName,
+                    workloadZoneSpread: b.inputs.workloadZoneSpread,
+                    workloadZoneSpreadExtras: b.inputs.workloadZoneSpreadExtras,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

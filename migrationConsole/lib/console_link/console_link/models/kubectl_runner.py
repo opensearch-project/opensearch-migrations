@@ -35,11 +35,21 @@ class KubectlRunner:
             return CommandResult(success=False, value=f"Kubernetes action failed: {e}")
 
     def retrieve_deployment_status(self) -> Optional[DeploymentStatus]:
-        logger.info(f"Listing namespaced pods for {self.namespace} "
-                    f"label_selector=deployment-name={self.deployment_name}")
         try:
-            pods = self.k8s_core.list_namespaced_pod(
-                self.namespace, label_selector=f"deployment-name={self.deployment_name}")
+            deployment = self.k8s_apps.read_namespaced_deployment(namespace=self.namespace, name=self.deployment_name)
+        except Exception as e:
+            logger.error(f"Error faced when performing k8s read_namespaced_deployment(): {e}")
+            return None
+
+        # Count the pods the Deployment itself selects, so this never hardcodes a selector label.
+        match_labels = deployment.spec.selector.match_labels or {}
+        if not match_labels:
+            logger.error(f"Deployment {self.deployment_name} has no matchLabels selector")
+            return None
+        label_selector = ",".join(f"{key}={value}" for key, value in sorted(match_labels.items()))
+        logger.info(f"Listing namespaced pods for {self.namespace} label_selector={label_selector}")
+        try:
+            pods = self.k8s_core.list_namespaced_pod(self.namespace, label_selector=label_selector)
         except Exception as e:
             logger.error(f"Error faced when performing k8s list_namespaced_pod(): {e}")
             return None
@@ -56,12 +66,6 @@ class KubectlRunner:
                     running_pods += 1
                 elif phase == "Pending":
                     pending_pods += 1
-
-        try:
-            deployment = self.k8s_apps.read_namespaced_deployment(namespace=self.namespace, name=self.deployment_name)
-        except Exception as e:
-            logger.error(f"Error faced when performing k8s read_namespaced_deployment(): {e}")
-            return None
 
         desired_pods = deployment.spec.replicas
         return DeploymentStatus(

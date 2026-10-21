@@ -1,0 +1,149 @@
+# Open-source Elasticsearch source for local Kubernetes (kind and similar): elasticsearch-oss
+# 7.10.2 behind an nginx sidecar for TLS and basic auth (admin:admin), snapshotting to the
+# Migration Assistant's localstack S3. The EKS counterpart is valuesEks.yaml.
+#
+#   helm upgrade --install tc . -n ma -f values.yaml -f valuesOss.yaml
+#
+# Requires cert-manager and the migrations-ca ClusterIssuer (both installed by the Migration
+# Assistant chart) and outbound internet access for the image pulls and the plugin download.
+# For a source without auth or TLS, add:
+#   --set nginxFrontend.basicAuth.enabled=false --set nginxFrontend.tls.enabled=false \
+#   --set source.podAnnotations.testclusters/nginx-frontend=plain
+#
+# Localstack accepts any credentials, so the keystore gets fixed "test" values at startup, the
+# same ones the SearchGuard image (still used by the Docker Compose solution) bakes in.
+
+nginxFrontend:
+  enabled: true
+
+source:
+  image: docker.elastic.co/elasticsearch/elasticsearch-oss
+  imageTag: "7.10.2"
+  protocol: https
+
+  # The chart's credentials Secret sets ELASTIC_PASSWORD, which makes the stock entrypoint add an
+  # X-Pack bootstrap.password to the keystore. OSS has no X-Pack; nginx does the authentication.
+  secret:
+    enabled: false
+
+  # nginx reads its config through a subPath mount, which never updates in a running pod. Each
+  # overlay names its front-end mode here so that switching modes changes the pod template and
+  # restarts the pod.
+  podAnnotations:
+    testclusters/nginx-frontend: tls-basic-auth
+
+  esConfig:
+    elasticsearch.yml: |
+      cluster.name: "docker-cluster"
+      network.host: 0.0.0.0
+      # Only nginx, in the same pod, can reach the HTTP API.
+      http.host: 127.0.0.1
+      http.port: 9201
+      discovery.type: single-node
+      cluster.routing.allocation.disk.threshold_enabled: false
+      s3.client.default.endpoint: "http://localstack:4566"
+      s3.client.default.path_style_access: true
+
+  readinessProbe:
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9201/_cluster/health)
+          [[ "${STATUS}" == "200" ]]
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+    exec:
+      command:
+        - bash
+        - -c
+        - |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:9201/_cluster/health?timeout=5s")
+          [[ "${STATUS}" == "200" ]]
+
+  extraVolumes:
+    - name: es-plugins
+      emptyDir: {}
+    - name: es-keystore
+      emptyDir: {}
+    - name: nginx-tmp
+      emptyDir: {}
+    - name: nginx-conf
+      configMap:
+        name: source-nginx-conf
+    - name: nginx-auth
+      secret:
+        secretName: source-nginx-auth
+        optional: true    # absent when nginxFrontend.basicAuth.enabled=false
+    - name: nginx-tls
+      secret:
+        secretName: source-nginx-tls
+        optional: true    # absent when nginxFrontend.tls.enabled=false
+  extraVolumeMounts:
+    - name: es-plugins
+      mountPath: /usr/share/elasticsearch/plugins
+    - name: es-keystore
+      mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+      subPath: elasticsearch.keystore
+
+  extraInitContainers:
+    - name: install-plugins
+      image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          if [[ -d /usr/share/elasticsearch/plugins/repository-s3 ]]; then
+            echo "repository-s3 already installed"
+            exit 0
+          fi
+          bin/elasticsearch-plugin install --batch repository-s3
+      volumeMounts:
+        - name: es-plugins
+          mountPath: /usr/share/elasticsearch/plugins
+    - name: init-es-keystore
+      image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          TMP_CONF="$(mktemp -d)"
+          export ES_PATH_CONF="$TMP_CONF"
+          bin/elasticsearch-keystore create
+          for key in access_key secret_key session_token; do
+            echo -n test | bin/elasticsearch-keystore add -x "s3.client.default.$key"
+          done
+          cp "$ES_PATH_CONF/elasticsearch.keystore" /keystore/elasticsearch.keystore
+          chmod 0600 /keystore/elasticsearch.keystore
+          rm -rf "$TMP_CONF"
+      volumeMounts:
+        - name: es-keystore
+          mountPath: /keystore
+
+  extraContainers:
+    - name: nginx
+      image: public.ecr.aws/nginx/nginx:1.30-alpine
+      # Listens on 9200, which the chart already declares on the elasticsearch container.
+      readinessProbe:
+        tcpSocket:
+          port: 9200
+        periodSeconds: 10
+      volumeMounts:
+        - name: nginx-tmp
+          mountPath: /tmp
+        - name: nginx-conf
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: nginx-auth
+          mountPath: /etc/nginx/auth
+          readOnly: true
+        - name: nginx-tls
+          mountPath: /etc/nginx/tls
+          readOnly: true

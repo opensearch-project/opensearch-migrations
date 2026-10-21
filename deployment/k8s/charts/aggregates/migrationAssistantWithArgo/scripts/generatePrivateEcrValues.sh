@@ -233,7 +233,7 @@ defaultBucketConfiguration:
   bucketOperationImage: "${M}/mirror.gcr.io/amazon/aws-cli:2.25.11"
 
 # --- Otel collector (hardcoded in template, override via values) ---
-otelCollectorImage: "${M}/public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"
+otelCollectorImage: "${M}/public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0"
 
 # --- Coordinator cluster image (used by RFS workflow via configmap) ---
 images:

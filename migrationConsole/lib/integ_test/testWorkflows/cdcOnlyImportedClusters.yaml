@@ -11,14 +11,30 @@ spec:
 
   arguments:
     parameters:
+      - name: snapshot-configmap
+        value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
       - name: monitor-retry-limit
         value: "120"
       - name: speedup-factor
         value: "20"
+      - name: replayer-config-overrides
+        value: "{}"
+      - name: capture-proxy-config-overrides
+        value: "{}"
       - name: capture-proxy-service-type
         value: "LoadBalancer"
+      - name: capture-proxy-pod-replicas
+        value: "1"
+      - name: kafka-broker-replicas
+        value: "3"
+      - name: kafka-node-pool-spec-overrides
+        value: "{}"
+      - name: traffic-topic-partitions
+        value: "2"
+      - name: replayer-pod-replicas
+        value: "1"
       - name: otel-trace-collector-endpoint
         value: ""
 
@@ -28,6 +44,30 @@ spec:
         parameters:
           - name: source-configs
           - name: target-config
+          - name: tupleS3Region
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.snapshot-configmap}}"
+                key: AWS_REGION
+          - name: useLocalStack
+            default: "false"
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.snapshot-configmap}}"
+                key: USE_LOCAL_STACK
+                optional: true
+          - name: tupleS3Endpoint
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.snapshot-configmap}}"
+                key: ENDPOINT_HTTP
+                optional: true
+          - name: tupleS3BucketName
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.snapshot-configmap}}"
+                key: BUCKET_NAME
           - name: imageMigrationConsoleLocation
             valueFrom:
               configMapKeyRef:
@@ -47,6 +87,14 @@ spec:
                   value: "{{inputs.parameters.source-configs}}"
                 - name: target-config
                   value: "{{inputs.parameters.target-config}}"
+                - name: tupleS3Region
+                  value: "{{inputs.parameters.tupleS3Region}}"
+                - name: useLocalStack
+                  value: "{{inputs.parameters.useLocalStack}}"
+                - name: tupleS3Endpoint
+                  value: "{{inputs.parameters.tupleS3Endpoint}}"
+                - name: tupleS3BucketName
+                  value: "{{inputs.parameters.tupleS3BucketName}}"
                 - name: imageMigrationConsoleLocation
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
@@ -74,6 +122,10 @@ spec:
         parameters:
           - name: source-configs
           - name: target-config
+          - name: tupleS3Region
+          - name: useLocalStack
+          - name: tupleS3Endpoint
+          - name: tupleS3BucketName
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: otel-trace-collector-endpoint
@@ -87,7 +139,14 @@ spec:
 
             SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
+            TUPLE_S3_REGION='{{inputs.parameters.tupleS3Region}}'
+            USE_LOCAL_STACK='{{inputs.parameters.useLocalStack}}'
+            TUPLE_S3_ENDPOINT='{{inputs.parameters.tupleS3Endpoint}}'
+            TUPLE_S3_BUCKET='{{inputs.parameters.tupleS3BucketName}}'
             OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otel-trace-collector-endpoint}}'
+            REPLAYER_CONFIG_OVERRIDES='{{workflow.parameters.replayer-config-overrides}}'
+            CAPTURE_PROXY_CONFIG_OVERRIDES='{{workflow.parameters.capture-proxy-config-overrides}}'
+            KAFKA_NODE_POOL_SPEC_OVERRIDES='{{workflow.parameters.kafka-node-pool-spec-overrides}}'
 
             # Transform source cluster config (same field renames as fullMigrationImportedClusters)
             SOURCE_CLUSTER=$(echo "$SOURCE_CONFIGS" | jq '
@@ -107,17 +166,41 @@ spec:
               | del(.no_auth)
             ')
 
-            # speedupFactor and observedPacketConnectionTimeout are parameterized for testing
+            # speedupFactor is parameterized for testing
             CDC_CONFIG=$(jq -n \
               --argjson source "$SOURCE_CLUSTER" \
               --argjson target "$TARGET_CLUSTER" \
+              --arg tupleS3Bucket "$TUPLE_S3_BUCKET" \
+              --arg tupleS3Region "$TUPLE_S3_REGION" \
+              --argjson useLocalStack "$USE_LOCAL_STACK" \
+              --arg tupleS3Endpoint "$TUPLE_S3_ENDPOINT" \
               --arg otelTraceCollectorEndpoint "$OTEL_TRACE_COLLECTOR_ENDPOINT" \
+              --argjson captureProxyPodReplicas '{{workflow.parameters.capture-proxy-pod-replicas}}' \
+              --argjson kafkaBrokerReplicas '{{workflow.parameters.kafka-broker-replicas}}' \
+              --argjson kafkaNodePoolSpecOverrides "$KAFKA_NODE_POOL_SPEC_OVERRIDES" \
+              --argjson trafficTopicPartitions '{{workflow.parameters.traffic-topic-partitions}}' \
+              --argjson replayerPodReplicas '{{workflow.parameters.replayer-pod-replicas}}' \
+              --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
+              --argjson captureProxyOverrides "$CAPTURE_PROXY_CONFIG_OVERRIDES" \
               '{
                 "skipApprovals": true,
                 "sourceClusters": { "source1": $source },
                 "targetClusters": { "target1": $target },
                 "snapshotMigrationConfigs": [],
-                "kafkaClusterConfiguration": { "default": { "autoCreate": {} } },
+                "kafkaClusterConfiguration": {
+                  "default": {
+                    "autoCreate": {
+                      "nodePoolSpecOverrides": (
+                        $kafkaNodePoolSpecOverrides + {
+                          "replicas": $kafkaBrokerReplicas
+                        }
+                      ),
+                      "topicSpecOverrides": {
+                        "partitions": $trafficTopicPartitions
+                      }
+                    }
+                  }
+                },
                 "traffic": {
                   "proxies": {
                     "capture-proxy": {
@@ -125,11 +208,11 @@ spec:
                       "proxyConfig": ({
                         "listenPort": 9201,
                         "noCapture": false,
-                        "podReplicas": 2,
+                        "podReplicas": $captureProxyPodReplicas,
                         "serviceType": "{{workflow.parameters.capture-proxy-service-type}}"
                       } + (if $otelTraceCollectorEndpoint != "" then {
                         "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
-                      } else {} end))
+                      } else {} end) + $captureProxyOverrides)
                     }
                   },
                   "replayers": {
@@ -137,11 +220,21 @@ spec:
                       "fromCapturedTraffic": "capture-proxy",
                       "toTarget": "target1",
                       "replayerConfig": ({
-                        "observedPacketConnectionTimeout": 30,
-                        "speedupFactor": {{workflow.parameters.speedup-factor}}
-                      } + (if $otelTraceCollectorEndpoint != "" then {
+                        "speedupFactor": {{workflow.parameters.speedup-factor}},
+                        "podReplicas": $replayerPodReplicas,
+                        "useLocalStack": $useLocalStack
+                      } + (if $tupleS3Bucket != "" then {
+                        "tupleS3Bucket": $tupleS3Bucket,
+                        "tupleS3Region": $tupleS3Region,
+                        "tupleS3Prefix": "tuples/"
+                      } else {} end)
+                      + (if $tupleS3Endpoint != "" then {
+                        "tupleS3Endpoint": $tupleS3Endpoint
+                      } else {} end)
+                      + (if $otelTraceCollectorEndpoint != "" then {
                         "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
-                      } else {} end))
+                      } else {} end)
+                      + $replayerOverrides)
                     }
                   }
                 }

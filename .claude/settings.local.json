@@ -11,7 +11,10 @@
       "Bash(cat:*)",
       "Bash(kubectl get:*)",
       "Bash(argo resume:*)",
-      "Bash(xargs ls)"
+      "Bash(xargs ls)",
+      "Bash(helm version *)",
+      "Bash(helm template *)",
+      "Bash(uvx flake8 *)"
     ]
   }
 }

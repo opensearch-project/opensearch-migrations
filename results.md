@@ -1,3 +1,7 @@
+> **Historical (2026-03).** These runs used the SearchGuard test source with the old
+> `testClusters/valuesEks.yaml`. On EKS that file now deploys the open-source source described in
+> [`deployment/k8s/charts/aggregates/testClusters/README.md`](deployment/k8s/charts/aggregates/testClusters/README.md).
+
 # E2E Test Results
 
 ## Test 1: Non-Isolated (mirror cluster)

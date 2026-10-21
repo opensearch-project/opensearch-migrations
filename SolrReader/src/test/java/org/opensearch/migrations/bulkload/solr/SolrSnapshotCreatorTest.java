@@ -73,6 +73,18 @@ class SolrSnapshotCreatorTest {
         assertFalse(SolrSnapshotCreator.isCloudRepoUri(null));
     }
 
+    // isCloudRepoUri must stay total. RepoUri.parse throws on an unrecognized scheme, but
+    // callers reach here with a location that Solr may still handle as a plain path (e.g.
+    // SolrBackupStrategy passes a bare path for file repos, and the legacy standalone
+    // replication handler accepts relative paths), so an unparseable value has to answer
+    // "not cloud" rather than blow up the backup request.
+    @Test
+    void isCloudRepoUri_unparseableLocationIsNotCloud() {
+        assertFalse(SolrSnapshotCreator.isCloudRepoUri("relative/path"));
+        assertFalse(SolrSnapshotCreator.isCloudRepoUri(""));
+        assertFalse(SolrSnapshotCreator.isCloudRepoUri("ftp://host/path"));
+    }
+
     // buildPerCollectionLocation is what flows into Solr's BACKUP `location` param. For cloud URIs
     // (s3:// AND gs://) it must yield the bucket-relative <path>/<snapshotName>; for a bare
     // filesystem path it appends <snapshotName> to the path as-is.

@@ -13,9 +13,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;

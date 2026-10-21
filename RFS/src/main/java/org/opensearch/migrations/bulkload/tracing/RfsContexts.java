@@ -51,7 +51,7 @@ public interface RfsContexts extends IRfsContexts {
             public final LongCounter bytesReadCounter;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 bytesSentCounter = meter.counterBuilder(MetricNames.BYTES_SENT).setUnit(COUNT_UNITS).build();
                 bytesReadCounter = meter.counterBuilder(MetricNames.BYTES_READ).setUnit(COUNT_UNITS).build();
             }
@@ -181,7 +181,7 @@ public interface RfsContexts extends IRfsContexts {
             public final LongCounter deltaDeletionsCounter;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 segmentsSeenCounter = meter.counterBuilder("deltaSegmentsSeen").setUnit(COUNT_UNITS).build();
                 deltaAdditionsCounter = meter.counterBuilder("deltaAdditions").setUnit(COUNT_UNITS).build();
                 deltaDeletionsCounter = meter.counterBuilder("deltaDeletions").setUnit(COUNT_UNITS).build();
