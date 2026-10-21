@@ -88,14 +88,15 @@ def add_snapshot_counts(totals, final):
 
 
 def derive_averages_and_deltas(totals):
-    source, requests = totals["source"], totals["requests"]
-    totals["averageSourceDocumentBytes"] = source["bytes"] / source["upserts"] if source["upserts"] else None
+    metrics = totals["metrics"]
+    source, requests, snapshot = metrics["source"], metrics["requests"], metrics["snapshot"]
+    metrics["averageSourceDocumentBytes"] = source["bytes"] / source["upserts"] if source["upserts"] else None
     total = requests["total"]
-    totals["averageRequestBytes"] = requests["bytes"] / total if total else None
-    totals["averageRequestDurationMillis"] = requests["durationMillis"] / total if total else None
-    current, previous = totals["liveLuceneDocCount"], totals["previousLiveLuceneDocCount"]
-    totals["snapshotLiveLuceneDelta"] = current - previous if current is not None and previous is not None else None
-    totals["sourceRootDocumentDelta"] = (
+    metrics["averageRequestBytes"] = requests["bytes"] / total if total else None
+    metrics["averageRequestDurationMillis"] = requests["durationMillis"] / total if total else None
+    current, previous = snapshot["liveLuceneDocCount"], snapshot["previousLiveLuceneDocCount"]
+    metrics["snapshotLiveLuceneDelta"] = current - previous if current is not None and previous is not None else None
+    metrics["sourceRootDocumentDelta"] = (
         source["upserts"] - source["deletes"] if totals["deltaMode"] == "UPDATES_AND_DELETES" else None)
 
 
@@ -114,17 +115,19 @@ def aggregate(records, expected_shards=None):
         totals = indices.setdefault(key, {
             "snapshotName": identity[0], "indexName": identity[1],
             "previousSnapshotName": final["previousSnapshotName"], "deltaMode": final["deltaMode"], "shards": 0,
-            "source": dict.fromkeys(("upserts", "deletes", "bytes"), 0),
-            "requests": dict.fromkeys(("batches", "total", "retries", "bytes", "durationMillis"), 0),
-            "liveLuceneDocCount": 0, "previousLiveLuceneDocCount": 0,
+            "metrics": {
+                "source": dict.fromkeys(("upserts", "deletes", "bytes"), 0),
+                "requests": dict.fromkeys(("batches", "total", "retries", "bytes", "durationMillis"), 0),
+                "snapshot": {"liveLuceneDocCount": 0, "previousLiveLuceneDocCount": 0},
+            },
         })
         totals["shards"] += 1
         for record in work:
             if (record["previousSnapshotName"], record["deltaMode"]) != (
                     totals["previousSnapshotName"], totals["deltaMode"]):
                 raise ValueError(f"Snapshot mode changed within index {key}")
-            add_metrics(totals, record["metrics"])
-        add_snapshot_counts(totals, final)
+            add_metrics(totals["metrics"], record["metrics"])
+        add_snapshot_counts(totals["metrics"]["snapshot"], final["metrics"]["snapshot"])
     for totals in indices.values():
         derive_averages_and_deltas(totals)
     return list(indices.values())

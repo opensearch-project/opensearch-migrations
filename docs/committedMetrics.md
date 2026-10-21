@@ -44,6 +44,9 @@ costs exclude abandoned work-item attempts, so they do not measure all traffic.
 The following objects are the `committed_metrics` field inside coordinator
 `_source` documents. Existing lease and completion fields remain alongside it.
 The coordinator document ID is still the serialized work-item string.
+`metrics.snapshot` holds whole-shard counts only on the final work item; it is
+`null` on intermediate checkpoints. Source and request totals cover each
+work item's committed range.
 
 A full backfill with five root documents and nine nested children:
 
@@ -61,10 +64,9 @@ A full backfill with five root documents and nine nested children:
   "deltaMode": null,
   "metrics": {
     "source": {"upserts": 5, "deletes": 0, "bytes": 500},
-    "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 1500, "durationMillis": 90}
-  },
-  "liveLuceneDocCount": 14,
-  "previousLiveLuceneDocCount": null
+    "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 1500, "durationMillis": 90},
+    "snapshot": {"liveLuceneDocCount": 14, "previousLiveLuceneDocCount": null}
+  }
 }
 ```
 
@@ -84,10 +86,9 @@ A subsequent delta with three additions and one removal in the source diff:
   "deltaMode": "UPDATES_AND_DELETES",
   "metrics": {
     "source": {"upserts": 3, "deletes": 1, "bytes": 300},
-    "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 900, "durationMillis": 90}
-  },
-  "liveLuceneDocCount": 16,
-  "previousLiveLuceneDocCount": 14
+    "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 900, "durationMillis": 90},
+    "snapshot": {"liveLuceneDocCount": 16, "previousLiveLuceneDocCount": 14}
+  }
 }
 ```
 
@@ -109,9 +110,10 @@ An archival/storage job can upload both artifacts to S3. This feature adds no
 worker S3 writes or automatic S3 uploader.
 
 The report has `schemaVersion`, `complete`, and `indices`. Each index entry
-identifies the current/previous snapshot and delta mode, and contains:
+identifies the current/previous snapshot and delta mode and the shard count.
+Its `metrics` object contains:
 
-- `shards`, summed `source` and `requests` fields, and snapshot counts summed once
+- Summed `source` and `requests` fields, and `snapshot` counts summed once
   from each shard's final work item.
 - `averageSourceDocumentBytes`, `averageRequestBytes`, and
   `averageRequestDurationMillis`, derived from summed numerators and denominators.
@@ -141,7 +143,7 @@ Search responses and NDJSON hits are accepted, but all search pages are required
 
 ## Interpret counts
 
-Sum `liveLuceneDocCount` once per source shard for the snapshot's expected
+Sum `metrics.snapshot.liveLuceneDocCount` once per source shard for the snapshot's expected
 `_cat/indices docs.count`, including nested children. Delta records also retain
 the previous snapshot count. Their difference includes changes to nested
 children; source upserts minus deletes counts root-document changes when both

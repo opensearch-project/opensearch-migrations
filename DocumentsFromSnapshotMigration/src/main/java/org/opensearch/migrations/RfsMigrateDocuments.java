@@ -917,9 +917,10 @@ public class RfsMigrateDocuments {
                 .fromPosition(Math.max(0, workItem.getStartingDocId()))
                 .nextPosition(cursor.getProgressCheckpointNum())
                 .shardComplete(cursor.isShardComplete())
-                .metrics(cursor.getMetrics())
-                .liveLuceneDocCount(cursor.getLiveLuceneDocCount())
-                .previousLiveLuceneDocCount(cursor.getPreviousLiveLuceneDocCount())
+                .metrics(new WorkItemMetricsRecord.Metrics(
+                    cursor.getMetrics().source(), cursor.getMetrics().requests(),
+                    cursor.isShardComplete() ? new WorkItemMetricsRecord.Snapshot(
+                        cursor.getLiveLuceneDocCount(), cursor.getPreviousLiveLuceneDocCount()) : null))
                 .build();
             return mapper.convertValue(record, new TypeReference<Map<String, Object>>() {});
         };

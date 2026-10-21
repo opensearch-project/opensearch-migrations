@@ -19,8 +19,9 @@ public class WorkItemMetricsRecord {
     boolean shardComplete;
     String previousSnapshotName;
     String deltaMode;
-    MigrationMetrics metrics;
-    /** Includes nested children; null when unavailable, zero for an empty shard. */
-    Long liveLuceneDocCount;
-    Long previousLiveLuceneDocCount;
+    Metrics metrics;
+
+    public record Metrics(MigrationMetrics.Source source, MigrationMetrics.Requests requests, Snapshot snapshot) {}
+
+    public record Snapshot(Long liveLuceneDocCount, Long previousLiveLuceneDocCount) {}
 }

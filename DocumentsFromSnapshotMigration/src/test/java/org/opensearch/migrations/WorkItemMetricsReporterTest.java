@@ -24,7 +24,9 @@ class WorkItemMetricsReporterTest {
         assertEquals(42L, ((Number) metrics.get("fromPosition")).longValue());
         assertEquals(43L, ((Number) metrics.get("nextPosition")).longValue());
         assertTrue((Boolean) metrics.get("shardComplete"));
-        assertNull(metrics.get("liveLuceneDocCount"));
+        var snapshot = (Map<?, ?>) ((Map<?, ?>) metrics.get("metrics")).get("snapshot");
+        assertNull(snapshot.get("liveLuceneDocCount"));
+        assertNull(snapshot.get("previousLiveLuceneDocCount"));
         assertNull(metrics.get("previousSnapshotName"));
         assertNull(metrics.get("deltaMode"));
     }
@@ -37,12 +39,24 @@ class WorkItemMetricsReporterTest {
             .apply(new WorkItem("idx", 0, 0L), new WorkItemCursor(4, totals, true, 16L, 14L));
         assertEquals("before", metrics.get("previousSnapshotName"));
         assertEquals("UPDATES_AND_DELETES", metrics.get("deltaMode"));
-        assertEquals(16L, ((Number) metrics.get("liveLuceneDocCount")).longValue());
-        assertEquals(14L, ((Number) metrics.get("previousLiveLuceneDocCount")).longValue());
         var groups = (Map<?, ?>) metrics.get("metrics");
+        var snapshot = (Map<?, ?>) groups.get("snapshot");
+        assertEquals(16L, ((Number) snapshot.get("liveLuceneDocCount")).longValue());
+        assertEquals(14L, ((Number) snapshot.get("previousLiveLuceneDocCount")).longValue());
         var requests = (Map<?, ?>) groups.get("requests");
         assertEquals(3L, ((Number) requests.get("total")).longValue());
         assertEquals(1L, ((Number) requests.get("retries")).longValue());
         assertEquals(90L, ((Number) requests.get("durationMillis")).longValue());
+    }
+
+    @Test
+    void publishesSnapshotCountsOnlyOnShardCompletion() {
+        var reporter = RfsMigrateDocuments.committedMetricsReporter("snapshot", null, null);
+        var work = new WorkItem("idx", 0, 0L);
+        var checkpoint = reporter.apply(work, new WorkItemCursor(1, MigrationMetrics.ZERO, false, 14L));
+        assertNull(((Map<?, ?>) checkpoint.get("metrics")).get("snapshot"));
+        var completed = reporter.apply(work, new WorkItemCursor(0, MigrationMetrics.ZERO, true, 0L));
+        var snapshot = (Map<?, ?>) ((Map<?, ?>) completed.get("metrics")).get("snapshot");
+        assertEquals(0L, ((Number) snapshot.get("liveLuceneDocCount")).longValue());
     }
 }

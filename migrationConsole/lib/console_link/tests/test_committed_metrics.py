@@ -22,9 +22,11 @@ def work_item(shard=0, start=0, end=4, complete=True, previous=None, mode=None):
             "metrics": {
                 "source": {"upserts": 3, "deletes": 1 if previous else 0, "bytes": 300},
                 "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 900, "durationMillis": 90},
+                "snapshot": {
+                    "liveLuceneDocCount": 16,
+                    "previousLiveLuceneDocCount": 14 if previous else None,
+                } if complete else None,
             },
-            "liveLuceneDocCount": 16 if complete else None,
-            "previousLiveLuceneDocCount": 14 if complete and previous else None,
         },
     }}
 
@@ -44,12 +46,13 @@ def test_aggregate_ranges_shards_and_weighted_averages():
     assert summary["complete"]
     totals, = summary["indices"]
     assert totals["shards"] == 2
+    totals = totals["metrics"]
     assert totals["source"] == {"upserts": 9, "deletes": 0, "bytes": 900}
     assert totals["requests"] == {
         "batches": 5, "total": 7, "retries": 2, "bytes": 1900, "durationMillis": 190,
     }
-    assert totals["liveLuceneDocCount"] == 32
-    assert totals["previousLiveLuceneDocCount"] is None
+    assert totals["snapshot"]["liveLuceneDocCount"] == 32
+    assert totals["snapshot"]["previousLiveLuceneDocCount"] is None
     assert totals["averageSourceDocumentBytes"] == 100
     assert totals["averageRequestBytes"] == pytest.approx(1900 / 7)
     assert totals["averageRequestDurationMillis"] == pytest.approx(190 / 7)
@@ -61,6 +64,7 @@ def test_aggregate_ranges_shards_and_weighted_averages():
 ])
 def test_delta_counts(mode, root_delta):
     totals, = archive_summary([work_item(previous="previous", mode=mode)])["indices"]
+    totals = totals["metrics"]
     assert totals["snapshotLiveLuceneDelta"] == 2
     assert totals["sourceRootDocumentDelta"] == root_delta
 
@@ -69,14 +73,15 @@ def test_delta_counts(mode, root_delta):
 def test_empty_and_unknown_counts_remain_distinct(count):
     item = work_item(end=0)
     record = metrics(item)
-    record["liveLuceneDocCount"] = count
-    for group in record["metrics"].values():
-        for key in group:
-            group[key] = 0
+    record["metrics"]["snapshot"]["liveLuceneDocCount"] = count
+    for group in ("source", "requests"):
+        for key in record["metrics"][group]:
+            record["metrics"][group][key] = 0
     summary = archive_summary([item])
     assert summary["complete"]
     totals, = summary["indices"]
-    assert totals["liveLuceneDocCount"] == count
+    totals = totals["metrics"]
+    assert totals["snapshot"]["liveLuceneDocCount"] == count
     assert totals["averageSourceDocumentBytes"] is None
     assert totals["averageRequestBytes"] is None
     assert totals["averageRequestDurationMillis"] is None
