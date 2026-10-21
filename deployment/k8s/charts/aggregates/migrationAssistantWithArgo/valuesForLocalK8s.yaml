@@ -117,6 +117,39 @@ charts:
 
   fluent-bit:
     waitForInstallation: false
+    values:
+      # Each node's Fluent Bit writes to <node name>/ under the node's /var/log/migrations-all
+      # instead of the shared logs PVC (a ReadWriteOnce volume only one node's Fluent Bit could
+      # mount), and the console reads that directory. kindTesting.sh mounts one directory on this
+      # machine there on every node, so the console sees every node's logs. On a cluster without
+      # that mount (Jenkins creates its own), it's a local directory on each node; the console sees
+      # its own node's, which is every node on a single-node cluster. Lists replace whole, so the
+      # OUTPUT_FORMAT and lua-scripts entries from values.yaml are repeated.
+      env:
+        - name: OUTPUT_FORMAT
+          valueFrom:
+            configMapKeyRef:
+              name: log-aggregation-config
+              key: OUTPUT_FORMAT
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+      extraVolumes:
+        - name: logs-pv
+          hostPath:
+            path: /var/log/migrations-all
+            type: DirectoryOrCreate
+        - name: lua-scripts
+          configMap:
+            name: fluentbit-lua-scripts
+      extraVolumeMounts:
+        - name: logs-pv
+          mountPath: /shared_logs
+          subPathExpr: $(K8S_NODE_NAME)
+        - name: lua-scripts
+          mountPath: /fluentbit/scripts
+          readOnly: true
 
   kube-prometheus-stack:
     waitForInstallation: false
@@ -126,3 +159,11 @@ charts:
 
   jaeger:
     waitForInstallation: false
+
+# Logs go to each node's host directory (see fluent-bit above), not the shared logs PVC, and the
+# console reads every node's logs from the nodes' shared parent directory.
+logs:
+  sharedLogsVolume:
+    enabled: false
+  hostLogsVolume:
+    enabled: true

@@ -76,3 +76,9 @@ describe.each(schemas)("%s OpenTelemetry export options", (_name, schema, baseOp
         }).success).toBe(false);
     });
 });
+
+test("capture proxy defaults to Netty's processor-aware worker count", () => {
+    const result = USER_PROXY_PROCESS_OPTIONS.parse({listenPort: 9200});
+
+    expect(result.numThreads).toBe(0);
+});

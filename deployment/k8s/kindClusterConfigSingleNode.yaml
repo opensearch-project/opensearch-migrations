@@ -1,7 +1,11 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+# Cloud nodes carry topology.kubernetes.io/zone; one labeled node behaves like a single-zone cluster
+# for the workflows' zone spread of Kafka, capture proxies and replayers.
 nodes:
     - role: control-plane
+      labels:
+        topology.kubernetes.io/zone: local-a
 containerdConfigPatches:
   - |-
     [plugins."io.containerd.grpc.v1.cri".registry]

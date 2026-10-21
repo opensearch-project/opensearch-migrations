@@ -32,6 +32,14 @@ k6Operator:
 k6-operator:
   namespace:
     create: false
+  # The repository builds this narrowly patched controller from the pinned upstream v1.5.0 source.
+  # installK6Chart.sh rewrites these fields to the same registry used by the migration images.
+  manager:
+    image:
+      registry: docker.io
+      repository: migrations/k6_operator
+      tag: latest
+      pullPolicy: IfNotPresent
 
 # TestRun distribution defaults, rendered as parameter defaults on every k6-<profile>
 # WorkflowTemplate. `parallelism` splits each run's load across that many runner pods (the
@@ -48,6 +56,50 @@ k6-operator:
 testRun:
   parallelism: 1
   useSeparatePodPerTestInstance: false
+  # Filled automatically by installK6Chart.sh from the migration deployment's provider-config
+  # ConfigMap. Empty preserves ordinary scheduling for local and non-EKS installations.
+  nodePoolName: ""
+  runner:
+    # Explicit requests prevent distributed runs from being scheduled as BestEffort pods and
+    # concentrated on nodes that cannot support their startup load.
+    resources:
+      requests:
+        cpu: "1"
+        memory: 4Gi
+      limits:
+        cpu: "2"
+        memory: 8Gi
+    # The operator otherwise probes k6's /v1/status API for liveness. Under a saturated load that
+    # control endpoint can miss the one-second probe deadline even while the test is healthy,
+    # causing Kubernetes to terminate a productive runner. The runner's main k6 process is PID 1;
+    # if it exits the container exits naturally, so liveness only needs to verify that process
+    # remains present. Readiness retains the operator's HTTP probe for API responsiveness.
+    livenessProbe:
+      exec:
+        command:
+          - /bin/sh
+          - -c
+          - kill -0 1
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # Keep each TestRun's runner fleet balanced across available zones. The generated selector
+    # also matches that TestRun's k6_cr label, so independent load tests do not affect each
+    # other's skew calculation. A single-zone cluster still has a valid one-domain placement.
+    zoneSpread:
+      enabled: true
+      maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+    # Optional per-host spreading. Keep this disabled by default: EKS Auto Mode/Karpenter treats
+    # even a ScheduleAnyway hostname preference as a provisioning preference, which can create
+    # nearly one node per runner for large distributed tests. Zone spreading provides the required
+    # failure-domain balance while the scheduler can still bin-pack runners across hosts.
+    hostnameSpread:
+      enabled: false
+      maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
 
 # Where a run aims its traffic. This is deployment topology — the proxy's service name and namespace
 # — not a load profile, so it belongs to the chart rather than to the k6-config/*.env presets, which
@@ -105,9 +157,20 @@ scenarios:
       INGEST_VUS: "20"                   # pre-allocated VUs; each holds one keep-alive connection
       INGEST_MAX_VUS: "100"
       EXECUTOR: constant-arrival-rate    # decides the timing knob: DURATION, or a stage list
+      RAMP_UP_DURATION: ""               # constant-arrival-rate only: ramp 0→INGEST_RATE first
       BULK_BATCH_SIZE: "20"              # documents per _bulk call
+      DOCUMENT_PADDING_BYTES: "0"        # extra bytes in a mapped text field on each document
+      DOCUMENT_ID_PREFIX: k6             # suite overrides this with a unique per-tester prefix
       BULK_FRACTION: "0.70"              # share of iterations that send _bulk
       SEQUENCE_FRACTION: "0.15"          # share that run create→update→query→delete
+      RETRY_ENABLED: "false"             # retry transient writes with stable IDs
+      RETRY_WINDOW_SECONDS: "300"
+      RETRY_ATTEMPT_TIMEOUT_SECONDS: "10"
+      RETRY_BACKOFF_SECONDS: "1"
+      GRACEFUL_STOP: 30s                 # lets in-flight iterations finish after arrivals stop
+      HTTP_REQ_FAILED_THRESHOLD: rate<0.05
+      INGEST_ERROR_THRESHOLD: rate<0.05
+      DROPPED_ITERATIONS_THRESHOLD: count>=0
       CONNECTION_MODE: pinned            # pinned (keep-alive) | spread (Connection: close)
       NO_CONNECTION_REUSE: "false"
       CONTROL_ENABLED: "false"           # chaos control bus (needs registry.enabled=true)
@@ -272,6 +335,9 @@ k6Output:
   K6_OUT: opentelemetry
   K6_OTEL_GRPC_EXPORTER_ENDPOINT: otel-collector:4317
   K6_OTEL_GRPC_EXPORTER_INSECURE: "true"
+  # Every system tag becomes a metric dimension downstream. The default set adds url, error text, proto and
+  # tls_version, which multiplied k6 into ~200K CloudWatch series; requests are already named, so these suffice.
+  K6_SYSTEM_TAGS: "status,method,name,group,check,scenario,expected_response,error_code"
 
 # Valkey is required only by the mixed write-then-read registry and chaos control bus. It is off by
 # default; mixed runs degrade to flat searches when the registry is disabled or unavailable.
@@ -303,4 +369,4 @@ workflow:
   # Upper bound on a single run, counted from TestRun creation. It only fires when the run never
   # reaches a terminal stage — for example runner pods stuck on an image pull — so keep it well above
   # the longest load test you expect.
-  activeDeadlineSeconds: 7200
+  activeDeadlineSeconds: 14400

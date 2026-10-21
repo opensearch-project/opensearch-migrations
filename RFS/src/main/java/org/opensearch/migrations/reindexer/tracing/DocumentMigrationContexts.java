@@ -146,7 +146,8 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, fromActivityName(activityName));
-                shardDuration = meter.histogramBuilder(MetricNames.SHARD_DURATION).setUnit("ms").build();
+                shardDuration = meter.histogramBuilder(MetricNames.SHARD_DURATION).setUnit("ms")
+                    .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS).build();
                 docsMigrated = meter.counterBuilder(MetricNames.DOCS_MIGRATED).setUnit("count").build();
                 bytesMigrated = meter.counterBuilder(MetricNames.BYTES_MIGRATED).setUnit("bytes").build();
                 pipelineErrors = meter.counterBuilder(MetricNames.PIPELINE_ERRORS).setUnit("count").build();

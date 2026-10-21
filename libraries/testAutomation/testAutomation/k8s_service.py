@@ -5,6 +5,7 @@ from kubernetes import client, config, stream
 from kubernetes.client import V1Pod
 from kubernetes.stream.ws_client import WSClient
 import logging
+import os
 import shlex
 import subprocess
 import time
@@ -391,15 +392,21 @@ class K8sService:
     def copy_log_files(self, destination: str):
         console_pod_id = self.get_migration_console_pod_id()
         kubectl = " ".join(self._kubectl_base())
+        # Fluent Bit's files are either at the top of /shared-logs-output (the shared logs PVC) or
+        # one level down, in a directory per node (local clusters' host log directories).
         command_list = [
             "sh",
             "-c",
             f"rm -rf {destination} && mkdir -p {destination} && "
             f"{kubectl} -n ma exec {console_pod_id} -- sh -c "
-            f"'cd /shared-logs-output && tar -cf - fluentbit-*' | "
+            f"'cd /shared-logs-output && find . -maxdepth 2 -name \"fluentbit-*\" -print | tar -cf - -T -' | "
             f"tar -xf - -C {destination}"
         ]
         self.run_command(command=command_list, ignore_errors=True)
+        # Copying is best-effort, so say so when it found nothing rather than failing silently.
+        if not any(name.startswith("fluentbit-") for _, _, files in os.walk(destination) for name in files):
+            logger.warning(f"No Fluent Bit log files were copied from {console_pod_id}:/shared-logs-output "
+                           f"to {destination}")
 
     def delete_all_pvcs(self) -> List[str]:
         """Delete all PersistentVolumeClaims in the namespace, waiting up to

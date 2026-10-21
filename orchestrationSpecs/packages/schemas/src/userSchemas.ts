@@ -178,7 +178,7 @@ export const REPO_CONFIG = z.object({
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
             "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
-    s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
+    s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
             "Used for s3:// URIs only; ignored for gs://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
@@ -461,7 +461,7 @@ export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
 ]);
 
 export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
-    partitions: 1,
+    partitions: 2,
     replicas: 3,
     config: {
         "retention.ms": 604800000,
@@ -512,28 +512,9 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
             size: "2Gi",
             deleteClaim: true,
         },
-        template: {
-            pod: {
-                // Spread brokers one-per-node so a single node disruption can only take
-                // one broker. ScheduleAnyway keeps this soft so <3-node dev clusters still
-                // schedule instead of wedging Pending.
-                topologySpreadConstraints: [
-                    {
-                        maxSkew: 1,
-                        topologyKey: "kubernetes.io/hostname",
-                        whenUnsatisfiable: "ScheduleAnyway",
-                        labelSelector: {
-                            matchExpressions: [
-                                {
-                                    key: "strimzi.io/name",
-                                    operator: "Exists",
-                                },
-                            ],
-                        },
-                    },
-                ],
-            },
-        },
+        // Zone and host spread are not defaults here: the workflow generates them from the
+        // deployment's workloadZoneSpread setting unless template.pod.topologySpreadConstraints is
+        // set explicitly in these overrides, in which case that list is used as given.
     },
     topicSpecOverrides: {
         ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES
@@ -667,7 +648,8 @@ export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
     destinationConnectionPoolSize: z.number().default(0).optional()
-        .describe("Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."),
+        .describe("Number of warm destination connections maintained per Netty worker thread. " +
+            "0 disables the warm pool and opens destination connections on demand."),
     destinationConnectionPoolTimeout: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
         .default("PT30S").optional()
@@ -685,8 +667,9 @@ export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
-    numThreads: z.number().default(1).optional()
-        .describe("Number of Netty worker threads for the proxy to handle concurrent connections."),
+    numThreads: z.number().default(0).optional()
+        .describe("Number of Netty worker threads for the proxy to handle concurrent connections. " +
+            "0 uses Netty's processor-aware default."),
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.")
         .changeRestriction('gated'),
@@ -746,12 +729,43 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     kafkaTrafficPropertyFile: z.string().optional()
         .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.")
         .changeRestriction('impossible'),
-    lookaheadTimeSeconds: z.number().default(400).optional()
-        .describe("Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."),
-    maxConcurrentRequests: z.number().default(10000).optional()
-        .describe("Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."),
-    numClientThreads: z.number().default(0).optional()
-        .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
+    maxConcurrentRequests: z.number().int().min(1).optional()
+        .describe("Maximum number of target HTTP requests that can be in flight simultaneously."),
+    numClientThreads: z.number().int().nonnegative().default(0).optional()
+        .describe("Number of target Netty event-loop threads. 0 uses Netty's default of 2 times the available processors."),
+    cancellationGraceMs: z.number().int().nonnegative().default(1000).optional()
+        .describe("Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown."),
+    kafkaQuietWindowMs: z.number().int().min(1).default(60000).optional()
+        .describe("Milliseconds Kafka consumer-group membership must stop growing before partitions are rebalanced across new replayers. " +
+            "Replacements for departed replayers are filled immediately. Also the delay before the first assignment after the whole " +
+            "replayer fleet starts. Must be greater than cancellationGraceMs."),
+    targetRetryMaxDelayMs: z.number().int().min(100).default(30000).optional()
+        .describe("Upper bound in milliseconds on one request's jittered exponential backoff between target attempts."),
+    targetRetryBudgetRatio: z.number().nonnegative().default(0.2).optional()
+        .describe("Sustained target retries allowed per first attempt across each replayer process. Retries beyond the budget wait for it, " +
+            "so retry load stays proportional to the replayed load."),
+    targetRetryBudgetFloorPerSecond: z.number()
+        .refine(value => value > 0, "targetRetryBudgetFloorPerSecond must be positive")
+        .default(50).optional()
+        .describe("Target retries per second always allowed in each replayer process, so a process whose requests are all retrying still makes progress."),
+    targetConnectionInitialRate: z.number().nonnegative()
+        .refine(value => value === 0 || (value >= 10 && value <= 1000000), "targetConnectionInitialRate must be 0 or between 10 and 1000000")
+        .default(200).optional()
+        .describe("Starting allowance, in new target connections per second, for each replayer process's adaptive connection limiter. " +
+            "The allowance halves when connects or TLS handshakes fail and grows while they succeed. 0 disables the limiter."),
+    catchUpFactor: z.number().nonnegative()
+        .refine(value => value === 0 || value > 1, "catchUpFactor must be 0 or greater than 1")
+        .default(2).optional()
+        .describe("How many times faster than the normal schedule a newly assigned partition replays work that is already overdue. " +
+            "0 sends overdue work immediately."),
+    heartbeatExpirationIntervalSeconds: z.number().int().min(1).default(30).optional()
+        .describe("Broker-time heartbeat expiration interval E in seconds."),
+    maximumBackwardSkewSeconds: z.number().int().nonnegative().default(5).optional()
+        .describe("Maximum permitted Kafka broker timestamp regression S in seconds."),
+    sourceResponseRetryWindowSeconds: z.number().int().min(1).default(5).optional()
+        .describe("Broker-time source-response retry window W in seconds."),
+    readyRequestsBufferPerThread: z.number().int().min(1).default(2).optional()
+        .describe("Retry-ready request buffer target P for each target Netty event-loop thread."),
     nonRetryableDocExceptionTypes: z.array(z.string()).optional()
         .describe("List of document-level exception types that should not be retried during bulk replay. " +
             "These errors still count as failures in the output but are not retried because they are " +
@@ -761,15 +775,13 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "Set explicitly to override the defaults entirely (not additive). " +
             "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
             "illegal_argument_exception, resource_already_exists_exception."),
-    observedPacketConnectionTimeout: z.number().default(360).optional()
-        .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
     ...OTEL_EXPORT_OPTIONS,
-    quiescentPeriodMs: z.number().default(5000).optional()
-        .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
         .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.")
         .changeRestriction('gated'),
-    speedupFactor: z.number().default(1.1).optional()
+    speedupFactor: z.number()
+        .refine(value => value > 0, "speedupFactor must be positive")
+        .default(1.1).optional()
         .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."),
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
         .describe("Maximum seconds to wait for a response from the target cluster before timing out a replayed request."),
@@ -848,14 +860,6 @@ export const USER_REPLAYER_OPTIONS = withOtelExportOptions(z.object({
         });
     }
 
-    if (data.lookaheadTimeSeconds !== undefined && data.observedPacketConnectionTimeout !== undefined
-        && data.lookaheadTimeSeconds <= data.observedPacketConnectionTimeout) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `lookaheadTimeSeconds (${data.lookaheadTimeSeconds}) must be strictly greater than observedPacketConnectionTimeout (${data.observedPacketConnectionTimeout})`,
-            path: ['lookaheadTimeSeconds']
-        });
-    }
 }));
 
 // Internal (glue-layer) field: the config transformer folds the user-facing Solr
@@ -1809,6 +1813,47 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
             const proxies = data.traffic.proxies ?? {};
             const s3Sources = data.traffic.s3Sources ?? {};
             const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+            const reportedTimestampRequirements = new Set<string>();
+            const validateWorkflowManagedTimestampType = (
+                kafkaClusterName: string,
+                requiredTimestampType: "LogAppendTime" | "CreateTime",
+                topicKind: string
+            ) => {
+                const kafkaCluster = kafkaClusters[kafkaClusterName];
+                if (!kafkaCluster || !("autoCreate" in kafkaCluster)) {
+                    return;
+                }
+                const topicConfig = kafkaCluster.autoCreate.topicSpecOverrides?.config;
+                const configuredTimestampType =
+                    topicConfig !== null
+                    && typeof topicConfig === "object"
+                    && !Array.isArray(topicConfig)
+                        ? topicConfig["message.timestamp.type"]
+                        : undefined;
+                if (configuredTimestampType === undefined
+                    || configuredTimestampType === requiredTimestampType) {
+                    return;
+                }
+
+                const requirementKey = `${kafkaClusterName}\0${requiredTimestampType}`;
+                if (reportedTimestampRequirements.has(requirementKey)) {
+                    return;
+                }
+                reportedTimestampRequirements.add(requirementKey);
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Workflow-managed ${topicKind} on Kafka cluster '${kafkaClusterName}' require `
+                        + `'message.timestamp.type' to be '${requiredTimestampType}'.`,
+                    path: [
+                        "kafkaClusterConfiguration",
+                        kafkaClusterName,
+                        "autoCreate",
+                        "topicSpecOverrides",
+                        "config",
+                        "message.timestamp.type",
+                    ],
+                });
+            };
             for (const [proxyName, proxyConfig] of Object.entries(proxies)) {
                 if (!(proxyConfig.source in data.sourceClusters)) {
                     ctx.addIssue({
@@ -1825,6 +1870,37 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         path: ['traffic', 'proxies', proxyName, 'kafka']
                     });
                 }
+
+                if (proxyConfig.proxyConfig.noCapture !== true) {
+                    const effectiveKafkaRef = kafkaRef ?? "default";
+                    validateWorkflowManagedTimestampType(
+                        effectiveKafkaRef,
+                        "LogAppendTime",
+                        "live capture topics"
+                    );
+                    const kafkaCluster = kafkaClusters[effectiveKafkaRef];
+                    const partitionCount = kafkaCluster && 'autoCreate' in kafkaCluster
+                        ? kafkaCluster.autoCreate.topicSpecOverrides?.partitions
+                        : Object.keys(kafkaClusters).length === 0
+                            ? DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.partitions
+                            : undefined;
+                    const proxyCount = proxyConfig.proxyConfig.podReplicas ?? 1;
+                    const requiredPartitionCount = proxyCount > 0 ? proxyCount + 1 : 1;
+                    if (typeof partitionCount === "number" && partitionCount < requiredPartitionCount) {
+                        const topicName = proxyConfig.kafkaTopic || proxyName;
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `Kafka topic '${topicName}' on cluster '${effectiveKafkaRef}' has ${partitionCount} partition(s), but capture proxy '${proxyName}' with ${proxyCount} pod replica(s) requires at least ${requiredPartitionCount} partition(s) so a rolling update always has a spare writer partition.`,
+                            path: [
+                                'kafkaClusterConfiguration',
+                                effectiveKafkaRef,
+                                'autoCreate',
+                                'topicSpecOverrides',
+                                'partitions'
+                            ]
+                        });
+                    }
+                }
             }
             for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
                 const kafkaRef = s3Config.kafka;
@@ -1835,6 +1911,11 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         path: ['traffic', 's3Sources', s3Name, 'kafka']
                     });
                 }
+                validateWorkflowManagedTimestampType(
+                    kafkaRef ?? "default",
+                    "CreateTime",
+                    "BYOC import topics"
+                );
             }
 
             for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {

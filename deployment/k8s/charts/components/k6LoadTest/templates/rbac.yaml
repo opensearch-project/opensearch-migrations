@@ -43,3 +43,51 @@ roleRef:
   kind: Role
   name: k6-testrun-manager
   apiGroup: rbac.authorization.k8s.io
+---
+# The optional stress task deletes one selected pod only after the full proxy/replayer/Kafka fleet
+# and every traffic-topic ISR have recovered. Keep this destructive grant off the console account.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k6-pod-churn
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["default-migration-app", "default-cluster-ca-cert"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["migrations.opensearch.org"]
+    resources: ["capturedtraffics"]
+    verbs: ["get"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas", "kafkanodepools"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k6-pod-churn
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+subjects:
+  {{- range concat (list .Values.workflow.serviceAccountName) (.Values.workflow.extraServiceAccountNames | default list) }}
+  - kind: ServiceAccount
+    name: {{ . }}
+    namespace: {{ $.Release.Namespace }}
+  {{- end }}
+roleRef:
+  kind: Role
+  name: k6-pod-churn
+  apiGroup: rbac.authorization.k8s.io

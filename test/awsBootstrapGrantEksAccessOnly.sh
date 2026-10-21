@@ -115,7 +115,10 @@ run_guard_case() {
 run_success_case() {
   local script_under_test="$1"
   local label="$2"
-  local case_dir="${TMP_ROOT}/${label}-success"
+  local principal_arn="${3:-arn:aws:iam::123456789012:role/TestAdmin}"
+  local expected_policy_arn="${4:-arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy}"
+  local partition="${expected_policy_arn#arn:}"
+  local case_dir="${TMP_ROOT}/${label}-success-${partition%%:*}"
   local mock_dir="${case_dir}/mock-bin"
   local log_file="${case_dir}/commands.log"
   local output_file="${case_dir}/output.txt"
@@ -129,7 +132,7 @@ run_success_case() {
       --grant-eks-access-only \
       --stage dev \
       --region us-east-1 \
-      --eks-access-principal-arn arn:aws:iam::123456789012:role/TestAdmin \
+      --eks-access-principal-arn "${principal_arn}" \
       >"${output_file}" 2>&1
 
   assert_contains "Grant-only mode: skipping release version resolution." "${output_file}"
@@ -140,6 +143,7 @@ run_success_case() {
   assert_contains "aws eks describe-access-entry" "${log_file}"
   assert_contains "aws eks create-access-entry" "${log_file}"
   assert_contains "aws eks associate-access-policy" "${log_file}"
+  assert_contains "--policy-arn ${expected_policy_arn}" "${log_file}"
 
   assert_not_contains "curl " "${log_file}"
   assert_not_contains "jq " "${log_file}"
@@ -166,6 +170,10 @@ for script_under_test in "${SOURCE_BOOTSTRAP}" "${ASSEMBLED_BOOTSTRAP}"; do
     "Error: --grant-eks-access-only cannot be combined with --deploy-*-cfn, --skip-cfn-deploy, or --build." \
     "invalid-combination"
   run_success_case "${script_under_test}" "${label}"
+  # Outside the commercial partition the access policy must use the principal's partition.
+  run_success_case "${script_under_test}" "${label}" \
+    "arn:aws-cn:iam::123456789012:role/TestAdmin" \
+    "arn:aws-cn:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
 done
 
 echo "PASS: grant-only mode works without artifact/tool dependencies and still enforces its argument guards."

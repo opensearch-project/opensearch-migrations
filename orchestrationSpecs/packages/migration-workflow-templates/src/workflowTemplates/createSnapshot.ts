@@ -26,7 +26,7 @@ import {makeClusterParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getSourceHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
-import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {COMPONENT_LABEL, COMPONENTS, MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 function getSnapshotDoneCronJobName(dataSnapshotName: BaseExpression<string>) {
     return expr.concat(dataSnapshotName, expr.literal("-snapshot-done"));
@@ -142,6 +142,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     'migrations.opensearch.org/source': inputs.sourceK8sLabel,
                     'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
                     'migrations.opensearch.org/task': inputs.taskK8sLabel,
+                    [COMPONENT_LABEL]: COMPONENTS.SNAPSHOT_CREATE,
                     [MIGRATION_RESOURCE_UID_LABEL]: inputs.dataSnapshotUid,
                 }
             }))
@@ -178,6 +179,9 @@ export const CreateSnapshot = WorkflowBuilder.create({
                 SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL: expr.literal(SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL),
                 SNAPSHOT_MONITOR_SESSION_LABEL: expr.literal(SNAPSHOT_MONITOR_SESSION_LABEL),
                 MIGRATION_RESOURCE_UID_LABEL: expr.literal(MIGRATION_RESOURCE_UID_LABEL),
+                COMPONENT_LABEL: expr.literal(COMPONENT_LABEL),
+                MONITOR_COMPONENT: expr.literal(COMPONENTS.SNAPSHOT_MONITOR),
+                MONITOR_TASK: expr.literal("snapshot"),
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("applySnapshotMonitorCronJob.sh")])
