@@ -3,12 +3,13 @@ package org.opensearch.migrations.bulkload.pipeline;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalLong;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -29,9 +30,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class DocumentMigrationBootstrapDocCountTest {
-    private record Result(int documentsRead, OptionalLong snapshotCount) {}
+    private record Result(int documentsRead, Optional<SnapshotDocumentCounts> snapshotCount) {}
 
-    private Result migrate(int roots, long startingPosition, OptionalLong luceneCount) {
+    private Result migrate(int roots, long startingPosition, Optional<SnapshotDocumentCounts> luceneCount) {
         var partition = new EsShardPartition("snap", "idx", 0);
         var documents = IntStream.range(0, roots)
             .mapToObj(i -> new Document("doc-" + i, new byte[] {1}, Document.Operation.UPSERT,
@@ -39,7 +40,7 @@ class DocumentMigrationBootstrapDocCountTest {
             .toList();
         var source = mock(DocumentSource.class);
         when(source.listPartitions("idx")).thenReturn(List.of(partition));
-        when(source.countLiveDocuments(partition)).thenReturn(luceneCount);
+        when(source.snapshotDocumentCounts(partition)).thenReturn(luceneCount);
         when(source.readDocuments(any(), anyLong())).thenAnswer(call -> Flux.fromIterable(documents)
             .filter(doc -> doc.position().orElseThrow() >= call.<Long>getArgument(1)));
         var processed = new AtomicInteger();
@@ -49,14 +50,13 @@ class DocumentMigrationBootstrapDocCountTest {
             processed.addAndGet(batch.size());
             return Mono.just(new BatchResult(batch.size(), batch.size()));
         });
-        var count = new AtomicReference<OptionalLong>();
+        var count = new AtomicReference<Optional<SnapshotDocumentCounts>>();
         var bootstrap = DocumentMigrationBootstrap.builder()
             .documentSource(source)
             .targetClient(mock(OpenSearchClient.class))
             .cursorConsumer(cursor -> {
                 if (cursor.isShardComplete()) {
-                    count.set(cursor.getLiveLuceneDocCount() == null
-                        ? OptionalLong.empty() : OptionalLong.of(cursor.getLiveLuceneDocCount()));
+                    count.set(Optional.ofNullable(cursor.getSnapshotDocumentCounts()));
                 }
             })
             .build();
@@ -70,21 +70,21 @@ class DocumentMigrationBootstrapDocCountTest {
 
     @Test
     void snapshotCountIsIndependentOfResumePosition() {
-        var full = migrate(5, 0, OptionalLong.of(25));
-        var resumed = migrate(5, 14, OptionalLong.of(25));
+        var full = migrate(5, 0, Optional.of(new SnapshotDocumentCounts(25, 20, 4)));
+        var resumed = migrate(5, 14, Optional.of(new SnapshotDocumentCounts(25, 20, 4)));
         assertEquals(5, full.documentsRead());
         assertEquals(3, resumed.documentsRead());
         assertEquals(full.snapshotCount(), resumed.snapshotCount());
-        assertEquals(OptionalLong.of(25), resumed.snapshotCount());
+        assertEquals(Optional.of(new SnapshotDocumentCounts(25, 20, 4)), resumed.snapshotCount());
     }
 
     @Test
     void unavailableCountStaysUnknown() {
-        assertTrue(migrate(5, 0, OptionalLong.empty()).snapshotCount().isEmpty());
+        assertTrue(migrate(5, 0, Optional.empty()).snapshotCount().isEmpty());
     }
 
     @Test
     void emptyShardReportsZero() {
-        assertEquals(OptionalLong.of(0), migrate(0, 0, OptionalLong.of(0)).snapshotCount());
+        assertEquals(Optional.of(new SnapshotDocumentCounts(0, 0, 0)), migrate(0, 0, Optional.of(new SnapshotDocumentCounts(0, 0, 0))).snapshotCount());
     }
 }

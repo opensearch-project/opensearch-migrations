@@ -152,7 +152,7 @@ public class DocumentMigrationBootstrap {
         targetClient.setFailedDocumentStreamWorkItem(wi.toString());
 
         if (workItemTimeProvider != null) {
-            workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
+            workItemTimeProvider.recordLeaseAcquisition();
         }
 
         var partition = resolvePartition(wi);
@@ -215,7 +215,7 @@ public class DocumentMigrationBootstrap {
             long start = System.currentTimeMillis();
             latch.await(); // Bridge reactive→sync: block until pipeline subscription completes
             long durationMs = System.currentTimeMillis() - start;
-            var shardLiveLuceneDocs = documentSource.countLiveDocuments(partition);
+            var snapshotCounts = documentSource.snapshotDocumentCounts(partition);
             log.atInfo()
                 .setMessage("Partition migration stats: index={}, shard={}, sourcePartition={}, docsThisGeneration={}, "
                     + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}, "
@@ -227,8 +227,7 @@ public class DocumentMigrationBootstrap {
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)
                 .addArgument(durationMs)
-                .addArgument(shardLiveLuceneDocs.isPresent()
-                    ? Long.toString(shardLiveLuceneDocs.getAsLong()) : "unknown")
+                .addArgument(snapshotCounts.map(counts -> Long.toString(counts.liveDocuments())).orElse("unknown"))
                 .log();
 
             var error = migrationError.get();
@@ -238,12 +237,10 @@ public class DocumentMigrationBootstrap {
             }
 
             var progress = latestProgress.get();
-            var previousCount = documentSource.countPreviousLiveDocuments(partition);
             publishProgress(new WorkItemCursor(
                 progress == null ? startingOffset : progress.getProgressCheckpointNum(),
                 progress == null ? MigrationMetrics.ZERO : progress.getMetrics(), true,
-                shardLiveLuceneDocs.isPresent() ? shardLiveLuceneDocs.getAsLong() : null,
-                previousCount.isPresent() ? previousCount.getAsLong() : null));
+                snapshotCounts.orElse(null)));
 
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());

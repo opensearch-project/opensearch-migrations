@@ -1,8 +1,9 @@
 package org.opensearch.migrations.bulkload.pipeline.source;
 
 import java.util.List;
-import java.util.OptionalLong;
+import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
@@ -42,20 +43,9 @@ public interface DocumentSource extends AutoCloseable {
      */
     Flux<Document> readDocuments(Partition partition, long startingDocOffset);
 
-    /**
-     * Total live documents in the whole partition, when available, independent of resume position.
-     *
-     * <p>For Lucene-backed sources this is the live Lucene document count, which counts nested
-     * children and so matches the shard's contribution to {@code _cat/indices docs.count}.
-     * The count may become available during {@link #readDocuments}; empty means unknown, while
-     * zero means a known empty partition.
-     */
-    default OptionalLong countLiveDocuments(Partition partition) {
-        return OptionalLong.empty();
-    }
-
-    default OptionalLong countPreviousLiveDocuments(Partition partition) {
-        return OptionalLong.empty();
+    /** Whole-partition snapshot counts, independent of resume position; empty until available. */
+    default Optional<SnapshotDocumentCounts> snapshotDocumentCounts(Partition partition) {
+        return Optional.empty();
     }
 
     /** Whether operations on the same document can depend on an earlier batch. */

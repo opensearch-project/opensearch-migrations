@@ -7,8 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.function.BiConsumer;
-import java.util.function.LongConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -18,6 +17,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepoAccessor;
@@ -169,12 +169,12 @@ public class SnapshotExtractor {
     }
 
     /**
-     * @param liveDocCountSink receives the shard's live Lucene document count once the reader is
+     * @param snapshotCountsSink receives the shard's document counts once the reader is
      *                         open. May be null.
      */
     public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
                                                      FieldMappingContext mappingContext, boolean useRecoverySource,
-                                                     LongConsumer liveDocCountSink) {
+                                                     Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -191,7 +191,7 @@ public class SnapshotExtractor {
         // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource, liveDocCountSink);
+        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource, snapshotCountsSink);
     }
 
     /**
@@ -213,7 +213,7 @@ public class SnapshotExtractor {
         Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
     ) {
         return readDeltaDocuments(currentShard, previousShard, deltaMode, workDir, deltaContextFactory,
-            (previous, current) -> {});
+            current -> {});
     }
 
     public Flux<LuceneDocumentChange> readDeltaDocuments(
@@ -222,7 +222,7 @@ public class SnapshotExtractor {
         DeltaMode deltaMode,
         Path workDir,
         Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory,
-        BiConsumer<Long, Long> liveDocCounts
+        Consumer<SnapshotDocumentCounts> snapshotCounts
     ) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
@@ -258,7 +258,7 @@ public class SnapshotExtractor {
 
         DeltaLuceneReader.DeltaResult deltaResult;
         try (var deltaContext = deltaContextFactory.get()) {
-            liveDocCounts.accept(LuceneReader.countLiveDocs(previousReader), LuceneReader.countLiveDocs(currentReader));
+            snapshotCounts.accept(LuceneReader.countSnapshotDocuments(currentReader));
             deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
                 previousReader, currentReader, 0, deltaContext);
         } catch (RuntimeException | Error e) {

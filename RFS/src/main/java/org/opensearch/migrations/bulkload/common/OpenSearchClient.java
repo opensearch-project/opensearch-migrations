@@ -534,7 +534,7 @@ public abstract class OpenSearchClient {
                     List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
                         ? pendingDocs.stream().map(this::stripDocumentId).collect(Collectors.toList())
                         : pendingDocs;
-                    return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
+                    return BulkNdjson.serialize(operationsToSend, OBJECT_MAPPER);
                 },
                 pendingDocs,
                 () -> {},
@@ -570,12 +570,12 @@ public abstract class OpenSearchClient {
                 indexName,
                 () -> {
                     if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
-                        return buildRawNdjsonBytes(pendingRawDocs, indexName, allowServerGeneratedIds);
+                        return BulkNdjson.serializeRaw(pendingRawDocs, indexName, allowServerGeneratedIds, OBJECT_MAPPER);
                     }
                     List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
                         ? pendingOps.stream().map(this::stripDocumentId).collect(Collectors.toList())
                         : pendingOps;
-                    return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
+                    return BulkNdjson.serialize(operationsToSend, OBJECT_MAPPER);
                 },
                 pendingOps,
                 lazyConvert,
@@ -597,7 +597,7 @@ public abstract class OpenSearchClient {
      */
     private Mono<BulkResponse> executeBulkWithRetry(
         String indexName,
-        java.util.function.Supplier<byte[]> bodyBuilder,
+        java.util.function.Supplier<BulkNdjson.SerializedBulk> bodyBuilder,
         ArrayList<BulkOperationSpec> pendingOps,
         Runnable preCompactHook,
         IRfsContexts.IRequestContext context,
@@ -606,7 +606,11 @@ public abstract class OpenSearchClient {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
         var totals = new RequestTotals();
         return Mono.defer(() -> {
-            var bodyBytes = bodyBuilder.get();
+            var request = bodyBuilder.get();
+            var bodyBytes = request.bytes();
+            if (totals.attempts == 0) {
+                totals.target = request.operations();
+            }
             if (bodyBytes.length == 0) {
                 return Mono.just(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"));
             }
@@ -666,6 +670,7 @@ public abstract class OpenSearchClient {
             }
         })
         .map(response -> new BulkResponse(response.statusCode, response.statusText, response.headers, response.body,
+            totals.target,
             new MigrationMetrics.Requests(
                 1, totals.attempts, Math.max(0, totals.attempts - 1),
                 totals.bytes, Duration.ofNanos(totals.durationNanos).toMillis())));
@@ -675,6 +680,7 @@ public abstract class OpenSearchClient {
         long attempts;
         long bytes;
         long durationNanos;
+        MigrationMetrics.Operations target = MigrationMetrics.Operations.ZERO;
     }
 
     private Mono<HttpResponse> postBulkRequest(String indexName, byte[] bodyBytes,
@@ -685,10 +691,6 @@ public abstract class OpenSearchClient {
             RestClient.addGzipResponseHeaders(additionalHeaders);
         }
         return client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context);
-    }
-
-    private byte[] buildRawNdjsonBytes(List<Document> docs, String indexName, boolean stripIds) {
-        return BulkNdjson.toRawNdjsonBytes(docs, indexName, stripIds, OBJECT_MAPPER);
     }
 
     private static BulkOperationSpec docToBulkOp(Document doc, String indexName) {
@@ -887,16 +889,18 @@ public abstract class OpenSearchClient {
     }
 
     public static class BulkResponse extends HttpResponse {
+        public final MigrationMetrics.Operations target;
         public final MigrationMetrics.Requests requests;
 
         public BulkResponse(int statusCode, String statusText, Map<String, String> headers, String body) {
             this(statusCode, statusText, headers, body,
-                MigrationMetrics.Requests.ZERO);
+                MigrationMetrics.Operations.ZERO, MigrationMetrics.Requests.ZERO);
         }
 
         public BulkResponse(int statusCode, String statusText, Map<String, String> headers, String body,
-                            MigrationMetrics.Requests requests) {
+                            MigrationMetrics.Operations target, MigrationMetrics.Requests requests) {
             super(statusCode, statusText, headers, body);
+            this.target = target;
             this.requests = requests;
         }
 

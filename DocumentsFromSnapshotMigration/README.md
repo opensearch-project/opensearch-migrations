@@ -340,8 +340,8 @@ Common exception types that can be allowlisted:
 
 ## Committed metrics
 
-Document Backfill commits source operations, request totals, and snapshot counts
-with each work-item checkpoint. Sum the committed ranges to measure completed
+Document Backfill commits source/target operations, request costs, and work-item
+duration with each checkpoint, plus whole-shard snapshot counts on completion. Sum the committed ranges to measure completed
 work, and use snapshot counts to validate the target even while the source keeps
-ingesting. See [committed metrics](../docs/committedMetrics.md) for coordinator archives,
-aggregation, delta counts, and target comparison requirements.
+ingesting. See [committed metrics](../docs/committedMetrics.md) for the published structure, existing coordinator archives, aggregation rules,
+and full/delta target comparison requirements.

@@ -13,7 +13,6 @@ from console_link.models.client_options import ClientOptions
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.command_result import CommandResult
-from console_link.models.committed_metrics import write_archive_summary
 from console_link.models.kubectl_runner import DeploymentStatus, KubectlRunner
 from console_link.models.ecs_service import ECSService
 
@@ -556,7 +555,6 @@ def perform_archive(target_cluster: Cluster,
         backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
         logger.info(f"Backing up working state index to {backup_path}")
         backup_working_state_index(target_cluster, WORKING_STATE_INDEX, backup_path)
-        write_archive_summary(backup_path)
         logger.info("Working state index backed up successful")
 
         logger.info("Cleaning up working state index on target cluster")

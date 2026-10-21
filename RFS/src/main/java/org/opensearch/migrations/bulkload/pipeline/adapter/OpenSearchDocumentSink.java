@@ -122,7 +122,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 requestContext, allowServerGeneratedIds, allowlist);
         }
 
-        return bulkMono.map(response -> new BatchResult(batch.size(), bytesInBatch, response.requests));
+        return bulkMono.map(response -> new BatchResult(batch.size(), bytesInBatch, response.target, response.requests));
     }
 
     @SuppressWarnings("unchecked")

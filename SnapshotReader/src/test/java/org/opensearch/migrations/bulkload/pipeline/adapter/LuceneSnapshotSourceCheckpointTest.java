@@ -2,13 +2,14 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.nio.file.Path;
 import java.util.List;
-import java.util.OptionalLong;
-import java.util.function.LongConsumer;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
@@ -34,7 +35,7 @@ class LuceneSnapshotSourceCheckpointTest {
         when(extractor.listShards("previous", "idx")).thenReturn(List.of());
         when(extractor.readDocuments(eq(current), any(), eq(9), any(), eq(false), any()))
             .thenAnswer(call -> Flux.defer(() -> {
-                call.<LongConsumer>getArgument(5).accept(liveCount);
+                call.<Consumer<SnapshotDocumentCounts>>getArgument(5).accept(new SnapshotDocumentCounts(liveCount, liveCount / 2, 3));
                 return Flux.empty();
             }));
         var builder = LuceneSnapshotSource.builder(extractor, "current", Path.of("/unused"));
@@ -43,10 +44,10 @@ class LuceneSnapshotSourceCheckpointTest {
         }
         try (var source = builder.build()) {
             var partition = source.listPartitions("idx").get(0);
-            assertTrue(source.countLiveDocuments(partition).isEmpty(), "the reader has not opened yet");
+            assertTrue(source.snapshotDocumentCounts(partition).isEmpty(), "the reader has not opened yet");
             source.readDocuments(partition, 9).blockLast();
-            assertEquals(OptionalLong.of(liveCount),
-                source.countLiveDocuments(partition));
+            assertEquals(Optional.of(new SnapshotDocumentCounts(liveCount, liveCount / 2, 3)),
+                source.snapshotDocumentCounts(partition));
         }
     }
 
@@ -73,7 +74,7 @@ class LuceneSnapshotSourceCheckpointTest {
                 assertEquals(documents.subList(i, documents.size()),
                     source.readDocuments(partition, documents.get(i).position().orElseThrow()).collectList().block());
             }
-            assertTrue(source.countLiveDocuments(partition).isEmpty(),
+            assertTrue(source.snapshotDocumentCounts(partition).isEmpty(),
                 "delta operations do not provide a whole-shard live count");
         }
     }

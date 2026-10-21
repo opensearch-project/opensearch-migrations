@@ -65,15 +65,18 @@ class ProgressCursorPositionTest {
             Assertions.assertTrue(started.await(10, TimeUnit.SECONDS));
             Assertions.assertEquals(List.of(1, 3, 1), batchSizes);
             completions.get(2).tryEmitValue(new BatchResult(1, 1,
+                new MigrationMetrics.Operations(10, 0, 10),
                 new MigrationMetrics.Requests(1, 1, 0, 100, 10)));
             Assertions.assertTrue(cursors.isEmpty());
             completions.get(0).tryEmitValue(new BatchResult(1, 10,
+                new MigrationMetrics.Operations(2, 0, 20),
                 new MigrationMetrics.Requests(1, 2, 1, 200, 20)));
             Assertions.assertTrue(firstEmitted.await(10, TimeUnit.SECONDS));
             Assertions.assertEquals(1, cursors.size());
             Assertions.assertEquals(1, cursors.get(0).nextPosition());
             Assertions.assertEquals(new MigrationMetrics(
-                new MigrationMetrics.Source(1, 0, 10), new MigrationMetrics.Requests(1, 2, 1, 200, 20)),
+                new MigrationMetrics.Operations(1, 0, 10), new MigrationMetrics.Operations(2, 0, 20),
+                new MigrationMetrics.Requests(1, 2, 1, 200, 20)),
                 cursors.get(0).metrics());
         } finally {
             subscription.dispose();

@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -677,7 +678,8 @@ public class RfsMigrateDocuments {
             coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
         var cleanShutdownCompleted = new AtomicBoolean(false);
         var metricsReporter = committedMetricsReporter(arguments.snapshotName,
-            arguments.experimental.previousSnapshotName, arguments.experimental.experimentalDeltaMode);
+            arguments.experimental.previousSnapshotName, arguments.experimental.experimentalDeltaMode,
+            workItemTimeProvider::freezeDurationMillis);
 
         try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
@@ -903,7 +905,7 @@ public class RfsMigrateDocuments {
     }
 
     static BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> committedMetricsReporter(
-        String snapshotName, String previousSnapshotName, DeltaMode deltaMode
+        String snapshotName, String previousSnapshotName, DeltaMode deltaMode, LongSupplier workItemDurationMillis
     ) {
         var mapper = new ObjectMapper();
         return (workItem, cursor) -> {
@@ -918,9 +920,9 @@ public class RfsMigrateDocuments {
                 .nextPosition(cursor.getProgressCheckpointNum())
                 .shardComplete(cursor.isShardComplete())
                 .metrics(new WorkItemMetricsRecord.Metrics(
-                    cursor.getMetrics().source(), cursor.getMetrics().requests(),
-                    cursor.isShardComplete() ? new WorkItemMetricsRecord.Snapshot(
-                        cursor.getLiveLuceneDocCount(), cursor.getPreviousLiveLuceneDocCount()) : null))
+                    cursor.getMetrics().source(), cursor.getMetrics().target(), cursor.getMetrics().requests(),
+                    new WorkItemMetricsRecord.WorkItem(workItemDurationMillis.getAsLong()),
+                    cursor.isShardComplete() ? cursor.getSnapshotDocumentCounts() : null))
                 .build();
             return mapper.convertValue(record, new TypeReference<Map<String, Object>>() {});
         };

@@ -2,10 +2,11 @@ package org.opensearch.migrations.bulkload.pipeline;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.OptionalLong;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
@@ -22,18 +23,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class DocumentMigrationBootstrapCountLoggingTest {
-    static Stream<OptionalLong> counts() {
-        return Stream.of(OptionalLong.empty(), OptionalLong.of(0), OptionalLong.of(14));
+    static Stream<Optional<SnapshotDocumentCounts>> counts() {
+        return Stream.of(Optional.empty(), Optional.of(new SnapshotDocumentCounts(0, 0, 0)), Optional.of(new SnapshotDocumentCounts(14, 9, 2)));
     }
 
     @ParameterizedTest
     @MethodSource("counts")
-    void logsKnownCountsAndUnknownDistinctly(OptionalLong count) {
+    void logsKnownCountsAndUnknownDistinctly(Optional<SnapshotDocumentCounts> count) {
         var partition = new EsShardPartition("snap", "idx", 0);
         var source = mock(DocumentSource.class);
         when(source.listPartitions("idx")).thenReturn(List.of(partition));
         when(source.readDocuments(partition, 0)).thenReturn(Flux.empty());
-        when(source.countLiveDocuments(partition)).thenReturn(count);
+        when(source.snapshotDocumentCounts(partition)).thenReturn(count);
         var bootstrap = DocumentMigrationBootstrap.builder()
             .documentSource(source).targetClient(mock(OpenSearchClient.class)).build();
         try (var logs = new CloseableLogSetup(DocumentMigrationBootstrap.class.getName());
@@ -42,7 +43,7 @@ class DocumentMigrationBootstrapCountLoggingTest {
                 new WorkItemAndDuration(Instant.now().plusSeconds(60),
                     new WorkItemAndDuration.WorkItem("idx", 0, 0L)),
                 new PipelineConfig(source, mock(DocumentSink.class), 10, 1000, 1), context);
-            var expected = count.isPresent() ? Long.toString(count.getAsLong()) : "unknown";
+            var expected = count.map(counts -> Long.toString(counts.liveDocuments())).orElse("unknown");
             assertTrue(logs.getLogEvents().stream().anyMatch(line ->
                 line.contains("Partition migration stats:") && line.contains("sourcePartition=snap/idx/0")
                     && line.contains("shardLiveLuceneDocs=" + expected)));

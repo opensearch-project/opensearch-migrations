@@ -3,29 +3,30 @@ package org.opensearch.migrations.bulkload.pipeline.model;
 import java.util.List;
 import java.util.Objects;
 
-/** Additive costs and source operations belonging to a contiguous range of completed batches. */
-public record MigrationMetrics(Source source, Requests requests) {
-    public static final MigrationMetrics ZERO = new MigrationMetrics(Source.ZERO, Requests.ZERO);
+/** Additive operation counts and request costs for a contiguous range of completed batches. */
+public record MigrationMetrics(Operations source, Operations target, Requests requests) {
+    public static final MigrationMetrics ZERO = new MigrationMetrics(Operations.ZERO, Operations.ZERO, Requests.ZERO);
 
     public MigrationMetrics {
         Objects.requireNonNull(source);
+        Objects.requireNonNull(target);
         Objects.requireNonNull(requests);
     }
 
     public MigrationMetrics plus(MigrationMetrics other) {
-        return new MigrationMetrics(source.plus(other.source), requests.plus(other.requests));
+        return new MigrationMetrics(source.plus(other.source), target.plus(other.target), requests.plus(other.requests));
     }
 
-    public record Source(long upserts, long deletes, long bytes) {
-        public static final Source ZERO = new Source(0, 0, 0);
+    public record Operations(long upserts, long deletes, long bytes) {
+        public static final Operations ZERO = new Operations(0, 0, 0);
 
-        public Source {
+        public Operations {
             if (upserts < 0 || deletes < 0 || bytes < 0) {
-                throw new IllegalArgumentException("Source totals must be nonnegative");
+                throw new IllegalArgumentException("Operation totals must be nonnegative");
             }
         }
 
-        public static Source fromDocuments(List<Document> documents) {
+        public static Operations fromDocuments(List<Document> documents) {
             long upserts = 0;
             long bytes = 0;
             for (var document : documents) {
@@ -34,11 +35,11 @@ public record MigrationMetrics(Source source, Requests requests) {
                     bytes += document.sourceLength();
                 }
             }
-            return new Source(upserts, documents.size() - upserts, bytes);
+            return new Operations(upserts, documents.size() - upserts, bytes);
         }
 
-        public Source plus(Source other) {
-            return new Source(Math.addExact(upserts, other.upserts), Math.addExact(deletes, other.deletes),
+        public Operations plus(Operations other) {
+            return new Operations(Math.addExact(upserts, other.upserts), Math.addExact(deletes, other.deletes),
                 Math.addExact(bytes, other.bytes));
         }
     }

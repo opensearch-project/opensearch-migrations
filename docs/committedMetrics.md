@@ -1,16 +1,18 @@
 # Validate backfills with committed metrics
 
 Use the snapshot RFS migrated as the validation baseline when the live source
-keeps ingesting. RFS stores `committed_metrics` in each coordinator work-item
-document. Migration Console archives those documents and writes a companion
-report with index totals. Workers need no metrics storage configuration.
+keeps ingesting. Each coordinator work-item document stores `committed_metrics`.
+The existing Migration Console archive preserves the complete document,
+including these metrics, in its existing
+`backfill_working_state/working_state_backup_<timestamp>.json` file. A later
+reporting or S3 publication job can consume that archive.
 
-## What commits
+## Commit semantics
 
-The watermark covers consecutive completed source batches, after their
-failed-document records have flushed. If a one-document batch finishes while
-the next three-document batch is pending, only the first document contributes.
-Later batches that finish early remain outside the watermark.
+The watermark covers consecutive completed source batches after failed-document
+records flush. If a one-document batch finishes while the next three-document
+batch is pending, only the first document contributes. Later batches that finish
+early remain outside the watermark.
 
 At a lease handoff or shard completion, RFS writes the watermark and its metrics
 in the same coordinator update. Completion cannot succeed without persisting
@@ -18,63 +20,104 @@ the metrics. Successors resume at `nextPosition`, so committed ranges
 `[fromPosition, nextPosition)` do not overlap. Recovery preserves frozen metrics;
 abandoned attempts do not add another committed range.
 
-| Field | Meaning |
-| --- | --- |
-| `metrics.source.upserts` | Source root-document indexing operations handled before transformations |
-| `metrics.source.deletes` | Source root-document delete operations handled |
-| `metrics.source.bytes` | Source body bytes; deletes contribute zero |
-| `metrics.requests.batches` | Completed logical sink batches, including fully filtered batches |
-| `metrics.requests.total` | HTTP bulk requests for those batches, including retries |
-| `metrics.requests.retries` | Additional HTTP requests after each batch's first request |
-| `metrics.requests.bytes` | Uncompressed NDJSON bytes across those HTTP requests |
-| `metrics.requests.durationMillis` | Summed HTTP request durations, excluding retry delays |
+## Metric scope and aggregation
 
-Timing uses monotonic nanoseconds within a batch, then converts its total to
-milliseconds before adding it to work-item totals. The conversion discards less
-than one millisecond per batch. Milliseconds leave ample room for aggregation.
+| Group | Published fields | Meaning and aggregation |
+| --- | --- | --- |
+| `metrics.source` | `upserts`, `deletes`, `bytes` | Root-document operations and body bytes before transformations. Sum across committed ranges. |
+| `metrics.target` | `upserts`, `deletes`, `bytes` | Output operations and body bytes after transformations, counted once before retries. Sum across committed ranges. |
+| `metrics.requests` | `batches`, `total`, `retries`, `bytes`, `durationMillis` | Logical batches and their HTTP request costs. Sum across committed ranges. |
+| `metrics.workItem` | `durationMillis` | Acquired attempt's elapsed time through preparation of its first checkpoint/completion commit. Sum for committed worker time. |
+| `metrics.snapshot` | `liveDocuments`, `nestedDocuments`, `tombstonedDocuments` | Whole-shard Lucene counts. Present only on the final work item; take once per shard, then sum by index. |
 
-These are committed processing metrics, not successful target insert counts.
-Transformations can filter or split documents, indexing can replace IDs, and
-terminal document failures can be handled through the failed-document stream.
-Retries are not an error count: a bulk response can partially succeed. Request
-costs exclude abandoned work-item attempts, so they do not measure all traffic.
+Source/target deletes contribute zero body bytes. Request bytes are uncompressed
+NDJSON, including action metadata and retries. `requests.total` includes retries;
+`retries` counts requests after each logical batch's first request. Fully
+filtered batches still count as batches but send no HTTP request.
+
+A transformation that doubles four source documents records `source.upserts=4`
+and `target.upserts=8`; one that filters half records 4 and 2. These count
+operations, not successful target inserts: IDs may be replaced and terminal
+document failures may be handled through the failed-document stream. The target
+metrics describe output originating from this source work item, even if a
+transformation routes it to another index. Request costs exclude abandoned
+work-item attempts. Retries are not error counts because a bulk request can
+partially succeed.
+
+Both durations use monotonic nanoseconds internally and publish milliseconds.
+Request duration sums HTTP attempts, excluding retry delays; concurrent requests
+can overlap, so their summed duration can exceed work-item duration. Work-item
+duration includes shard preparation, processing, retry delays and failure-stream
+flushes. It freezes before the first commit request so retries preserve identical
+metrics, and excludes coordinator commit latency and subsequent recovery.
+
+For lease analysis, group completed records by snapshot/index/shard and inspect
+the sum and maximum work-item duration, the number of items, and their completion
+flags. Summed duration includes repeated preparation in committed attempts, but
+excludes abandoned attempts and gaps between workers; it is not the shard's full
+wall-clock migration span. Checkpointed durations are limited by existing leases,
+so they do not by themselves predict the lease needed to finish a shard.
+
+Divide summed source/target body bytes by the corresponding upserts for average
+document size. Divide summed request bytes/duration by summed total requests for
+request averages. A zero denominator gives `null`. Never sum averages or
+percentiles. A later maximum-duration metric should use maximum aggregation;
+configuration values such as lease duration or concurrency remain context for
+each item or run. A cumulative shard/run total must be selected once at that
+scope, rather than added for every work item.
+
+`metrics.snapshot` is `null` on intermediate checkpoints or when unavailable.
+Known zero counts are reported as `0`. `liveDocuments` includes live nested
+children; `nestedDocuments` counts those children, so their difference is the
+live root count. `tombstonedDocuments` counts retained non-live Lucene slots,
+including hard and soft deletions.
+This is a snapshot baseline, independent of the worker's resume position.
+An unavailable count on any shard makes the index baseline unknown.
+Per-item counters describe emitted root-document operations, not physical Lucene
+slots. Lucene deleted documents can include replaced versions and disappear on
+merge; they are not interchangeable with delta delete operations.
 
 ## Work-item examples
 
-The following objects are the `committed_metrics` field inside coordinator
-`_source` documents. Existing lease and completion fields remain alongside it.
-The coordinator document ID is still the serialized work-item string.
-`metrics.snapshot` holds whole-shard counts only on the final work item; it is
-`null` on intermediate checkpoints. Source and request totals cover each
-work item's committed range.
+These are the `committed_metrics` values inside coordinator `_source` documents,
+alongside existing lease/completion fields. The document ID remains the
+serialized work-item string. The metrics payload uses `schemaVersion: 2`; this
+is separate from the coordinator checkpoint `scriptVersion: "3.1"`.
 
-A full backfill with five root documents and nine nested children:
+Full snapshot: five root documents with nine nested children give a whole-shard
+live Lucene count of 14, plus two tombstoned slots.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "workItemId": "b3JkZXJz__0__0",
   "snapshotName": "full-001",
   "indexName": "orders",
   "shardNumber": 0,
   "fromPosition": 0,
-  "nextPosition": 14,
+  "nextPosition": 16,
   "shardComplete": true,
   "previousSnapshotName": null,
   "deltaMode": null,
   "metrics": {
     "source": {"upserts": 5, "deletes": 0, "bytes": 500},
+    "target": {"upserts": 5, "deletes": 0, "bytes": 500},
     "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 1500, "durationMillis": 90},
-    "snapshot": {"liveLuceneDocCount": 14, "previousLiveLuceneDocCount": null}
+    "workItem": {"durationMillis": 120000},
+    "snapshot": {"liveDocuments": 14, "nestedDocuments": 9, "tombstonedDocuments": 2}
   }
 }
 ```
 
-A subsequent delta with three additions and one removal in the source diff:
+Delta snapshot: three source upserts and one source delete give a root-document
+change of 2 when both operations are enabled and all source documents are
+readable. The current snapshot contains 16 live Lucene documents. The previous
+snapshot name identifies the diff; a previous document count is unnecessary for
+validating the current snapshot baseline.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "workItemId": "b3JkZXJz__0__0",
   "snapshotName": "delta-002",
   "indexName": "orders",
@@ -86,85 +129,32 @@ A subsequent delta with three additions and one removal in the source diff:
   "deltaMode": "UPDATES_AND_DELETES",
   "metrics": {
     "source": {"upserts": 3, "deletes": 1, "bytes": 300},
+    "target": {"upserts": 3, "deletes": 1, "bytes": 300},
     "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 900, "durationMillis": 90},
-    "snapshot": {"liveLuceneDocCount": 16, "previousLiveLuceneDocCount": 14}
+    "workItem": {"durationMillis": 90000},
+    "snapshot": {"liveDocuments": 16, "nestedDocuments": 9, "tombstonedDocuments": 4}
   }
 }
 ```
 
-## Archive and aggregate
+## Target validation and extension
 
-When Migration Console archives a stopped run, it saves the full coordinator
-index and a metrics report before deleting the index:
+Sum the final `metrics.snapshot.liveDocuments` once per source shard to
+obtain the snapshot's expected `_cat/indices docs.count`, including nested
+children. Finish the migration, review failures, and refresh the target before
+comparing. A full backfill assumes an initially empty target; a delta assumes
+the target represented the previous snapshot and both updates and deletes were
+applied. Preserve IDs, index routing, nested mappings and cardinality, and
+account for independent target writes. Matching counts alone do not verify
+content. Source upserts minus deletes describes root-document change only in
+`UPDATES_AND_DELETES` mode with readable source documents.
 
-```text
-backfill_working_state/
-  working_state_backup_20261021120000.json
-  working_state_backup_20261021120000.metrics.json
-```
-
-These files use the existing archive directory: `SHARED_LOGS_DIR_PATH` when
-configured, otherwise the local working directory. The raw archive is an array
-of batches, each mapping work-item IDs to their complete `_source` documents.
-An archival/storage job can upload both artifacts to S3. This feature adds no
-worker S3 writes or automatic S3 uploader.
-
-The report has `schemaVersion`, `complete`, and `indices`. Each index entry
-identifies the current/previous snapshot and delta mode and the shard count.
-Its `metrics` object contains:
-
-- Summed `source` and `requests` fields, and `snapshot` counts summed once
-  from each shard's final work item.
-- `averageSourceDocumentBytes`, `averageRequestBytes`, and
-  `averageRequestDurationMillis`, derived from summed numerators and denominators.
-- `snapshotLiveLuceneDelta` (current minus previous), and
-  `sourceRootDocumentDelta` (upserts minus deletes in `UPDATES_AND_DELETES` mode).
-
-For the delta example, these averages are 100 bytes, 300 bytes, and 30 ms;
-both count deltas are 2. Empty denominators and unavailable counts remain `null`.
-An empty shard has count `0`. Unknown counts never become zero.
-
-Incomplete or mixed-version archives get `complete: false` and a `reason`
-instead of totals. Legacy archives without committed metrics remain unchanged.
-Writing either artifact must succeed before the coordinator index is deleted.
-An incomplete migration can still be archived for inspection or reset.
-
-To regenerate a report from one run's complete archive, with an independent
-check on the number of migrated source shards:
-
-```sh
-python -m console_link.models.committed_metrics working_state_backup_20261021120000.json --expected-shards 2
-```
-
-The aggregator rejects incomplete work items, conflicting duplicate records,
-gaps, overlaps, and missing shard completion. Supply every coordinator document
-from one run; `--expected-shards` additionally detects wholly missing shards.
-Search responses and NDJSON hits are accepted, but all search pages are required.
-
-## Interpret counts
-
-Sum `metrics.snapshot.liveLuceneDocCount` once per source shard for the snapshot's expected
-`_cat/indices docs.count`, including nested children. Delta records also retain
-the previous snapshot count. Their difference includes changes to nested
-children; source upserts minus deletes counts root-document changes when both
-operations are enabled and all source documents are readable. An updated or
-moved document contributes both a removal and an addition.
-
-For target validation, finish the migration, review failures, and refresh the
-target. A full backfill assumes an initially empty target; a delta assumes the
-target represents the previous snapshot and both updates and deletes were
-applied. Preserve IDs, nested mappings, and document cardinality through
-transformations, and account for independent target writes or deletes.
-Matching counts alone do not establish content equality.
-
-## Extend the metrics
-
-Add additive counters to the metrics model and collect them before the ordered
-watermark advances. Include zero defaults, aggregation, and retry/resume tests.
-Derive averages from sums rather than summing averages. Version incompatible
-schema changes. Archival/storage integrations can consume the coordinator
-payload without adding worker-side exporters.
+For future metrics, define their scope and aggregation rule first. Collect
+additive operation/request metrics before the ordered watermark advances, and
+freeze work-item observations when preparing the commit. Cover transformation,
+retry and resume behavior in tests. Version incompatible payload changes.
+Existing coordinator archives provide the data for future aggregation.
 
 Checkpoint semantics use coordinator script version `3.1`. Start a fresh
-coordinator index when upgrading from older workers; all workers in a run must
-use the same version.
+coordinator index when upgrading older workers; all workers in a run must use
+the same version.

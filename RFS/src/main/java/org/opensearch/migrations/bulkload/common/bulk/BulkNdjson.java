@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -39,12 +40,15 @@ public final class BulkNdjson {
      * @param out The output stream to write to
      * @param mapper The ObjectMapper to use for serialization
      */
-    @SneakyThrows
     public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
+        writeOperationAndCountBody(op, out, mapper);
+    }
+
+    @SneakyThrows
+    private static long writeOperationAndCountBody(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
         if (op.getRawDocument() != null) {
-            writeRawOperation(op.getOperationType().getValue(), op.getOperation(),
+            return writeRawOperationAndCountBody(op.getOperationType().getValue(), op.getOperation(),
                 op.isIncludeDocument() ? op.getRawDocument() : null, out, mapper);
-            return;
         }
         // action line: {"<op>": {...meta...}}
         Map<String, Object> actionLine = Map.of(op.getOperationType().getValue(), op.getOperation());
@@ -54,17 +58,25 @@ public final class BulkNdjson {
         // optional source/payload
         if (op.isIncludeDocument() && op.getDocument() != null) {
             out.write(NEWLINE_BYTES);
-            out.write(mapper.writeValueAsBytes(op.getDocument()));
+            var body = mapper.writeValueAsBytes(op.getDocument());
+            out.write(body);
+            return body.length;
         }
+        return 0;
     }
 
     /**
      * Write an action line + raw source bytes to an output stream in NDJSON format.
      * Skips Jackson deserialization/reserialization of the document body.
      */
-    @SneakyThrows
     public static void writeRawOperation(String operationType, BaseOperationMeta meta,
                                          byte[] rawSource, OutputStream out, ObjectMapper mapper) {
+        writeRawOperationAndCountBody(operationType, meta, rawSource, out, mapper);
+    }
+
+    @SneakyThrows
+    private static long writeRawOperationAndCountBody(String operationType, BaseOperationMeta meta,
+                                                       byte[] rawSource, OutputStream out, ObjectMapper mapper) {
         // Jackson already serializes the metadata's unwrapped fields. Avoid a
         // metadata -> Map -> JSON round trip on every document, including raw writes.
         Map<String, Object> actionLine = Map.of(operationType, meta);
@@ -74,7 +86,9 @@ public final class BulkNdjson {
             validateJsonBytes(rawSource);
             out.write(NEWLINE_BYTES);
             out.write(rawSource);
+            return rawSource.length;
         }
+        return 0;
     }
 
     /**
@@ -106,12 +120,22 @@ public final class BulkNdjson {
         List<? extends Document> docs,
         String indexName, boolean stripIds, ObjectMapper mapper
     ) {
+        return serializeRaw(docs, indexName, stripIds, mapper).bytes();
+    }
+
+    public static SerializedBulk serializeRaw(
+        List<? extends Document> docs, String indexName, boolean stripIds, ObjectMapper mapper
+    ) {
         long sourceBytes = docs.stream()
             .mapToLong(doc -> doc.operation() == Document.Operation.DELETE ? 0 : doc.sourceLength())
             .sum();
         try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, docs.size()))) {
+            long upserts = 0;
             for (var doc : docs) {
                 boolean isDelete = doc.operation() == Document.Operation.DELETE;
+                if (!isDelete) {
+                    upserts++;
+                }
                 String opType = isDelete ? "delete" : "index";
                 String docId = stripIds ? null : doc.id();
                 String routing = doc.hints().get(Document.HINT_ROUTING);
@@ -122,7 +146,8 @@ public final class BulkNdjson {
                 writeRawOperation(opType, meta, isDelete ? null : doc.source(), baos, mapper);
                 baos.write(NEWLINE_BYTES);
             }
-            return baos.toByteArray();
+            return new SerializedBulk(baos.toByteArray(),
+                new MigrationMetrics.Operations(upserts, docs.size() - upserts, sourceBytes));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -147,12 +172,28 @@ public final class BulkNdjson {
      * Avoids the byte[]→Map→byte[] round-trip for document bodies.
      */
     public static byte[] toBulkNdjsonBytes(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
+        return serialize(ops, mapper).bytes();
+    }
+
+    @SuppressWarnings({"java:S100", "java:S1186"})
+    public record SerializedBulk(byte[] bytes, MigrationMetrics.Operations operations) {}
+
+    public static SerializedBulk serialize(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
         long sourceBytes = ops.stream()
             .mapToLong(op -> op.isIncludeDocument() && op.getRawDocument() != null ? op.getRawDocument().length : 0)
             .sum();
         try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, ops.size()))) {
-            writeAll(ops, baos, mapper);
-            return baos.toByteArray();
+            long upserts = 0;
+            long bodyBytes = 0;
+            for (var op : ops) {
+                if (op instanceof IndexOp) {
+                    upserts++;
+                }
+                bodyBytes += writeOperationAndCountBody(op, baos, mapper);
+                baos.write(NEWLINE_BYTES);
+            }
+            return new SerializedBulk(baos.toByteArray(),
+                new MigrationMetrics.Operations(upserts, ops.size() - upserts, bodyBytes));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

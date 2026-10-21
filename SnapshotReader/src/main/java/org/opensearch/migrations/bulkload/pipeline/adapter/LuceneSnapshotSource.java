@@ -4,13 +4,14 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalLong;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -49,8 +50,7 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> shardEntryCache = new HashMap<>();
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> previousShardEntryCache = new HashMap<>();
 
-    private final Map<Partition, Long> liveDocCounts = new ConcurrentHashMap<>();
-    private final Map<Partition, Long> previousLiveDocCounts = new ConcurrentHashMap<>();
+    private final Map<Partition, SnapshotDocumentCounts> snapshotCounts = new ConcurrentHashMap<>();
 
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
@@ -191,15 +191,8 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
-    public OptionalLong countLiveDocuments(Partition partition) {
-        var cached = liveDocCounts.get(partition);
-        return cached == null ? OptionalLong.empty() : OptionalLong.of(cached);
-    }
-
-    @Override
-    public OptionalLong countPreviousLiveDocuments(Partition partition) {
-        var cached = previousLiveDocCounts.get(partition);
-        return cached == null ? OptionalLong.empty() : OptionalLong.of(cached);
+    public Optional<SnapshotDocumentCounts> snapshotDocumentCounts(Partition partition) {
+        return Optional.ofNullable(snapshotCounts.get(partition));
     }
 
     @Override
@@ -227,7 +220,6 @@ public class LuceneSnapshotSource implements DocumentSource {
             var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
             if (previousEntry == null) {
                 log.info("No previous partition for {} — treating as full read (all additions)", partition);
-                previousLiveDocCounts.put(partition, 0L);
                 if (deltaMode == DeltaMode.DELETES_ONLY) {
                     return Flux.empty();
                 }
@@ -236,10 +228,7 @@ public class LuceneSnapshotSource implements DocumentSource {
             log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
             // Delta doc numbers can overlap across snapshots; resume by stream ordinal.
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory,
-                    (previous, current) -> {
-                        previousLiveDocCounts.put(partition, previous);
-                        liveDocCounts.put(partition, current);
-                    })
+                    current -> snapshotCounts.put(partition, current))
                 .index()
                 .skip(startingPosition)
                 .map(indexed -> {
@@ -262,7 +251,7 @@ public class LuceneSnapshotSource implements DocumentSource {
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
         return extractor.readDocuments(entry, workDir, Math.toIntExact(startingPosition), mappingContext, useRecoverySource,
-                count -> liveDocCounts.put(partition, count))
+                count -> snapshotCounts.put(partition, count))
             .map(luceneAdapter::fromLucene);
     }
 
@@ -281,7 +270,6 @@ public class LuceneSnapshotSource implements DocumentSource {
     public void close() {
         shardEntryCache.clear();
         previousShardEntryCache.clear();
-        liveDocCounts.clear();
-        previousLiveDocCounts.clear();
+        snapshotCounts.clear();
     }
 }

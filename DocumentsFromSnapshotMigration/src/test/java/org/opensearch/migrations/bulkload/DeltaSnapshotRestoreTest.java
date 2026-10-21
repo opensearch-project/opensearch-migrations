@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.List;
-import java.util.OptionalLong;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -239,11 +238,11 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     () -> new RfsContexts.DeltaStreamContext(countsContext, null)).build()) {
                 var partition = source.listPartitions(indexName).get(0);
                 var changes = source.readDocuments(partition, 0).collectList().block();
-                var metrics = MigrationMetrics.Source.fromDocuments(changes);
+                var metrics = MigrationMetrics.Operations.fromDocuments(changes);
                 Assertions.assertEquals(1, metrics.upserts());
                 Assertions.assertEquals(1, metrics.deletes());
-                Assertions.assertEquals(OptionalLong.of(2), source.countLiveDocuments(partition));
-                Assertions.assertEquals(OptionalLong.of(2), source.countPreviousLiveDocuments(partition));
+                Assertions.assertEquals(2, source.snapshotDocumentCounts(partition).orElseThrow().liveDocuments());
+                Assertions.assertEquals(0, source.snapshotDocumentCounts(partition).orElseThrow().nestedDocuments());
                 Assertions.assertTrue(source.requiresOrderedWrites());
             }
 

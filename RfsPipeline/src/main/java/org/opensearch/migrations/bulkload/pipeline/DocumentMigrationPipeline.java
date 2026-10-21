@@ -139,7 +139,7 @@ public class DocumentMigrationPipeline {
                     activeBatches.incrementAndGet();
                     // Preserve the source position before handing the batch to the sink.
                     var lastPosition = batch.get(batch.size() - 1).position();
-                    var sourceMetrics = MigrationMetrics.Source.fromDocuments(batch);
+                    var sourceMetrics = MigrationMetrics.Operations.fromDocuments(batch);
                     return Mono.defer(() -> sink.writeBatch(collectionName, batch))
                         .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
                         .doFinally(s -> activeBatches.decrementAndGet());
@@ -157,7 +157,7 @@ public class DocumentMigrationPipeline {
                             : Math.addExact(previous.nextPosition(), Math.addExact(sourceMetrics.upserts(), sourceMetrics.deletes())),
                         result.docsInBatch(),
                         result.bytesInBatch(),
-                        previous.metrics().plus(new MigrationMetrics(sourceMetrics, result.requests()))
+                        previous.metrics().plus(new MigrationMetrics(sourceMetrics, result.target(), result.requests()))
                     );
                 })
                 .skip(1)
@@ -169,7 +169,7 @@ public class DocumentMigrationPipeline {
     // Sonar flags the compiler-generated record constructor parameters as unused.
     @SuppressWarnings("java:S1172")
     private record CompletedBatch(
-        OptionalLong lastPosition, MigrationMetrics.Source sourceMetrics, BatchResult result
+        OptionalLong lastPosition, MigrationMetrics.Operations sourceMetrics, BatchResult result
     ) {}
 
     /**

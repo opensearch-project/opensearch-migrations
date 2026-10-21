@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
@@ -15,6 +16,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
+import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
@@ -163,6 +165,22 @@ public class SnapshotDocCountTest extends SourceTestBase {
 
             var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(sourceVersion, true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+
+            var extractor = SnapshotExtractor.create(sourceVersion,
+                SnapshotReaderRegistry.getSnapshotReader(sourceVersion, sourceRepo, false), sourceRepo);
+            try (var source = LuceneSnapshotSource.builder(extractor, snapshotName,
+                    Files.createTempDirectory(localDirectory.toPath(), "snapshot-counts")).build()) {
+                long live = 0;
+                long nested = 0;
+                for (var partition : source.listPartitions(NESTED_INDEX)) {
+                    source.readDocuments(partition, 0).blockLast();
+                    var counts = source.snapshotDocumentCounts(partition).orElseThrow();
+                    live += counts.liveDocuments();
+                    nested += counts.nestedDocuments();
+                }
+                Assertions.assertEquals(sourceDocsCount, live);
+                Assertions.assertEquals(expectedChildren, nested);
+            }
 
             var runCounter = new AtomicInteger();
             try (var logs = new CloseableLogSetup(DocumentMigrationBootstrap.class.getName())) {
