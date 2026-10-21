@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate coordinator search hits; optionally verify their prepared S3 exports."""
+"""Aggregate coordinator search hits or Console archives; optionally verify prepared S3 exports."""
 
 import argparse
 from collections import defaultdict
@@ -26,8 +26,10 @@ def committed_records(values):
             if value.get("timed_out") or value.get("_shards", {}).get("failed", 0):
                 raise ValueError("Coordinator search was incomplete")
             hits = value["hits"]["hits"]
-        else:
+        elif "_id" in value:
             hits = [value]
+        else:
+            hits = [{"_id": work_id, "_source": source} for work_id, source in value.items()]
         for hit in hits:
             if hit["_id"] == "shard_setup":
                 continue
@@ -115,7 +117,8 @@ def aggregate(records, expected_shards):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("coordinator", type=Path, nargs="+", help="JSON search responses or NDJSON search hits")
+    parser.add_argument("coordinator", type=Path, nargs="+",
+                        help="JSON search responses, NDJSON hits, or Console archives")
     parser.add_argument("--expected-shards", type=int, required=True, help="Number of migrated source snapshot shards")
     parser.add_argument("--s3-records", type=Path, nargs="*", help="Downloaded JSON/NDJSON files, optionally gzipped")
     args = parser.parse_args()

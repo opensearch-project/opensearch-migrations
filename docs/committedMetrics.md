@@ -88,7 +88,9 @@ Export every search hit from this run's `.migrations_working_state` index (or
 its configured suffix), including `_id`, `_source.completedAt`, and
 `_source.committed_metrics`. Use a scroll search to retrieve all pages, rather
 than relying on the default search size. Keep the first response and subsequent
-scroll responses as JSON files. The helper also accepts NDJSON search hits.
+scroll responses as JSON files. The helper also accepts NDJSON search hits and
+Migration Console working-state archives. Retain an archive before removing the
+coordination index; it preserves the authoritative commits for later S3 verification.
 
 ```sh
 python3 dev-tools/aggregate_committed_metrics.py coordinator-page-*.json \

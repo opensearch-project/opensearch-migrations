@@ -43,6 +43,14 @@ class CommittedMetricsTest(unittest.TestCase):
                 for item in self.records]
         self.assertEqual(self.records, committed_records([*hits, *hits]))
 
+    def test_console_archive_preserves_commits_after_coordinator_cleanup(self):
+        archive = [{"shard_setup": {"completedAt": 1}}]
+        archive.extend({item["workItemId"]: {"completedAt": 1, "committed_metrics": item}}
+                       for item in self.records)
+        restored = committed_records(archive)
+        verify_exports(restored, self.records)
+        self.assertEqual(4, aggregate(restored, 1)[0]["source"]["upserts"])
+
     def test_missing_or_conflicting_export_fails(self):
         with self.assertRaises(ValueError):
             verify_exports(self.records, self.records[:1])
