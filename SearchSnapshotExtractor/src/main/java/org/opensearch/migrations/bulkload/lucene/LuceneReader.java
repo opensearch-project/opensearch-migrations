@@ -53,19 +53,19 @@ public class LuceneReader {
 
     public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
         return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext,
-            useRecoverySource, null);
+            useRecoverySource, null, null);
     }
 
     /**
      * @param snapshotCountsSink receives the shard's document counts once the reader is
      *                         open, before any documents are emitted. May be null.
      */
-    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource, Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource, String nestedPathField, Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
         return Flux.using(
             () -> indexReader.getReader(segmentsFileName),
             reader -> {
                 if (snapshotCountsSink != null) {
-                    snapshotCountsSink.accept(countSnapshotDocuments(reader));
+                    snapshotCountsSink.accept(countSnapshotDocuments(reader, nestedPathField));
                 }
                 return readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource);
             },
@@ -102,7 +102,7 @@ public class LuceneReader {
             .subscribeOn(LUCENE_IO_SCHEDULER);
     }
 
-    public static SnapshotDocumentCounts countSnapshotDocuments(LuceneDirectoryReader reader) {
+    public static SnapshotDocumentCounts countSnapshotDocuments(LuceneDirectoryReader reader, String nestedPathField) {
         long live = 0;
         long nested = 0;
         try {
@@ -110,8 +110,8 @@ public class LuceneReader {
                 var segment = leaf.reader();
                 var liveDocs = segment.getLiveDocs();
                 live += liveDocs == null ? segment.maxDoc() : liveDocs.cardinality();
-                nested += segment.countLiveDocumentsWithTermPrefix("_nested_path", "")
-                    + segment.countLiveDocumentsWithTermPrefix("_type", "__");
+                nested += segment.countLiveDocumentsWithTermPrefix(nestedPathField,
+                    "_type".equals(nestedPathField) ? "__" : "");
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Unable to count snapshot documents", e);

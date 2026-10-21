@@ -13,6 +13,7 @@ import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
@@ -30,6 +31,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -47,6 +49,35 @@ public class SnapshotDocCountTest extends SourceTestBase {
 
     @TempDir
     private File localDirectory;
+
+    @Test
+    @SneakyThrows
+    void legacyUserFieldIsNotNestedMetadata() {
+        try (var cluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)) {
+            cluster.start();
+            var operations = new ClusterOperations(cluster);
+            operations.createIndex("legacy", "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{\"properties\":{\"_nested_path\":{\"type\":\"keyword\"}}}}");
+            operations.createDocument("legacy", "root", "{\"_nested_path\":\"ordinary user data\"}");
+            operations.refresh("legacy");
+            var client = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                .host(cluster.getUrl()).insecure(true).build().toConnectionContext()).determineVersionAndCreate();
+            var creator = new SnapshotCreator("legacy-snapshot", "legacy-repo", client,
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
+                SnapshotTestContext.factory().noOtelTracking().createSnapshotCreateContext());
+            SnapshotRunner.runAndWaitForCompletion(creator);
+            cluster.copySnapshotData(localDirectory.toString());
+            var extractor = SnapshotExtractor.forLocalSnapshot(
+                localDirectory.toPath(), cluster.getContainerVersion().getVersion());
+            try (var source = LuceneSnapshotSource.builder(extractor, "legacy-snapshot",
+                    Files.createTempDirectory(localDirectory.toPath(), "counts")).build()) {
+                var partition = source.listPartitions("legacy").get(0);
+                Assertions.assertEquals(1, source.readDocuments(partition, 0).count().block());
+                Assertions.assertEquals(new SnapshotDocumentCounts(1, 0, 0),
+                    source.snapshotDocumentCounts(partition).orElseThrow());
+            }
+        }
+    }
 
     private static Stream<Arguments> scenarios() {
         return Stream.of(

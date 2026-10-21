@@ -34,7 +34,7 @@ class SnapshotDocumentCountsTest {
         when(leaf.countLiveDocumentsWithTermPrefix("_nested_path", "")).thenThrow(failure);
 
         var thrown = assertThrows(UncheckedIOException.class,
-            () -> LuceneReader.streamDocumentChanges(index, "segments_1", 0, null, false,
+            () -> LuceneReader.streamDocumentChanges(index, "segments_1", 0, null, false, "_nested_path",
                 counts -> { throw new AssertionError("Must not publish partial counts"); }).blockLast());
 
         assertSame(failure, thrown.getCause());
@@ -56,12 +56,14 @@ class SnapshotDocumentCountsTest {
             writer.commit();
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_5.DirectoryReader5(
                     shadow.lucene5.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(5, 3, 0), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(5, 2, 0), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(5, 1, 0), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
             writer.deleteDocuments(new shadow.lucene5.org.apache.lucene.index.Term("_type", "__deleted"));
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_5.DirectoryReader5(
                     shadow.lucene5.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(4, 2, 1), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
         }
     }
@@ -85,12 +87,14 @@ class SnapshotDocumentCountsTest {
             writer.commit();
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_6.DirectoryReader6(
                     shadow.lucene6.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(5, 3, 0), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(5, 2, 0), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(5, 1, 0), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
             writer.deleteDocuments(new shadow.lucene6.org.apache.lucene.index.Term("_type", "__deleted"));
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_6.DirectoryReader6(
                     shadow.lucene6.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(4, 2, 1), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
         }
     }
@@ -114,12 +118,14 @@ class SnapshotDocumentCountsTest {
             writer.commit();
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_7.DirectoryReader7(
                     shadow.lucene7.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(5, 3, 0), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(5, 2, 0), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(5, 1, 0), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
             writer.deleteDocuments(new shadow.lucene7.org.apache.lucene.index.Term("_type", "__deleted"));
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_7.DirectoryReader7(
                     shadow.lucene7.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(4, 2, 1), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
         }
     }
@@ -143,12 +149,14 @@ class SnapshotDocumentCountsTest {
             writer.commit();
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_9.DirectoryReader9(
                     shadow.lucene9.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(5, 3, 0), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(5, 2, 0), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(5, 1, 0), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
             writer.deleteDocuments(new shadow.lucene9.org.apache.lucene.index.Term("_type", "__deleted"));
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_9.DirectoryReader9(
                     shadow.lucene9.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(4, 2, 1), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
         }
     }
@@ -172,12 +180,14 @@ class SnapshotDocumentCountsTest {
             writer.commit();
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_10.DirectoryReader10(
                     shadow.lucene10.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(5, 3, 0), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(5, 2, 0), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(5, 1, 0), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
             writer.deleteDocuments(new shadow.lucene10.org.apache.lucene.index.Term("_type", "__deleted"));
             try (var reader = new org.opensearch.migrations.bulkload.lucene.version_10.DirectoryReader10(
                     shadow.lucene10.org.apache.lucene.index.DirectoryReader.open(writer), directory)) {
-                assertEquals(new SnapshotDocumentCounts(4, 2, 1), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_type"));
+                assertEquals(new SnapshotDocumentCounts(4, 1, 1), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
         }
     }
@@ -205,7 +215,7 @@ class SnapshotDocumentCountsTest {
                     new shadow.lucene9.org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper(
                         shadow.lucene9.org.apache.lucene.index.DirectoryReader.open(writer), "_soft_deletes"), directory)) {
                 assertEquals(1, reader.maxDoc());
-                assertEquals(new SnapshotDocumentCounts(1, 0, 1), LuceneReader.countSnapshotDocuments(reader));
+                assertEquals(new SnapshotDocumentCounts(1, 0, 1), LuceneReader.countSnapshotDocuments(reader, "_nested_path"));
             }
         }
     }

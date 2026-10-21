@@ -52,6 +52,8 @@ import reactor.core.publisher.Flux;
 @Slf4j
 public class SnapshotExtractor {
 
+    private static final int OPENSEARCH_VERSION_MASK = 0x08000000;
+
     @Getter
     private final Version version;
     private final ClusterSnapshotReader snapshotReader;
@@ -191,7 +193,21 @@ public class SnapshotExtractor {
         // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource, snapshotCountsSink);
+        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx,
+            mappingContext, useRecoverySource, snapshotCountsSink == null ? null : nestedPathField(shard),
+            snapshotCountsSink);
+    }
+
+    private String nestedPathField(ShardEntry shard) {
+        var settings = snapshotReader.getIndexMetadata().fromRepo(shard.snapshotName(), shard.indexName()).getSettings();
+        return nestedPathField(settings.path("index").path("version").path("created").asInt());
+    }
+
+    static String nestedPathField(int indexCreationVersion) {
+        boolean modern = indexCreationVersion >= OPENSEARCH_VERSION_MASK
+            ? (indexCreationVersion ^ OPENSEARCH_VERSION_MASK) >= 2_00_00_99
+            : indexCreationVersion >= 8_00_00_99;
+        return modern ? "_nested_path" : "_type";
     }
 
     /**
@@ -213,7 +229,7 @@ public class SnapshotExtractor {
         Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
     ) {
         return readDeltaDocuments(currentShard, previousShard, deltaMode, workDir, deltaContextFactory,
-            current -> {});
+            null);
     }
 
     public Flux<LuceneDocumentChange> readDeltaDocuments(
@@ -258,7 +274,9 @@ public class SnapshotExtractor {
 
         DeltaLuceneReader.DeltaResult deltaResult;
         try (var deltaContext = deltaContextFactory.get()) {
-            snapshotCounts.accept(LuceneReader.countSnapshotDocuments(currentReader));
+            if (snapshotCounts != null) {
+                snapshotCounts.accept(LuceneReader.countSnapshotDocuments(currentReader, nestedPathField(currentShard)));
+            }
             deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
                 previousReader, currentReader, 0, deltaContext);
         } catch (RuntimeException | Error e) {
