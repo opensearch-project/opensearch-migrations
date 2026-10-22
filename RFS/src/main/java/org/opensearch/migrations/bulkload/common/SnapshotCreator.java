@@ -114,20 +114,8 @@ public class SnapshotCreator {
             }
             case RepoUri.AzureRepoUri a -> {
                 var azureUri = a.azureUri();
-                // repository-azure calls its bucket "container", hence the sibling helper.
                 putContainerSettings(settings, azureUri.containerName, azureUri.key);
-                // Same rule as the repository-gcs arm above: repository-azure exposes no
-                // repository-level "endpoint" setting, so an emulator endpoint (Azurite)
-                // cannot be forwarded here and is intentionally dropped.
-                //
-                // The storage account is intentionally not forwarded either. In
-                // repository-azure the "client" setting falls back to the deprecated
-                // "account" setting, and both name a keystore client alias resolved as
-                // azure.client.<client>.account, not a storage account name. Emitting
-                // azureUri.accountName in either field would name a client that does not
-                // exist on the cluster. The account segment of the URI serves the reader
-                // side (AzureRepo); a writing cluster resolves its account from its own
-                // keystore.
+                // Neither the endpoint nor the storage account is forwarded: both are cluster-side client settings.
                 body.put("type", "azure");
             }
         }
@@ -136,24 +124,16 @@ public class SnapshotCreator {
         return body;
     }
 
-    /** repository-s3 and repository-gcs both key the container by "bucket". */
     private void putBucketSettings(ObjectNode settings, String bucket, String key) {
         settings.put("bucket", bucket);
         putCommonBlobSettings(settings, key);
     }
 
-    /** repository-azure keys the container by "container", so it cannot share the above. */
     private void putContainerSettings(ObjectNode settings, String container, String key) {
         settings.put("container", container);
         putCommonBlobSettings(settings, key);
     }
 
-    /**
-     * Settings every blob-store repository type spells identically. Deliberately does NOT take
-     * the container-name key as a parameter: keeping "bucket" and "container" as literals in the
-     * two named methods above means the compiler and the reader both know which provider a call
-     * is for, where a key-name argument would be an unchecked magic string at each call site.
-     */
     private void putCommonBlobSettings(ObjectNode settings, String basePath) {
         if (basePath != null && !basePath.isEmpty()) {
             settings.put("base_path", basePath);

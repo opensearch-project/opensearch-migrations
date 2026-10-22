@@ -47,10 +47,6 @@ FROM_SNAPSHOT_SCHEMA = {
                 'endpoint': {'type': 'string', 'required': False},
             }
         },
-        # Azure Blob Storage. This block reads an existing repository, so an endpoint here is
-        # forwarded to MetadataMigration's reader (for example an Azurite emulator holding an
-        # imported snapshot). It is independent of snapshot creation, which registers the
-        # repository on the cluster and has no repository-level endpoint setting for azure.
         "azure": {
             'type': 'dict',
             "required": False,
@@ -151,9 +147,6 @@ class Metadata:
         logger.info("Metadata migration configuration defined")
 
     def _init_from_snapshot_object(self, snapshot: Optional[Snapshot]) -> None:
-        # Extracted from __init__ to keep its cognitive complexity under the limit; adding the
-        # azure arm pushed it over. No behaviour change, including the absent else: a snapshot
-        # type with no arm here leaves the snapshot fields unset, exactly as before.
         if isinstance(snapshot, S3Snapshot):
             self._init_from_s3_snapshot(snapshot)
         elif isinstance(snapshot, FileSystemSnapshot):
@@ -188,8 +181,6 @@ class Metadata:
             self._gcs_uri = from_snapshot["gcs"]["repo_uri"]
             self._gcs_endpoint = from_snapshot["gcs"].get("endpoint")
         else:
-            # gcs used to be the fall-through here, so a location this branch did not know about
-            # failed with a KeyError naming gcs. Name the real location instead.
             raise ValueError(f"Unsupported snapshot location: {self._snapshot_location}")
 
     def _init_from_s3_snapshot(self, snapshot: S3Snapshot) -> None:
@@ -339,9 +330,6 @@ class Metadata:
         return version
 
     def _add_snapshot_location_args(self, command_args: Dict[str, Any]) -> None:
-        # Extracted from migrate_or_evaluate to keep its cognitive complexity under the limit;
-        # adding the azure arm pushed it over. No behaviour change, including the absent else:
-        # an unrecognised location contributes no repo arguments, exactly as before.
         if self._snapshot_location == 's3':
             self._add_s3_args(command_args=command_args)
         elif self._snapshot_location == 'gcs':

@@ -78,10 +78,6 @@ SNAPSHOT_SCHEMA = {
                     'endpoint': {'type': 'string', 'required': False, 'empty': True},
                 }
             },
-            # Azure Blob Storage. Deliberately has no 'endpoint' field: creating a snapshot
-            # registers the repository on the source cluster, and repository-azure has no
-            # repository-level endpoint setting, so an endpoint here would be silently
-            # dropped. Do not add one for symmetry with s3/gcs.
             'azure': {
                 'type': 'dict',
                 'nullable': True,
@@ -456,8 +452,6 @@ class GcsSnapshot(Snapshot):
 class AzureSnapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         super().__init__(config, source_cluster)
-        # Repo URI form: azure://<account>/<container>/<path>
-        # There is intentionally no endpoint attribute; see SNAPSHOT_SCHEMA.
         self.azure_repo_uri = config['azure']['repo_uri']
 
     def create(self, *args, **kwargs) -> str:
@@ -1267,10 +1261,7 @@ class AzureSnapshotSource(SnapshotSource):
     uri: str
 
 
-# Tagged on `type` rather than left as a bare union. AzureSnapshotSource and GcsSnapshotSource
-# declare the same fields, so an untagged union resolves both to whichever member comes first,
-# and an azure payload would deserialize as GcsSnapshotSource. The members were structurally
-# distinguishable before azure existed, which is why the bare union worked until now.
+# Tagged because Azure and GCS sources share fields; untagged, an azure payload parses as GCS.
 SnapshotType: TypeAlias = Annotated[
     FileSystemSnapshotSource | S3SnapshotSource | GcsSnapshotSource | AzureSnapshotSource,
     Field(discriminator="type"),
