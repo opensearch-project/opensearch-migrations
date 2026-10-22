@@ -10,10 +10,12 @@ The per-account endpoint only works with NextGen collections, which are created 
 and can be search or vector search collections. Classic collections, including all time series collections, only
 have per-collection endpoints, so each one still needs its own target.
 
-Collection routing applies to metadata migration and document backfill. Traffic replay doesn't support it yet,
-so a replayer can't point at a collection-routed target. The migration console's cluster commands, such as
-`connection-check` and `cat-indices`, don't send the collection header either, so they don't work against a
-collection-routed target.
+Collection routing applies to metadata migration and document backfill. Traffic replay to a collection-routed
+target would need a custom transformation that adds the `x-amz-aoss-collection-name` header to each request, and a
+request that spans indices in different collections, such as a mixed `_bulk`, can't be routed that way. The
+workflow configuration doesn't allow a replayer to point at a collection-routed target yet. The migration console's
+cluster commands, such as `connection-check` and `cat-indices`, don't send the collection header either, so they
+don't work against a collection-routed target.
 
 ## Configuration
 
