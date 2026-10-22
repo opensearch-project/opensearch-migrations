@@ -29,7 +29,7 @@ import time
 from typing import List, Optional
 
 from console_link.models.command_result import CommandResult
-from console_link.models.kafka import Kafka, ScramKafka, MSK
+from console_link.models.kafka import Kafka, ScramKafka, TlsKafka, MSK
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +72,10 @@ def _derive_cluster_name(kafka: Kafka) -> Optional[str]:
     which is the most reliable signal. Otherwise fall back to the bootstrap
     host prefix `<cluster>-kafka-bootstrap...`.
     """
-    if isinstance(kafka, ScramKafka) and kafka.username.endswith("-migration-app"):
-        return kafka.username[: -len("-migration-app")]
+    if isinstance(kafka, ScramKafka):
+        username = getattr(kafka, "username", "")
+        if not isinstance(kafka, TlsKafka) and username.endswith("-migration-app"):
+            return username[: -len("-migration-app")]
     brokers = kafka.brokers or ""
     host = brokers.split(",")[0].split(":")[0]
     marker = "-kafka-bootstrap"
@@ -154,7 +156,11 @@ def _build_dump_args(
         "--kafka-traffic-brokers", kafka.brokers,
         "--kafka-traffic-topic", topic,
     ]
-    if isinstance(kafka, ScramKafka):
+    if isinstance(kafka, TlsKafka):
+        args += ["--kafkaAuthType", "ssl"]
+        if auth_configmap_mounted:
+            args += ["--kafka-traffic-property-file", KAFKA_AUTH_CONFIG_FILE_PATH]
+    elif isinstance(kafka, ScramKafka):
         args += ["--kafkaAuthType", "scram-sha-512", "--kafkaUserName", kafka.username]
         if auth_configmap_mounted:
             args += ["--kafka-traffic-property-file", KAFKA_AUTH_CONFIG_FILE_PATH]
@@ -173,27 +179,27 @@ def _build_dump_args(
     return args
 
 
-def _build_scram_pod_extras(
+def _build_kafka_tls_pod_extras(
     is_scram: bool,
+    uses_tls: bool,
     cluster_name: Optional[str],
+    ca_secret_name: Optional[str],
     mount_auth: bool,
     kafka_auth_configmap: Optional[str],
 ) -> tuple:
-    """Build (env, volumes, volume_mounts) for the dump pod's SCRAM wiring.
+    """Build (env, volumes, volume_mounts) for the dump pod's Kafka TLS wiring.
 
-    Returns empty lists for non-SCRAM auth. The SCRAM password is injected by k8s
-    from the same Secret the replayer uses (secretKeyRef) — never handled by the
-    console or placed in argv. The CA cert + client.properties are mounted from the
-    workflow's existing kafka-auth ConfigMap / cluster-ca-cert Secret.
+    The SCRAM password is injected by k8s from the same Secret the replayer uses
+    (secretKeyRef). TLS-only mode mounts the property file and CA without a password.
     """
     env: List[dict] = []
     volumes: List[dict] = []
     volume_mounts: List[dict] = []
-    if not is_scram:
+    if not uses_tls:
         return env, volumes, volume_mounts
 
-    scram_secret = f"{cluster_name}-migration-app" if cluster_name else None
-    if scram_secret:
+    scram_secret = f"{cluster_name}-migration-app" if is_scram and cluster_name else None
+    if is_scram and scram_secret:
         env.append({
             "name": SCRAM_PASSWORD_ENV_VAR,
             "valueFrom": {"secretKeyRef": {"name": scram_secret, "key": "password"}},
@@ -207,7 +213,7 @@ def _build_scram_pod_extras(
         "mountPath": KAFKA_AUTH_CONFIG_MOUNT_PATH,
         "readOnly": True,
     })
-    ca_secret = f"{cluster_name}-cluster-ca-cert" if cluster_name else None
+    ca_secret = ca_secret_name or (f"{cluster_name}-cluster-ca-cert" if cluster_name else None)
     if ca_secret:
         volumes.append({"name": "kafka-ca", "secret": {"secretName": ca_secret}})
         volume_mounts.append({
@@ -238,8 +244,10 @@ def build_dump_pod_manifest(
     for `kubectl apply -f -`). Pure function — no cluster calls — so it is
     directly unit-testable.
     """
-    is_scram = isinstance(kafka, ScramKafka)
-    mount_auth = bool(is_scram and kafka_auth_configmap)
+    is_tls_only = isinstance(kafka, TlsKafka)
+    is_scram = isinstance(kafka, ScramKafka) and not is_tls_only
+    uses_tls = is_scram or is_tls_only
+    mount_auth = bool(uses_tls and kafka_auth_configmap)
 
     container = {
         "name": "kafka-dump",
@@ -252,8 +260,14 @@ def build_dump_pod_manifest(
         ),
     }
 
-    env, volumes, volume_mounts = _build_scram_pod_extras(
-        is_scram, cluster_name, mount_auth, kafka_auth_configmap)
+    env, volumes, volume_mounts = _build_kafka_tls_pod_extras(
+        is_scram,
+        uses_tls,
+        cluster_name,
+        getattr(kafka, "ca_secret_name", None),
+        mount_auth,
+        kafka_auth_configmap,
+    )
 
     if volume_mounts:
         container["volumeMounts"] = volume_mounts
@@ -317,7 +331,7 @@ def launch_dump_pod(
     kafka_auth_configmap = None
     if isinstance(kafka, ScramKafka):
         kafka_auth_configmap = _discover_kafka_auth_configmap(k8s_client, namespace)
-        if not cluster_name:
+        if not isinstance(kafka, TlsKafka) and not cluster_name:
             raise KafkaDumpError(
                 "Could not determine the Kafka cluster name for SCRAM auth "
                 f"(username='{kafka.username}', brokers='{kafka.brokers}')."

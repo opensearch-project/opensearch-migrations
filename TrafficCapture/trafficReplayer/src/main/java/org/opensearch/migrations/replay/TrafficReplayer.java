@@ -80,6 +80,7 @@ public class TrafficReplayer {
     public static final String SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG = "--sigv4-auth-header-service-region";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     public static final String KAFKA_AUTH_TYPE_NONE = "none";
+    public static final String KAFKA_AUTH_TYPE_SSL = "ssl";
     public static final String KAFKA_AUTH_TYPE_MSK_IAM = "msk-iam";
     public static final String KAFKA_AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
     private static final String MODE_REPLAY = "replay";
@@ -395,7 +396,7 @@ public class TrafficReplayer {
             required = false,
             names = { "--kafkaAuthType", "--kafka-traffic-auth-type", "--kafkaTrafficAuthType" },
             arity = 1,
-            description = "Kafka client auth mode. Supported values: none, msk-iam, scram-sha-512")
+            description = "Kafka client auth mode. Supported values: none, ssl, msk-iam, scram-sha-512")
         String kafkaTrafficAuthType;
         @Parameter(
             required = false,
@@ -515,6 +516,7 @@ public class TrafficReplayer {
                     );
                 }
                 if (!KAFKA_AUTH_TYPE_NONE.equals(kafkaTrafficAuthType)
+                    && !KAFKA_AUTH_TYPE_SSL.equals(kafkaTrafficAuthType)
                     && !KAFKA_AUTH_TYPE_MSK_IAM.equals(kafkaTrafficAuthType)
                     && !KAFKA_AUTH_TYPE_SCRAM_SHA_512.equals(kafkaTrafficAuthType)) {
                     throw new ParameterException("Unsupported --kafkaAuthType value: " + kafkaTrafficAuthType);

@@ -416,6 +416,15 @@ class ConsoleResourceCatalog:
             runtime.setdefault("namespace", self.namespace)
         if runtime.get("type") == "direct":
             client_config = dict(runtime["clientConfig"])
+            if "tls" in client_config and runtime.get("caSecretName"):
+                ca_cert_path = _resolve_kafka_ca_certificate(
+                    ca_secret=runtime["caSecretName"],
+                    namespace=runtime.get("namespace"),
+                )
+                client_config["tls"] = {"ca_cert_path": ca_cert_path}
+                kafka = get_kafka(client_config)
+                kafka.ca_secret_name = runtime["caSecretName"]
+                return kafka
             if "scram" in client_config and runtime.get("secretName"):
                 password, ca_cert_path = _resolve_strimzi_scram_credentials(
                     username_secret=runtime["secretName"],
@@ -574,16 +583,25 @@ def _resolve_strimzi_scram_credentials(
     ca_cert_path = None
     if ca_secret:
         try:
-            ca = v1.read_namespaced_secret(name=ca_secret, namespace=namespace)
-            ca_crt_b64 = ca.data.get("ca.crt")
-            if ca_crt_b64:
-                ca_crt = base64.b64decode(ca_crt_b64).decode("utf-8")
-                fd, ca_cert_path = tempfile.mkstemp(prefix="kafka-ca-", suffix=".crt")
-                with os.fdopen(fd, "w") as f:
-                    f.write(ca_crt)
+            ca_cert_path = _resolve_kafka_ca_certificate(ca_secret, namespace)
         except Exception:
             logger.warning("Could not read Kafka CA certificate secret; continuing without a CA certificate")
     return password, ca_cert_path
+
+
+def _resolve_kafka_ca_certificate(ca_secret: str, namespace: Optional[str] = None) -> str:
+    load_k8s_config()
+    namespace = namespace or get_current_namespace()
+    v1 = client.CoreV1Api()
+    ca = v1.read_namespaced_secret(name=ca_secret, namespace=namespace)
+    ca_crt_b64 = (ca.data or {}).get("ca.crt")
+    if not ca_crt_b64:
+        raise ValueError(f"Secret '{ca_secret}' in namespace '{namespace}' has no 'ca.crt' key")
+    ca_crt = base64.b64decode(ca_crt_b64).decode("utf-8")
+    fd, ca_cert_path = tempfile.mkstemp(prefix="kafka-ca-", suffix=".crt")
+    with os.fdopen(fd, "w") as f:
+        f.write(ca_crt)
+    return ca_cert_path
 
 
 def _list_custom_objects(custom: client.CustomObjectsApi, namespace: str, plural: str) -> List[Dict]:

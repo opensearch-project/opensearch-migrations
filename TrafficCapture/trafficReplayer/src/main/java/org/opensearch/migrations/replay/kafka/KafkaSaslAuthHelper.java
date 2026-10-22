@@ -7,20 +7,24 @@ import java.util.Properties;
  * Duplicated from KafkaConfig.applySaslAuthProperties to avoid a cross-module dependency.
  */
 class KafkaSaslAuthHelper {
+    static final String AUTH_TYPE_SSL = "ssl";
     static final String AUTH_TYPE_MSK_IAM = "msk-iam";
     static final String AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
+    private static final String SECURITY_PROTOCOL_PROPERTY = "security.protocol";
 
     private KafkaSaslAuthHelper() {}
 
     static void applySaslAuthProperties(Properties props, String authType, String kafkaUserName, String kafkaPassword) {
-        if (AUTH_TYPE_MSK_IAM.equals(authType)) {
-            props.setProperty("security.protocol", "SASL_SSL");
+        if (AUTH_TYPE_SSL.equals(authType)) {
+            props.setProperty(SECURITY_PROTOCOL_PROPERTY, "SSL");
+        } else if (AUTH_TYPE_MSK_IAM.equals(authType)) {
+            props.setProperty(SECURITY_PROTOCOL_PROPERTY, "SASL_SSL");
             props.setProperty("sasl.mechanism", "AWS_MSK_IAM");
             props.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
             props.setProperty("sasl.client.callback.handler.class",
                     "software.amazon.msk.auth.iam.IAMClientCallbackHandler");
         } else if (AUTH_TYPE_SCRAM_SHA_512.equals(authType)) {
-            props.setProperty("security.protocol", "SASL_SSL");
+            props.setProperty(SECURITY_PROTOCOL_PROPERTY, "SASL_SSL");
             props.setProperty("sasl.mechanism", "SCRAM-SHA-512");
             if (kafkaUserName != null && kafkaPassword != null) {
                 props.setProperty("sasl.jaas.config",

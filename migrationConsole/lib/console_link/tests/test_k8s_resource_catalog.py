@@ -413,3 +413,37 @@ def test_direct_scram_kafka_uses_secret_metadata(monkeypatch):
     assert kafka.password == "secret-password"
     assert kafka.ca_cert_path == "/tmp/kafka-ca.crt"
     assert calls == [("external-kafka-user", "external-kafka-ca", "ma")]
+
+
+def test_direct_tls_kafka_uses_ca_secret_metadata(monkeypatch):
+    calls = []
+
+    def fake_resolve_ca(ca_secret, namespace=None):
+        calls.append((ca_secret, namespace))
+        return "/tmp/kafka-ca.crt"
+
+    monkeypatch.setattr(
+        "console_link.k8s_resource_catalog._resolve_kafka_ca_certificate",
+        fake_resolve_ca,
+    )
+    catalog = ConsoleResourceCatalog([
+        ConsoleResourceEntry(
+            role=ResourceRole.KAFKA,
+            ref_name="external",
+            aliases=["external"],
+            kafka_runtime={
+                "type": "direct",
+                "clientConfig": {
+                    "broker_endpoints": "broker.example.com:9093",
+                    "tls": {},
+                },
+                "caSecretName": "external-kafka-ca",
+            },
+        ),
+    ], namespace="ma")
+
+    kafka = catalog.resolve_kafka("external")
+
+    assert kafka.ca_cert_path == "/tmp/kafka-ca.crt"
+    assert kafka.ca_secret_name == "external-kafka-ca"
+    assert calls == [("external-kafka-ca", "ma")]

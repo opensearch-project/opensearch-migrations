@@ -149,6 +149,7 @@ function directKafkaClientConfig(kafkaConfig: KafkaClientConfig): Record<string,
         broker_endpoints: kafkaConfig.kafkaConnection,
         ...(kafkaConfig.enableMSKAuth ? {msk: null} : {}),
         ...(!kafkaConfig.enableMSKAuth && kafkaConfig.authType === "none" ? {standard: null} : {}),
+        ...(!kafkaConfig.enableMSKAuth && kafkaConfig.authType === "ssl" ? {tls: {}} : {}),
         ...(!kafkaConfig.enableMSKAuth && kafkaConfig.authType === "scram-sha-512" ? {
             scram: withDefinedValues({
                 username: kafkaConfig.kafkaUserName || undefined,

@@ -37,6 +37,8 @@ spec:
         value: "1"
       - name: otel-trace-collector-endpoint
         value: ""
+      - name: kafka-cluster-config
+        value: "{}"
 
   templates:
     - name: main
@@ -101,6 +103,8 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                 - name: otel-trace-collector-endpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
+                - name: kafka-cluster-config
+                  value: "{{workflow.parameters.kafka-cluster-config}}"
 
         - - name: run-full-migration-with-workflow-cli
             templateRef:
@@ -129,6 +133,7 @@ spec:
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: otel-trace-collector-endpoint
+          - name: kafka-cluster-config
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -147,6 +152,7 @@ spec:
             REPLAYER_CONFIG_OVERRIDES='{{workflow.parameters.replayer-config-overrides}}'
             CAPTURE_PROXY_CONFIG_OVERRIDES='{{workflow.parameters.capture-proxy-config-overrides}}'
             KAFKA_NODE_POOL_SPEC_OVERRIDES='{{workflow.parameters.kafka-node-pool-spec-overrides}}'
+            KAFKA_CLUSTER_CONFIG='{{inputs.parameters.kafka-cluster-config}}'
 
             # Transform source cluster config (same field renames as fullMigrationImportedClusters)
             SOURCE_CLUSTER=$(echo "$SOURCE_CONFIGS" | jq '
@@ -182,25 +188,32 @@ spec:
               --argjson replayerPodReplicas '{{workflow.parameters.replayer-pod-replicas}}' \
               --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
               --argjson captureProxyOverrides "$CAPTURE_PROXY_CONFIG_OVERRIDES" \
+              --argjson kafkaClusterConfig "$KAFKA_CLUSTER_CONFIG" \
               '{
                 "skipApprovals": true,
                 "sourceClusters": { "source1": $source },
                 "targetClusters": { "target1": $target },
                 "snapshotMigrationConfigs": [],
-                "kafkaClusterConfiguration": {
-                  "default": {
-                    "autoCreate": {
-                      "nodePoolSpecOverrides": (
-                        $kafkaNodePoolSpecOverrides + {
-                          "replicas": $kafkaBrokerReplicas
+                "kafkaClusterConfiguration": (
+                  if ($kafkaClusterConfig | length) > 0 then
+                    $kafkaClusterConfig
+                  else
+                    {
+                      "default": {
+                        "autoCreate": {
+                          "nodePoolSpecOverrides": (
+                            $kafkaNodePoolSpecOverrides + {
+                              "replicas": $kafkaBrokerReplicas
+                            }
+                          ),
+                          "topicSpecOverrides": {
+                            "partitions": $trafficTopicPartitions
+                          }
                         }
-                      ),
-                      "topicSpecOverrides": {
-                        "partitions": $trafficTopicPartitions
                       }
                     }
-                  }
-                },
+                  end
+                ),
                 "traffic": {
                   "proxies": {
                     "capture-proxy": {

@@ -48,6 +48,13 @@ SCRAM_SCHEMA = {
     },
 }
 
+TLS_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "ca_cert_path": {"type": "string", "required": True},
+    },
+}
+
 SCHEMA = {
     'kafka': {
         'type': 'dict',
@@ -56,8 +63,9 @@ SCHEMA = {
             'msk': MSK_SCHEMA,
             'standard': STANDARD_SCHEMA,
             'scram': SCRAM_SCHEMA,
+            'tls': TLS_SCHEMA,
         },
-        'check_with': contains_one_of({'msk', 'standard', 'scram'})
+        'check_with': contains_one_of({'msk', 'standard', 'scram', 'tls'})
     }
 }
 
@@ -510,3 +518,29 @@ class ScramKafka(Kafka):
             os.unlink(self._props_file)
         except (OSError, AttributeError):
             pass
+
+
+class TlsKafka(ScramKafka):
+    """
+    TLS-encrypted Kafka implementation without SASL authentication.
+
+    It reuses ScramKafka's command-config plumbing, but its generated properties
+    file contains only the TLS transport and truststore settings.
+    """
+
+    def __init__(self, config):
+        Kafka.__init__(self, config)
+        tls_config = config['tls']
+        self.ca_cert_path = tls_config['ca_cert_path']
+        self._props_file = self._write_properties_file()
+
+    def _write_properties_file(self) -> str:
+        lines = [
+            'security.protocol=SSL',
+            'ssl.truststore.type=PEM',
+            f'ssl.truststore.location={self.ca_cert_path}',
+        ]
+        fd, path = tempfile.mkstemp(prefix='kafka-tls-', suffix='.properties')
+        with os.fdopen(fd, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        return path

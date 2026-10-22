@@ -697,6 +697,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "enum": [
                         "none",
+                        "ssl",
                         "scram-sha-512"
                       ],
                       "default": "none"
@@ -710,6 +711,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": ""
                     },
                     "kafkaUserName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "producerClientProperties": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "consumerClientProperties": {
                       "type": "string",
                       "default": ""
                     },
@@ -1411,6 +1420,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "enum": [
                         "none",
+                        "ssl",
                         "scram-sha-512"
                       ],
                       "default": "none"
@@ -1424,6 +1434,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": ""
                     },
                     "kafkaUserName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "producerClientProperties": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "consumerClientProperties": {
                       "type": "string",
                       "default": ""
                     },
@@ -2920,6 +2938,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "enum": [
                         "none",
+                        "ssl",
                         "scram-sha-512"
                       ],
                       "default": "none"
@@ -2933,6 +2952,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": ""
                     },
                     "kafkaUserName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "producerClientProperties": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "consumerClientProperties": {
                       "type": "string",
                       "default": ""
                     },
@@ -3593,6 +3620,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": {
                             "type": "string",
                             "enum": [
+                              "ssl"
+                            ]
+                          },
+                          "caSecretName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "caSecretName"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
                               "scram-sha-512"
                             ]
                           },
@@ -3619,6 +3665,47 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": {
                       "type": "none"
                     }
+                  },
+                  "clientProperties": {
+                    "type": "object",
+                    "properties": {
+                      "producer": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        },
+                        "default": {}
+                      },
+                      "consumer": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        },
+                        "default": {}
+                      }
+                    },
+                    "default": {},
+                    "description": "Flat Kafka producer and consumer Java client properties for externally managed Kafka clusters."
                   }
                 },
                 "required": [
