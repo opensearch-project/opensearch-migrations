@@ -13,6 +13,7 @@ public class IndexMetadataResults {
     private final List<CreationResult> indexes;
     @Singular
     private final List<CreationResult> aliases;
+    private final long skippedIndexes;
 
     public List<CreationResult> getIndexes() {
         return indexes == null ? List.of() : indexes;
@@ -20,5 +21,9 @@ public class IndexMetadataResults {
 
     public List<CreationResult> getAliases() {
         return aliases == null ? List.of() : aliases;
+    }
+
+    public long getSkippedIndexes() {
+        return skippedIndexes;
     }
 }

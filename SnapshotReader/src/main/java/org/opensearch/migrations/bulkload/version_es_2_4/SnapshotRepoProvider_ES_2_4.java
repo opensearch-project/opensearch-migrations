@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -20,6 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
     private SnapshotRepoData_ES_2_4 repoData;
+    private String cachedSnapshotName;
+    private List<SnapshotRepo.Index> cachedIndices;
 
     public SnapshotRepoProvider_ES_2_4(SourceRepo repo) {
         this.repo = repo;
@@ -42,7 +45,15 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
     }
 
     @Override
-    public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+    public synchronized List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
+        if (cachedIndices == null || !Objects.equals(snapshotName, cachedSnapshotName)) {
+            cachedIndices = loadIndicesInSnapshot(snapshotName);
+            cachedSnapshotName = snapshotName;
+        }
+        return cachedIndices;
+    }
+
+    private List<SnapshotRepo.Index> loadIndicesInSnapshot(String snapshotName) {
         Path snapshotMetaFile = repo.getSnapshotMetadataFilePath(snapshotName);
         ObjectMapper smileMapper = new ObjectMapper(ElasticsearchConstants_ES_2_4.SMILE_FACTORY);
 
@@ -81,7 +92,7 @@ public class SnapshotRepoProvider_ES_2_4 implements SnapshotRepo.Provider {
                         .log();
                     result.add(new SimpleIndex(indexName));
                 }
-                return result;
+                return List.copyOf(result);
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to read SMILE snapshot metadata for snapshot=" + snapshotName, e);
