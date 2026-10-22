@@ -162,7 +162,8 @@ pub fn apply_deploy_flags(state: &mut State, args: &[String]) -> DeployFlags {
             "--use-general-node-pool" => state.set("USE_GENERAL_NODE_POOL", "Y"),
             "--disable-general-purpose-pool" => state.set("DISABLE_GENERAL_NODE_POOL", "Y"),
             "--build" => state.set("BUILD_FROM_SOURCE", "Y"),
-            "--skip-test-images" => state.set("SKIP_TEST_IMAGES", "Y"),
+            // Accepted for older callers; EKS builds never include test-only images now.
+            "--skip-test-images" => {}
             "--ignore-checks" => state.set("IGNORE_CHECKS", "Y"),
             "--" => {
                 // Everything after `--` is positional.

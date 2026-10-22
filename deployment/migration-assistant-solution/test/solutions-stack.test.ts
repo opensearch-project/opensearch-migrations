@@ -17,8 +17,9 @@ describe('Solutions stack', () => {
 
     test('ECS stack with new VPC matches snapshot', () => {
         const stack = new SolutionsInfrastructureStack(new App(), 'TestMigrationAssistantStack', defaultProperties);
-        const template = Template.fromStack(stack).toJSON();
-        expect(template).toMatchSnapshot();
+        const template = Template.fromStack(stack);
+        verifyNoAppRegistry(template);
+        expect(template.toJSON()).toMatchSnapshot();
     });
 
     test('ECS stack with import VPC matches snapshot', () => {
@@ -26,7 +27,15 @@ describe('Solutions stack', () => {
             ...defaultProperties,
             createVPC: false
         });
-        const template = Template.fromStack(stack).toJSON();
-        expect(template).toMatchSnapshot();
+        const template = Template.fromStack(stack);
+        verifyNoAppRegistry(template);
+        expect(template.toJSON()).toMatchSnapshot();
     });
+
+    function verifyNoAppRegistry(template: Template) {
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 0);
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::ResourceAssociation', 0);
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::AttributeGroup', 0);
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::AttributeGroupAssociation', 0);
+    }
 });

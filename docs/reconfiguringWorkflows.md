@@ -138,6 +138,26 @@ The important distinction is stage, not whether the next operation happens in th
 * **later convergence steps** = perform the actual infrastructure work if the returned checksum says it is still needed
 * **final status patch** = record that the contract has now been successfully realized
 
+### Runtime gates and the `approve` CLI
+
+The `waitForFix` step blocks on a runtime `ApprovalGate` whose name ends in `.vapretry` (one per
+managed resource, e.g. `kafkacluster.my-cluster.vapretry`). The operator clears it through the
+`workflow approve` CLI, and the gate's subcategory — derived from the VAP denial message —
+selects the command:
+
+| Subcategory | When | Operator action | CLI |
+|---|---|---|---|
+| `change` | denial does **not** contain "Impossible" — a **Gated** field changed | Approve to let the workflow annotate the resource and retry the apply | `workflow approve change <resource>` |
+| `retry` | denial contains "Impossible" — an **Impossible** field changed | Manually reset the resource (e.g. delete & recreate), then approve to retry | `workflow approve retry <resource>` |
+
+`workflow approve change --list` / `--list` for retry enumerate the waiting runtime gates; the
+resource name is accepted with or without the `.vapretry` suffix. Approving a `change` gate
+drives the `patchApproval → resetGate → retryLoop` path above: the approval annotation
+(`migrations.opensearch.org/approved-during-run`) is written onto the resource, the gate is reset
+to `Pending`, and the apply is retried — this time accepted by the VAP. Step gates (the
+non-`.vapretry` milestone checkpoints) are described in
+[MigrationAsAWorkflow.md](MigrationAsAWorkflow.md#blocking-upon-user-approval).
+
 ---
 
 ## Field Classification
@@ -166,6 +186,17 @@ Kafka ──→ Proxy (CapturedTraffic) ──→ DataSnapshot ──→ Snapsho
 ```
 
 Each arrow represents a "waits for" relationship. Downstream waiters check a **per-dependency checksum** on the upstream resource — not a single monolithic hash.
+
+Separately from checksum propagation, each CR records its dependency-graph edges in
+`spec.dependsOn`. The `workflow reset` CLI reads `spec.dependsOn` off the live CRs to build a
+deletion DAG (see [WorkflowCrdDesign.md](WorkflowCrdDesign.md)). This field is written by the
+workflow's `tryApply` step — **not** the initializer — for every resource including the terminal
+`DataSnapshot` and `SnapshotMigration`. Writing it only from `tryApply` keeps `spec.dependsOn`
+reflecting the *established* graph: the initializer must not advertise an edge before the workflow
+has actually wired it up, or a mid-run reset could order deletions around a dependency that does
+not yet exist. For terminal resources the value is derived from the resolved dependency set
+(DataSnapshot: its proxy setups; SnapshotMigration: its DataSnapshot, or none for an
+externally-managed ES/OS snapshot).
 
 #### Schema annotations as the source of truth
 
@@ -279,11 +310,12 @@ The replayer has no downstream dependencies — nothing waits on it. The checksu
 | `spec.otelTraceCollectorEndpoint` | Safe | Trace export config | Yes (rolling) | ❌ |
 | `spec.otelMetricsCollectorEndpoint` | Safe | Metrics export config | Yes (rolling) | ❌ |
 | `spec.speedupFactor` | Safe | Replay rate tuning | Yes (rolling) | ❌ |
-| `spec.lookaheadTimeSeconds` | Safe | Buffer tuning | Yes (rolling) | ❌ |
-| `spec.maxConcurrentRequests` | Safe | Performance tuning | Yes (rolling) | ❌ |
-| `spec.numClientThreads` | Safe | Performance tuning | Yes (rolling) | ❌ |
-| `spec.observedPacketConnectionTimeout` | Safe | Timeout tuning | Yes (rolling) | ❌ |
-| `spec.quiescentPeriodMs` | Safe | Timing tuning | Yes (rolling) | ❌ |
+| `spec.maxConcurrentRequests` | Safe | Maximum simultaneous target HTTP requests | Yes (rolling) | ❌ |
+| `spec.numClientThreads` | Safe | Absolute target event-loop workers; 0 uses Netty's processor-based default | Yes (rolling) | ❌ |
+| `spec.heartbeatExpirationIntervalSeconds` | Safe | Broker-time heartbeat expiration interval `E` | Yes (rolling) | ❌ |
+| `spec.maximumBackwardSkewSeconds` | Safe | Permitted Kafka broker timestamp regression `S` | Yes (rolling) | ❌ |
+| `spec.sourceResponseRetryWindowSeconds` | Safe | Broker-time source-response retry window `W` | Yes (rolling) | ❌ |
+| `spec.readyRequestsBufferPerThread` | Safe | Retry-ready request buffer `P` per target event-loop thread | Yes (rolling) | ❌ |
 | `spec.targetServerResponseTimeoutSeconds` | Safe | Timeout tuning | Yes (rolling) | ❌ |
 | `spec.userAgent` | Safe | Cosmetic | Yes (rolling) | ❌ |
 
@@ -294,6 +326,14 @@ This transitions to `Completed`.
 Lock-on-Complete freezes the entire spec once done.
 All fields here are impossible to edit.  If a user wanted to change a snapshot
 in-progress, they would need to delete the existing snapshot and redrive.
+
+Like the other root-CR reconciles, `reconcileDataSnapshotResource` implements the
+`tryApply → waitForFix → patchApproval → resetGate → retryLoop` recovery loop against a
+`datasnapshot.<name>.vapretry` `ApprovalGate`. DataSnapshot has no `gated` fields today, so
+this loop does not fire during normal reconfiguration; it is the recovery path for a
+VAP-rejected apply (for example, `lock-on-complete` rejecting a re-apply of a `Completed`
+CR after an in-place upgrade, or any future `gated` field). Without it a rejected apply
+would be a silent dead end.
 
 Downstream dependencies that consume the snapshot's checksum:
 - **SnapshotMigration** — waits for the snapshot to be Completed before running metadata migration and/or document backfill
@@ -350,13 +390,16 @@ Migration CRD resources follow a common lifecycle tracked natively in the `.stat
 
 | State | Meaning | Used By |
 | --- | --- | --- |
-| `Initialized` | Placeholder — created by the initialization process but not yet acted upon. | All |
-| `Running` | Work is in progress (deployment rolling out, snapshot copying). | All |
+| `Created` | Placeholder — created by the initialization process but not yet acted upon. | All |
+| `Pending` | Argo is applying work (deployment rolling out, snapshot copying). | All |
 | `Ready` | Infrastructure is healthy, operational, and serving traffic. | **Long-Lived** (Proxy, Kafka) |
 | `Completed` | A finite task has finished successfully. The output is immutable. | **Terminal** (Snapshots) |
+| `Deleting` | `workflow reset` is tearing the resource down; a VAP rejects updates other than deletion bookkeeping (it does not cover the `/status` subresource). | **Long-Lived**, **Terminal** |
 | `Error` | Execution failed. The resource is "poisoned". | All |
 
-Bootstrap placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with only the minimal bootstrap fields needed up front, plus `status.phase: Initialized` and an empty `status.configChecksum`. The workflow's first successful `tryApply` writes the real desired spec contract.
+ApprovalGates have their own lifecycle: `Created`, then `Pending` while waiting for approval, then `Approved`, or `Error`.
+
+Bootstrap placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with only the minimal bootstrap fields needed up front, plus `status.phase: Created` and, except for ApprovalGates, an empty `status.configChecksum`. The workflow's first successful `tryApply` writes the real desired spec contract.
 
 ### The "Fail Forward / Poison Resource" Principle
 
@@ -458,7 +501,7 @@ validations:
 
 ```
 
-*(Note: There is explicitly **no** "Running Guard" in this architecture. Long-lived infrastructure supports native K8s stacked rollouts. If a Proxy is `Running`, the user is free to push a corrective workflow over it immediately, governed purely by the standard Gated/Impossible field checks).*
+*(Note: There is explicitly **no** guard on `Pending` resources in this architecture. Long-lived infrastructure supports native K8s stacked rollouts. If a Proxy is `Pending`, the user is free to push a corrective workflow over it immediately, governed purely by the standard Gated/Impossible field checks).*
 
 ### CRD Upgrade "In-Flight" Handling
 
@@ -503,7 +546,7 @@ If the Kafka cluster config changes, its checksum changes, which cascades throug
 **Runtime flow:**
 
 1. Config processor computes all checksums and includes them in the workflow config
-2. The initializer creates placeholder CRDs with `status.phase: Initialized`, an empty `status.configChecksum`, and only the minimal bootstrap fields needed before the workflow starts
+2. The initializer creates placeholder CRDs with `status.phase: Created`, an empty `status.configChecksum` (except ApprovalGates), and only the minimal bootstrap fields needed before the workflow starts
 3. The initializer also emits helper scripts because CRD status must be patched through the `/status` subresource separately from the initial create/apply
 4. Lifecycle templates only stamp the final success state and the new `status.configChecksum` after the child-resource subtree succeeds
 5. Waiters compare both lifecycle state and checksum for CRDs, and compare Strimzi readiness plus a checksum annotation for Kafka
@@ -581,8 +624,8 @@ the migration-console image; they are not hand-maintained Helm templates.
 
 Each resource is a single CRD with configuration in `.spec` and lifecycle in `.status.phase`. Choose the lifecycle type:
 
-* **Long-lived** (proxy, replayer): phases `[Initialized, Running, Ready, Error]`
-* **Terminal** (snapshot, migration job): phases `[Initialized, Running, Completed, Error]`
+* **Long-lived** (proxy, replayer): phases `[Created, Pending, Ready, Deleting, Error]`
+* **Terminal** (snapshot, migration job): phases `[Created, Pending, Completed, Deleting, Error]`
 
 Include a typed schema for every spec field — don't use `x-kubernetes-preserve-unknown-fields` on the spec root. This enables CEL field-level comparisons in VAPs.
 
@@ -643,7 +686,7 @@ includes the resource in `lock-on-complete-policy`.
 
 ### 5. Add initializer placeholder
 
-In `migrationInitializer.ts`, create the resource with only the minimal bootstrap fields it needs before workflow execution (for example, dependency links or identity fields needed by waiters), plus `status: { phase: "Initialized", configChecksum: "" }`. Do **not** duplicate the full desired spec contract in the initializer; the workflow-owned `tryApply` step is the canonical place that writes the full root spec.
+In `migrationInitializer.ts`, create the resource with only the minimal bootstrap fields it needs before workflow execution (for example, dependency links or identity fields needed by waiters), plus `status: { phase: "Created", configChecksum: "" }`. Do **not** duplicate the full desired spec contract in the initializer; the workflow-owned `tryApply` step is the canonical place that writes the full root spec.
 
 If the resource is a CRD with a status subresource, make sure the initializer also emits the corresponding status patch handling in the generated resource handler script.
 
@@ -718,7 +761,7 @@ Call the lifecycle template from `fullMigration.ts` (or the appropriate orchestr
 Create a test pod in `templates/tests/` modeled on `test-vap-kafka.yaml`. The test should:
 
 1. Create the resource
-2. Apply a spec (should succeed on `Initialized`)
+2. Apply a spec (should succeed on `Created`)
 3. Try an Impossible field change (should fail)
 4. Try a Gated field change without approval (should fail)
 5. Add matching run label + approval annotation, retry the Gated change (should succeed)

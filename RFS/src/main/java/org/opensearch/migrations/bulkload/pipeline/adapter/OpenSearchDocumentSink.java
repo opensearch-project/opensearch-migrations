@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -15,6 +16,7 @@ import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,6 +41,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     private final OpenSearchClient client;
     private final IJsonTransformer transformer;
+    private final List<BulkOperationTransformer> nativeTransformers;
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
@@ -52,6 +55,8 @@ public class OpenSearchDocumentSink implements DocumentSink {
     ) {
         this.client = client;
         this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
+        this.nativeTransformers = this.transformer == null ? List.of()
+            : this.transformer.getNativeStages(BulkOperationTransformer.class).orElse(null);
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
         this.requestContextSupplier = requestContextSupplier;
@@ -95,9 +100,18 @@ public class OpenSearchDocumentSink implements DocumentSink {
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
-        if (transformer == null) {
+        if (nativeTransformers != null && nativeTransformers.isEmpty()) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
             bulkMono = client.sendBulkRequestRaw(collectionName, batch,
+                requestContext, allowServerGeneratedIds, allowlist);
+        } else if (nativeTransformers != null) {
+            var operations = batch.stream()
+                .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
+                .collect(Collectors.toList());
+            for (var nativeTransformer : nativeTransformers) {
+                operations = nativeTransformer.transformOperations(operations);
+            }
+            bulkMono = client.sendBulkRequest(collectionName, operations,
                 requestContext, allowServerGeneratedIds, allowlist);
         } else {
             var bulkOps = batch.stream()
@@ -108,7 +122,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 requestContext, allowServerGeneratedIds, allowlist);
         }
 
-        return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch)));
+        return bulkMono.map(response -> new BatchResult(batch.size(), bytesInBatch, response.target, response.requests));
     }
 
     @SuppressWarnings("unchecked")
@@ -116,15 +130,42 @@ public class OpenSearchDocumentSink implements DocumentSink {
         if (transformer == null) {
             return ops;
         }
+        // Snapshot the original (pre-transformation) document bodies, keyed by document id,
+        // so we can re-attach them to the transformed ops below. The transformer round-trips
+        // ops through Maps (dropping the in-memory originalSource), and may reorder, add, or
+        // drop items, so correlation is by id rather than position.
+        Map<String, Map<String, Object>> originalById = new HashMap<>();
+        for (BulkOperationSpec op : ops) {
+            String id = op.getOriginalSource() != null ? documentIdOf(op) : null;
+            if (id != null) {
+                originalById.putIfAbsent(id, op.getOriginalSource());
+            }
+        }
         var asMaps = ops.stream()
-            .map(op -> OBJECT_MAPPER.convertValue(op, Map.class))
+            .map(op -> op.toTransformerMap(OBJECT_MAPPER))
             .toList();
         var transformed = transformer.transformJson(asMaps);
         if (transformed instanceof List) {
             return ((List<Map<String, Object>>) transformed).stream()
-                .map(item -> OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class))
+                .map(item -> {
+                    BulkOperationSpec op = OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class);
+                    // Re-attach the original source by id. If the transformer changed the id or
+                    // synthesized a new document, no original exists; leave it null and the failed document stream
+                    // will fall back to the transformed document body.
+                    String id = documentIdOf(op);
+                    Map<String, Object> original = id != null ? originalById.get(id) : null;
+                    if (original != null) {
+                        op.setOriginalSource(original);
+                    }
+                    return op;
+                })
                 .collect(Collectors.toList());
         }
         return ops;
+    }
+
+    private static String documentIdOf(BulkOperationSpec op) {
+        var meta = op.getOperation();
+        return meta != null ? meta.getId() : null;
     }
 }

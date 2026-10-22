@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
@@ -33,7 +35,26 @@ public class HttpMessageAndTimestamp {
     }
 
     public static class Response extends HttpMessageAndTimestamp {
+        /**
+         * When the proxy finished writing this response's request to the source, from its request-forwarded
+         * observation; null when that observation didn't arrive before the response completed.
+         */
+        @Getter
+        @Setter
+        private Instant requestForwardedTimestamp;
+
         public Response(Instant firstPacketTimestamp) {
+            super(firstPacketTimestamp);
+        }
+
+        @Override
+        public String toString() {
+            return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.RESPONSE));
+        }
+    }
+
+    public static class InterimResponse extends HttpMessageAndTimestamp {
+        public InterimResponse(Instant firstPacketTimestamp) {
             super(firstPacketTimestamp);
         }
 
@@ -48,6 +69,13 @@ public class HttpMessageAndTimestamp {
     @Getter
     @Setter
     private Instant lastPacketTimestamp;
+    /**
+     * When the first observation carrying this message's own bytes was captured. This differs from
+     * {@link #firstPacketTimestamp} for a final response, whose first packet timestamp is the end of its request
+     * unless the response began before the request ended.
+     */
+    @Getter
+    private Instant firstDataTimestamp;
 
     public final RawPackets packetBytes;
     ByteArrayOutputStream currentSegmentBytes;
@@ -71,6 +99,13 @@ public class HttpMessageAndTimestamp {
 
     public void add(byte[] b) {
         packetBytes.add(b);
+    }
+
+    /** Records {@code timestamp} as {@link #getFirstDataTimestamp()} unless an earlier one was recorded. */
+    public void noteDataTimestamp(Instant timestamp) {
+        if (firstDataTimestamp == null) {
+            firstDataTimestamp = timestamp;
+        }
     }
 
     public Stream<byte[]> stream() {
@@ -106,10 +141,12 @@ public class HttpMessageAndTimestamp {
         }
     }
 
-    public void finalizeRequestSegments(Instant timestamp) {
-        packetBytes.add(currentSegmentBytes.toByteArray());
+    public byte[] finalizeRequestSegments(Instant timestamp) {
+        var finalizedSegment = currentSegmentBytes.toByteArray();
+        packetBytes.add(finalizedSegment);
         this.lastPacketTimestamp = timestamp;
         currentSegmentBytes = null;
+        return finalizedSegment;
     }
 
     @Override

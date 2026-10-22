@@ -37,6 +37,8 @@ STATUS_EXIT_CODE=$?
 set -e
 echo "Status output:"
 echo "$STATUS_OUTPUT"
+mkdir -p /tmp/outputs
+echo "$STATUS_OUTPUT" > /tmp/outputs/monitorResult
 
 if [ $STATUS_EXIT_CODE -ne 0 ]; then
     echo "Failed to get workflow status (exit code: $STATUS_EXIT_CODE), will retry..."
@@ -45,8 +47,6 @@ fi
 
 if echo "$STATUS_OUTPUT" | grep -q "Phase: Succeeded\|Phase: Failed\|Phase: Error"; then
     echo "Workflow is in terminal state"
-    mkdir -p /tmp/outputs
-    echo "$STATUS_OUTPUT" > /tmp/outputs/monitorResult
     exit 0
 fi
 

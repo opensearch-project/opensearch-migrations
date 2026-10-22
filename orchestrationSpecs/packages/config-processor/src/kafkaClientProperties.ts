@@ -11,35 +11,32 @@ type ProtectedKeyReasons = Map<string, string>;
 // Protected keys are owned by the workflow or by the producer/consumer app contract.
 // They are protected by rejecting user-provided file entries during config processing,
 // before the rendered properties file is mounted into the Argo workflow.
-function addAuthProtectedKeys(keys: ProtectedKeyReasons, kafkaConfig: KafkaClientConfig): void {
-    if (kafkaConfig.authType !== "none" || kafkaConfig.enableMSKAuth) {
-        keys.set("security.protocol", "auth");
-        keys.set("sasl.mechanism", "auth");
-        keys.set("sasl.jaas.config", "auth");
-    }
-
-    if (kafkaConfig.enableMSKAuth) {
-        keys.set("sasl.client.callback.handler.class", "enableMSKAuth");
-    }
-
-    if (kafkaConfig.authType === "scram-sha-512" && kafkaConfig.caSecretName) {
-        keys.set("ssl.truststore.type", "auth.caSecretName");
-        keys.set("ssl.truststore.location", "auth.caSecretName");
-    }
+function addAuthProtectedKeys(keys: ProtectedKeyReasons): void {
+    // These properties select authentication implementations or credential sources. Keep
+    // them workflow-owned for every auth mode so `auth.type: none` cannot be used to
+    // smuggle a JAAS login module or callback class into the application process.
+    keys.set("security.protocol", "auth");
+    keys.set("sasl.mechanism", "auth");
+    keys.set("sasl.jaas.config", "auth");
+    keys.set("sasl.client.callback.handler.class", "auth");
+    keys.set("sasl.login.callback.handler.class", "auth");
+    keys.set("sasl.login.class", "auth");
+    keys.set("ssl.truststore.type", "auth.caSecretName");
+    keys.set("ssl.truststore.location", "auth.caSecretName");
 }
 
-function protectedProducerKeys(kafkaConfig: KafkaClientConfig): ProtectedKeyReasons {
+function protectedProducerKeys(): ProtectedKeyReasons {
     const keys: ProtectedKeyReasons = new Map([
         ["bootstrap.servers", "kafkaConnection"],
         ["client.id", "proxyConfig.kafkaClientId"],
         ["key.serializer", "capture proxy producer serialization"],
         ["value.serializer", "capture proxy producer serialization"],
     ]);
-    addAuthProtectedKeys(keys, kafkaConfig);
+    addAuthProtectedKeys(keys);
     return keys;
 }
 
-function protectedConsumerKeys(kafkaConfig: KafkaClientConfig): ProtectedKeyReasons {
+function protectedConsumerKeys(): ProtectedKeyReasons {
     const keys: ProtectedKeyReasons = new Map([
         ["bootstrap.servers", "kafkaConnection"],
         ["group.id", "traffic replayer group id"],
@@ -48,14 +45,14 @@ function protectedConsumerKeys(kafkaConfig: KafkaClientConfig): ProtectedKeyReas
         ["enable.auto.commit", "traffic replayer offset management"],
         ["partition.assignment.strategy", "traffic replayer partition assignment strategy"],
     ]);
-    addAuthProtectedKeys(keys, kafkaConfig);
+    addAuthProtectedKeys(keys);
     return keys;
 }
 
-function protectedKeysForRole(role: KafkaClientRole, kafkaConfig: KafkaClientConfig): ProtectedKeyReasons {
+function protectedKeysForRole(role: KafkaClientRole): ProtectedKeyReasons {
     return role === "producer"
-        ? protectedProducerKeys(kafkaConfig)
-        : protectedConsumerKeys(kafkaConfig);
+        ? protectedProducerKeys()
+        : protectedConsumerKeys();
 }
 
 function validateProtectedKeys(
@@ -98,7 +95,10 @@ function assertKafkaClientPropertyNamesAndValues(
 export function workflowGeneratedKafkaClientProperties(
     kafkaConfig: KafkaClientConfig
 ): KafkaClientProperties {
-    if (kafkaConfig.authType !== "scram-sha-512" || !kafkaConfig.caSecretName) {
+    if (
+        !["ssl", "scram-sha-512"].includes(kafkaConfig.authType ?? "none")
+        || !kafkaConfig.caSecretName
+    ) {
         return {};
     }
 
@@ -159,7 +159,7 @@ export function buildKafkaClientPropertiesFileContent(args: {
         args.role,
         args.clusterKey,
         userProperties,
-        protectedKeysForRole(args.role, args.kafkaConfig)
+        protectedKeysForRole(args.role)
     );
 
     return renderJavaProperties({

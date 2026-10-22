@@ -329,7 +329,7 @@ Add `groupName` to the five top-level phase templates so they're self-describing
 | `setupProxies` | Use `proxyName` param (e.g. `"capture-proxy"`) |
 | `createSnapshots` | Derive from source label (e.g. `"source-snap1"`) |
 | `runSnapshotMigrations` | Use existing `resourceName` |
-| `runTrafficReplays` | Use `fromProxy` param |
+| `runTrafficReplays` | Use `fromCapturedTraffic` param |
 
 With `groupName` on these nodes, the existing filter already keeps them — no `at_root_level`
 logic needed. However, the `at_root_level` approach is more resilient as a fallback for
@@ -864,7 +864,7 @@ iteration gets its `groupName` from the loop item:
 | `setupProxies` | `proxyName` param | `"capture-proxy"` |
 | `createSnapshots` | derive from source config | `"source"` |
 | `runSnapshotMigrations` | `resourceName` param | `"source-target-snap1"` |
-| `runTrafficReplays` | `fromProxy` param | `"capture-proxy"` |
+| `runTrafficReplays` | `fromCapturedTraffic` param | `"capture-proxy"` |
 
 Each requires: (1) the target template to accept `groupName` as an input, and (2) the
 caller to pass it in `c.register({...})`.
@@ -919,7 +919,7 @@ automatically.
 2. Add `groupName` to key sub-phase templates
 3. Add `at_root_level` fallback to `filter_tree_nodes`
 4. Update affected test fixtures, add new ones
-5. Redeploy to minikube, resubmit workflow, verify output
+5. Redeploy to kind, resubmit workflow, verify output
 
 ### What this does NOT address (deferred)
 

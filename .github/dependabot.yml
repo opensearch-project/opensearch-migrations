@@ -82,6 +82,13 @@ updates:
       - dependency-name: "org.junit:junit-bom"
       - dependency-name: "org.junit.platform:*"
       - dependency-name: "org.junit.jupiter:*"
+      # GraalVM 25.1.x currently breaks the GraalPy venv tests on CI's Java 21 runtime.
+      - dependency-name: "org.graalvm.polyglot:*"
+        versions:
+          - "[25.0.4,)"
+      - dependency-name: "org.graalvm.python:python-embedding"
+        versions:
+          - "[25.0.4,)"
 
   - package-ecosystem: "github-actions"
     directory: "/"

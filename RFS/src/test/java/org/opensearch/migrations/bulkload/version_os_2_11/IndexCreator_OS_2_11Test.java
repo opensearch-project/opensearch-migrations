@@ -1,12 +1,16 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
@@ -34,6 +38,27 @@ class IndexCreator_OS_2_11Test {
         .build();
     private static final Optional<ObjectNode> INDEX_CREATE_SUCCESS = Optional.of(mock(ObjectNode.class));
     private static final String MIN_INDEX_JSON = "{ \"settings\": { } }";
+
+    /** Index metadata for a 1-shard index read from an ES 6.8 snapshot, after the built-in transforms. */
+    private static final String ES_6_8_SNAPSHOT_INDEX_JSON = "{\n" +
+        "  \"routing_num_shards\" : 1,\n" +
+        "  \"aliases\" : { },\n" +
+        "  \"mappings\" : { \"properties\": { \"body\": { \"type\": \"text\" } } },\n" +
+        "  \"settings\" : {\n" +
+        "    \"creation_date\": \"1735689600000\",\n" +
+        "    \"number_of_replicas\": \"1\",\n" +
+        "    \"number_of_shards\": \"1\",\n" +
+        "    \"provided_name\": \"v4_messages_01_2025\",\n" +
+        "    \"uuid\": \"q1w2e3r4t5y6u7i8o9p0aa\",\n" +
+        "    \"version\": { \"created\": \"6082399\" }\n" +
+        "  }\n" +
+        "}";
+
+    private static final String SERVERLESS_ROUTING_SHARDS_ERROR = "{\"error\":{\"root_cause\":[{\"type\":\"illegal_argument_exception\","
+        + "\"reason\":\"OpenSearch exception [type=illegal_argument_exception, reason=index.number_of_routing_shards [1] "
+        + "must be >= index.number_of_shards [8]]- server : [envoy]\"}],\"type\":\"illegal_argument_exception\","
+        + "\"reason\":\"OpenSearch exception [type=illegal_argument_exception, reason=index.number_of_routing_shards [1] "
+        + "must be >= index.number_of_shards [8]]- server : [envoy]\"},\"status\":400}";
 
     @Test
     void testCreate() throws Exception {
@@ -266,6 +291,61 @@ class IndexCreator_OS_2_11Test {
             finalBody.get("settings").get("analysis").get("analyzer")
                 .get("custom_tokenized_string").get("tokenizer").asText(),
             equalTo("standard"));
+    }
+
+    @Test
+    void testCreate_retriesWithoutRoutingShardsWhenTargetRejectsThem() throws Exception {
+        // opensearch-migrations#3440: the snapshot's top-level "routing_num_shards" is copied into
+        // settings.number_of_routing_shards. If the target rejects it (here with the error
+        // Serverless returns), the setting is removed and creation is retried.
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any())).thenAnswer(invocation -> {
+            ObjectNode body = invocation.getArgument(1);
+            if (body.path("settings").has("number_of_routing_shards")) {
+                throw new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), SERVERLESS_ROUTING_SHARDS_ERROR));
+            }
+            return INDEX_CREATE_SUCCESS;
+        });
+
+        var result = create(client, ES_6_8_SNAPSHOT_INDEX_JSON, "v4_messages_01_2025");
+
+        assertThat(String.valueOf(result.getException()), result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
+        var finalIndexBody = requestBodyCapture.getValue().toPrettyString();
+        assertThat(finalIndexBody, not(containsString("number_of_routing_shards")));
+        assertThat(finalIndexBody, containsString("number_of_shards"));
+    }
+
+    @Test
+    void testCreate_serverlessTarget_doesNotSendRoutingShardsOrInternalSettings() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.getClusterVersion()).thenReturn(Version.builder().flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH).major(2).build());
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var result = create(client, ES_6_8_SNAPSHOT_INDEX_JSON, "v4_messages_01_2025");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        var settings = requestBodyCapture.getValue().get("settings");
+        assertThat(settings.toString(), equalTo("{\"number_of_replicas\":\"1\",\"number_of_shards\":\"1\"}"));
+    }
+
+    @Test
+    void testCreate_openSearchTarget_copiesRoutingShardsAndStripsInternalSettings() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.getClusterVersion()).thenReturn(Version.fromString("OS 2.19.0"));
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var result = create(client, ES_6_8_SNAPSHOT_INDEX_JSON, "v4_messages_01_2025");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        var settings = requestBodyCapture.getValue().get("settings");
+        assertThat(settings.toString(),
+            equalTo("{\"number_of_replicas\":\"1\",\"number_of_shards\":\"1\",\"number_of_routing_shards\":1}"));
     }
 
     @SneakyThrows

@@ -14,6 +14,19 @@ variable "project" {
   type        = string
 }
 
+variable "migration_release" {
+  description = <<-EOT
+    Migration Assistant release tag to deploy. Applied to every Migration
+    Assistant image (console, installer, reindex-from-snapshot, capture-proxy,
+    traffic-replayer). Defaults to a pinned release for reproducibility; bump it
+    to move to a newer release. The tag must exist for all four mirrored images
+    in the Artifact Registry repo the images.* repositories point at
+    (us-central1-docker.pkg.dev/<project>/migrations/*).
+  EOT
+  type        = string
+  default     = "3.3.4"
+}
+
 variable "region" {
   description = "GCP region"
   type        = string
@@ -32,19 +45,6 @@ variable "node_count" {
   default     = 2
 }
 
-
-variable "source_endpoint" {
-  description = "Source Elasticsearch/OpenSearch cluster endpoint URL"
-  type        = string
-  default     = ""
-}
-
-variable "target_endpoint" {
-  description = "Target OpenSearch cluster endpoint URL (e.g. Aiven)"
-  type        = string
-  default     = ""
-}
-
 variable "kafka_brokers" {
   description = "Comma-separated list of Kafka bootstrap brokers"
   type        = string
@@ -58,7 +58,7 @@ variable "kafka_auth_type" {
 }
 
 variable "deploy_kafka" {
-  description = "Deploy a dedicated GKE node pool for in-cluster Kafka brokers. Set to false when using external Kafka (Aiven, MSK, Confluent Cloud) configured via kafka_brokers."
+  description = "Deploy a dedicated GKE node pool for in-cluster Kafka brokers. Set to false when using external Kafka (MSK, Confluent Cloud, Aiven) configured via kafka_brokers."
   type        = bool
   default     = true
 }
@@ -205,7 +205,9 @@ variable "allowed_ingress_cidrs" {
 variable "node_iam_roles" {
   description = "GCP IAM roles granted to the GKE node service account"
   type        = list(string)
-  default     = ["roles/storage.admin", "roles/artifactregistry.reader"]
+  # logging.logWriter lets fluent-bit ship workload logs to Cloud Logging via
+  # Workload Identity (see the fluent-bit stackdriver output in valuesGke.yaml).
+  default = ["roles/storage.admin", "roles/artifactregistry.reader", "roles/logging.logWriter"]
 }
 
 variable "workload_identity_namespace" {
@@ -218,4 +220,85 @@ variable "additional_workload_identity_service_accounts" {
   description = "Additional Kubernetes service accounts allowed to impersonate the GCP migration service account"
   type        = list(string)
   default     = ["migration-console-access-role", "argo-workflow-executor", "argo-workflow-controller", "argo-controller", "argo-test-workflow-executor"]
+}
+
+variable "source_connectivity" {
+  description = "Private connectivity for the source-read leg. mode = none (default) | psc_consumer | vpc_peering."
+  type = object({
+    mode = optional(string, "none")
+    # psc_consumer:
+    service_attachment  = optional(string)
+    allow_global_access = optional(bool, false)
+    # vpc_peering:
+    peer_vpc_self_link = optional(string)
+    # psc_consumer DNS (optional):
+    dns_name        = optional(string)
+    dns_zone_domain = optional(string)
+  })
+  default = { mode = "none" }
+
+  validation {
+    condition     = contains(["none", "psc_consumer", "vpc_peering"], var.source_connectivity.mode)
+    error_message = "source_connectivity.mode must be one of: none, psc_consumer, vpc_peering."
+  }
+
+  validation {
+    condition     = var.source_connectivity.mode != "psc_consumer" || try(var.source_connectivity.service_attachment, null) != null
+    error_message = "source_connectivity.service_attachment is required when mode = psc_consumer."
+  }
+
+  validation {
+    condition     = var.source_connectivity.mode != "vpc_peering" || try(var.source_connectivity.peer_vpc_self_link, null) != null
+    error_message = "source_connectivity.peer_vpc_self_link is required when mode = vpc_peering."
+  }
+}
+
+variable "target_connectivity" {
+  description = "Private connectivity for the target-write leg. mode = none (default) | psc_consumer | vpc_peering."
+  type = object({
+    mode = optional(string, "none")
+    # psc_consumer:
+    service_attachment  = optional(string)
+    allow_global_access = optional(bool, false)
+    # vpc_peering:
+    peer_vpc_self_link = optional(string)
+    # psc_consumer DNS (optional):
+    dns_name        = optional(string)
+    dns_zone_domain = optional(string)
+  })
+  default = { mode = "none" }
+
+  validation {
+    condition     = contains(["none", "psc_consumer", "vpc_peering"], var.target_connectivity.mode)
+    error_message = "target_connectivity.mode must be one of: none, psc_consumer, vpc_peering."
+  }
+
+  validation {
+    condition     = var.target_connectivity.mode != "psc_consumer" || try(var.target_connectivity.service_attachment, null) != null
+    error_message = "target_connectivity.service_attachment is required when mode = psc_consumer."
+  }
+
+  validation {
+    condition     = var.target_connectivity.mode != "vpc_peering" || try(var.target_connectivity.peer_vpc_self_link, null) != null
+    error_message = "target_connectivity.peer_vpc_self_link is required when mode = vpc_peering."
+  }
+}
+
+variable "gcs_connectivity" {
+  description = "Private path for snapshot traffic to Cloud Storage. mode = private_google_access (default) routes GKE->GCS over Google's private network; none disables it. (psc_google_apis, for VPC Service Controls perimeters, is reserved for a future release.)"
+  type = object({
+    mode = optional(string, "private_google_access")
+  })
+  default = { mode = "private_google_access" }
+
+  validation {
+    condition     = contains(["private_google_access", "none"], var.gcs_connectivity.mode)
+    error_message = "gcs_connectivity.mode must be one of: private_google_access, none. (psc_google_apis is not yet implemented.)"
+  }
+}
+
+variable "enable_private_endpoint" {
+  description = "Give the GKE control plane a private endpoint only (no public IP). Default false preserves current behavior. When true, operator access requires IAP/bastion/VPN (see docs/gcpPrivateNetworking.md) and master_authorized_cidrs must be narrowed to internal ranges. We do not provision a bastion."
+  type        = bool
+  default     = false
 }

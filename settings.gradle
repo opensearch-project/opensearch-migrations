@@ -8,23 +8,28 @@
  */
 import java.nio.file.Paths
 
+pluginManagement {
+    settings.apply from: new File(settingsDir, 'gradle/repositories.gradle')
+    settings.ext.configureMavenRepositories(repositories, true)
+}
+
 plugins {
     id("com.gradle.develocity") version("3.18.1")
     id 'org.gradle.toolchains.foojay-resolver-convention' version '0.10.0'
 }
 
 void addSubProjects(String path, File dir) {
-    if (dir.isDirectory() == false) {
-        return;
+    if (!dir.isDirectory()) {
+        return
     }
     if (dir.name == 'buildSrc') {
-        return;
+        return
     }
-    if (new File(dir, 'build.gradle').exists() == false) {
-        return;
+    if (!new File(dir, 'build.gradle').exists()) {
+        return
     }
     if (findProject(dir) != null) {
-        return;
+        return
     }
 
     final String projectName = "${path}:${dir.name}"
@@ -40,12 +45,14 @@ void addSubProjects(String path, File dir) {
 rootProject.name = 'OpensearchMigrations'
 include 'awsUtilities'
 include 'coreUtilities'
+include 's3Common'
 include 'deployment:migration-assistant-solution'
 include 'libraries:kafkaCommandLineFormatter'
 include 'libraries:kafkaUtils'
 include 'transformation'
 include 'transformation:standardJavascriptTransforms'
 include 'testHelperFixtures'
+include 'searchClusterTestFixtures'
 include 'RFS'
 include 'RfsCommon'
 include 'RfsHttp'

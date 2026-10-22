@@ -14,7 +14,9 @@ metadata:
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 900
-  ttlSecondsAfterFinished: 600
+  # No ttlSecondsAfterFinished: the TTL controller deletes failed jobs too. Keep a failed
+  # hook pod for debugging (kubectl logs); helm's hook-delete-policy above still cleans up
+  # on success and before the next install/upgrade.
   podFailurePolicy:
     rules:
       - action: Ignore
@@ -35,10 +37,22 @@ spec:
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
       restartPolicy: Never
+{{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
+      volumes:
+        - name: dashboards
+          configMap:
+            name: {{ .Release.Name }}-cloudwatch-dashboard-manifests
+{{- end }}
       containers:
         - name: helm-uninstaller
           image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
+{{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
+          volumeMounts:
+            - name: dashboards
+              mountPath: /dashboards
+              readOnly: true
+{{- end }}
           command:
             - /bin/sh
             - -c
@@ -46,11 +60,16 @@ spec:
               #!/bin/sh
               set -e
               {{- include "migration.retryFunctions" . | nindent 14 }}
+              {{- include "migration.preDeleteCleanupFunctions" . | nindent 14 }}
               {{- include "migration.helmUninstallFunctions" . | nindent 14 }}
 
-              # Phase 1: Uninstall all charts except fluent-bit (kept for logging) and kyverno (uninstalled last).
+              # Drain runtime resources while Argo, Strimzi, and ACK controllers are alive.
+              prepare_release_for_uninstall
+
+              # Phase 1: Uninstall all charts except fluent-bit (kept for logging), localstack (the S3 endpoint
+              # the weight-0 bucket-deletion hook still needs), and kyverno (uninstalled last). Phase 2 removes them.
               # See _uninstallHelper.tpl for the full uninstall strategy documentation.
-              uninstall_all_charts_except fluent-bit
+              uninstall_all_charts_except fluent-bit localstack
 
 ---
 # Phase 2: Post-delete job to clean up charts that were intentionally kept alive during Phase 1.
@@ -72,7 +91,9 @@ metadata:
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 900
-  ttlSecondsAfterFinished: 600
+  # No ttlSecondsAfterFinished: the TTL controller deletes failed jobs too. Keep a failed
+  # hook pod for debugging (kubectl logs); helm's hook-delete-policy above still cleans up
+  # on success and before the next install/upgrade.
   podFailurePolicy:
     rules:
       - action: Ignore

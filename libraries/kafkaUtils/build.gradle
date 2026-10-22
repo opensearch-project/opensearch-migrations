@@ -18,14 +18,16 @@ dependencies {
     byocFixtureGenerator testFixtures(project(':testHelperFixtures'))
     testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation libs.junit.jupiter.api
+    testImplementation libs.mockito.core
+    testImplementation libs.mockito.junit.jupiter
     testRuntimeOnly libs.junit.jupiter.engine
 }
 
-tasks.withType(Tar){
+tasks.withType(Tar).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-tasks.withType(Zip){
+tasks.withType(Zip).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 

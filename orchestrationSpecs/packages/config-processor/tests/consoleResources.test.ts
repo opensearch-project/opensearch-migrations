@@ -304,6 +304,53 @@ describe("console resources", () => {
         ]);
     });
 
+    it("projects externally managed TLS-only Kafka CA metadata", async () => {
+        const config = multiResourceConfig();
+        config.kafkaClusterConfiguration = {
+            external: {
+                existing: {
+                    kafkaConnection: "broker.example.com:9093",
+                    auth: {
+                        type: "ssl",
+                        caSecretName: "external-kafka-ca",
+                    },
+                },
+            },
+        };
+        config.traffic.proxies = {
+            "proxy-a": {
+                source: "sourceA",
+                kafka: "external",
+                proxyConfig: {
+                    listenPort: 9201,
+                },
+            },
+        };
+        config.traffic.replayers = {
+            replayA: {
+                fromCapturedTraffic: "proxy-a",
+                toTarget: "targetX",
+            },
+        };
+
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
+        const resources = buildConsoleResources(workflowConfig);
+
+        expect(resources.kafkas).toEqual([
+            expect.objectContaining({
+                refName: "external",
+                runtime: expect.objectContaining({
+                    type: "direct",
+                    caSecretName: "external-kafka-ca",
+                    clientConfig: {
+                        broker_endpoints: "broker.example.com:9093",
+                        tls: {},
+                    },
+                }),
+            }),
+        ]);
+    });
+
     it("writes console resources from the command line", async () => {
         const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "console-resources-cli-test-"));
         const inputFile = path.join(outputDir, "workflow.yaml");

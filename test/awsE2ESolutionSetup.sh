@@ -32,6 +32,100 @@ create_service_linked_roles () {
   aws iam create-service-linked-role --aws-service-name osis.amazonaws.com
 }
 
+wait_for_migration_stack_update_rollback () {
+  local stack=$1
+  local attempt
+  local status
+
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    status=$(aws cloudformation describe-stacks \
+        --stack-name "$stack" \
+        --query 'Stacks[0].StackStatus' \
+        --output text) || {
+          echo "Error: could not read migration stack rollback status for $stack."
+          return 1
+        }
+    case "$status" in
+      UPDATE_ROLLBACK_COMPLETE)
+        return 0
+        ;;
+      UPDATE_COMPLETE|CREATE_COMPLETE)
+        echo "Migration stack $stack completed before rollback; continuing cleanup."
+        return 0
+        ;;
+      UPDATE_ROLLBACK_IN_PROGRESS|UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS|UPDATE_COMPLETE_CLEANUP_IN_PROGRESS)
+        sleep 15
+        ;;
+      *)
+        echo "Error: migration stack $stack entered $status while waiting for update rollback."
+        return 1
+        ;;
+    esac
+  done
+
+  echo "Error: migration stack $stack did not finish rolling back within 15 minutes."
+  return 1
+}
+
+recover_interrupted_migration_updates () {
+  local migration_stack_prefix="OSMigrations-${STAGE}-"
+  local active_updates
+  local stack
+  local status
+
+  active_updates=$(aws cloudformation list-stacks \
+      --stack-status-filter UPDATE_IN_PROGRESS UPDATE_ROLLBACK_IN_PROGRESS UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS UPDATE_COMPLETE_CLEANUP_IN_PROGRESS \
+      --query "StackSummaries[?starts_with(StackName, \`${migration_stack_prefix}\`)].StackName" \
+      --output text) || {
+        echo "Error: could not discover interrupted migration stack updates."
+        return 1
+      }
+
+  for stack in $active_updates; do
+    status=$(aws cloudformation describe-stacks \
+        --stack-name "$stack" \
+        --query 'Stacks[0].StackStatus' \
+        --output text) || {
+          echo "Error: could not read migration stack status for $stack."
+          return 1
+        }
+    case "$status" in
+      UPDATE_IN_PROGRESS)
+        echo "Canceling interrupted migration stack update before cleanup: $stack"
+        if ! aws cloudformation cancel-update-stack --stack-name "$stack"; then
+          status=$(aws cloudformation describe-stacks \
+              --stack-name "$stack" \
+              --query 'Stacks[0].StackStatus' \
+              --output text) || return 1
+          case "$status" in
+            UPDATE_ROLLBACK_IN_PROGRESS|UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS|UPDATE_ROLLBACK_COMPLETE|UPDATE_COMPLETE_CLEANUP_IN_PROGRESS)
+              ;;
+            UPDATE_COMPLETE|CREATE_COMPLETE)
+              echo "Migration stack $stack completed before cancellation; continuing cleanup."
+              continue
+              ;;
+            *)
+              echo "Error: could not cancel migration stack update for $stack (now $status)."
+              return 1
+              ;;
+          esac
+        fi
+        wait_for_migration_stack_update_rollback "$stack" || {
+          echo "Error: migration stack $stack did not finish rolling back."
+          return 1
+        }
+        ;;
+      UPDATE_ROLLBACK_IN_PROGRESS|UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS|UPDATE_COMPLETE_CLEANUP_IN_PROGRESS)
+        echo "Waiting for interrupted migration stack rollback before cleanup: $stack ($status)"
+        wait_for_migration_stack_update_rollback "$stack" || {
+          echo "Error: migration stack $stack did not finish rolling back."
+          return 1
+        }
+        ;;
+    esac
+  done
+}
+
 clean_up_migration () {
   # Destroy the migration CDK app ("*" in its cdk.json) and block until all of
   # its CloudFormation stacks are fully deleted. `npx cdk destroy` is already
@@ -39,6 +133,7 @@ clean_up_migration () {
   # wait afterwards so that any stack cdk couldn't see (e.g. out-of-band
   # resources left behind by a prior partial deploy) still holds up the
   # source destroy that follows.
+  recover_interrupted_migration_updates || exit $?
   cd "$MIGRATION_CDK_PATH" || exit
   # `cdk destroy` goes through the app entrypoint (`npx ts-node bin/app.ts`),
   # which requires the migration CDK's node_modules to be installed so the

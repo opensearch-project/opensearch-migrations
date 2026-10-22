@@ -46,8 +46,16 @@ CONFIG_OUTPUT=$(
 echo "$CONFIG_OUTPUT"
 
 echo "Submitting workflow..."
-WORKFLOW_OUTPUT=$(
-  kubectl exec --namespace "$WORKFLOW_NAMESPACE" "$MIGRATION_CONSOLE_POD" -- \
-    /bin/bash -lc 'workflow submit' 2>&1
-) || fail "Submit failed: $WORKFLOW_OUTPUT"
+if [ -n "${RUN_NONCE:-}" ]; then
+  echo "Using workflow unique run nonce: $RUN_NONCE"
+  WORKFLOW_OUTPUT=$(
+    kubectl exec --namespace "$WORKFLOW_NAMESPACE" "$MIGRATION_CONSOLE_POD" -- \
+      /bin/bash -lc 'workflow submit --unique-run-nonce "$1"' bash "$RUN_NONCE" 2>&1
+  ) || fail "Submit failed: $WORKFLOW_OUTPUT"
+else
+  WORKFLOW_OUTPUT=$(
+    kubectl exec --namespace "$WORKFLOW_NAMESPACE" "$MIGRATION_CONSOLE_POD" -- \
+      /bin/bash -lc 'workflow submit' 2>&1
+  ) || fail "Submit failed: $WORKFLOW_OUTPUT"
+fi
 echo "Workflow submit output: $WORKFLOW_OUTPUT"

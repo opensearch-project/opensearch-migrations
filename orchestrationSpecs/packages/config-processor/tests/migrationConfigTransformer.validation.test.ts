@@ -120,6 +120,268 @@ describe('MigrationConfigTransformer validation', () => {
         }).toThrow(/Unrecognized keys at sourceClusters\.\[0\]\.authConfig\.basic: rogueInUnion/);
     });
 
+    it.each([
+        { globalValue: undefined, innerValue: undefined, expectedValue: false, expectedBeginValue: false },
+        { globalValue: undefined, innerValue: false, expectedValue: false, expectedBeginValue: false },
+        { globalValue: undefined, innerValue: true, expectedValue: true, expectedBeginValue: true },
+        { globalValue: false, innerValue: undefined, expectedValue: false, expectedBeginValue: false },
+        { globalValue: false, innerValue: false, expectedValue: false, expectedBeginValue: false },
+        { globalValue: false, innerValue: true, expectedValue: true, expectedBeginValue: true },
+        { globalValue: true, innerValue: undefined, expectedValue: true, expectedBeginValue: false },
+        { globalValue: true, innerValue: false, expectedValue: false, expectedBeginValue: false },
+        { globalValue: true, innerValue: true, expectedValue: true, expectedBeginValue: true },
+    ])(
+        'should resolve global=$globalValue and inner=$innerValue to skip=$expectedValue and begin=$expectedBeginValue',
+        async ({ globalValue, innerValue, expectedValue, expectedBeginValue }) => {
+            const config = cloneBaseConfig();
+
+            if (globalValue === undefined) {
+                delete config.skipApprovals;
+            } else {
+                config.skipApprovals = globalValue;
+            }
+            if (innerValue === undefined) {
+                delete config.requireBeginApproval;
+                delete config.traffic.proxies.proxy1.skipApproval;
+            } else {
+                config.requireBeginApproval = innerValue;
+                config.traffic.proxies.proxy1.skipApproval = innerValue;
+            }
+
+            delete config.snapshotMigrationConfigs[0].skipApprovals;
+            config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+                metadataMigrationConfig: innerValue === undefined ? {} : {
+                    skipEvaluateApproval: innerValue,
+                    skipMigrateApproval: innerValue
+                },
+                documentBackfillConfig: innerValue === undefined ? {} : {
+                    skipApproval: innerValue
+                }
+            };
+
+            const result = await transformer.processFromObject(config);
+            const migration = result.snapshotMigrations?.[0] as any;
+
+            expect(result.requireBeginApproval).toBe(expectedBeginValue);
+            expect(result.proxies?.[0]?.skipApproval).toBe(expectedValue);
+            expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(expectedValue);
+            expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(expectedValue);
+            expect(migration?.documentBackfillConfig?.skipApproval).toBe(expectedValue);
+        }
+    );
+
+    it('should let per-migration skipApprovals override global skipApprovals for snapshot gates', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        config.snapshotMigrationConfigs[0].skipApprovals = false;
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
+        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(false);
+        expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
+    it('should let per-gate skip flags override broader skipApprovals', async () => {
+        const config = cloneBaseConfig();
+        config.skipApprovals = true;
+        delete config.snapshotMigrationConfigs[0].skipApprovals;
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {
+                skipEvaluateApproval: false
+            },
+            documentBackfillConfig: {
+                skipApproval: false
+            }
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
+        expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(true);
+        expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
+    it('renders external Kafka producer and consumer client properties', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092,broker2:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {
+                            "max.request.size": 8388608,
+                            "compression.type": "lz4",
+                        },
+                        consumer: {
+                            "fetch.min.bytes": 1024,
+                            "client.rack": "us-east-1a",
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies?.[0]?.kafkaConfig.producerClientProperties).toBe([
+            "compression.type=lz4",
+            "max.request.size=8388608",
+            "",
+        ].join("\n"));
+        expect(result.trafficReplays?.[0]?.kafkaConfig.consumerClientProperties).toBe([
+            "client.rack=us-east-1a",
+            "fetch.min.bytes=1024",
+            "",
+        ].join("\n"));
+    });
+
+    it('supports TLS without SASL for an existing Kafka cluster', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9093",
+                    kafkaTopic: "",
+                    auth: {
+                        type: "ssl",
+                        caSecretName: "external-kafka-ca",
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+        const expectedProperties = [
+            "ssl.truststore.location=/config/kafka-ca/ca.crt",
+            "ssl.truststore.type=PEM",
+            "",
+        ].join("\n");
+
+        expect(result.proxies?.[0]?.kafkaConfig).toMatchObject({
+            authType: "ssl",
+            caSecretName: "external-kafka-ca",
+            producerClientProperties: expectedProperties,
+        });
+        expect(result.trafficReplays?.[0]?.kafkaConfig).toMatchObject({
+            authType: "ssl",
+            caSecretName: "external-kafka-ca",
+            consumerClientProperties: expectedProperties,
+        });
+    });
+
+    it('rejects auth implementation properties even when external Kafka auth is none', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {
+                            "sasl.jaas.config": "com.example.UntrustedLoginModule required;",
+                        },
+                    },
+                },
+            },
+        };
+
+        await expect(transformer.processFromObject(config)).rejects.toThrow(
+            /clientProperties\.producer\.sasl\.jaas\.config.*workflow-owned/
+        );
+    });
+
+    it('changes workload checksums when Kafka client properties change', async () => {
+        const baselineConfig = cloneBaseConfig();
+        baselineConfig.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {"compression.type": "lz4"},
+                        consumer: {"fetch.min.bytes": 1},
+                    },
+                },
+            },
+        };
+        const changedConfig = cloneBaseConfig();
+        changedConfig.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {"compression.type": "zstd"},
+                        consumer: {"fetch.min.bytes": 1024},
+                    },
+                },
+            },
+        };
+
+        const baseline = await transformer.processFromObject(baselineConfig);
+        const changed = await transformer.processFromObject(changedConfig);
+
+        expect(changed.proxies?.[0]?.configChecksum).not.toEqual(baseline.proxies?.[0]?.configChecksum);
+        expect(changed.proxies?.[0]?.checksumForReplayer).not.toEqual(
+            baseline.proxies?.[0]?.checksumForReplayer
+        );
+        expect(changed.trafficReplays?.[0]?.configChecksum).not.toEqual(
+            baseline.trafficReplays?.[0]?.configChecksum
+        );
+    });
+
+    it('should carry metadata memory overrides from user input into populated workflow resources', async () => {
+        const config = cloneBaseConfig();
+        const inputResources = {
+            requests: {
+                memory: "3Gi"
+            },
+            limits: {
+                memory: "4Gi"
+            }
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {
+                resources: inputResources
+            }
+        };
+
+        expect(
+            config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig.resources
+        ).toEqual(inputResources);
+
+        const normalized = normalizeUserConfig(config as any);
+        expect(
+            normalized.snapshotMigrationConfigs[0].perSnapshotConfig!.snap1[0].metadataMigrationConfig!.resources
+        ).toEqual(inputResources);
+
+        const result = await transformer.processFromObject(config);
+        const metadataConfig = result.snapshotMigrations?.[0]?.metadataMigrationConfig as any;
+
+        expect(metadataConfig?.resources).toEqual({
+            requests: {
+                cpu: "500m",
+                memory: "3Gi"
+            },
+            limits: {
+                cpu: "500m",
+                memory: "4Gi"
+            }
+        });
+    });
+
     it('should reject rogue key in nested object (snapshotInfo)', () => {
         const configWithRogueInNested = {
             ...baseConfig,
@@ -151,178 +413,29 @@ describe('MigrationConfigTransformer validation', () => {
         }).not.toThrow();
     });
 
-    it('renders external Kafka producer and consumer client properties', async () => {
-        const config = cloneBaseConfig();
-        config.kafkaClusterConfiguration = {
-            default: {
-                existing: {
-                    kafkaConnection: "broker1:9092,broker2:9092",
-                    kafkaTopic: "",
-                    auth: {type: "none"},
-                    clientProperties: {
-                        producer: {
-                            "max.request.size": 8388608,
-                            "compression.type": "lz4",
-                            "delivery.timeout.ms": 30000,
-                        },
-                        consumer: {
-                            "fetch.max.bytes": 8388608,
-                            "max.partition.fetch.bytes": 8388608,
-                            "allow.auto.create.topics": false,
-                        },
-                    },
-                },
-            },
+    it('should reject solrCollections on a user-facing ES/OS createSnapshotConfig', () => {
+        // solrCollections is a Solr-only, internal (ARGO) field. It must not be settable on the
+        // user-facing ES/OS snapshot config; ES/OS users use indexAllowlist instead.
+        const configWithSolrCollections = cloneBaseConfig();
+        configWithSolrCollections.sourceClusters.source1.snapshotInfo.snapshots.snap1.config.createSnapshotConfig = {
+            solrCollections: ["collectionA"]
         };
 
-        const result = await transformer.processFromObject(config);
-
-        expect(result.proxies[0].kafkaConfig.producerClientProperties).toBe([
-            "compression.type=lz4",
-            "delivery.timeout.ms=30000",
-            "max.request.size=8388608",
-            "",
-        ].join("\n"));
-        expect(result.trafficReplays[0].kafkaConfig.consumerClientProperties).toBe([
-            "allow.auto.create.topics=false",
-            "fetch.max.bytes=8388608",
-            "max.partition.fetch.bytes=8388608",
-            "",
-        ].join("\n"));
+        expect(() => {
+            transformer.validateInput(configWithSolrCollections);
+        }).toThrow(/Unrecognized keys.*solrCollections/);
     });
 
-    it('merges external Kafka SCRAM TLS properties with user client properties', async () => {
-        const config = cloneBaseConfig();
-        config.kafkaClusterConfiguration = {
-            default: {
-                existing: {
-                    kafkaConnection: "broker1:9093",
-                    kafkaTopic: "",
-                    auth: {
-                        type: "scram-sha-512",
-                        secretName: "external-kafka-user",
-                        caSecretName: "external-kafka-ca",
-                        kafkaUserName: "migration-app",
-                    },
-                    clientProperties: {
-                        producer: {
-                            "max.request.size": 8388608,
-                        },
-                        consumer: {
-                            "fetch.max.bytes": 8388608,
-                        },
-                    },
-                },
-            },
+    it('should reject solrContextPath on a user-facing ES/OS createSnapshotConfig', () => {
+        // Solr-only as well: ES/OS snapshots have no context path to configure.
+        const configWithContextPath = cloneBaseConfig();
+        configWithContextPath.sourceClusters.source1.snapshotInfo.snapshots.snap1.config.createSnapshotConfig = {
+            solrContextPath: "/tenant-a/solr"
         };
 
-        const result = await transformer.processFromObject(config);
-
-        expect(result.proxies[0].kafkaConfig.producerClientProperties).toBe([
-            "max.request.size=8388608",
-            "ssl.truststore.location=/config/kafka-ca/ca.crt",
-            "ssl.truststore.type=PEM",
-            "",
-        ].join("\n"));
-        expect(result.trafficReplays[0].kafkaConfig.consumerClientProperties).toBe([
-            "fetch.max.bytes=8388608",
-            "ssl.truststore.location=/config/kafka-ca/ca.crt",
-            "ssl.truststore.type=PEM",
-            "",
-        ].join("\n"));
-    });
-
-    it('rejects workflow-owned Kafka producer client properties', async () => {
-        const config = cloneBaseConfig();
-        config.kafkaClusterConfiguration = {
-            default: {
-                existing: {
-                    kafkaConnection: "broker1:9092",
-                    kafkaTopic: "",
-                    auth: {type: "none"},
-                    clientProperties: {
-                        producer: {
-                            "bootstrap.servers": "other-broker:9092",
-                        },
-                    },
-                },
-            },
-        };
-
-        await expect(transformer.processFromObject(config)).rejects.toThrow(
-            /kafkaClusterConfiguration\.default\.existing\.clientProperties\.producer\.bootstrap\.servers.*kafkaConnection/
-        );
-    });
-
-    it('rejects workflow-owned Kafka consumer and auth client properties', async () => {
-        const config = cloneBaseConfig();
-        config.kafkaClusterConfiguration = {
-            default: {
-                existing: {
-                    kafkaConnection: "broker1:9093",
-                    kafkaTopic: "",
-                    auth: {
-                        type: "scram-sha-512",
-                        secretName: "external-kafka-user",
-                        caSecretName: "external-kafka-ca",
-                    },
-                    clientProperties: {
-                        consumer: {
-                            "partition.assignment.strategy": "org.apache.kafka.clients.consumer.RangeAssignor",
-                            "ssl.truststore.location": "/tmp/other.crt",
-                        },
-                    },
-                },
-            },
-        };
-
-        await expect(transformer.processFromObject(config)).rejects.toThrow(
-            /kafkaClusterConfiguration\.default\.existing\.clientProperties\.consumer\.partition\.assignment\.strategy.*traffic replayer partition assignment strategy/
-        );
-    });
-
-    it('rejects nested Kafka client property values during preprocessing', async () => {
-        const config = cloneBaseConfig();
-        config.kafkaClusterConfiguration = {
-            default: {
-                existing: {
-                    kafkaConnection: "broker1:9092",
-                    kafkaTopic: "",
-                    auth: {type: "none"},
-                    clientProperties: {
-                        producer: {
-                            "max.request.size": {value: 8388608},
-                        },
-                    },
-                },
-            },
-        };
-
-        await expect(transformer.processFromObject(config)).rejects.toThrow(
-            /flat string, number, or boolean|Unrecognized keys/
-        );
-    });
-
-    it('rejects empty Kafka client property names during preprocessing', async () => {
-        const config = cloneBaseConfig();
-        config.kafkaClusterConfiguration = {
-            default: {
-                existing: {
-                    kafkaConnection: "broker1:9092",
-                    kafkaTopic: "",
-                    auth: {type: "none"},
-                    clientProperties: {
-                        consumer: {
-                            "": "bad",
-                        },
-                    },
-                },
-            },
-        };
-
-        await expect(transformer.processFromObject(config)).rejects.toThrow(
-            /empty Kafka client property name|Unrecognized keys/
-        );
+        expect(() => {
+            transformer.validateInput(configWithContextPath);
+        }).toThrow(/Unrecognized keys.*solrContextPath/);
     });
 
     it('stamps a sanitized resourceName on each snapshot migration', async () => {
@@ -410,6 +523,11 @@ describe('MigrationConfigTransformer validation', () => {
             label: "default",
             kafkaTopic: "loaded-dump",
             managedByWorkflow: true,
+            topicSpecOverrides: expect.objectContaining({
+                config: expect.objectContaining({
+                    "message.timestamp.type": "CreateTime",
+                }),
+            }),
             configChecksum: expect.stringMatching(/^[a-f0-9]{16}$/)
         }));
 
@@ -918,6 +1036,25 @@ describe('MigrationConfigTransformer validation', () => {
         expect(changedMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
     });
 
+    it('should produce distinct checksums when a migration stage config is added or removed', async () => {
+        const withMetadataOnly = cloneBaseConfig(); // baseConfig already has only metadataMigrationConfig
+
+        const withBoth = cloneBaseConfig();
+        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+
+        const withBackfillOnly = cloneBaseConfig();
+        delete withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig;
+        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+
+        const metadataOnly = (await transformer.processFromObject(withMetadataOnly)).snapshotMigrations[0];
+        const both = (await transformer.processFromObject(withBoth)).snapshotMigrations[0];
+        const backfillOnly = (await transformer.processFromObject(withBackfillOnly)).snapshotMigrations[0];
+
+        expect(metadataOnly.configChecksum).not.toEqual(both.configChecksum);
+        expect(backfillOnly.configChecksum).not.toEqual(both.configChecksum);
+        expect(metadataOnly.configChecksum).not.toEqual(backfillOnly.configChecksum);
+    });
+
     it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {
         const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
         const normalized = normalizeUserConfig(parsed);
@@ -984,28 +1121,9 @@ describe('MigrationConfigTransformer validation', () => {
                         size: "2Gi",
                         deleteClaim: true,
                     },
-                    template: {
-                        pod: {
-                            topologySpreadConstraints: [
-                                {
-                                    maxSkew: 1,
-                                    topologyKey: "kubernetes.io/hostname",
-                                    whenUnsatisfiable: "ScheduleAnyway",
-                                    labelSelector: {
-                                        matchExpressions: [
-                                            {
-                                                key: "strimzi.io/name",
-                                                operator: "Exists",
-                                            },
-                                        ],
-                                    },
-                                },
-                            ],
-                        },
-                    },
                 },
                 topicSpecOverrides: {
-                    partitions: 1,
+                    partitions: 2,
                     replicas: 3,
                     config: {
                         "retention.ms": 604800000,
@@ -1026,6 +1144,109 @@ describe('MigrationConfigTransformer validation', () => {
                 }
             }
         });
+    });
+
+    it('should leave Kafka topology spread to the deployment unless the configuration overrides it', async () => {
+        const defaults = await transformer.processFromObject(baseConfig);
+        expect(defaults.kafkaClusters?.[0]?.config?.nodePoolSpecOverrides?.template).toBeUndefined();
+
+        const constraints = [{
+            maxSkew: 2,
+            topologyKey: "topology.kubernetes.io/zone",
+            whenUnsatisfiable: "ScheduleAnyway",
+            labelSelector: {},
+        }];
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    nodePoolSpecOverrides: {template: {pod: {topologySpreadConstraints: constraints}}},
+                },
+            },
+        };
+        const overridden = await transformer.processFromObject(config);
+        expect(overridden.kafkaClusters?.[0]?.config?.nodePoolSpecOverrides).toMatchObject({
+            replicas: 3,
+            template: {pod: {topologySpreadConstraints: constraints}},
+        });
+    });
+
+    it('should default workflow-managed live proxy topics to LogAppendTime', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        partitions: 2,
+                        replicas: 3,
+                        config: {
+                            "retention.ms": 12345,
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies[0].kafkaConfig.topicSpecOverrides).toEqual({
+            partitions: 2,
+            replicas: 3,
+            config: {
+                "retention.ms": 12345,
+                "segment.bytes": 1073741824,
+                "message.timestamp.type": "LogAppendTime",
+            },
+        });
+    });
+
+    it('should reject an explicit CreateTime override for workflow-managed live proxy topics', () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        config: {
+                            "message.timestamp.type": "CreateTime",
+                        },
+                    },
+                },
+            },
+        };
+
+        expect(() => transformer.validateInput(config)).toThrow(
+            /'message.timestamp.type' to be 'LogAppendTime'/
+        );
+    });
+
+    it('should reject an explicit LogAppendTime override for workflow-managed BYOC topics', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs = [];
+        config.traffic = {
+            s3Sources: {
+                "loaded-dump": {
+                    s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
+                    awsRegion: "us-east-1",
+                    sourceLabel: "detached-source",
+                },
+            },
+            replayers: {},
+        };
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        config: {
+                            "message.timestamp.type": "LogAppendTime",
+                        },
+                    },
+                },
+            },
+        };
+
+        expect(() => transformer.validateInput(config)).toThrow(
+            /'message.timestamp.type' to be 'CreateTime'/
+        );
     });
 
     it('should require a CA secret for existing SCRAM-managed Kafka clusters', () => {

@@ -3,10 +3,12 @@ package org.opensearch.migrations.bulkload.pipeline;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -14,37 +16,24 @@ import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration.WorkItem;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/**
- * Top-level wiring for the clean pipeline approach. Connects all adapters and provides
- * work-coordinated execution for horizontal scaling.
- *
- * <pre>
- * var runner = DocumentMigrationBootstrap.builder()
- *     .extractor(snapshotExtractor)
- *     .targetClient(openSearchClient)
- *     .snapshotName("my-snapshot")
- *     .workDir(Paths.get("/tmp/lucene"))
- *     .workCoordinator(scopedWorkCoordinator)
- *     .maxInitialLeaseDuration(Duration.ofMinutes(10))
- *     .cursorConsumer(progressCursor::set)
- *     .cancellationTriggerConsumer(cancellationRef::set)
- *     .build();
- * runner.migrateOneShard(contextSupplier);
- * </pre>
- */
+/** Coordinates source reads, target writes, and work leases. */
 @Slf4j
 @Builder
 @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
@@ -74,6 +63,11 @@ public class DocumentMigrationBootstrap {
     private final Consumer<WorkItemCursor> cursorConsumer = cursor -> {};
     @Builder.Default
     private final Consumer<Runnable> cancellationTriggerConsumer = runnable -> {};
+
+    @Builder.Default
+    private final BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter = (workItem, cursor) -> null;
+    @Builder.Default
+    private final AtomicReference<WorkItemCursor> latestProgress = new AtomicReference<>();
 
     /**
      * Acquire and migrate a single shard via work coordination.
@@ -129,7 +123,7 @@ public class DocumentMigrationBootstrap {
                     public CompletionStatus onNoAvailableWorkToBeDone() {
                         return CompletionStatus.NOTHING_DONE;
                     }
-                }, context::createCloseContext);
+                }, context::createCloseContext, wi -> metricsReporter.apply(wi, latestProgress.get()));
             }
         } finally {
             closeQuietly(source);
@@ -137,16 +131,28 @@ public class DocumentMigrationBootstrap {
         }
     }
 
-    private CompletionStatus runPartitionMigration(
+    private void publishProgress(WorkItemCursor cursor) {
+        latestProgress.set(cursor);
+        cursorConsumer.accept(cursor);
+    }
+
+    // Package-private for end-to-end testing of the per-batch failed document stream flush gating (see
+    // DocumentMigrationBootstrapFailedDocumentStreamE2ETest); the public entry point is migrateOneShard.
+    CompletionStatus runPartitionMigration(
         IWorkCoordinator.WorkItemAndDuration workItem,
         PipelineConfig pipelineConfig,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
         var wi = workItem.getWorkItem();
+        latestProgress.set(null);
         log.info("Pipeline acquired work item: {}", wi);
 
+        // Stamp failed document stream records emitted while processing this shard with its canonical work-item id
+        // (index + shard + checkpoint) so each terminal failure traces back to the work item.
+        targetClient.setFailedDocumentStreamWorkItem(wi.toString());
+
         if (workItemTimeProvider != null) {
-            workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
+            workItemTimeProvider.recordLeaseAcquisition();
         }
 
         var partition = resolvePartition(wi);
@@ -174,13 +180,19 @@ public class DocumentMigrationBootstrap {
                     workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
                 }
             })
+            // Flush this batch's failures to S3 before its cursor advances the watermark; concatMap
+            // keeps it ordered and serial. Reactive, not .block(): onNext may run on a reactor-netty
+            // event loop thread where blocking throws.
+            .concatMap(cursor ->
+                flushFailedDocumentStreamForBatch(targetClient.getFailedDocumentStreamSink())
+                    .thenReturn(cursor))
             .doFinally(s -> finishScheduler.dispose())
             .subscribe(
                 cursor -> {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                    cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
+                    publishProgress(new WorkItemCursor(cursor.nextPosition(), cursor.metrics(), false, null));
                 },
                 error -> {
                     log.atError()
@@ -203,14 +215,19 @@ public class DocumentMigrationBootstrap {
             long start = System.currentTimeMillis();
             latch.await(); // Bridge reactive→sync: block until pipeline subscription completes
             long durationMs = System.currentTimeMillis() - start;
+            var snapshotCounts = documentSource.snapshotDocumentCounts(partition);
             log.atInfo()
-                .setMessage("Partition migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
+                .setMessage("Partition migration stats: index={}, shard={}, sourcePartition={}, docsThisGeneration={}, "
+                    + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}, "
+                    + "shardLiveLuceneDocs={}")
                 .addArgument(wi.getIndexName())
                 .addArgument(wi.getShardNumber())
+                .addArgument(partition.name())
                 .addArgument(totalDocsMigrated::get)
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)
                 .addArgument(durationMs)
+                .addArgument(snapshotCounts.map(counts -> Long.toString(counts.liveDocuments())).orElse("unknown"))
                 .log();
 
             var error = migrationError.get();
@@ -218,6 +235,13 @@ public class DocumentMigrationBootstrap {
                 context.recordPipelineError();
                 throw new RfsException("Partition migration failed for " + wi, error);
             }
+
+            var progress = latestProgress.get();
+            publishProgress(new WorkItemCursor(
+                progress == null ? startingOffset : progress.getProgressCheckpointNum(),
+                progress == null ? MigrationMetrics.ZERO : progress.getMetrics(), true,
+                snapshotCounts.orElse(null)));
+
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());
             context.recordBytesMigrated(totalBytesMigrated.get());
@@ -228,6 +252,18 @@ public class DocumentMigrationBootstrap {
         } finally {
             progressMonitor.close();
         }
+    }
+
+    /**
+     * Flush a batch's terminal failures to S3 before its progress is committed. The Mono errors on
+     * flush failure or the 5-minute timeout, aborting the migration so the work item isn't completed
+     * and a successor reprocesses and re-emits (at-least-once). Empty Mono when the stream is disabled.
+     */
+    static Mono<Void> flushFailedDocumentStreamForBatch(FailedDocumentStreamSink failedDocumentStreamSink) {
+        if (failedDocumentStreamSink == null) {
+            return Mono.empty();
+        }
+        return failedDocumentStreamSink.flush().timeout(Duration.ofMinutes(5));
     }
 
     private org.opensearch.migrations.bulkload.pipeline.model.Partition resolvePartition(

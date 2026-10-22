@@ -29,14 +29,15 @@ pipeline {
                     [key: 'action', value: '$.action'],
                     [key: 'isPreRelease', value: '$.release.prerelease'],
                     [key: 'release_url', value: '$.release.url'],
+                    [key: 'release_html_url', value: '$.release.html_url'],
                     [key: 'assets_url', value: '$.release.assets_url']
                 ],
                 tokenCredentialId: 'jenkins-opensearch-migrations-generic-webhook-token',
                 causeString: 'A tag was cut on opensearch-project/opensearch-migrations repository causing this workflow to run',
                 printContributedVariables: false,
                 printPostContent: false,
-                regexpFilterText: '$isDraft $action',
-                regexpFilterExpression: '^true created$'
+                regexpFilterText: '$isPreRelease $action',
+                regexpFilterExpression: '^true published$'
             )
         }
         environment {

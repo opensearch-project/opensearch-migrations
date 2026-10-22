@@ -8,7 +8,7 @@ import java.util.Optional;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;

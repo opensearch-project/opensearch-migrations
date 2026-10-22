@@ -1,4 +1,11 @@
-# Kafka Client Configuration Proposal
+# Kafka Client Configuration Design
+
+## Implementation Status
+
+This design is implemented by the accompanying change. It includes external producer and
+consumer properties, TLS-only and SCRAM authentication modes, workflow-owned authentication
+selectors, rollout checksums for mounted property changes, console support, and a focused
+k8s-local integration test.
 
 ## Context
 
@@ -31,12 +38,14 @@ The initial implementation should:
 The initial implementation should not:
 
 - Add arbitrary client properties to workflow-managed Strimzi Kafka.
-- Require Java capture proxy or replayer changes.
 - Require Argo-time `sprig.merge`, line concatenation, or property-file deduplication.
 - Require customers to build custom images or mutate pods to mount property files.
 - Introduce a Kafka client property allowlist.
 
 This is enough for bring-your-own Kafka clusters while avoiding a broader managed-Strimzi product surface before there is a high-level setting that needs it.
+
+The replayer does require the small Java-side addition of the `ssl` transport mode so an
+external TLS broker can be used without enabling SASL.
 
 ## Current Behavior
 
@@ -96,6 +105,14 @@ auth:
   kafkaUserName: migration-app
 ```
 
+For TLS without SASL:
+
+```yaml
+auth:
+  type: ssl
+  caSecretName: external-kafka-ca
+```
+
 The workflow resolves those fields into application arguments and environment variables, including broker addresses, topic, listener/auth type, Kubernetes secret names, usernames, and password environment variables.
 
 The workflow-generated Kafka settings passed to the capture proxy are limited to:
@@ -106,7 +123,7 @@ The workflow-generated Kafka settings passed to the capture proxy are limited to
 - `kafkaAuthType`
 - `kafkaSecretName`
 - `kafkaUserName`
-- `kafkaPropertyFile`, only when SCRAM auth causes the workflow to mount `/config/kafka-auth/client.properties`
+- `kafkaPropertyFile`, whenever the rendered producer properties file is non-empty
 - `CAPTURE_PROXY_KAFKA_PASSWORD`, from the configured Kubernetes secret when SCRAM is used
 
 The workflow-generated Kafka settings passed to the traffic replayer are limited to:
@@ -118,7 +135,7 @@ The workflow-generated Kafka settings passed to the traffic replayer are limited
 - `kafkaTrafficAuthType`
 - `kafkaTrafficSecretName`
 - `kafkaTrafficUserName`
-- `kafkaTrafficPropertyFile`, either from user `replayerConfig.kafkaTrafficPropertyFile` or from the workflow when SCRAM auth causes the workflow to mount `/config/kafka-auth/client.properties`
+- `kafkaTrafficPropertyFile`, whenever the rendered consumer properties file is non-empty
 - `TRAFFIC_REPLAYER_KAFKA_TRAFFIC_PASSWORD`, from the configured Kubernetes secret when SCRAM is used
 
 ### Existing Client Properties Files
@@ -306,17 +323,16 @@ For `clientProperties.producer`, reject these keys:
 - `key.serializer`
 - `value.serializer`
 
-Reject these keys whenever auth is represented by workflow config and `auth.type` is not `none`:
+Reject these authentication implementation selectors for every auth mode, including `none`:
 
 - `security.protocol`
 - `sasl.mechanism`
 - `sasl.jaas.config`
-
-Reject this key for MSK IAM:
-
 - `sasl.client.callback.handler.class`
+- `sasl.login.callback.handler.class`
+- `sasl.login.class`
 
-Reject these keys for SCRAM/TLS when the workflow mounts the Kafka CA:
+Reject these workflow-owned truststore keys for every auth mode:
 
 - `ssl.truststore.type`
 - `ssl.truststore.location`
@@ -360,17 +376,16 @@ For `clientProperties.consumer`, reject these keys:
 - `enable.auto.commit`
 - `partition.assignment.strategy`
 
-Reject these keys whenever auth is represented by workflow config and `auth.type` is not `none`:
+Reject these authentication implementation selectors for every auth mode, including `none`:
 
 - `security.protocol`
 - `sasl.mechanism`
 - `sasl.jaas.config`
-
-Reject this key for MSK IAM:
-
 - `sasl.client.callback.handler.class`
+- `sasl.login.callback.handler.class`
+- `sasl.login.class`
 
-Reject these keys for SCRAM/TLS when the workflow mounts the Kafka CA:
+Reject these workflow-owned truststore keys for every auth mode:
 
 - `ssl.truststore.type`
 - `ssl.truststore.location`
@@ -526,6 +541,10 @@ Set the application property-file argument when either auth requires generated p
 
 For this initial implementation, the workflow should not perform `sprig.merge` or build properties-file text dynamically. The final property-file content is predetermined during config processing.
 
+Include the workload configuration checksum in each proxy and replayer pod-template annotation.
+The checksum includes the role-specific rendered properties so editing `clientProperties`
+causes Kubernetes to roll the affected deployment.
+
 If a future workflow needs dynamic properties-file content, use a single dynamic YAML string scalar for the complete file body. Recent workflow-builder YAML hardening wraps dynamic string scalars in resource manifests with `toJSON(...)`, which keeps newline-containing and YAML-sensitive strings valid after Argo substitution. Avoid rendering the properties file through `makeDirectTypeProxy` or through unescaped string fragments.
 
 Simple Argo string concatenation can produce valid file contents when it is rendered as a YAML-safe string scalar, but it should be reserved for future dynamic cases. It should concatenate already-resolved, conflict-checked final lines rather than relying on duplicate keys for override semantics. The line renderer must still escape Java `.properties` keys and values correctly; YAML-safe rendering only protects the Kubernetes manifest, not the file format consumed by `Properties.load(...)`.
@@ -658,17 +677,17 @@ Use the next open CDC test id in the `0031-0039` range, for example `Test0036Cdc
 
 For Jenkins, add a new k8s-local job wrapper rather than adding this to the broad version matrix. The test provisions another Kafka cluster and will be slower than a normal CDC smoke test. A focused job keeps failures easier to triage and avoids inflating every `elasticsearch8xK8sLocalTest` run.
 
-Suggested Jenkins placement:
+Jenkins placement:
 
-- `vars/externalKafkaK8sLocalTest.groovy`
-- `jenkins/migrationIntegPipelines/externalKafkaK8sLocalTestCover.groovy`
+- `vars/k8sLocalExternalKafkaTest.groovy`
+- `jenkins/migrationIntegPipelines/k8sLocalExternalKafkaTestCover.groovy`
 
 The wrapper can call `k8sLocalDeployment` with a single modern version pair and only the new test id:
 
 ```groovy
 def call(Map config = [:]) {
     k8sLocalDeployment(
-        jobName: config.jobName ?: 'external-kafka-k8s-local-test',
+        jobName: config.jobName ?: 'k8s-local-external-kafka-test',
         sourceVersion: 'ES_8.19',
         targetVersion: 'OS_3.1',
         testIds: '0036'
@@ -676,4 +695,4 @@ def call(Map config = [:]) {
 }
 ```
 
-If Jenkins capacity is a concern, this can initially be a periodic or manually triggered job. Once stable, it can be added to PR checks only for changes under `orchestrationSpecs`, `deployment/k8s`, `migrationConsole/lib/integ_test`, or traffic capture/replay Kafka code.
+The job is included in PR checks and has a six-hour periodic schedule on main.

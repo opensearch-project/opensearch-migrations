@@ -4,6 +4,9 @@
 
 This directory contains Jenkins pipeline "cover" files that serve as entry points for migration integration tests. These files are thin wrappers that load shared library functions from the `vars/` directory.
 
+Source build stages use a shared Maven/Gradle dependency cache. See
+[provisioning, configuration, validation, and rollback](../DEPENDENCY_CACHE.md).
+
 ## Job Name Override Pattern
 
 ### Purpose
@@ -69,10 +72,9 @@ functionName(jobName: jobNameOverride ?: null)
 
 **Special case for matrix tests:**
 - Use `JOB_NAME_OVERRIDE` for matrix parent webhook routing
-- Use `CHILD_JOB_NAME_OVERRIDE` parameter
-- Pass as `childJobName` to the vars function
-- Default child job path follows parent job name:
-  - `childJobName` must be specified explicitly; there is no longer a default child job
+- The matrix parent routes each selected source version to the matching per-source local k8s child job
+- `CHILD_JOB_NAME_OVERRIDE` is accepted only for compatibility with existing Jenkins job configs and is ignored by the shared library
+- Clear stale `CHILD_JOB_NAME_OVERRIDE` values such as `main/main-k8s-local-integ-test`; that aggregate child job has been replaced by per-source jobs
 - Periodic schedules are defined in `vars/periodicCron.groovy` (dispatch table keyed on job name). `pr-*` jobs never have a cadence; `main-*` and `release-*` jobs pick their cadence from the table
 
 ### Supported Cover Files
@@ -87,6 +89,7 @@ functionName(jobName: jobNameOverride ?: null)
 | eksBYOSIntegTestCover.groovy | eksBYOSIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCdcAossFullE2eIntegTestCover.groovy | eksCdcAossIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCdcFullE2eIntegTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcK6LoadTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
 | eksCreateVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksImportVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksIntegTestCover.groovy | eksIntegPipeline | JOB_NAME_OVERRIDE |
@@ -100,9 +103,11 @@ functionName(jobName: jobNameOverride ?: null)
 | k8sLocalOpensearch1xTestCover.groovy | k8sLocalOpensearch1xTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolr8xTestCover.groovy | k8sLocalSolr8xTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolrOtherTestCover.groovy | k8sLocalSolrOtherTest | JOB_NAME_OVERRIDE |
-| k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE + CHILD_JOB_NAME_OVERRIDE |
+| k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE |
 | rfsDefaultE2ETestCover.groovy | rfsDefaultE2ETest | JOB_NAME_OVERRIDE |
 | solutionsCFNTestCover.groovy | solutionsCFNTest | JOB_NAME_OVERRIDE |
+
+The time-series and vector AOSS cover files are retained as manual compatibility entry points. Their periodic schedules are disabled; the search cover file runs the combined three-collection suite.
 
 ### GitHub Actions Integration
 
@@ -115,13 +120,26 @@ Jobs triggered:
 - `k8s-local-opensearch1x-test` (PR and main)
 - `k8s-local-solr8x-test` (PR and main)
 - `k8s-local-solr-other-test` (PR and main)
+- `docker-compose-e2e-test` (PR and main)
 - `eks-integ-test` (PR with `run-eks-tests` label, and main)
-- `eks-cdc-*` (PR with `run-eks-tests` label, and main)
-- `eks-aoss-*` (PR with `run-aoss-tests` label, and main)
+- `eks-cdc-*` (PR with `run-eks-tests` label, and main). This includes `eks-cdc-k6-load-test`, which
+  runs test `0080` — a CDC migration whose traffic comes from a k6 load test. The test runner installs
+  the standalone k6LoadTest chart for any `008x` ID, so the job needs no extra flag
+- `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three collection types)
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
+- `eks-full-e2e-isolated-vpc-test` (PR with `run-eks-isolated-tests` label, and main)
 
 This ensures PR-triggered jobs don't conflict with post-merge jobs using the same pipeline code.
+
+#### Running label-gated tests on a PR
+
+To run the label-gated tests on a PR (e.g. while reviewing it), add the matching `run-*` label:
+
+- The label's jobs start immediately. The always-on jobs are not re-run, and no in-progress job is cancelled.
+- If that label's jobs are already running for the PR, the new jobs wait and run after the current ones finish.
+- Labels that don't start with `run-` (e.g. `dependencies` added by Dependabot) don't start any jobs.
+- Once a label is on the PR, its jobs also run on every later push.
 
 ### Jenkins Folder Structure
 

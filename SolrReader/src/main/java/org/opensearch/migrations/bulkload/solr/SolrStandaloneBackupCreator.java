@@ -20,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 public class SolrStandaloneBackupCreator {
 
     private final String solrBaseUrl;
+    private final String contextPath;
     private final SolrHttpClient httpClient;
     @Getter
     private final String backupName;
@@ -45,8 +46,24 @@ public class SolrStandaloneBackupCreator {
         ConnectionContext connectionContext,
         String repositoryName
     ) {
+        this(solrBaseUrl, backupName, backupLocation, cores, connectionContext, repositoryName, null);
+    }
+
+    /**
+     * @param contextPath the path Solr is served under, or null for {@link SolrContextPath#DEFAULT}
+     */
+    public SolrStandaloneBackupCreator(
+        String solrBaseUrl,
+        String backupName,
+        String backupLocation,
+        List<String> cores,
+        ConnectionContext connectionContext,
+        String repositoryName,
+        String contextPath
+    ) {
         this.solrBaseUrl = solrBaseUrl.endsWith("/")
             ? solrBaseUrl.substring(0, solrBaseUrl.length() - 1) : solrBaseUrl;
+        this.contextPath = SolrContextPath.normalize(contextPath);
         this.backupName = backupName;
         this.backupLocation = backupLocation;
         this.repositoryName = repositoryName;
@@ -58,8 +75,8 @@ public class SolrStandaloneBackupCreator {
     public void createBackup() {
         for (var core : cores) {
             var url = String.format(
-                "%s/solr/%s/replication?command=backup&location=%s&name=%s&wt=json",
-                solrBaseUrl, core, backupLocation, backupName
+                "%s%s/%s/replication?command=backup&location=%s&name=%s&wt=json",
+                solrBaseUrl, contextPath, core, backupLocation, backupName
             );
             if (repositoryName != null) {
                 url += "&repository=" + repositoryName;
@@ -81,8 +98,8 @@ public class SolrStandaloneBackupCreator {
     public boolean isBackupFinished() {
         for (var core : cores) {
             var url = String.format(
-                "%s/solr/%s/replication?command=details&wt=json",
-                solrBaseUrl, core
+                "%s%s/%s/replication?command=details&wt=json",
+                solrBaseUrl, contextPath, core
             );
             var response = httpClient.getJson(url);
             var backup = response.path("details").path("backup");
@@ -111,14 +128,31 @@ public class SolrStandaloneBackupCreator {
         return true;
     }
 
-    /** Extract a value from a Solr NamedList JSON array: ["key1","val1","key2","val2",...] */
+    /**
+     * Extract a value from Solr's replication "backup" payload, which differs by version:
+     * <ul>
+     *   <li>Solr 8 serializes the NamedList as a flat JSON array:
+     *       {@code ["status","success","snapshotCompletedAt","...",...]}.</li>
+     *   <li>Solr 9 serializes it as a JSON object:
+     *       {@code {"status":"success","snapshotCompletedAt":"...",...}}.</li>
+     * </ul>
+     * Returns the string value for {@code key}, or null if absent.
+     */
     private static String extractNamedListValue(JsonNode namedList, String key) {
-        if (namedList == null || !namedList.isArray()) {
+        if (namedList == null) {
             return null;
         }
-        for (int i = 0; i < namedList.size() - 1; i++) {
-            if (key.equals(namedList.get(i).asText())) {
-                return namedList.get(i + 1).asText();
+        // Solr 9+: object form.
+        if (namedList.isObject()) {
+            var value = namedList.get(key);
+            return value != null ? value.asText() : null;
+        }
+        // Solr 8: NamedList serialized as ["key1","val1","key2","val2",...].
+        if (namedList.isArray()) {
+            for (int i = 0; i < namedList.size() - 1; i++) {
+                if (key.equals(namedList.get(i).asText())) {
+                    return namedList.get(i + 1).asText();
+                }
             }
         }
         return null;

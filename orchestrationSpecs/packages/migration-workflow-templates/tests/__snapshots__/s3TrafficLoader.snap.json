@@ -22,10 +22,6 @@
           "value": "migration-image-config"
         },
         {
-          "name": "approvalConfigMapName",
-          "value": "approval-config"
-        },
-        {
           "name": "migrationRunNumber",
           "value": "0"
         },
@@ -65,6 +61,13 @@
             },
             {
               "name": "loadCompletionChecksum"
+            },
+            {
+              "name": "resourceUid"
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "s3TrafficLoader"
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -145,6 +148,11 @@
           ]
         },
         "metadata": {
+          "labels": {
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}",
+            "migrations.opensearch.org/component": "s3-traffic-loader",
+            "migrations.opensearch.org/migration-resource-uid": "{{inputs.parameters.resourceUid}}"
+          },
           "annotations": {
             "karpenter.sh/do-not-disrupt": "true"
           }
@@ -238,6 +246,10 @@
                   {
                     "name": "kafkaClusterName",
                     "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.loaderConfig)['kafkaConfig'])}}"
                   },
                   {
                     "name": "kafkaTopicName",
@@ -401,6 +413,10 @@
                   {
                     "name": "loadCompletionChecksum",
                     "value": "{{inputs.parameters.checksumForReplayer}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=fromJSON(inputs.parameters.loaderConfig)['resourceUid']}}"
                   }
                 ]
               },

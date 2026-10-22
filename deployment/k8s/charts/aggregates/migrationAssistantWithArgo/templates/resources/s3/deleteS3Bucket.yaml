@@ -5,12 +5,19 @@ metadata:
   name: delete-s3-bucket-{{ .Release.Name }}
   annotations:
     "helm.sh/hook": pre-delete
-    "helm.sh/hook-weight": "-20" # Delete before charts are uninstalled
+    # The runtime cleanup hook at weight -10 stops workflows and resets capture/replay
+    # resources first. Empty the bucket only after writers can no longer add objects.
+    "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  ttlSecondsAfterFinished: 600
+  # No ttlSecondsAfterFinished: the TTL controller deletes failed jobs too. Keep a failed
+  # hook pod for debugging (kubectl logs); helm's hook-delete-policy above still cleans up
+  # on success and before the next install/upgrade.
   backoffLimit: 1
-  activeDeadlineSeconds: 600
+  # Large capture buckets can contain millions of tuple objects. Batched deletes
+  # reduce the request count substantially, but the hook still needs enough time
+  # to finish before Helm tears down its credentials and network access.
+  activeDeadlineSeconds: 14400
   podFailurePolicy:
     rules:
       - action: Ignore
@@ -97,8 +104,70 @@ spec:
 
                 if [ "${EMPTY_BEFORE_DELETE}" = "true" ]; then
                   echo "The defaultBucketConfiguration.emptyBeforeDelete value is enabled. Deleting all contents of $BUCKET_NAME..."
+
+                  delete_objects_in_batches() {
+                    LIST_OPERATION="$1"
+                    LIST_QUERY="$2"
+                    CONTENT_DESCRIPTION="$3"
+                    BATCH_FILE="/tmp/s3-delete-batch.json"
+                    RESULT_FILE="/tmp/s3-delete-result.json"
+                    BATCH_NUMBER=0
+                    DELETED_COUNT=0
+
+                    # Repeatedly list and remove the first page. S3 list operations
+                    # are strongly consistent, so each successful batch advances
+                    # toward an empty bucket without managing continuation tokens.
+                    while true; do
+                      if ! aws $S3_ENDPOINT_FLAG s3api "$LIST_OPERATION" \
+                          --bucket "$BUCKET_NAME" \
+                          --no-paginate \
+                          --max-keys 1000 \
+                          --query "$LIST_QUERY" \
+                          --output json > "$BATCH_FILE"; then
+                        echo "Failed to list $CONTENT_DESCRIPTION in $BUCKET_NAME." >&2
+                        return 1
+                      fi
+
+                      BATCH_SIZE=$(grep -c '"Key":' "$BATCH_FILE" || true)
+                      if [ "$BATCH_SIZE" -eq 0 ]; then
+                        break
+                      fi
+
+                      BATCH_NUMBER=$((BATCH_NUMBER + 1))
+                      if ! aws $S3_ENDPOINT_FLAG s3api delete-objects \
+                          --bucket "$BUCKET_NAME" \
+                          --delete "file://$BATCH_FILE" > "$RESULT_FILE"; then
+                        echo "Failed to delete $CONTENT_DESCRIPTION batch $BATCH_NUMBER." >&2
+                        return 1
+                      fi
+
+                      # DeleteObjects can return HTTP success while reporting
+                      # individual key failures in the response body.
+                      if grep -q '"Errors":' "$RESULT_FILE"; then
+                        echo "S3 reported failures while deleting $CONTENT_DESCRIPTION:" >&2
+                        cat "$RESULT_FILE" >&2
+                        return 1
+                      fi
+
+                      DELETED_COUNT=$((DELETED_COUNT + BATCH_SIZE))
+                      echo "Deleted $CONTENT_DESCRIPTION batch $BATCH_NUMBER ($BATCH_SIZE entries; $DELETED_COUNT total)."
+                    done
+                  }
+
                   empty_bucket() {
-                    aws $S3_ENDPOINT_FLAG s3 rm s3://"$BUCKET_NAME" --recursive
+                    # Remove retained versions and delete markers first. Starting
+                    # with current objects in a versioned bucket would create a
+                    # new delete marker for every key and increase the cleanup
+                    # work. Sweep current objects afterward for unversioned
+                    # buckets and S3-compatible implementations.
+                    delete_objects_in_batches \
+                      list-object-versions \
+                      '{Objects:[Versions[].{Key:Key,VersionId:VersionId},DeleteMarkers[].{Key:Key,VersionId:VersionId}][],Quiet:`true`}' \
+                      "object versions and delete markers"
+                    delete_objects_in_batches \
+                      list-objects-v2 \
+                      '{Objects:Contents[].{Key:Key},Quiet:`true`}' \
+                      "current objects"
                   }
                   retry 2 5 "empty bucket $BUCKET_NAME" -- empty_bucket
                 fi

@@ -4,7 +4,7 @@
 # it provisions source + target clusters inline (via cluster-templates) AND wires up
 # the capture proxy + replayer for CDC traffic capture — all in a single workflow.
 #
-# Use this template for local (minikube / kind) CDC tests where no external CDK
+# Use this template for local kind CDC tests where no external CDK
 # deployment supplies cluster endpoints. Use cdc-full-e2e-imported-clusters when
 # clusters are pre-provisioned and their configs are supplied as inputs.
 #
@@ -48,7 +48,11 @@ spec:
           {"batchSize": 1000, "concurrency": 4}
       - name: skip-cleanup
         value: "false"
-      # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
+      - name: skip-approvals
+        value: "true"
+      - name: require-begin-approval
+        value: "false"
+      # Registry prefix for custom ES images (e.g. "localhost:5000/" for kind)
       - name: image-registry-prefix
         value: ""
       - name: snapshot-configmap
@@ -59,14 +63,22 @@ spec:
         value: "120"
       - name: speedup-factor
         value: "20"
-      - name: observed-packet-timeout
-        value: "30"
       - name: replayer-config-overrides
         value: "{}"
       - name: pre-snapshot-proxy-submit
         value: "false"
       - name: capture-proxy-service-type
         value: "LoadBalancer"
+      - name: capture-proxy-pod-replicas
+        value: "1"
+      - name: kafka-broker-replicas
+        value: "3"
+      - name: kafka-node-pool-spec-overrides
+        value: "{}"
+      - name: traffic-topic-partitions
+        value: "2"
+      - name: replayer-pod-replicas
+        value: "1"
       - name: otel-trace-collector-endpoint
         value: ""
       - name: client-auth-pem-base64
@@ -166,6 +178,10 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
+                - name: skip-approvals
+                  value: "{{workflow.parameters.skip-approvals}}"
+                - name: require-begin-approval
+                  value: "{{workflow.parameters.require-begin-approval}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -200,6 +216,14 @@ spec:
                       key: migrationConsolePullPolicy
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: captureProxyPodReplicas
+                  value: "{{workflow.parameters.capture-proxy-pod-replicas}}"
+                - name: kafkaBrokerReplicas
+                  value: "{{workflow.parameters.kafka-broker-replicas}}"
+                - name: kafkaNodePoolSpecOverrides
+                  value: "{{workflow.parameters.kafka-node-pool-spec-overrides}}"
+                - name: trafficTopicPartitions
+                  value: "{{workflow.parameters.traffic-topic-partitions}}"
                 - name: otelTraceCollectorEndpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
                 - name: clientAuthPemBase64
@@ -246,8 +270,6 @@ spec:
                   value: "{{steps.generate-base-config.outputs.parameters.migrationConfigBase64}}"
                 - name: speedupFactor
                   value: "{{workflow.parameters.speedup-factor}}"
-                - name: observedPacketTimeout
-                  value: "{{workflow.parameters.observed-packet-timeout}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -262,6 +284,16 @@ spec:
                   value: "{{workflow.parameters.replayer-config-overrides}}"
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: captureProxyPodReplicas
+                  value: "{{workflow.parameters.capture-proxy-pod-replicas}}"
+                - name: kafkaBrokerReplicas
+                  value: "{{workflow.parameters.kafka-broker-replicas}}"
+                - name: kafkaNodePoolSpecOverrides
+                  value: "{{workflow.parameters.kafka-node-pool-spec-overrides}}"
+                - name: trafficTopicPartitions
+                  value: "{{workflow.parameters.traffic-topic-partitions}}"
+                - name: replayerPodReplicas
+                  value: "{{workflow.parameters.replayer-pod-replicas}}"
                 - name: otelTraceCollectorEndpoint
                   value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
                 - name: clientAuthPemBase64

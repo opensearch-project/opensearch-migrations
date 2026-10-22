@@ -22,10 +22,6 @@
           "value": "migration-image-config"
         },
         {
-          "name": "approvalConfigMapName",
-          "value": "approval-config"
-        },
-        {
           "name": "migrationRunNumber",
           "value": "0"
         },
@@ -48,6 +44,9 @@
             },
             {
               "name": "kafkaAuthConfigMapName"
+            },
+            {
+              "name": "configChecksum"
             },
             {
               "name": "kafkaAuthType"
@@ -93,6 +92,36 @@
               "value": "trafficReplayer"
             },
             {
+              "name": "workloadNodePoolName",
+              "value": "",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "provider-config",
+                  "key": "replayerNodePoolName"
+                }
+              }
+            },
+            {
+              "name": "workloadZoneSpread",
+              "value": "preferred",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "provider-config",
+                  "key": "workloadZoneSpread"
+                }
+              }
+            },
+            {
+              "name": "workloadZoneSpreadExtras",
+              "value": "{}",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "provider-config",
+                  "key": "workloadZoneSpreadConstraintExtras"
+                }
+              }
+            },
+            {
               "name": "imageTrafficReplayerLocation"
             },
             {
@@ -104,7 +133,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{=toJSON(inputs.parameters.name)}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: TrafficReplay\n      name: {{=toJSON(inputs.parameters.name)}}\n      uid: {{=toJSON(inputs.parameters.ownerUid)}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n    migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n    migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n    migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: Recreate\n  selector:\n    matchLabels:\n      app: replayer\n  template:\n    metadata:\n      labels:\n        app: replayer\n        migrations/replayer: {{=toJSON(inputs.parameters.name)}}\n        workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n        migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n        migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n        migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: replayer\n          image: {{=toJSON(inputs.parameters.imageTrafficReplayerLocation)}}\n          imagePullPolicy: {{=toJSON(inputs.parameters.imageTrafficReplayerPullPolicy)}}\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TRAFFIC_REPLAYER_KAFKA_TRAFFIC_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(inputs.parameters.kafkaSecretName)}}\n                  key: password\n                  optional: {{=!(inputs.parameters.kafkaAuthType == 'scram-sha-512')}}\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.basicAuthSecretName)) ? ('empty') : (inputs.parameters.basicAuthSecretName)))}}\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.basicAuthSecretName)) ? ('empty') : (inputs.parameters.basicAuthSecretName)))}}\n                  key: password\n                  optional: true\n            - name: JDK_JAVA_OPTIONS\n              value: {{=toJSON(inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration/configuration') : ('')))}}\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: {{=toJSON(((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : ('')))}}\n          volumeMounts: {{=sprig.concat([sprig.dict(\"name\", 'kafka-auth-config', \"mountPath\", '/config/kafka-auth', \"readOnly\", true), sprig.dict(\"name\", 'kafka-ca', \"mountPath\", '/config/kafka-ca', \"readOnly\", true), sprig.dict(\"name\", 'log4j-configuration', \"mountPath\", '/config/logConfiguration', \"readOnly\", true), sprig.dict(\"name\", 'localstack-test-creds', \"mountPath\", '/config/credentials', \"readOnly\", true)], fromJSON(inputs.parameters.fileSourceVolumeMounts))}}\n      volumes: {{=sprig.concat([sprig.dict(\"name\", 'kafka-auth-config', \"configMap\", sprig.dict(\"name\", inputs.parameters.kafkaAuthConfigMapName)), sprig.dict(\"name\", 'kafka-ca', \"secret\", sprig.dict(\"secretName\", inputs.parameters.kafkaCaSecretName, \"optional\", !(inputs.parameters.kafkaAuthType == 'scram-sha-512'))), sprig.dict(\"name\", 'log4j-configuration', \"configMap\", sprig.dict(\"name\", sprig.default('default-log4j-config', inputs.parameters.loggingConfigurationOverrideConfigMap), \"optional\", !(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))))), sprig.dict(\"name\", 'localstack-test-creds', \"configMap\", sprig.dict(\"name\", 'localstack-test-creds', \"optional\", !(fromJSON(inputs.parameters.useLocalStack))))], fromJSON(inputs.parameters.fileSourceVolumes))}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{=toJSON(inputs.parameters.name)}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: TrafficReplay\n      name: {{=toJSON(inputs.parameters.name)}}\n      uid: {{=toJSON(inputs.parameters.ownerUid)}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    migrations.opensearch.org/component: traffic-replayer\n    workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n    migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n    migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n    migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\n    migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.ownerUid)}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: Recreate\n  selector:\n    matchLabels:\n      migrations.opensearch.org/component: traffic-replayer\n      migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.ownerUid)}}\n  template:\n    metadata:\n      annotations:\n        migrations.opensearch.org/config-checksum: {{=toJSON(inputs.parameters.configChecksum)}}\n      labels:\n        migrations.opensearch.org/component: traffic-replayer\n        workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n        migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n        migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n        migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\n        migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.ownerUid)}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      nodeSelector: {{=((0 == len(inputs.parameters.workloadNodePoolName)) ? (sprig.dict()) : (sprig.dict(\"migrations.opensearch.org/workload-pool\", inputs.parameters.workloadNodePoolName)))}}\n      tolerations: {{=((0 == len(inputs.parameters.workloadNodePoolName)) ? ([]) : ([sprig.dict(\"key\", 'migrations.opensearch.org/workload-pool', \"operator\", 'Equal', \"value\", inputs.parameters.workloadNodePoolName, \"effect\", 'NoSchedule')]))}}\n      topologySpreadConstraints: {{=((inputs.parameters.workloadZoneSpread == 'none') ? ([]) : ([sprig.merge(sprig.dict(\"maxSkew\", 1, \"topologyKey\", 'topology.kubernetes.io/zone', \"whenUnsatisfiable\", ((inputs.parameters.workloadZoneSpread == 'required') ? ('DoNotSchedule') : ('ScheduleAnyway')), \"nodeTaintsPolicy\", 'Honor', \"labelSelector\", sprig.dict(), \"matchLabelKeys\", [\"migrations.opensearch.org/component\",\"migrations.opensearch.org/migration-resource-uid\"]), ((inputs.parameters.workloadZoneSpread == 'required') ? (fromJSON(inputs.parameters.workloadZoneSpreadExtras)) : (sprig.dict())))]))}}\n      containers:\n        - name: replayer\n          image: {{=toJSON(inputs.parameters.imageTrafficReplayerLocation)}}\n          imagePullPolicy: {{=toJSON(inputs.parameters.imageTrafficReplayerPullPolicy)}}\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TRAFFIC_REPLAYER_KAFKA_TRAFFIC_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(inputs.parameters.kafkaSecretName)}}\n                  key: password\n                  optional: {{=!(inputs.parameters.kafkaAuthType == 'scram-sha-512')}}\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.basicAuthSecretName)) ? ('empty') : (inputs.parameters.basicAuthSecretName)))}}\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.basicAuthSecretName)) ? ('empty') : (inputs.parameters.basicAuthSecretName)))}}\n                  key: password\n                  optional: true\n            - name: JDK_JAVA_OPTIONS\n              value: {{=toJSON(inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration/configuration') : ('')))}}\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: {{=toJSON(((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : ('')))}}\n          volumeMounts: {{=sprig.concat([sprig.dict(\"name\", 'kafka-auth-config', \"mountPath\", '/config/kafka-auth', \"readOnly\", true), sprig.dict(\"name\", 'kafka-ca', \"mountPath\", '/config/kafka-ca', \"readOnly\", true), sprig.dict(\"name\", 'log4j-configuration', \"mountPath\", '/config/logConfiguration', \"readOnly\", true), sprig.dict(\"name\", 'localstack-test-creds', \"mountPath\", '/config/credentials', \"readOnly\", true)], fromJSON(inputs.parameters.fileSourceVolumeMounts))}}\n      volumes: {{=sprig.concat([sprig.dict(\"name\", 'kafka-auth-config', \"configMap\", sprig.dict(\"name\", inputs.parameters.kafkaAuthConfigMapName)), sprig.dict(\"name\", 'kafka-ca', \"secret\", sprig.dict(\"secretName\", inputs.parameters.kafkaCaSecretName, \"optional\", !(inputs.parameters.kafkaAuthType == 'scram-sha-512' || inputs.parameters.kafkaAuthType == 'ssl'))), sprig.dict(\"name\", 'log4j-configuration', \"configMap\", sprig.dict(\"name\", sprig.default('default-log4j-config', inputs.parameters.loggingConfigurationOverrideConfigMap), \"optional\", !(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))))), sprig.dict(\"name\", 'localstack-test-creds', \"configMap\", sprig.dict(\"name\", 'localstack-test-creds', \"optional\", !(fromJSON(inputs.parameters.useLocalStack))))], fromJSON(inputs.parameters.fileSourceVolumes))}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.readyReplicas > 0"
@@ -149,7 +178,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: {{=toJSON(inputs.parameters.name)}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: TrafficReplay\n      name: {{=toJSON(inputs.parameters.name)}}\n      uid: {{=toJSON(inputs.parameters.ownerUid)}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n    migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n    migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n    migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\nspec:\n  minAvailable: {{=fromJSON(inputs.parameters.minPodReplicas)}}\n  selector:\n    matchLabels:\n      migrations/replayer: {{=toJSON(inputs.parameters.name)}}\n",
+          "manifest": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: {{=toJSON(inputs.parameters.name)}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: TrafficReplay\n      name: {{=toJSON(inputs.parameters.name)}}\n      uid: {{=toJSON(inputs.parameters.ownerUid)}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    migrations.opensearch.org/component: traffic-replayer\n    workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n    migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n    migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n    migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\nspec:\n  minAvailable: {{=fromJSON(inputs.parameters.minPodReplicas)}}\n  selector:\n    matchLabels:\n      migrations.opensearch.org/component: traffic-replayer\n      migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.ownerUid)}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -225,6 +254,9 @@
               "name": "useLocalStack"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "resolvedKafkaConnection",
               "value": ""
             },
@@ -256,7 +288,7 @@
                   },
                   {
                     "name": "clientProperties",
-                    "value": "{{=sprig.dig('consumerClientProperties', '', fromJSON(inputs.parameters.kafkaConfig))}}"
+                    "value": "{{=fromJSON(inputs.parameters.kafkaConfig)['consumerClientProperties']}}"
                   }
                 ]
               },
@@ -325,6 +357,10 @@
                     "value": "{{inputs.parameters.name}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.ownerUid}}"
                   },
@@ -354,7 +390,7 @@
                   },
                   {
                     "name": "kafkaCaSecretName",
-                    "value": "{{=((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])) == 'scram-sha-512') ? (fromJSON(inputs.parameters.kafkaConfig)['caSecretName']) : ('empty'))}}"
+                    "value": "{{=((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])) == 'scram-sha-512' || ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])) == 'ssl') ? (fromJSON(inputs.parameters.kafkaConfig)['caSecretName']) : ('empty'))}}"
                   },
                   {
                     "name": "podReplicas",
@@ -382,7 +418,7 @@
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.dict(\"targetUri\", fromJSON(inputs.parameters.targetConfig)['endpoint'], \"insecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))), (('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"sigv4AuthHeaderServiceRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service']+','+fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : (sprig.dict()))) : (sprig.dict()))), sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'minPodReplicas', 'useLocalStack', 'resources', 'fileSourceVolumes', 'fileSourceVolumeMounts')), sprig.merge(sprig.dict(\"kafkaTrafficBrokers\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.kafkaConfig)['kafkaConnection'])), \"kafkaTrafficTopic\", fromJSON(inputs.parameters.kafkaConfig)['kafkaTopic'], \"kafkaTrafficGroupId\", inputs.parameters.kafkaGroupId, \"kafkaTrafficListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.kafkaConfig)['listenerName'])), \"kafkaTrafficAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])), \"kafkaTrafficSecretName\", fromJSON(inputs.parameters.kafkaConfig)['secretName'], \"kafkaTrafficUserName\", fromJSON(inputs.parameters.kafkaConfig)['kafkaUserName']), ((!(sprig.dig('consumerClientProperties', '', fromJSON(inputs.parameters.kafkaConfig)) == '')) ? (sprig.dict(\"kafkaTrafficPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict())))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.dict(\"targetUri\", fromJSON(inputs.parameters.targetConfig)['endpoint'], \"insecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))), (('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"sigv4AuthHeaderServiceRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service']+','+fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : (sprig.dict()))) : (sprig.dict()))), ((sprig.dig('otelMetricsCollectorEndpoint', '', sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'minPodReplicas', 'useLocalStack', 'resources', 'fileSourceVolumes', 'fileSourceVolumeMounts')) == '') ? (sprig.omit(sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'minPodReplicas', 'useLocalStack', 'resources', 'fileSourceVolumes', 'fileSourceVolumeMounts'), 'otelMetricsCollectorEndpoint')) : (sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'minPodReplicas', 'useLocalStack', 'resources', 'fileSourceVolumes', 'fileSourceVolumeMounts')))), sprig.merge(sprig.dict(\"kafkaTrafficBrokers\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.kafkaConfig)['kafkaConnection'])), \"kafkaTrafficTopic\", fromJSON(inputs.parameters.kafkaConfig)['kafkaTopic'], \"kafkaTrafficGroupId\", inputs.parameters.kafkaGroupId, \"kafkaTrafficListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.kafkaConfig)['listenerName'])), \"kafkaTrafficAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])), \"kafkaTrafficSecretName\", fromJSON(inputs.parameters.kafkaConfig)['secretName'], \"kafkaTrafficUserName\", fromJSON(inputs.parameters.kafkaConfig)['kafkaUserName']), ((!(fromJSON(inputs.parameters.kafkaConfig)['consumerClientProperties'] == '')) ? (sprig.dict(\"kafkaTrafficPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict())))))}}"
                   },
                   {
                     "name": "resources",

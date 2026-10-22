@@ -10,7 +10,7 @@ import subprocess
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-from .autocomplete_k8s_labels import complete_label_value
+from .autocomplete_k8s_labels import complete_component_value, complete_label_value
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .argo_utils import DEFAULT_ARGO_SERVER_URL
 from .crd_utils import (
@@ -25,12 +25,7 @@ from ..models.utils import load_k8s_config, get_current_namespace
 
 
 logger = logging.getLogger(__name__)
-_RESOURCE_OUTPUT_LABELS = {'strimzi.io/cluster'}
-# Labels present on CRs but not propagated to workflow pods.
-_LABELS_NOT_PROPAGATED_TO_PODS = {
-    'migrations.opensearch.org/run-number',
-    'migrations.opensearch.org/workflow-name',
-}
+MIGRATION_RESOURCE_UID_LABEL = 'migrations.opensearch.org/migration-resource-uid'
 
 # `workflow log` is intentionally for pod logs only. Durable command output is
 # handled by the workflow templates instead: the few output-producing steps
@@ -45,6 +40,7 @@ _LABELS_NOT_PROPAGATED_TO_PODS = {
 # the user had placed them before `--`.
 _PROMOTABLE_FLAGS = {
     '--timestamps': 'timestamps',
+    '--show-pods': 'show_pods',
     '-f': 'follow',
     '--follow': 'follow',
 }
@@ -122,13 +118,14 @@ def _validate_selector_arg(ctx, selector):
         ctx.exit(1)
 
 
-def _filter_selectors(source, target, snapshot, task, from_snapshot_migration, labels):
+def _filter_selectors(source, target, snapshot, task, component, from_snapshot_migration, labels):
     selectors = []
     for key, value in (
         ('source', source),
         ('target', target),
         ('snapshot', snapshot),
         ('task', task),
+        ('component', component),
         ('from-snapshot-migration', from_snapshot_migration),
     ):
         if value:
@@ -175,26 +172,24 @@ def _find_resource_object(namespace, resource_name):
     return None
 
 
-def _resource_label_selectors(ctx, namespace, resource_name, prefix):
+def _resource_label_selectors(ctx, namespace, resource_name):
     resource = _find_resource_object(namespace, resource_name)
     if not resource:
         click.echo(f"No migration resource matching '{resource_name}'.", err=True)
         ctx.exit(1)
-    labels = resource.get('metadata', {}).get('labels', {}) or {}
-    selectors = [
-        f"{key}={value}"
-        for key, value in sorted(labels.items())
-        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and
-        key not in _LABELS_NOT_PROPAGATED_TO_PODS and value
-    ]
-    if not selectors:
-        click.echo(f"Migration resource '{resource_name}' has no output labels.", err=True)
+    resource_uid = resource.get('metadata', {}).get('uid')
+    if not resource_uid:
+        click.echo(
+            f"Migration resource '{resource_name}' has no Kubernetes UID; "
+            "resource logs cannot be selected safely.",
+            err=True,
+        )
         ctx.exit(1)
-    return selectors
+    return [f"{MIGRATION_RESOURCE_UID_LABEL}={resource_uid}"]
 
 
 def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):
-    from .autocomplete_k8s_labels import _fetch_workflow_labels
+    from .autocomplete_k8s_labels import _fetch_workflow_labels, fetch_component_values
     effective_name = None if all_workflows else workflow_name
     argo_server = kwargs.get('argo_server', DEFAULT_ARGO_SERVER_URL)
     token = kwargs.get('token')
@@ -202,6 +197,13 @@ def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):
     label_map, _ = _fetch_workflow_labels(
         effective_name or DEFAULT_WORKFLOW_NAME, namespace,
         argo_server, token, insecure)
+    try:
+        components = fetch_component_values(namespace, effective_name)
+    except Exception as e:
+        logger.debug(f"Unable to list pod components: {e}")
+        components = set()
+    if components:
+        label_map = {**label_map, 'component': components}
     if not label_map:
         click.echo("No matching pods found.")
     else:
@@ -210,10 +212,11 @@ def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):
                 click.echo(f"{key}={val}")
 
 
-def _run_output(ctx, namespace, selector, follow, timestamps, passthrough_args):
+def _run_output(ctx, namespace, selector, follow, timestamps, passthrough_args, show_pods=False):
     promoted, passthrough_args = _promote_known_flags(list(passthrough_args))
     follow = follow or 'follow' in promoted
     timestamps = timestamps or 'timestamps' in promoted
+    show_pods = show_pods or 'show_pods' in promoted
 
     if '--help' in passthrough_args:
         _show_underlying_help(follow)
@@ -222,7 +225,7 @@ def _run_output(ctx, namespace, selector, follow, timestamps, passthrough_args):
     if follow:
         _run_tailing_mode(namespace, selector, timestamps, passthrough_args)
     else:
-        _run_history_mode(ctx, namespace, selector, timestamps, passthrough_args)
+        _run_history_mode(ctx, namespace, selector, timestamps, passthrough_args, show_pods)
 
 
 def _output_options(func):
@@ -248,6 +251,8 @@ def _output_options(func):
                         help='Stream live logs via stern instead of showing history')(func)
     func = click.option('--timestamps', is_flag=True, default=False,
                         help='Show timestamps in log output')(func)
+    func = click.option('--show-pods', is_flag=True, default=False,
+                        help='Prefix each historical log line with its source pod')(func)
     return func
 
 
@@ -273,7 +278,7 @@ def log_command():
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def output_all(ctx, workflow_name, all_workflows, namespace, prefix,
-               follow, timestamps, extra_args, **kwargs):
+               follow, timestamps, show_pods, extra_args, **kwargs):
     """Show all logs for the selected workflow.
 
     \b
@@ -290,7 +295,7 @@ def output_all(ctx, workflow_name, all_workflows, namespace, prefix,
         ctx.exit(1)
     effective_name = None if all_workflows else workflow_name
     full_selector = _selector_parts([], prefix, effective_name)
-    _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args)
+    _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args, show_pods)
 
 
 @log_command.command("resource")
@@ -301,7 +306,7 @@ def output_all(ctx, workflow_name, all_workflows, namespace, prefix,
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def output_resource(ctx, list_labels, workflow_name, all_workflows, namespace, prefix,
-                    follow, timestamps, resource_name, extra_args, **kwargs):
+                    follow, timestamps, show_pods, resource_name, extra_args, **kwargs):
     """Show logs for one migration resource.
 
     \b
@@ -342,13 +347,11 @@ def output_resource(ctx, list_labels, workflow_name, all_workflows, namespace, p
         click.echo(f"Error: could not load Kubernetes configuration: {e}", err=True)
         ctx.exit(1)
         return
-    resource_selectors = _resource_label_selectors(ctx, namespace, resource_name, prefix)
-    uses_external_resource_selector = any(
-        selector.startswith('strimzi.io/cluster=') for selector in resource_selectors
-    )
-    effective_name = None if all_workflows or uses_external_resource_selector else workflow_name
-    full_selector = _selector_parts(resource_selectors, prefix, effective_name)
-    _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args)
+    resource_selectors = _resource_label_selectors(ctx, namespace, resource_name)
+    # A Kubernetes UID is globally unique. Do not narrow it with a workflow
+    # label: controller-created and monitor pods can outlive their Argo workflow.
+    full_selector = _selector_parts(resource_selectors, prefix, None)
+    _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args, show_pods)
 
 
 @log_command.command("filter")
@@ -362,10 +365,12 @@ def output_resource(ctx, list_labels, workflow_name, all_workflows, namespace, p
               help='Filter output by snapshot label')
 @click.option('--task', shell_complete=complete_label_value('task'),
               help='Filter output by task label')
+@click.option('--component', shell_complete=complete_component_value,
+              help='Filter output by component label (the piece of a task, e.g. rfs-worker)')
 @click.option('--from-snapshot-migration', shell_complete=complete_label_value('from-snapshot-migration'),
               help='Filter output by from-snapshot-migration label')
 @click.option('--label', 'labels', multiple=True,
-              help='Additional raw key=value label selector. May be used multiple times.')
+              help='Additional raw key=value (or key!=value) label selector. May be used multiple times.')
 @_output_options
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
@@ -376,6 +381,8 @@ def output_filter(ctx, **params):
     Examples:
       workflow log filter --source mycluster --target target1
       workflow log filter --snapshot snap1 --task metadataMigrate
+      workflow log filter --from-snapshot-migration m1 --component rfs-coordinator
+      workflow log filter --from-snapshot-migration m1 --label 'component!=rfs-coordinator'
       workflow log filter --label custom.example/key=value -- --since=1h
     """
     workflow_name = params['workflow_name']
@@ -386,7 +393,7 @@ def output_filter(ctx, **params):
 
     _validate_scope(ctx, all_workflows)
     if params['list_labels']:
-        _list_available_labels(workflow_name, all_workflows, namespace, **params)
+        _list_available_labels(**params)
         return
 
     selectors, passthrough_args = _split_passthrough_args(params['extra_args'])
@@ -398,7 +405,7 @@ def output_filter(ctx, **params):
 
     selectors = _filter_selectors(
         params['source'], params['target'], params['snapshot'], params['task'],
-        params['from_snapshot_migration'], labels)
+        params['component'], params['from_snapshot_migration'], labels)
     if not selectors:
         click.echo("Error: specify --list or one or more filter options.\n", err=True)
         click.echo(ctx.get_help())
@@ -409,7 +416,15 @@ def output_filter(ctx, **params):
 
     effective_name = None if all_workflows else workflow_name
     full_selector = _selector_parts(selectors, prefix, effective_name)
-    _run_output(ctx, namespace, full_selector, params['follow'], params['timestamps'], passthrough_args)
+    _run_output(
+        ctx,
+        namespace,
+        full_selector,
+        params['follow'],
+        params['timestamps'],
+        passthrough_args,
+        params['show_pods'],
+    )
 
 
 def _show_underlying_help(follow):
@@ -429,7 +444,12 @@ def _run_tailing_mode(namespace, selector, timestamps, passthrough_args):
     subprocess.run(cmd)
 
 
-def _run_history_mode(ctx, namespace, selector, show_timestamps, passthrough_args):
+def _attribute_log_stream(pod_name, stream):
+    for line in stream:
+        yield line, pod_name
+
+
+def _run_history_mode(ctx, namespace, selector, show_timestamps, passthrough_args, show_pods=False):
     """Handle the complex merging of historical logs from multiple pods."""
     pods = []
     try:
@@ -454,19 +474,22 @@ def _run_history_mode(ctx, namespace, selector, show_timestamps, passthrough_arg
             processes.append((pod.metadata.name, p))
 
         # Merge and Stream
-        streams = [p.stdout for _, p in processes]
-        _stream_merged_logs(heapq.merge(*streams), show_timestamps)
+        streams = [_attribute_log_stream(pod_name, process.stdout) for pod_name, process in processes]
+        merged_logs = heapq.merge(*streams, key=lambda item: item[0])
+        _stream_merged_logs(merged_logs, show_timestamps, show_pods)
         _check_process_errors(processes)
 
 
-def _stream_merged_logs(merged_logs, show_ts):
+def _stream_merged_logs(merged_logs, show_ts, show_pods=False):
     """Handle formatting and printing of the log lines."""
     try:
-        for line in merged_logs:
+        for line, pod_name in merged_logs:
             if not show_ts:
                 # Strip RFC3339 timestamp
                 parts = line.split(" ", 1)
                 line = parts[1] if len(parts) > 1 else line
+            if show_pods:
+                line = f"[pod/{pod_name}] {line}"
             click.echo(line.rstrip())
     except KeyboardInterrupt:
         click.echo("\nInterrupted by user.", err=True)

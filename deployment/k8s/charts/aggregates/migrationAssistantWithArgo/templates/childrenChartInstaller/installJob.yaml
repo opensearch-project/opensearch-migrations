@@ -10,11 +10,17 @@ metadata:
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "0"
+    # Delete on success (right after the hook completes) and clean up any leftover
+    # from a prior run before creating the next one. Deliberately NO 'hook-failed':
+    # a failed installer pod is kept so its logs can be inspected (kubectl logs). It
+    # is removed on the next install/upgrade via 'before-hook-creation', or manually.
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 1200
-  ttlSecondsAfterFinished: 600
+  # No ttlSecondsAfterFinished: the TTL controller can't tell success from failure,
+  # and successful jobs are already reaped by the hook-succeeded delete policy above.
+  # The only jobs a TTL would remove are the failed ones we want to keep for debugging.
   podFailurePolicy:
     rules:
       - action: Ignore
@@ -35,20 +41,36 @@ spec:
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
       restartPolicy: Never
-{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+{{- $kyvernoPolicy := and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+{{- $dashboards := get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
+{{- if or $kyvernoPolicy $dashboards }}
       volumes:
+{{- if $kyvernoPolicy }}
         - name: policy
           configMap:
             name: {{ .Release.Name }}-kyverno-zero-resources-policy
+{{- end }}
+{{- if $dashboards }}
+        - name: dashboards
+          configMap:
+            name: {{ .Release.Name }}-cloudwatch-dashboard-manifests
+{{- end }}
 {{- end }}
       containers:
         - name: helm-installer
           image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
-{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+{{- if or $kyvernoPolicy $dashboards }}
           volumeMounts:
+{{- if $kyvernoPolicy }}
             - name: policy
               mountPath: /policy
+{{- end }}
+{{- if $dashboards }}
+            - name: dashboards
+              mountPath: /dashboards
+              readOnly: true
+{{- end }}
 {{- end }}
           command:
             - /bin/sh
@@ -332,15 +354,12 @@ spec:
                 exit 1
               fi
 
-      {{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
-      {{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
-      {{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
-      {{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}
+      {{- if $dashboards }}
               echo "Waiting for Dashboard CRD to be established..."
               kubectl wait --for=condition=Established crd/dashboards.cloudwatch.services.k8s.aws --timeout=120s
               echo "Applying CloudWatch Dashboard CRs..."
               apply_dashboards() {
-                echo '{{ include "cloudwatch.dashboardCRs" (dict "region" $region "account" $account "stage" $stage "root" $) | b64enc }}' | base64 -d | kubectl apply -f -
+                kubectl apply -f /dashboards/dashboards.yaml
               }
               retry 3 5 "apply CloudWatch Dashboard CRs" -- apply_dashboards
               echo "Dashboard CRs applied."

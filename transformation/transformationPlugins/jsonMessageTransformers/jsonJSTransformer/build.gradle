@@ -27,7 +27,7 @@ dependencies {
 
 // Process JS resources
 processResources {
-    from(project(':transformation:standardJavascriptTransforms').buildDir.toString() + '/dist') {
+    from(project(':transformation:standardJavascriptTransforms').layout.buildDirectory.dir('dist')) {
         into 'js' // should be within the build area
     }
 

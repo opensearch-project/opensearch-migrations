@@ -1,11 +1,17 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,8 +21,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.PortFinder;
+import org.opensearch.migrations.testutils.SelfSignedSSLContextBuilder;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
@@ -24,8 +32,11 @@ import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import lombok.Lombok;
@@ -81,9 +92,9 @@ class NettyScanningHttpProxyTest {
     @Test
     public void testRoundTrip() throws IOException, InterruptedException,
         PortFinder.ExceededMaxPortAssigmentAttemptException {
-        final int NUM_EXPECTED_TRAFFIC_STREAMS = 1;
+        final int NUM_EXPECTED_TRAFFIC_RECORDS = 1;
         final int NUM_INTERACTIONS = 3;
-        CountDownLatch interactionsCapturedCountdown = new CountDownLatch(NUM_EXPECTED_TRAFFIC_STREAMS);
+        CountDownLatch interactionsCapturedCountdown = new CountDownLatch(NUM_EXPECTED_TRAFFIC_RECORDS);
         var captureFactory = new InMemoryConnectionCaptureFactory(
             TEST_NODE_ID_STRING,
             1024 * 1024,
@@ -94,47 +105,162 @@ class NettyScanningHttpProxyTest {
             inMemoryInstrumentationBundle.openTelemetrySdk,
             IContextTracker.DO_NOTHING_TRACKER
         );
-        var servers = startServers(rootCtx, captureFactory);
-
-        try (var client = new SimpleHttpClientForTesting()) {
-            var nettyEndpoint = URI.create("http://localhost:" + servers.getKey().getProxyPort() + "/");
+        try (var servers = startServers(rootCtx, captureFactory);
+             var client = new SimpleHttpClientForTesting()) {
+            var nettyEndpoint = servers.proxyEndpoint();
             for (int i = 0; i < NUM_INTERACTIONS; ++i) {
                 var responseBody = makeTestRequestViaClient(client, nettyEndpoint);
                 Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
             }
-        }
-        interactionsCapturedCountdown.await();
-        var recordedStreams = captureFactory.getRecordedStreams();
-        Assertions.assertEquals(1, recordedStreams.size());
-        var recordedTrafficStreams = captureFactory.getRecordedTrafficStreamsStream().toArray(TrafficStream[]::new);
-        Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_STREAMS, recordedTrafficStreams.length);
-        log.info("Recorded traffic stream:\n" + recordedTrafficStreams[0]);
-        var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
-        Assertions.assertEquals(NUM_INTERACTIONS * 2, coalescedTrafficList.size());
-        int counter = 0;
-        final var expectedResponseMessage = normalizeMessage(EXPECTED_RESPONSE_STRING);
-        for (var httpMessage : coalescedTrafficList) {
-            var normalizedMessage = normalizeMessage(new String(httpMessage, StandardCharsets.UTF_8));
-            if (counter % 2 == 0) {
-                Assertions.assertTrue(EXPECTED_REQUEST_PATTERN.matcher(normalizedMessage).matches());
-            } else {
-                Assertions.assertEquals(expectedResponseMessage, normalizedMessage);
-            }
-            counter++;
-        }
 
-        var observations = recordedTrafficStreams[0].getSubStreamList();
-        var eomIndices = IntStream.range(0, observations.size())
-            .filter(i -> observations.get(i).hasEndOfMessageIndicator())
-            .toArray();
-        Assertions.assertEquals(NUM_INTERACTIONS, eomIndices.length);
-        for (int eomIndex : eomIndices) {
-            Assertions.assertTrue(observations.get(eomIndex - 1).hasRead());
-            Assertions.assertTrue(observations.get(eomIndex + 1).hasWrite());
-            var eom = observations.get(eomIndex).getEndOfMessageIndicator();
-            Assertions.assertEquals(14, eom.getFirstLineByteLength());
-            Assertions.assertEquals(711, eom.getHeadersByteLength());
+            interactionsCapturedCountdown.await();
+            var recordedStreams = captureFactory.getRecordedStreams();
+            Assertions.assertEquals(1, recordedStreams.size());
+            var recordedTrafficStreams = captureFactory.getRecordedTrafficStreamsStream().toArray(TrafficStream[]::new);
+            Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_RECORDS, recordedTrafficStreams.length);
+            log.info("Recorded traffic record:\n" + recordedTrafficStreams[0]);
+            var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
+            Assertions.assertEquals(NUM_INTERACTIONS * 2, coalescedTrafficList.size());
+            int counter = 0;
+            final var expectedResponseMessage = normalizeMessage(EXPECTED_RESPONSE_STRING);
+            for (var httpMessage : coalescedTrafficList) {
+                var normalizedMessage = normalizeMessage(new String(httpMessage, StandardCharsets.UTF_8));
+                if (counter % 2 == 0) {
+                    Assertions.assertTrue(EXPECTED_REQUEST_PATTERN.matcher(normalizedMessage).matches());
+                } else {
+                    Assertions.assertEquals(expectedResponseMessage, normalizedMessage);
+                }
+                counter++;
+            }
+
+            var observations = recordedTrafficStreams[0].getSubStreamList();
+            var eomIndices = IntStream.range(0, observations.size())
+                .filter(i -> observations.get(i).hasEndOfMessageIndicator())
+                .toArray();
+            Assertions.assertEquals(NUM_INTERACTIONS, eomIndices.length);
+            for (int eomIndex : eomIndices) {
+                var lastRead = observations.get(eomIndex - 1);
+                Assertions.assertTrue(lastRead.hasRead());
+                // The request's last bytes reach the source after its end of message and before its response.
+                var forwarded = observations.get(eomIndex + 1);
+                Assertions.assertTrue(forwarded.hasRequestForwarded());
+                Assertions.assertFalse(
+                    instantOf(forwarded).isBefore(instantOf(lastRead)),
+                    "the forward completes no earlier than the request's last read"
+                );
+                Assertions.assertTrue(observations.get(eomIndex + 2).hasWrite());
+                var eom = observations.get(eomIndex).getEndOfMessageIndicator();
+                Assertions.assertEquals(14, eom.getFirstLineByteLength());
+                Assertions.assertEquals(711, eom.getHeadersByteLength());
+            }
         }
+    }
+
+    private static Instant instantOf(TrafficObservation observation) {
+        return Instant.ofEpochSecond(observation.getTs().getSeconds(), observation.getTs().getNanos());
+    }
+
+    @Test
+    public void testTlsHandshakeFailureIsLoggedTerminallyCapturedAndProxyStaysAlive() throws Exception {
+        var tlsFailureCaptured = new CountDownLatch(1);
+        var captureFactory = new InMemoryConnectionCaptureFactory(
+            TEST_NODE_ID_STRING,
+            1024 * 1024,
+            tlsFailureCaptured::countDown
+        );
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var sslContext = SelfSignedSSLContextBuilder.getSSLContext();
+        var sslEngineSupplier = makeServerSslEngineSupplier(sslContext);
+
+        try (var servers = startServers(rootCtx, captureFactory, sslEngineSupplier);
+             var closeableLogSetup = new CloseableLogSetup(ProxyChannelInitializer.class.getName())) {
+            sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
+
+            assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
+            Assertions.assertTrue(tlsFailureCaptured.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            var failedTlsConnection = captureFactory.getRecordedTrafficStreamsStream()
+                .findFirst()
+                .orElseThrow();
+            Assertions.assertEquals(
+                1,
+                failedTlsConnection.getSubStreamList()
+                    .stream()
+                    .filter(observation -> observation.hasClose())
+                    .count()
+            );
+
+            var responseBody = makeTestRequestViaHttpsClient(servers.proxyEndpoint(), sslContext);
+            Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
+        }
+    }
+
+    @Test
+    public void testTlsHandshakeFailureLogsAreDedupedWithinWindow() throws Exception {
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var sslContext = SelfSignedSSLContextBuilder.getSSLContext();
+        var sslEngineSupplier = makeServerSslEngineSupplier(sslContext);
+
+        try (var servers = startServers(rootCtx, captureFactory, sslEngineSupplier);
+             var closeableLogSetup = new CloseableLogSetup(ProxyChannelInitializer.class.getName())) {
+            sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
+            assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
+
+            sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
+            Thread.sleep(250);
+
+            Assertions.assertEquals(1, countLogEventsContaining(
+                closeableLogSetup,
+                ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE
+            ));
+
+            var responseBody = makeTestRequestViaHttpsClient(servers.proxyEndpoint(), sslContext);
+            Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
+        }
+    }
+
+    @Test
+    public void unexpectedEventLoopTerminationReportsAnUnstableProcess() throws Exception {
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var unstableFailure = new AtomicReference<Throwable>();
+
+        try (var servers = startServers(rootCtx, captureFactory, null, unstableFailure::set)) {
+            servers.proxy.workerGroup.next().shutdownGracefully().sync();
+
+            assertEventually(() -> unstableFailure.get() != null);
+            Assertions.assertTrue(
+                unstableFailure.get().getMessage().contains("worker-0 event loop terminated unexpectedly")
+            );
+        }
+    }
+
+    @Test
+    public void plannedProxyStopDoesNotReportEventLoopFailure() throws Exception {
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var unstableFailure = new AtomicReference<Throwable>();
+        var servers = startServers(rootCtx, captureFactory, null, unstableFailure::set);
+
+        servers.close();
+
+        Assertions.assertEquals(null, unstableFailure.get());
     }
 
     private static String normalizeMessage(String s) {
@@ -178,9 +304,39 @@ class NettyScanningHttpProxyTest {
         return responseBody;
     }
 
-    private static Map.Entry<NettyScanningHttpProxy, Integer> startServers(
+    private static String makeTestRequestViaHttpsClient(URI endpoint, SSLContext sslContext) throws Exception {
+        var connection = (HttpsURLConnection) endpoint.toURL().openConnection();
+        connection.setSSLSocketFactory(sslContext.getSocketFactory());
+        connection.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
+        connection.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
+        return new String(connection.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    private static RunningProxyServers startServers(
         RootWireLoggingContext rootCtx,
         IConnectionCaptureFactory connectionCaptureFactory
+    ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        return startServers(rootCtx, connectionCaptureFactory, null);
+    }
+
+    private static RunningProxyServers startServers(
+        RootWireLoggingContext rootCtx,
+        IConnectionCaptureFactory connectionCaptureFactory,
+        java.util.function.Supplier<SSLEngine> sslEngineSupplier
+    ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        return startServers(
+            rootCtx,
+            connectionCaptureFactory,
+            sslEngineSupplier,
+            failure -> log.error("Unexpected event-loop termination in proxy test", failure)
+        );
+    }
+
+    private static RunningProxyServers startServers(
+        RootWireLoggingContext rootCtx,
+        IConnectionCaptureFactory connectionCaptureFactory,
+        java.util.function.Supplier<SSLEngine> sslEngineSupplier,
+        java.util.function.Consumer<Throwable> unstableProcessFailureHandler
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var nshp = new AtomicReference<NettyScanningHttpProxy>();
         var upstreamTestServer = new AtomicReference<SimpleHttpServer>();
@@ -201,20 +357,21 @@ class NettyScanningHttpProxyTest {
         }
 
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
-            nshp.set(new NettyScanningHttpProxy(port));
+            nshp.set(new NettyScanningHttpProxy(port, unstableProcessFailureHandler));
             try {
                 var connectionPool = new BacksideConnectionPool(testServerUri, null, 10, Duration.ofSeconds(10));
 
                 nshp.get()
-                    .start(new ProxyChannelInitializer(rootCtx, connectionPool, null,
-                        connectionCaptureFactory, new RequestCapturePredicate()), 1);
+                    .start(new ProxyChannelInitializer(rootCtx, connectionPool, sslEngineSupplier,
+                        connectionCaptureFactory, new RequestCapturePredicate(),
+                        new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)), 1);
                 System.out.println("proxy port = " + port);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw Lombok.sneakyThrow(e);
             }
         });
-        return Map.entry(nshp.get(), underlyingPort);
+        return new RunningProxyServers(nshp.get(), upstreamTestServer.get(), sslEngineSupplier != null);
     }
 
     private static SimpleHttpResponse makeContext(HttpRequest request) {
@@ -228,5 +385,77 @@ class NettyScanningHttpProxyTest {
         );
         var payloadBytes = UPSTREAM_SERVER_RESPONSE_BODY.getBytes(StandardCharsets.UTF_8);
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
+    }
+
+    private static java.util.function.Supplier<SSLEngine> makeServerSslEngineSupplier(SSLContext sslContext) {
+        return () -> {
+            var engine = sslContext.createSSLEngine();
+            engine.setUseClientMode(false);
+            return engine;
+        };
+    }
+
+    private static void sendPlaintextToTlsEndpoint(int port) throws IOException {
+        try (var socket = new Socket(SimpleHttpServer.LOCALHOST, port)) {
+            socket.getOutputStream().write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                .getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+        }
+    }
+
+    private static void assertEventuallyLogged(CloseableLogSetup logSetup, String expectedMessage)
+        throws InterruptedException {
+        var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (countLogEventsContaining(logSetup, expectedMessage) > 0) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        Assertions.fail("Expected log message containing: " + expectedMessage
+            + ". Actual log messages: " + logSetup.getLogEvents());
+    }
+
+    private static void assertEventually(java.util.function.BooleanSupplier condition)
+        throws InterruptedException {
+        var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        Assertions.fail("Expected condition to become true");
+    }
+
+    private static long countLogEventsContaining(CloseableLogSetup logSetup, String expectedMessage) {
+        return new ArrayList<>(logSetup.getLogEvents()).stream()
+            .filter(e -> e.contains(expectedMessage))
+            .count();
+    }
+
+    private static class RunningProxyServers implements AutoCloseable {
+        private final NettyScanningHttpProxy proxy;
+        private final SimpleHttpServer upstreamServer;
+        private final boolean useTls;
+
+        private RunningProxyServers(NettyScanningHttpProxy proxy, SimpleHttpServer upstreamServer, boolean useTls) {
+            this.proxy = proxy;
+            this.upstreamServer = upstreamServer;
+            this.useTls = useTls;
+        }
+
+        private URI proxyEndpoint() {
+            return URI.create((useTls ? "https" : "http") + "://localhost:" + proxy.getProxyPort() + "/");
+        }
+
+        @Override
+        public void close() throws InterruptedException {
+            try {
+                proxy.stop();
+            } finally {
+                upstreamServer.close();
+            }
+        }
     }
 }

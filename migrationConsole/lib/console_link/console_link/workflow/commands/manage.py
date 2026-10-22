@@ -12,6 +12,7 @@ from kubernetes import client
 # Internal imports
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .argo_utils import DEFAULT_ARGO_SERVER_URL
+from .hints import hint_after_manage
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..tui.manage_injections import make_argo_service, make_k8s_pod_scraper, WaiterInterface
 from ..tui.workflow_manage_app import WorkflowTreeApp
@@ -113,3 +114,5 @@ def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
+
+    hint_after_manage(app.last_known_phase)

@@ -93,6 +93,7 @@ Source and target clusters have the following options:
 - `endpoint`: required, the endpoint to reach the cluster.
 - `allow_insecure`: optional, default is false, equivalent to the curl `--insecure` flag, will not verify unsigned or invalid certificates
 - `version`: optional, default is to assume a version compatible with ES 7 or OS 1. Format should be `ES_7.10.2` or `OS_2.15`, for instance.
+- `solr_context_path`: optional, Solr sources only, default `/solr`. The path Solr's APIs are served under, appended to this cluster's endpoint when building Solr URLs. Set this when Solr runs with a custom `solr.contextPath` or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host.
 
 Exactly one of the following blocks must be present:
 
@@ -130,7 +131,7 @@ Backfill can be performed via several mechanisms. The method supported by the co
 Depending on the purpose/deployment strategy, RFS can be used in various environments, including:
 1. Docker container environment, e.g. Docker compose setup
 2. AWS in an Elastic Container Service (ECS) deployment
-3. Kubernetes environment, e.g. Minikube environment
+3. Kubernetes environment, e.g. kind environment
 
 Most of the parameters for these options are the same, with some additional ones specific to the deployment.
 

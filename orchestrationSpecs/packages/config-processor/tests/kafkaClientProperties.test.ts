@@ -1,4 +1,7 @@
-import {renderJavaProperties} from "../src/kafkaClientProperties";
+import {
+    buildKafkaClientPropertiesFileContent,
+    renderJavaProperties,
+} from "../src/kafkaClientProperties";
 
 function splitAtSeparator(line: string): [string, string] {
     let escaped = false;
@@ -83,5 +86,62 @@ describe("Kafka client properties rendering", () => {
         expect(decodeRenderedProperties(rendered)).toEqual(
             Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, String(value)]))
         );
+    });
+
+    it.each([
+        "security.protocol",
+        "sasl.mechanism",
+        "sasl.jaas.config",
+        "sasl.client.callback.handler.class",
+        "sasl.login.callback.handler.class",
+        "sasl.login.class",
+    ])("protects authentication selector %s even when auth is disabled", protectedKey => {
+        expect(() => buildKafkaClientPropertiesFileContent({
+            role: "producer",
+            clusterKey: "external",
+            kafkaConfig: {
+                kafkaConnection: "broker:9092",
+                kafkaTopic: "traffic",
+                authType: "none",
+            } as any,
+            userProperties: {[protectedKey]: "user-controlled"},
+        })).toThrow(/workflow-owned/);
+    });
+
+    it("renders TLS trust configuration plus user tuning for SSL-only clusters", () => {
+        expect(buildKafkaClientPropertiesFileContent({
+            role: "consumer",
+            clusterKey: "external",
+            kafkaConfig: {
+                kafkaConnection: "broker:9093",
+                kafkaTopic: "traffic",
+                authType: "ssl",
+                caSecretName: "external-kafka-ca",
+            } as any,
+            userProperties: {"fetch.min.bytes": 1024},
+        })).toBe([
+            "fetch.min.bytes=1024",
+            "ssl.truststore.location=/config/kafka-ca/ca.crt",
+            "ssl.truststore.type=PEM",
+            "",
+        ].join("\n"));
+    });
+
+    it("directly renders the workflow-generated SCRAM trust configuration with no user properties", () => {
+        expect(buildKafkaClientPropertiesFileContent({
+            role: "producer",
+            clusterKey: "managed",
+            kafkaConfig: {
+                kafkaConnection: "managed-kafka-bootstrap:9093",
+                kafkaTopic: "traffic",
+                authType: "scram-sha-512",
+                caSecretName: "managed-cluster-ca-cert",
+                managedByWorkflow: true,
+            } as any,
+        })).toBe([
+            "ssl.truststore.location=/config/kafka-ca/ca.crt",
+            "ssl.truststore.type=PEM",
+            "",
+        ].join("\n"));
     });
 });

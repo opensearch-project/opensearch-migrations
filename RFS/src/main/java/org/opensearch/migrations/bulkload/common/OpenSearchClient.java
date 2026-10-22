@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
@@ -21,14 +22,21 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.parsing.BulkResponseParser;
+import org.opensearch.migrations.parsing.BulkResponseParser.ItemFailure;
+import org.opensearch.migrations.parsing.BulkResponseParser.ItemPartition;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,6 +75,18 @@ public abstract class OpenSearchClient {
     private final Version version;
     private final CompressionMode compressionMode;
 
+    // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
+    // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
+    // volatile: emitFailedDocumentStreamRecord runs on concurrent bulk-write threads (batchConcurrency defaults
+    // to 10) while setFailedDocumentStreamContext/setFailedDocumentStreamWorkItem are written from the pipeline thread, so these
+    // need safe publication across threads.
+    private volatile FailedDocumentStreamSink failedDocumentStreamSink;
+    private volatile String failedDocumentStreamSessionId = "unknown-session";
+    private volatile String failedDocumentStreamWorkerId = "unknown-worker";
+    // Canonical work-item id (index + shard + checkpoint) for the work item currently being
+    // processed. Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
+    private volatile String failedDocumentStreamWorkItemId;
+
     protected OpenSearchClient(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
         this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
     }
@@ -76,6 +96,33 @@ public abstract class OpenSearchClient {
         this.failedRequestsLogger = failedRequestsLogger;
         this.version = version;
         this.compressionMode = compressionMode;
+    }
+
+    /**
+     * Install the failed document stream sink and identifiers used to tag records. Called by the bootstrap
+     * once the session/worker identifiers are known. Safe to call before any bulk
+     * requests are issued.
+     */
+    public void setFailedDocumentStreamContext(FailedDocumentStreamSink failedDocumentStreamSink, String sessionId, String workerId) {
+        this.failedDocumentStreamSink = failedDocumentStreamSink;
+        this.failedDocumentStreamSessionId = sessionId;
+        this.failedDocumentStreamWorkerId = workerId;
+    }
+
+    /**
+     * Update the work-coordination work item id stamped on subsequent failed document stream records. The target
+     * client is long-lived and processes many work items over its lifetime, so the bootstrap
+     * calls this at the start of each work item. The id is the canonical
+     * {@code IWorkCoordinator.WorkItemAndDuration.WorkItem#toString()} form
+     * ({@code base64url(index)__shard__startingDocId}), so a failed document stream record round-trips back to the
+     * exact work item that produced it.
+     */
+    public void setFailedDocumentStreamWorkItem(String workItemId) {
+        this.failedDocumentStreamWorkItemId = workItemId;
+    }
+
+    public FailedDocumentStreamSink getFailedDocumentStreamSink() {
+        return failedDocumentStreamSink;
     }
 
     public Version getClusterVersion() {
@@ -426,19 +473,34 @@ public abstract class OpenSearchClient {
     private BulkOperationSpec stripDocumentId(BulkOperationSpec original) {
         if (original instanceof IndexOp indexOp) {
             var metadata = indexOp.getOperation();
+            var versioning = metadata.getVersioning();
+            // Explicit versions require an ID. Keep unrelated concurrency checks
+            // intact so invalid custom combinations are still rejected by the target.
+            var unversioned = versioning != null
+                && (versioning.getIfSeqNo() != null || versioning.getIfPrimaryTerm() != null)
+                    ? VersionControlMetadata.builder()
+                        .ifSeqNo(versioning.getIfSeqNo())
+                        .ifPrimaryTerm(versioning.getIfPrimaryTerm())
+                        .build()
+                    : null;
             var newMetadata = IndexOperationMeta.builder()
                 .index(metadata.getIndex())
                 .type(metadata.getType())
                 .routing(metadata.getRouting())
                 .write(metadata.getWrite())
-                .versioning(metadata.getVersioning())
+                .versioning(unversioned)
                 .opType(metadata.getOpType())
                 .build();
             
             return IndexOp.builder()
                 .operation(newMetadata)
-                .document(original.getDocument())
+                .document(original.getRawDocument() == null ? original.getDocument() : null)
+                .rawDocument(original.getRawDocument())
                 .includeDocument(original.isIncludeDocument())
+                .originalSource(original.getOriginalSourceBytes() == null ? original.getOriginalSource() : null)
+                .originalSourceBytes(original.getOriginalSourceBytes())
+                .sourceHints(original.getSourceHints())
+                .sourceMetadata(original.getSourceMetadata())
                 .build();
         }
         return original;
@@ -464,20 +526,22 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
-        final var pendingDocs = new ArrayList<BulkOperationSpec>(docs);
-        return executeBulkWithRetry(
-            indexName,
-            () -> {
-                List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
-                    ? pendingDocs.stream().map(this::stripDocumentId).collect(Collectors.toList())
-                    : pendingDocs;
-                return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
-            },
-            pendingDocs,
-            () -> {},
-            context,
-            allowlist
-        );
+        return Mono.defer(() -> {
+            final var pendingDocs = new ArrayList<BulkOperationSpec>(docs);
+            return executeBulkWithRetry(
+                indexName,
+                () -> {
+                    List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
+                        ? pendingDocs.stream().map(this::stripDocumentId).collect(Collectors.toList())
+                        : pendingDocs;
+                    return BulkNdjson.serialize(operationsToSend, OBJECT_MAPPER);
+                },
+                pendingDocs,
+                () -> {},
+                context,
+                allowlist
+            );
+        });
     }
 
     /**
@@ -488,35 +552,37 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
-        final var pendingRawDocs = new ArrayList<>(docs);
-        final var pendingOps = new ArrayList<BulkOperationSpec>();
+        return Mono.defer(() -> {
+            final var pendingRawDocs = new ArrayList<>(docs);
+            final var pendingOps = new ArrayList<BulkOperationSpec>();
 
-        // On first error, convert raw docs to ops for compaction tracking
-        Runnable lazyConvert = () -> {
-            if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
-                for (var doc : pendingRawDocs) {
-                    pendingOps.add(docToBulkOp(doc, indexName));
-                }
-                pendingRawDocs.clear();
-            }
-        };
-
-        return executeBulkWithRetry(
-            indexName,
-            () -> {
+            // On first error, convert raw docs to ops for compaction tracking
+            Runnable lazyConvert = () -> {
                 if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
-                    return buildRawNdjsonBytes(pendingRawDocs, indexName, allowServerGeneratedIds);
+                    for (var doc : pendingRawDocs) {
+                        pendingOps.add(docToBulkOp(doc, indexName));
+                    }
+                    pendingRawDocs.clear();
                 }
-                List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
-                    ? pendingOps.stream().map(this::stripDocumentId).collect(Collectors.toList())
-                    : pendingOps;
-                return BulkNdjson.toBulkNdjsonBytes(operationsToSend, OBJECT_MAPPER);
-            },
-            pendingOps,
-            lazyConvert,
-            context,
-            allowlist
-        );
+            };
+
+            return executeBulkWithRetry(
+                indexName,
+                () -> {
+                    if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
+                        return BulkNdjson.serializeRaw(pendingRawDocs, indexName, allowServerGeneratedIds, OBJECT_MAPPER);
+                    }
+                    List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
+                        ? pendingOps.stream().map(this::stripDocumentId).collect(Collectors.toList())
+                        : pendingOps;
+                    return BulkNdjson.serialize(operationsToSend, OBJECT_MAPPER);
+                },
+                pendingOps,
+                lazyConvert,
+                context,
+                allowlist
+            );
+        });
     }
 
     /**
@@ -531,17 +597,29 @@ public abstract class OpenSearchClient {
      */
     private Mono<BulkResponse> executeBulkWithRetry(
         String indexName,
-        java.util.function.Supplier<byte[]> bodyBuilder,
+        java.util.function.Supplier<BulkNdjson.SerializedBulk> bodyBuilder,
         ArrayList<BulkOperationSpec> pendingOps,
         Runnable preCompactHook,
         IRfsContexts.IRequestContext context,
         DocumentExceptionAllowlist allowlist
     ) {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
-
+        var totals = new RequestTotals();
         return Mono.defer(() -> {
-            var bodyBytes = bodyBuilder.get();
+            var request = bodyBuilder.get();
+            var bodyBytes = request.bytes();
+            if (totals.attempts == 0) {
+                totals.target = request.operations();
+            }
+            if (bodyBytes.length == 0) {
+                return Mono.just(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"));
+            }
+            totals.attempts++;
+            totals.bytes += bodyBytes.length;
+            long start = System.nanoTime();
             return postBulkRequest(indexName, bodyBytes, context)
+                .doOnSuccess(response -> totals.durationNanos += System.nanoTime() - start)
+                .doOnError(error -> totals.durationNanos += System.nanoTime() - start)
                 .flatMap(response -> {
                     var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
 
@@ -557,7 +635,7 @@ public abstract class OpenSearchClient {
                     // Allow lazy initialization of pendingOps (e.g., raw→ops conversion)
                     preCompactHook.run();
 
-                    int successCount = compactPendingDocs(pendingOps, resp, allowlist);
+                    int successCount = compactPendingDocs(indexName, pendingOps, resp, allowlist);
 
                     if (pendingOps.isEmpty()) {
                         return Mono.just(resp);
@@ -576,6 +654,7 @@ public abstract class OpenSearchClient {
         .retryWhen(getBulkRetryStrategy())
         .doOnError(error -> {
             if (!pendingOps.isEmpty()) {
+                emitRetryExhaustedToFailedDocumentStream(indexName, pendingOps, error, allowlist);
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     pendingOps::size,
@@ -589,7 +668,19 @@ public abstract class OpenSearchClient {
                     .addArgument(indexName)
                     .log();
             }
-        });
+        })
+        .map(response -> new BulkResponse(response.statusCode, response.statusText, response.headers, response.body,
+            totals.target,
+            new MigrationMetrics.Requests(
+                1, totals.attempts, Math.max(0, totals.attempts - 1),
+                totals.bytes, Duration.ofNanos(totals.durationNanos).toMillis())));
+    }
+
+    private static final class RequestTotals {
+        long attempts;
+        long bytes;
+        long durationNanos;
+        MigrationMetrics.Operations target = MigrationMetrics.Operations.ZERO;
     }
 
     private Mono<HttpResponse> postBulkRequest(String indexName, byte[] bodyBytes,
@@ -602,33 +693,194 @@ public abstract class OpenSearchClient {
         return client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context);
     }
 
-    private byte[] buildRawNdjsonBytes(List<Document> docs, String indexName, boolean stripIds) {
-        return BulkNdjson.toRawNdjsonBytes(docs, indexName, stripIds, OBJECT_MAPPER);
-    }
-
     private static BulkOperationSpec docToBulkOp(Document doc, String indexName) {
         return BulkOperationConverter.fromDocument(doc, indexName);
     }
-    
+
     /**
-     * Compacts pendingDocs in-place: keeps only failed docs using nextSetBit iteration.
-     * O(f) where f = number of failures, no allocation beyond BitSet.
-     * @return number of successful documents removed
+     * Partitions the bulk response into success / non-retryable / retryable buckets,
+     * emits one failed document stream record per non-retryable failure, and compacts {@code pendingDocs}
+     * in place so it contains only the items that should be retried.
+     *
+     * <p>Behavior change vs. the previous BitSet-based compactor: items whose error
+     * type is in {@link org.opensearch.migrations.BulkDocErrorTypes#NON_RETRYABLE}
+     * are written to the failed document stream immediately and removed from {@code pendingDocs} so the
+     * retry loop does not keep hammering them.
+     *
+     * @return number of documents removed because they succeeded (or were allowlisted)
      */
-    private int compactPendingDocs(ArrayList<BulkOperationSpec> pendingDocs, BulkResponse resp, DocumentExceptionAllowlist allowlist) {
-        BitSet failedPositions = BulkResponseParser.getFailedPositions(resp.body, allowlist);
-        if (failedPositions == null) {
+    private int compactPendingDocs(
+        String indexName,
+        ArrayList<BulkOperationSpec> pendingDocs,
+        BulkResponse resp,
+        DocumentExceptionAllowlist allowlist
+    ) {
+        ItemPartition partition = BulkResponseParser.partitionItems(resp.body, allowlist);
+        if (partition == null) {
             // Can't parse response - assume all failed, retry all
             return 0;
         }
-        
+
+        // Snapshot the ops we're about to drop so we can emit failed document stream records before mutating.
+        for (ItemFailure failure : partition.getNonRetryableFailures()) {
+            BulkOperationSpec op = failure.getPosition() < pendingDocs.size()
+                ? pendingDocs.get(failure.getPosition())
+                : null;
+            emitFailedDocumentStreamRecord(indexName, op, failure, FailureClass.NON_RETRYABLE);
+        }
+
+        // Keep only retryable failures in pendingDocs, in original order.
+        BitSet keep = new BitSet(pendingDocs.size());
+        for (ItemFailure failure : partition.getRetryableFailures()) {
+            keep.set(failure.getPosition());
+        }
         int writeIdx = 0;
-        for (int i = failedPositions.nextSetBit(0); i >= 0; i = failedPositions.nextSetBit(i + 1)) {
+        for (int i = keep.nextSetBit(0); i >= 0; i = keep.nextSetBit(i + 1)) {
             pendingDocs.set(writeIdx++, pendingDocs.get(i));
         }
-        int successCount = pendingDocs.size() - writeIdx;
+        int removed = pendingDocs.size() - writeIdx;
         pendingDocs.subList(writeIdx, pendingDocs.size()).clear();
-        return successCount;
+        // removed = successes + non-retryable; return only the success count for the existing log line.
+        return removed - partition.getNonRetryableFailures().size();
+    }
+
+    /**
+     * Emit one failed document stream record per item still in {@code pendingOps} after all retries were
+     * exhausted. Best-effort correlation with per-item response details from the last
+     * failing response (carried on {@link OperationFailed}); falls back to null
+     * responseItem when the error is not an {@code OperationFailed} (e.g. a network
+     * failure that never produced a bulk response).
+     *
+     * <p>The configured {@code allowlist} is honored when classifying the last response:
+     * allowlisted items are routed to {@code successPositions} and are therefore absent from the
+     * retryable-failure list used for correlation, so an allowlisted item's {@code failureType} or
+     * documentId can never be attached to a real retryable failure's failed document stream record.
+     *
+     * <p><b>Correlation is by retryable-failure index, not by raw response position.</b> By the time
+     * this runs, {@code compactPendingDocs} has already compacted {@code pendingOps} down to exactly
+     * the last response's retryable failures, kept in ascending-position order.
+     * {@code partitionItems(...).getRetryableFailures()} recomputes that same list in that same order,
+     * so {@code pendingOps.get(k)} and {@code retryableFailures.get(k)} are the same k-th retryable
+     * item. This alignment is stable across compaction and — unlike a document-id lookup — works for
+     * server-generated ids (the id was stripped from the request), for which it also recovers the
+     * cluster-assigned id carried on the response item.
+     *
+     * <p>If the last response can't be parsed (no {@code OperationFailed}, e.g. a network failure, or
+     * an unparseable body) there is no failure list to align against, so every pending op is emitted
+     * with a null failure (null failureType/responseItem); the document body is still preserved.
+     */
+    private void emitRetryExhaustedToFailedDocumentStream(
+        String indexName,
+        ArrayList<BulkOperationSpec> pendingOps,
+        Throwable error,
+        DocumentExceptionAllowlist allowlist
+    ) {
+        // Retry exhausted by Reactor wraps the underlying OperationFailed inside a
+        // RetryExhausted/RuntimeException — unwrap the cause chain to recover the
+        // per-item response details from the last attempt.
+        OperationFailed opFailed = null;
+        Throwable cursor = error;
+        while (cursor != null) {
+            if (cursor instanceof OperationFailed) {
+                opFailed = (OperationFailed) cursor;
+                break;
+            }
+            cursor = cursor.getCause();
+        }
+        HttpResponse lastResponse = opFailed != null ? opFailed.response : null;
+        List<ItemFailure> retryableFailures = List.of();
+        if (lastResponse != null && lastResponse.body != null) {
+            ItemPartition partition = BulkResponseParser.partitionItems(lastResponse.body, allowlist);
+            if (partition != null) {
+                retryableFailures = partition.getRetryableFailures();
+            }
+        }
+        // pendingOps and retryableFailures are the same retryable items in the same order (see javadoc);
+        // when they can't be aligned (unparseable response, or a size mismatch that should never happen)
+        // the failure is left null rather than risking a cross-item mis-attribution.
+        boolean aligned = retryableFailures.size() == pendingOps.size();
+        if (!aligned && !retryableFailures.isEmpty()) {
+            log.atWarn()
+                .setMessage("Retry-exhausted failed-document-stream correlation skipped for index '{}': "
+                    + "{} pending ops vs {} retryable failures in the last response")
+                .addArgument(indexName)
+                .addArgument(pendingOps.size())
+                .addArgument(retryableFailures.size())
+                .log();
+        }
+        for (int i = 0; i < pendingOps.size(); i++) {
+            ItemFailure failure = aligned ? retryableFailures.get(i) : null;
+            emitFailedDocumentStreamRecord(indexName, pendingOps.get(i), failure, FailureClass.RETRYABLE_EXHAUSTED);
+        }
+    }
+
+    void emitFailedDocumentStreamRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
+        if (failedDocumentStreamSink == null) {
+            return;
+        }
+        try {
+            String docId = failure != null && failure.getDocumentId() != null
+                ? failure.getDocumentId()
+                : extractDocumentId(op);
+            JsonNode requestItem = op != null ? OBJECT_MAPPER.valueToTree(op) : null;
+            // Persist the original source-index document rather than the transformed one.
+            // The transformed body is what was actually sent, but the failed document stream is meant to let
+            // operators inspect/replay the source document, so swap it in when available.
+            if (requestItem instanceof ObjectNode && op != null && op.getOriginalSource() != null) {
+                ((ObjectNode) requestItem).set("document", OBJECT_MAPPER.valueToTree(op.getOriginalSource()));
+            }
+            JsonNode responseItem = failure != null && failure.getResponseItemJson() != null
+                ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
+            String failureType = failure != null ? failure.getErrorType() : null;
+            FailedDocumentStreamRecord failedDocumentStreamRecord = FailedDocumentStreamRecord.builder()
+                .sessionId(failedDocumentStreamSessionId)
+                .workerId(failedDocumentStreamWorkerId)
+                .workItemId(failedDocumentStreamWorkItemId)
+                .targetIndex(indexName)
+                .documentId(docId)
+                .failureType(failureType)
+                .failureClass(cls)
+                .timestamp(Instant.now().toString())
+                .requestItem(requestItem)
+                .responseItem(responseItem)
+                .build();
+            failedDocumentStreamSink.write(failedDocumentStreamRecord).subscribe(
+                v -> {},
+                err -> log.atError().setCause(err)
+                    .setMessage("Failed to buffer failed document stream record for index {}: {}")
+                    .addArgument(indexName)
+                    .addArgument(err.getMessage())
+                    .log()
+            );
+        } catch (Exception e) {
+            log.atError().setCause(e)
+                .setMessage("Unexpected error while emitting failed document stream record for index {}").addArgument(indexName).log();
+        }
+    }
+
+    static String extractDocumentId(BulkOperationSpec op) {
+        if (op == null) return null;
+        try {
+            // The bulk operation Jackson tree wraps the request payload under an
+            // "operation" object that has an "_id" field; the bulk-API action key
+            // ("index"/"create"/"update") is also a fallback when callers pass
+            // pre-shaped nodes through Jackson.
+            JsonNode tree = OBJECT_MAPPER.valueToTree(op);
+            if (tree == null) return null;
+            JsonNode meta = tree.path("operation").path("_id");
+            if (meta.isMissingNode() || meta.isNull()) {
+                meta = tree.path("index").path("_id");
+            }
+            if (meta.isMissingNode() || meta.isNull()) {
+                meta = tree.path("create").path("_id");
+            }
+            if (meta.isMissingNode() || meta.isNull()) {
+                meta = tree.path("update").path("_id");
+            }
+            return meta.isMissingNode() || meta.isNull() ? null : meta.asText();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {
@@ -637,8 +889,19 @@ public abstract class OpenSearchClient {
     }
 
     public static class BulkResponse extends HttpResponse {
+        public final MigrationMetrics.Operations target;
+        public final MigrationMetrics.Requests requests;
+
         public BulkResponse(int statusCode, String statusText, Map<String, String> headers, String body) {
+            this(statusCode, statusText, headers, body,
+                MigrationMetrics.Operations.ZERO, MigrationMetrics.Requests.ZERO);
+        }
+
+        public BulkResponse(int statusCode, String statusText, Map<String, String> headers, String body,
+                            MigrationMetrics.Operations target, MigrationMetrics.Requests requests) {
             super(statusCode, statusText, headers, body);
+            this.target = target;
+            this.requests = requests;
         }
 
         public boolean hasBadStatusCode() {

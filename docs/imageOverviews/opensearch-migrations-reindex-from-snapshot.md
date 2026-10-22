@@ -8,7 +8,7 @@
 
 The Migration Assistant for OpenSearch is a tool that simplifies the migration of data from Elasticsearch to OpenSearch. It provides a comprehensive solution for migrating historical and/or live data.
 
-Learn more at the documentation for the [Migration Assistant for OpenSearch](https://docs.opensearch.org/docs/latest/migration-assistant).
+Learn more at the documentation for the [Migration Assistant for OpenSearch](https://docs.opensearch.org/latest/migration-assistant).
 
 ## What is OpenSearch Migrations Reindex-from-Snapshot?
 
@@ -26,7 +26,7 @@ See [ECR](https://gallery.ecr.aws/opensearchproject/opensearch-migrations-reinde
 
 ## How to Use This Image
 
-OpenSearch Migration Reindex-from-Snapshot is a component of the Migration Assistant for OpenSearch. We recommend following the instructions in the [OpenSearch documentation](https://docs.opensearch.org/docs/latest/migration-assistant) to get started.
+OpenSearch Migration Reindex-from-Snapshot is a component of the Migration Assistant for OpenSearch. We recommend following the instructions in the [OpenSearch documentation](https://docs.opensearch.org/latest/migration-assistant) to get started.
 
 ## Licensing
 

@@ -6,7 +6,14 @@ deployments, certificate provisioning is handled automatically by
 
 ## How it works
 
-When you configure `tls` in your proxy config, the migration workflow will:
+TLS is on by default. When a proxy's config has no `tls` block, the workflow gives it a
+cert-manager certificate from the built-in `migrations-ca` issuer, valid for `<proxy name>`,
+`<proxy name>.ma` and `<proxy name>.ma.svc.cluster.local` (plus `*.elb.<region>.amazonaws.com` on
+EKS, so clients can verify the load balancer's hostname), lasting 90 days and renewed 15 days before
+expiry. Set `tls.mode: "plaintext"` to run the proxy without TLS.
+
+For a certManager or existingSecret configuration, whether written or defaulted, the migration
+workflow will:
 
 1. Create a cert-manager `Certificate` resource referencing your chosen issuer
 2. Wait for the certificate to be issued and the TLS secret to be created
@@ -45,7 +52,9 @@ traffic:
 |---|---|---|
 | cert-manager | `certManager` | Workflow creates a Certificate resource and waits for it to be issued |
 | Existing secret | `existingSecret` | Workflow mounts a pre-existing K8s TLS secret (no cert-manager needed) |
-| No TLS | *(omit `tls`)* | Proxy runs without TLS |
+| No TLS | `plaintext` | Proxy runs without TLS |
+
+Omitting `tls` is the same as `certManager` with the built-in `migrations-ca` issuer (see above).
 
 For `existingSecret` mode:
 
@@ -148,8 +157,7 @@ in your proxy config.
 external issuers process them. The built-in approver does not auto-approve for the
 `awspca.cert-manager.io` group. You may need to install the
 [cert-manager-approver-policy](https://cert-manager.io/docs/policy/approval/approver-policy/)
-controller and create a policy that allows the PCA issuer. See the
-[plan document](../orchestrationSpecs/PLAN_proxy_tls_certificate_management.md) for details.
+controller and create a policy that allows the PCA issuer.
 
 ## Non-K8s deployments
 
@@ -167,5 +175,5 @@ supported for backward compatibility but is not recommended for new deployments.
 
 ## Sample configurations
 
-- [`proxyWithSelfSignedTls.wf.yaml`](../orchestrationSpecs/packages/config-processor/scripts/samples/proxyWithSelfSignedTls.wf.yaml) — local CA issuer (minikube, non-AWS)
+- [`proxyWithSelfSignedTls.wf.yaml`](../orchestrationSpecs/packages/config-processor/scripts/samples/proxyWithSelfSignedTls.wf.yaml) — local CA issuer (kind, non-AWS)
 - [`proxyWithPcaTls.wf.yaml`](../orchestrationSpecs/packages/config-processor/scripts/samples/proxyWithPcaTls.wf.yaml) — AWS PCA issuer (EKS)

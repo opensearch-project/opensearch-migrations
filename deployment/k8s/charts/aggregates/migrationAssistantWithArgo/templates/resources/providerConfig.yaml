@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: provider-config
+  labels:
+    # Necessary label for Argo to pull values from a configmap
+    workflows.argoproj.io/configmap-type: Parameter
+data:
+  # The target cloud provider, used by workflow templates to select
+  # cloud-specific behavior at runtime (e.g. the capture proxy's internal
+  # load-balancer annotation). Rendered unconditionally with the key always
+  # present: Argo v4 does not honor optional:true on configMapKeyRef input
+  # parameters and fails resolution if the key is absent. Empty defaults to
+  # "aws" in the workflow parameter definition.
+  cloudProvider: {{ .Values.cloudProvider | default "aws" | quote }}
+
+  # aws.resourceTags as a single "Key=Value,Key2=Value2" string -- the format the
+  # aws-load-balancer-additional-resource-tags annotation expects, so any number of tags fits in
+  # one value. Workflow templates that create a Service of type LoadBalancer stamp this onto it,
+  # which is the ONLY way to tag an EKS Auto Mode NLB: Auto Mode's load balancing controller is
+  # EKS-managed (its --default-tags flag is unreachable) and, unlike ALBs via
+  # IngressClassParams.spec.tags, Services have no cluster-wide params object.
+  #
+  # Rendered unconditionally, and empty when no tags are set, for the same reason as
+  # cloudProvider above: Argo v4 fails configMapKeyRef resolution on a missing key even with
+  # optional:true. Consumers must treat "" as "add no annotation".
+  #
+  # Ranging over a map yields keys in sorted order, so this is stable across renders.
+  {{- $pairs := list }}
+  {{- range $key, $value := .Values.aws.resourceTags }}
+  {{- $pairs = append $pairs (printf "%s=%s" $key (toString $value)) }}
+  {{- end }}
+  awsResourceTags: {{ join "," $pairs | quote }}
+
+  # Workload templates resolve these at pod-creation time. Empty values preserve ordinary
+  # Kubernetes scheduling when custom EKS NodePools are disabled. A toleration permits a pod onto
+  # its tainted pool; the matching node selector is what requires that placement.
+  {{- $nodePoolsEnabled := .Values.cluster.useCustomKarpenterNodePool }}
+  {{- $mode := .Values.workloadsNodePool.mode | default "isolated" }}
+  {{- if not (has $mode (list "shared" "isolated")) }}
+  {{- fail (printf "workloadsNodePool.mode must be shared or isolated, got %q" $mode) }}
+  {{- end }}
+  {{- $sharedPoolName := .Values.workloadsNodePool.name | default "general-work-pool" }}
+  {{- $kafkaPoolName := ternary .Values.workloadsNodePool.dedicatedPools.kafka.name $sharedPoolName (eq $mode "isolated") }}
+  {{- $proxyPoolName := ternary .Values.workloadsNodePool.dedicatedPools.proxy.name $sharedPoolName (eq $mode "isolated") }}
+  {{- $replayerPoolName := ternary .Values.workloadsNodePool.dedicatedPools.replayer.name $sharedPoolName (eq $mode "isolated") }}
+  kafkaNodePoolName: {{ ternary $kafkaPoolName "" $nodePoolsEnabled | quote }}
+  proxyNodePoolName: {{ ternary $proxyPoolName "" $nodePoolsEnabled | quote }}
+  replayerNodePoolName: {{ ternary $replayerPoolName "" $nodePoolsEnabled | quote }}
+  {{- $zoneSpread := .Values.workloadsNodePool.zoneSpread | default "preferred" }}
+  {{- if not (has $zoneSpread (list "required" "preferred" "none")) }}
+  {{- fail (printf "workloadsNodePool.zoneSpread must be required, preferred or none, got %q" $zoneSpread) }}
+  {{- end }}
+  workloadZoneSpread: {{ $zoneSpread | quote }}
+  {{- $zoneCount := .Values.workloadsNodePool.zoneCount | default 0 | int }}
+  workloadZoneSpreadConstraintExtras: {{ ternary (printf "{\"minDomains\":%d}" $zoneCount) "{}" (and (eq $zoneSpread "required") (gt $zoneCount 1)) | quote }}
+  k6NodePoolName: {{ ternary .Values.workloadsNodePool.dedicatedPools.k6.name "" $nodePoolsEnabled | quote }}

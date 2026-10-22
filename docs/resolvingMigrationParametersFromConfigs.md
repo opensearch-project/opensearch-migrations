@@ -69,7 +69,10 @@ Examples:
 
 - `USER_PROXY_OPTIONS` projects into `CaptureProxy.spec`.
 - `USER_REPLAYER_OPTIONS` projects into `TrafficReplay.spec`.
-- `USER_CREATE_SNAPSHOT_OPTIONS` projects into `DataSnapshot.spec`.
+- `USER_CREATE_SNAPSHOT_OPTIONS` projects into `DataSnapshot.spec`. The Solr-only `solrCollections`
+  field is an exception: it is not a user-facing option, so it lives on the internal
+  `ARGO_CREATE_SNAPSHOT_OPTIONS` and is projected into `DataSnapshot.spec` as an internal projected
+  field rather than through the user schema.
 - `USER_METADATA_OPTIONS` projects into prefixed `SnapshotMigration.spec.metadataMigration*` fields.
 - `USER_RFS_OPTIONS` projects into prefixed `SnapshotMigration.spec.documentBackfill*` fields.
 
@@ -284,6 +287,15 @@ the same projection metadata used by the CRD/VAP generator.
 The initializer embeds this object directly in `MigrationRun.spec.resolvedConfig`.
 The `resolveMigrationResources` command remains available for local inspection
 and tests, but the workflow does not run an artifact archival step.
+
+The resolved `parameters` are kept consistent with the spec the workflow actually
+applies to the live CR. In particular: default-less string fields that the apply
+manifests always write as `""` (for example `otelTraceCollectorEndpoint` and the
+metadata/document-backfill transformer configs) are emitted as `""` here too, and
+terminal resources (`DataSnapshot`, `SnapshotMigration`) include `dependsOn`. Note that
+`dependsOn` is authoritative on the live CR only after the workflow's `tryApply` step
+writes it; the initializer omits it from the bootstrap spec for terminal resources so it
+never advertises an unestablished edge.
 
 ## Dry-Run Policy Evaluation
 

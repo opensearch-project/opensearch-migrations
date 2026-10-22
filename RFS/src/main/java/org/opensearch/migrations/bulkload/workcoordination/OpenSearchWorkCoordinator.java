@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -8,6 +9,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Spliterators;
 import java.util.function.BiPredicate;
@@ -21,6 +23,7 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Lombok;
@@ -38,6 +41,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final int MAX_REFRESH_RETRIES = 6;
     public static final int MAX_SETUP_RETRIES = 6;
     static final long ACQUIRE_WORK_RETRY_BASE_MS = 10;
+    static final int MAX_COORDINATOR_UPDATE_RETRIES = 6;
+    static final long COORDINATOR_UPDATE_RETRY_BASE_MS = 10;
     // we'll retry lease acquisitions for up to
     static final int MAX_DRIFT_RETRIES = 13; // last delay before failure: 40 seconds
     static final int MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES = 17; // last delay before failure: 655.36 seconds
@@ -69,11 +74,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
-    // Bumped to 3.0 alongside the switch to base64url-encoded indexName segments in work-item
-    // ids (opensearch-project/opensearch-migrations#2880).  Work-coordination documents written
-    // by a previous version will fail the scriptVersion check, which is intentional — the
-    // working-state index must be cleared before upgrading across this boundary.
-    public static final String SCRIPT_VERSION = "3.0";
+    // 3.1 checkpoints identify the next source position, avoiding overlapping work-item metrics.
+    public static final String SCRIPT_VERSION = "3.1";
+    public static final String COMMITTED_METRICS_FIELD_NAME = "committed_metrics";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
     public static final String CLIENT_TIMESTAMP_TEMPLATE = "{CLIENT_TIMESTAMP}";
     public static final String EXPIRATION_WINDOW_TEMPLATE = "{EXPIRATION_WINDOW}";
@@ -201,6 +204,11 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     @FunctionalInterface
     public interface RetryableAction {
         void execute() throws IOException, NonRetryableException, InterruptedException;
+    }
+
+    @FunctionalInterface
+    private interface RetryableSupplier<T> {
+        T get() throws IOException, InterruptedException;
     }
 
     private static void retryWithExponentialBackoff(
@@ -437,32 +445,112 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         if (response.getStatusCode() == 409) {
             return DocumentModificationResult.IGNORED;
         }
-        final var resultDoc = objectMapper.readTree(response.getPayloadBytes());
+        final JsonNode resultDoc;
+        try {
+            var payloadBytes = response.getPayloadBytes();
+            if (payloadBytes == null) {
+                var e = new UnexpectedWorkCoordinationResponseException(
+                    "Work coordination update response did not contain a payload. "
+                        + getResponseStatusDescription(response),
+                    null
+                );
+                logUnexpectedResponse(response, e);
+                throw e;
+            }
+            resultDoc = objectMapper.readTree(payloadBytes);
+        } catch (UnexpectedWorkCoordinationResponseException e) {
+            throw e;
+        } catch (IOException e) {
+            var wrapped = new UnexpectedWorkCoordinationResponseException(
+                "Work coordination update response was not parseable JSON. "
+                    + getResponseStatusDescription(response),
+                e
+            );
+            logUnexpectedResponse(response, wrapped);
+            throw wrapped;
+        }
+
+        if ((response.getStatusCode() / 100) != 2) {
+            var e = new UnexpectedWorkCoordinationResponseException(
+                "Work coordination update request failed. "
+                    + getResponseStatusDescription(response)
+                    + getErrorSummary(resultDoc),
+                null
+            );
+            logUnexpectedResponse(response, e);
+            throw e;
+        }
+
         var resultStr = resultDoc.path(RESULT_OPENSSEARCH_FIELD_NAME).textValue();
         try {
             return DocumentModificationResult.parse(resultStr);
         } catch (Exception e) {
-            log.atWarn().setCause(e).setMessage("Caught exception while parsing the response").log();
-            log.atWarn().setMessage("status: {} {}")
-                .addArgument(response::getStatusCode)
-                .addArgument(response::getStatusText)
-                .log();
-            log.atWarn().setMessage("headers: {}")
-                .addArgument(() -> response.getHeaders()
-                    .map(kvp->kvp.getKey() + ":" + kvp.getValue()).collect(Collectors.joining("\n")))
-                .log();
-            log.atWarn().setMessage("Payload: {}")
-                .addArgument(() -> {
-                        try {
-                            return new String(response.getPayloadBytes(), StandardCharsets.UTF_8);
-                        } catch (Exception e2) {
-                            return "EXCEPTION: while trying to display response bytes: " + e2;
-                        }
-                    }
-                )
-                .log();
-            throw e;
+            var wrapped = new UnexpectedWorkCoordinationResponseException(
+                "Work coordination update response did not contain an expected result field. "
+                    + "Expected one of [noop, created, updated], got "
+                    + (resultStr == null ? "missing or non-textual result" : "'" + resultStr + "'")
+                    + ". " + getResponseStatusDescription(response)
+                    + getErrorSummary(resultDoc),
+                e
+            );
+            logUnexpectedResponse(response, wrapped);
+            throw wrapped;
         }
+    }
+
+    private static String getResponseStatusDescription(AbstractedHttpClient.AbstractHttpResponse response) {
+        return "Status: " + response.getStatusCode() + " " + response.getStatusText() + ".";
+    }
+
+    private static String getErrorSummary(JsonNode responseDoc) {
+        var error = responseDoc.path("error");
+        if (error.isMissingNode() || error.isNull()) {
+            return "";
+        }
+        return " Error: " + describeErrorNode(error) + ".";
+    }
+
+    private static String describeErrorNode(JsonNode errorNode) {
+        var type = getTextField(errorNode, "type").orElse("unknown_error");
+        var reason = getTextField(errorNode, "reason").orElse("no reason provided");
+        var summary = type + ": " + reason;
+        var causedBy = errorNode.path("caused_by");
+        if (!causedBy.isMissingNode() && !causedBy.isNull()) {
+            summary += "; caused by " + describeErrorNode(causedBy);
+        }
+        return summary;
+    }
+
+    private static Optional<String> getTextField(JsonNode node, String fieldName) {
+        var child = node.path(fieldName);
+        return child.isMissingNode() || child.isNull()
+            ? Optional.empty()
+            : Optional.of(child.asText());
+    }
+
+    private static void logUnexpectedResponse(
+        AbstractedHttpClient.AbstractHttpResponse response,
+        UnexpectedWorkCoordinationResponseException e
+    ) {
+        log.atWarn().setCause(e).setMessage("Caught exception while parsing the response").log();
+        log.atWarn().setMessage("status: {} {}")
+            .addArgument(response::getStatusCode)
+            .addArgument(response::getStatusText)
+            .log();
+        log.atWarn().setMessage("headers: {}")
+            .addArgument(() -> response.getHeaders()
+                .map(kvp->kvp.getKey() + ":" + kvp.getValue()).collect(Collectors.joining("\n")))
+            .log();
+        log.atWarn().setMessage("Payload: {}")
+            .addArgument(() -> {
+                    try {
+                        return new String(response.getPayloadBytes(), StandardCharsets.UTF_8);
+                    } catch (Exception e2) {
+                        return "EXCEPTION: while trying to display response bytes: " + e2;
+                    }
+                }
+            )
+            .log();
     }
 
     @Override
@@ -471,8 +559,23 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         Supplier<IWorkCoordinationContexts.ICreateUnassignedWorkItemContext> contextSupplier
     ) throws IOException {
         try (var ctx = contextSupplier.get()) {
-            var response = createOrUpdateLeaseForDocument(workItemId, 0);
-            return getResult(response) == DocumentModificationResult.CREATED;
+            try {
+                return retryWorkCoordinationUpdate(
+                    "createUnassignedWorkItem[" + workItemId + "]",
+                    ctx,
+                    () -> {
+                        var response = createOrUpdateLeaseForDocument(workItemId, 0);
+                        return getResult(response) == DocumentModificationResult.CREATED;
+                    }
+                );
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                var interrupted = new InterruptedIOException(
+                    "Interrupted while retrying createUnassignedWorkItem[" + workItemId + "]"
+                );
+                interrupted.initCause(e);
+                throw interrupted;
+            }
         }
     }
 
@@ -491,33 +594,95 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier
     ) throws IOException, InterruptedException {
         try (var ctx = contextSupplier.get()) {
-            var startTime = Instant.now();
-            var updateResponse = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());
-            var resultFromUpdate = getResult(updateResponse);
+            return retryWorkCoordinationUpdate(
+                "createOrUpdateLeaseForWorkItem[" + workItemId + "]",
+                ctx,
+                () -> createOrUpdateLeaseForWorkItemWithoutRetry(workItemId, leaseDuration)
+            );
+        }
+    }
 
-            if (resultFromUpdate == DocumentModificationResult.CREATED) {
-                return new WorkItemAndDuration(startTime.plus(leaseDuration),
+    private WorkAcquisitionOutcome createOrUpdateLeaseForWorkItemWithoutRetry(
+        String workItemId,
+        Duration leaseDuration
+    ) throws IOException {
+        var startTime = Instant.now();
+        var updateResponse = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());
+        var resultFromUpdate = getResult(updateResponse);
+
+        if (resultFromUpdate == DocumentModificationResult.CREATED) {
+            return new WorkItemAndDuration(startTime.plus(leaseDuration),
+                    WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId));
+        } else {
+            final var httpResponse = httpClient.makeJsonRequest(
+                AbstractedHttpClient.GET_METHOD,
+                getPathForGets(workItemId),
+                null,
+                null
+            );
+            final var responseDoc = objectMapper.readTree(httpResponse.getPayloadBytes()).path(SOURCE_FIELD_NAME);
+            if (resultFromUpdate == DocumentModificationResult.UPDATED) {
+                var leaseExpirationTime = Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue());
+                return new WorkItemAndDuration(leaseExpirationTime,
                         WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId));
+            } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
+                return new AlreadyCompleted();
+            } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
+                throw new LeaseLockHeldElsewhereException();
             } else {
-                final var httpResponse = httpClient.makeJsonRequest(
-                    AbstractedHttpClient.GET_METHOD,
-                    getPathForGets(workItemId),
-                    null,
-                    null
-                );
-                final var responseDoc = objectMapper.readTree(httpResponse.getPayloadBytes()).path(SOURCE_FIELD_NAME);
-                if (resultFromUpdate == DocumentModificationResult.UPDATED) {
-                    var leaseExpirationTime = Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue());
-                    return new WorkItemAndDuration(leaseExpirationTime,
-                            WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId));
-                } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
-                    return new AlreadyCompleted();
-                } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
-                    throw new LeaseLockHeldElsewhereException();
-                } else {
-                    throw new IllegalStateException("Unknown result: " + resultFromUpdate);
-                }
+                throw new IllegalStateException("Unknown result: " + resultFromUpdate);
             }
+        }
+    }
+
+    private static <T> T retryWorkCoordinationUpdate(
+        String operationName,
+        IWorkCoordinationContexts.IRetryableActivityContext context,
+        RetryableSupplier<T> action
+    ) throws IOException, InterruptedException {
+        int failures = 0;
+        long delay = COORDINATOR_UPDATE_RETRY_BASE_MS;
+        while (true) {
+            try {
+                return action.get();
+            } catch (IOException e) {
+                failures++;
+                if (failures > MAX_COORDINATOR_UPDATE_RETRIES) {
+                    recordFailure(context);
+                    throw new IOException(
+                        operationName + " failed after " + failures
+                            + " attempts. Last failure: " + e.getMessage(),
+                        e
+                    );
+                }
+
+                recordRetry(context);
+                var sleepDuration = Duration.ofMillis(delay);
+                log.atWarn().setCause(e)
+                    .setMessage("Retry attempt {}/{} for {}. Backing off {} before next attempt. Error: {}")
+                    .addArgument(failures)
+                    .addArgument(MAX_COORDINATOR_UPDATE_RETRIES)
+                    .addArgument(operationName)
+                    .addArgument(sleepDuration)
+                    .addArgument(e.getClass().getSimpleName())
+                    .log();
+                Thread.sleep(delay);
+                delay = delay > Long.MAX_VALUE / EXPONENTIAL_BACKOFF_MULTIPLIER
+                    ? Long.MAX_VALUE
+                    : delay * EXPONENTIAL_BACKOFF_MULTIPLIER;
+            }
+        }
+    }
+
+    private static void recordRetry(IWorkCoordinationContexts.IRetryableActivityContext context) {
+        if (context != null) {
+            context.recordRetry();
+        }
+    }
+
+    private static void recordFailure(IWorkCoordinationContexts.IRetryableActivityContext context) {
+        if (context != null) {
+            context.recordFailure();
         }
     }
 
@@ -525,18 +690,46 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws InterruptedException {
-            retryWithExponentialBackoff(
-                () -> completeWorkItemWithoutRetry(workItemId, contextSupplier),
-                completionRetryConfig.maxRetries(),
-                completionRetryConfig.initialDelayMs(),
-                completionRetryConfig.maxDelayMs(),
-                "completeWorkItem[" + workItemId + "]",
-                ignored -> {}
-            );
+        completeWorkItem(workItemId, null, contextSupplier);
+    }
+
+    @Override
+    public void completeWorkItem(
+        String workItemId,
+        Map<String, Object> committedMetrics,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws InterruptedException {
+        retryWithExponentialBackoff(
+            () -> completeWorkItemWithoutRetry(workItemId, committedMetrics, contextSupplier),
+            completionRetryConfig.maxRetries(),
+            completionRetryConfig.initialDelayMs(),
+            completionRetryConfig.maxDelayMs(),
+            "completeWorkItem[" + workItemId + "]",
+            ignored -> {}
+        );
+    }
+
+    private String withCommittedMetrics(String body, Map<String, Object> metrics) throws IOException {
+        if (metrics == null) {
+            return body;
+        }
+        var root = objectMapper.readTree(body);
+        var script = (ObjectNode) root.get("script");
+        var params = (ObjectNode) script.get("params");
+        params.set("committedMetrics", objectMapper.valueToTree(metrics));
+        script.put("source", script.get("source").asText() + """
+            if (ctx._source.committed_metrics != null
+                && !ctx._source.committed_metrics.equals(params.committedMetrics)) {
+                throw new IllegalArgumentException("Committed metrics cannot be replaced");
+            }
+            ctx._source.committed_metrics = params.committedMetrics;
+            """);
+        return objectMapper.writeValueAsString(root);
     }
 
     private void completeWorkItemWithoutRetry(
         String workItemId,
+        Map<String, Object> committedMetrics,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException {
         try (var ctx = contextSupplier.get()) {
@@ -569,12 +762,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 AbstractedHttpClient.POST_METHOD,
                 getPathForUpdates(workItemId),
                 null,
-                body
+                withCommittedMetrics(body, committedMetrics)
             );
-            final var resultStr = objectMapper.readTree(response.getPayloadBytes())
-                .get(RESULT_OPENSSEARCH_FIELD_NAME)
-                .textValue();
-            if (DocumentModificationResult.UPDATED != DocumentModificationResult.parse(resultStr)) {
+            if (DocumentModificationResult.UPDATED != getResult(response)) {
                 throw new IllegalStateException(
                     "Unexpected response for workItemId: "
                         + workItemId
@@ -915,7 +1105,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private void updateWorkItemWithSuccessors(String workItemId, List<String> successorWorkItemIds) throws IOException, NonRetryableException {
+    private void updateWorkItemWithSuccessors(String workItemId, List<String> successorWorkItemIds,
+                                               Map<String, Object> committedMetrics) throws IOException, NonRetryableException {
         final var updateSuccessorWorkItemsTemplate = "{\n"
                 + "  \"script\": {\n"
                 + "    \"lang\": \"painless\",\n"
@@ -950,7 +1141,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 AbstractedHttpClient.POST_METHOD,
                 getPathForUpdates(workItemId),
                 null,
-                body
+                withCommittedMetrics(body, committedMetrics)
         );
         try {
             DocumentModificationResult modificationResult = getResult(response);
@@ -1059,6 +1250,19 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             Instant deadline,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
+        createSuccessorWorkItemsAndMarkComplete(workItemId, successorWorkItemIds,
+            successorNextAcquisitionLeaseExponent, deadline, null, contextSupplier);
+    }
+
+    @Override
+    public void createSuccessorWorkItemsAndMarkComplete(
+        String workItemId,
+        List<String> successorWorkItemIds,
+        int successorNextAcquisitionLeaseExponent,
+        Instant deadline,
+        Map<String, Object> committedMetrics,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException {
         if (successorWorkItemIds.contains(workItemId)) {
             throw new IllegalArgumentException(String.format("successorWorkItemIds %s can not not contain the parent workItemId: %s", successorWorkItemIds, workItemId));
         }
@@ -1067,7 +1271,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
         try (var ctx = contextSupplier.get()) {
             retryWithExponentialBackoff(
-                    () -> updateWorkItemWithSuccessors(workItemId, successorWorkItemIds),
+                    () -> updateWorkItemWithSuccessors(workItemId, successorWorkItemIds, committedMetrics),
                     MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
                     Long.MAX_VALUE,
@@ -1085,7 +1289,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
-                    () -> completeWorkItemWithoutRetry(workItemId, ctx::getCompleteWorkItemContext),
+                    () -> completeWorkItemWithoutRetry(workItemId, null, ctx::getCompleteWorkItemContext),
                     completionRetryConfig.maxRetries(),
                     completionRetryConfig.initialDelayMs(),
                     completionRetryConfig.maxDelayMs(),
@@ -1120,6 +1324,12 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         public String getMessage() {
             var parentPrefix = Optional.ofNullable(super.getMessage()).map(s -> s + " ").orElse("");
             return parentPrefix  + "Response: " + response.toDiagnosticString() ;
+        }
+    }
+
+    public static class UnexpectedWorkCoordinationResponseException extends IOException {
+        public UnexpectedWorkCoordinationResponseException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 

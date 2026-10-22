@@ -1,43 +1,138 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLException;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
+import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.UnauthenticatedClientLogDeduper.KnownEvent;
 
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.ssl.SslHandler;
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
     protected static final String CAPTURE_HANDLER_NAME = "CaptureHandler";
+    static final String TLS_HANDSHAKE_FAILURE_LOG_MESSAGE = "TLS handshake failed for frontside channel";
+    static final Duration UNAUTHENTICATED_CLIENT_LOG_DEDUPE_WINDOW = Duration.ofMinutes(1);
 
     protected final IConnectionCaptureFactory<T> connectionCaptureFactory;
+    protected final IConnectionCaptureFactory<T> passThroughConnectionCaptureFactory;
     protected final Supplier<SSLEngine> sslEngineProvider;
     protected final IRootWireLoggingContext rootContext;
     protected final BacksideConnectionPool backsideConnectionPool;
     protected final RequestCapturePredicate requestCapturePredicate;
+    protected final IncompleteRequestLimits incompleteRequestLimits;
+    protected final Duration maximumConnectionDuration;
+    protected final CaptureProcessState captureProcessState;
+    private final UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper;
 
     public ProxyChannelInitializer(
         IRootWireLoggingContext rootContext,
         BacksideConnectionPool backsideConnectionPool,
         Supplier<SSLEngine> sslEngineSupplier,
         IConnectionCaptureFactory<T> connectionCaptureFactory,
-        @NonNull RequestCapturePredicate requestCapturePredicate
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull CaptureProcessState captureProcessState
+    ) {
+        this(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            connectionCaptureFactory,
+            connectionCaptureFactory,
+            requestCapturePredicate,
+            IncompleteRequestLimits.DEFAULT,
+            org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler.DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            captureProcessState
+        );
+    }
+
+    public ProxyChannelInitializer(
+        IRootWireLoggingContext rootContext,
+        BacksideConnectionPool backsideConnectionPool,
+        Supplier<SSLEngine> sslEngineSupplier,
+        IConnectionCaptureFactory<T> connectionCaptureFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull Duration maximumRequestAssemblyDuration,
+        @NonNull CaptureProcessState captureProcessState
+    ) {
+        this(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            connectionCaptureFactory,
+            connectionCaptureFactory,
+            requestCapturePredicate,
+            new IncompleteRequestLimits(
+                maximumRequestAssemblyDuration,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
+            ),
+            org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler.DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            captureProcessState
+        );
+    }
+
+    public ProxyChannelInitializer(
+        IRootWireLoggingContext rootContext,
+        BacksideConnectionPool backsideConnectionPool,
+        Supplier<SSLEngine> sslEngineSupplier,
+        IConnectionCaptureFactory<T> connectionCaptureFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull IncompleteRequestLimits incompleteRequestLimits,
+        @NonNull CaptureProcessState captureProcessState
+    ) {
+        this(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            connectionCaptureFactory,
+            connectionCaptureFactory,
+            requestCapturePredicate,
+            incompleteRequestLimits,
+            org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler.DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            captureProcessState
+        );
+    }
+
+    public ProxyChannelInitializer(
+        IRootWireLoggingContext rootContext,
+        BacksideConnectionPool backsideConnectionPool,
+        Supplier<SSLEngine> sslEngineSupplier,
+        IConnectionCaptureFactory<T> connectionCaptureFactory,
+        IConnectionCaptureFactory<T> passThroughConnectionCaptureFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull IncompleteRequestLimits incompleteRequestLimits,
+        @NonNull Duration maximumConnectionDuration,
+        @NonNull CaptureProcessState captureProcessState
     ) {
         this.rootContext = rootContext;
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
+        this.passThroughConnectionCaptureFactory = passThroughConnectionCaptureFactory;
         this.requestCapturePredicate = requestCapturePredicate;
+        this.incompleteRequestLimits = incompleteRequestLimits;
+        this.maximumConnectionDuration = maximumConnectionDuration;
+        this.captureProcessState = captureProcessState;
+        this.unauthenticatedClientLogDeduper =
+            new UnauthenticatedClientLogDeduper(UNAUTHENTICATED_CLIENT_LOG_DEDUPE_WINDOW);
     }
 
     public boolean shouldGuaranteeMessageOffloading(HttpRequest httpRequest) {
@@ -50,23 +145,101 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
 
     @Override
     protected void initChannel(@NonNull SocketChannel ch) throws IOException {
-        var sslContext = sslEngineProvider != null ? sslEngineProvider.get() : null;
-        if (sslContext != null) {
-            ch.pipeline().addLast(new SslHandler(sslEngineProvider.get()));
+        if (captureProcessState.isTerminating()) {
+            ch.close();
+            return;
+        }
+        var sslEngine = sslEngineProvider != null ? sslEngineProvider.get() : null;
+        if (sslEngine != null) {
+            ch.pipeline().addLast(new SslHandler(sslEngine));
+            ch.pipeline().addLast(new FrontsideTlsExceptionHandler(unauthenticatedClientLogDeduper));
         }
 
         var connectionId = ch.id().asLongText();
-        ch.pipeline()
-            .addLast(CAPTURE_HANDLER_NAME,
-                new ConditionallyReliableLoggingHttpHandler<>(
-                    rootContext,
-                    "",
-                    connectionId,
-                    connectionCaptureFactory,
-                    requestCapturePredicate,
-                    this::shouldGuaranteeMessageOffloading
-                )
-            );
+        ch.pipeline().addLast(CAPTURE_HANDLER_NAME, createCaptureHandler(connectionId));
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));
+    }
+
+    ConditionallyReliableLoggingHttpHandler<T> createCaptureHandler(String connectionId) throws IOException {
+        if (captureProcessState.isTerminating()) {
+            throw new IllegalStateException("Proxy capture process is terminating");
+        }
+        var selectedFactory = captureProcessState.isPassThrough()
+            ? passThroughConnectionCaptureFactory
+            : connectionCaptureFactory;
+        try {
+            return newCaptureHandler(connectionId, selectedFactory);
+        } catch (RuntimeException | IOException e) {
+            if (selectedFactory != passThroughConnectionCaptureFactory && captureProcessState.isPassThrough()) {
+                return newCaptureHandler(connectionId, passThroughConnectionCaptureFactory);
+            }
+            throw e;
+        }
+    }
+
+    private ConditionallyReliableLoggingHttpHandler<T> newCaptureHandler(
+        String connectionId,
+        IConnectionCaptureFactory<T> selectedFactory
+    ) throws IOException {
+        return new ConditionallyReliableLoggingHttpHandler<>(
+            rootContext,
+            "",
+            connectionId,
+            selectedFactory,
+            requestCapturePredicate,
+            this::shouldGuaranteeMessageOffloading,
+            incompleteRequestLimits,
+            maximumConnectionDuration,
+            captureProcessState
+        );
+    }
+
+    private static class FrontsideTlsExceptionHandler extends ChannelInboundHandlerAdapter {
+        private final UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper;
+
+        private FrontsideTlsExceptionHandler(UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper) {
+            this.unauthenticatedClientLogDeduper = unauthenticatedClientLogDeduper;
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+            if (!containsCause(cause, SSLException.class)) {
+                ctx.fireExceptionCaught(cause);
+                return;
+            }
+
+            var logDecision = unauthenticatedClientLogDeduper.recordOccurrence(KnownEvent.FRONTSIDE_TLS_HANDSHAKE_FAILURE);
+            if (logDecision.shouldLog()) {
+                logTlsHandshakeFailure(ctx, cause, logDecision.getSuppressedCountSinceLastLog());
+            }
+            ctx.close();
+        }
+
+        private void logTlsHandshakeFailure(ChannelHandlerContext ctx, Throwable cause, long suppressedCount) {
+            if (suppressedCount > 0) {
+                log.atWarn().setCause(cause)
+                    .setMessage(TLS_HANDSHAKE_FAILURE_LOG_MESSAGE
+                        + ": {} ({} similar events suppressed since the previous stack trace)")
+                    .addArgument(() -> ctx.channel().id().asLongText())
+                    .addArgument(suppressedCount)
+                    .log();
+            } else {
+                log.atWarn().setCause(cause)
+                    .setMessage(TLS_HANDSHAKE_FAILURE_LOG_MESSAGE + ": {}")
+                    .addArgument(() -> ctx.channel().id().asLongText())
+                    .log();
+            }
+        }
+
+        private static boolean containsCause(Throwable cause, Class<? extends Throwable> causeType) {
+            var current = cause;
+            while (current != null) {
+                if (causeType.isInstance(current)) {
+                    return true;
+                }
+                current = current.getCause();
+            }
+            return false;
+        }
     }
 }

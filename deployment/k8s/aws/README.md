@@ -9,6 +9,11 @@ For a high-level overview of all Kubernetes deployment options see the
 [K8s README](../README.md). For broader Migration Assistant documentation
 see the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
 
+To provision equivalent EKS infrastructure without CloudFormation, use the
+additive [AWS Terraform module](../../terraform/aws/README.md). The Terraform
+module leaves this CloudFormation workflow intact and can optionally install the
+same Helm chart directly.
+
 ## What you get
 
 A single command:
@@ -59,8 +64,163 @@ curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/
 
 The shim is a 30-line script that downloads the CLI tarball into
 `~/.opensearch-migrate/cli/<version>/` and execs the unpacked binary.
-Older releases that shipped the monolithic `aws-bootstrap.sh` keep
-working; this CLI is the new entry point.
+The Rust CLI is the operator-oriented entry point. Developers who need to
+build and deploy the currently checked-out source should use
+`aws-bootstrap.sh` directly, as described below.
+
+For an end-to-end walkthrough that builds from source, creates a self-managed
+Elasticsearch source and an Amazon OpenSearch Service domain or Serverless
+collection target, runs a backfill plus capture and replay, and observes it, see
+[Quick start: self-managed Elasticsearch to Amazon OpenSearch](quickstarts/selfManagedEsToAmazonOpenSearch/README.md).
+
+## Build and deploy the current checkout
+
+The repository's `aws-bootstrap.sh` workflow builds the CloudFormation
+templates, container images, Helm chart, and CloudWatch dashboards from the
+current checkout, pushes the images to the deployment's private ECR registry,
+and installs those locally built artifacts on EKS.
+
+In addition to the general prerequisites above, this workflow requires:
+
+- Java 21
+- Docker with the Buildx plugin
+- `kubectl` and Helm
+- Network access from the EKS build nodes to the public base-image registries
+
+To create a development EKS deployment in a new VPC, run this from the
+repository root:
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --build \
+  --base-dir "$(git rev-parse --show-toplevel)" \
+  --stack-name MA-Dev \
+  --stage dev \
+  --region us-east-2
+```
+
+To rebuild and reinstall the current checkout on an existing Migration
+Assistant CloudFormation/EKS deployment, first remove the installed release.
+The script only installs: it stops if a release named after `--namespace`
+already exists. `helm uninstall` runs the chart's pre-delete hook, which stops
+and deletes migration workflows and resources and empties the deployment's S3
+bucket, so finish or save anything you need first.
+
+```bash
+helm uninstall ma -n ma
+```
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --skip-cfn-deploy \
+  --build \
+  --base-dir "$(git rev-parse --show-toplevel)" \
+  --stage dev \
+  --region us-east-2
+```
+
+Use the same `--stage` and `--region` values as the existing deployment so the
+script resolves the correct CloudFormation exports. `--build` and `--version`
+are mutually exclusive. Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for
+the existing-VPC and other deployment options.
+
+## Configuring workload NodePools
+
+The EKS deployment's main workload pool, `general-work-pool`, can be tuned by
+passing a Helm values override file through `--helm-values`:
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --skip-cfn-deploy \
+  --stage dev \
+  --region us-east-2 \
+  --helm-values ./deployment/k8s/aws/examples/nodepool-overrides.yaml
+```
+
+By default, instance family and size selection remain with EKS Auto Mode.
+Dedicated Kafka, proxy and replayer pools require On-Demand capacity because
+interruptions affect capture availability and replay-rate stability. The
+shared pool and dedicated k6 pool leave capacity type unconstrained, so Auto
+Mode may select Spot for them. The sample file at
+[`examples/nodepool-overrides.yaml`](./examples/nodepool-overrides.yaml)
+requires On-Demand for every pool and narrows selection to c/m/r instances of
+generation 5 and newer, up to `4xlarge`. It sets each of these shared-pool
+fields:
+
+- `workloadsNodePool.mode`
+- `workloadsNodePool.architectures`
+- `workloadsNodePool.capacityTypes`
+- `workloadsNodePool.instanceCategories`
+- `workloadsNodePool.minInstanceGeneration`
+- `workloadsNodePool.instanceSizes`
+- `workloadsNodePool.limits.cpu`
+- `workloadsNodePool.limits.memory`
+- `workloadsNodePool.disruption.consolidationPolicy`
+- `workloadsNodePool.disruption.consolidateAfter`
+
+`workloadsNodePool.mode` selects the data-plane placement model:
+
+- `shared` keeps Kafka, capture proxies, and replayers together on `general-work-pool`.
+- `isolated` gives Kafka, capture proxies, and replayers separate tainted NodePools.
+
+`isolated` is the default for EKS deployments. Set the mode to `shared` to
+consolidate Kafka, capture proxies, and replayers onto `general-work-pool`.
+
+The optional k6 load generator uses a separate tainted pool in both modes.
+Generated pods carry a required node selector as well as the matching
+toleration, so a toleration cannot accidentally allow them to fall back onto
+a different pool.
+
+Isolation does not require `NodePool.spec.limits`. Limits are optional total
+capacity ceilings for cost or quota control. Per-pool limits and instance
+requirements can be set below:
+
+- `workloadsNodePool.dedicatedPools.kafka`
+- `workloadsNodePool.dedicatedPools.proxy`
+- `workloadsNodePool.dedicatedPools.replayer`
+- `workloadsNodePool.dedicatedPools.k6`
+
+Dedicated pools inherit the shared architecture, capacity type, instance
+category, minimum generation, instance size, and disruption settings unless
+they override them. Kafka, proxy and replayer override the default capacity
+type with `["on-demand"]`; any pool can explicitly select `["spot"]`,
+`["on-demand"]`, or another EKS-supported capacity type through its own
+`capacityTypes` value. Their `limits` are independent and empty by default.
+
+In `shared` mode, Kafka, proxies, and replayers necessarily use the shared
+pool's single capacity policy. Set `workloadsNodePool.capacityTypes:
+["on-demand"]` when using shared mode if proxy and replay interruption is not
+acceptable.
+
+Values files follow normal Helm merge behavior: map fields merge by key, scalar
+conflicts are resolved by the later source, and list fields replace the full
+default list. For example, overriding `workloadsNodePool.disruption.consolidateAfter`
+alone keeps the default `consolidationPolicy`, while overriding `instanceSizes`
+requires supplying the full desired size list.
+
+The pools have no `limits` by default, so their size is bounded only by the
+account's EC2 vCPU quotas. Set `workloadsNodePool.limits.cpu` and/or
+`workloadsNodePool.limits.memory` to cap the shared pool, or set `limits` under
+an individual dedicated pool to cap that pool.
+
+Disruption defaults to `consolidationPolicy: WhenEmpty`, so running migration
+pods are never moved to repack nodes, with `consolidateAfter: 0s`, so empty
+nodes are removed right away. EKS requires `consolidateAfter` whenever
+`disruption` is set. Setting `workloadsNodePool.disruption: null` leaves the
+block out and uses Auto Mode's defaults (`WhenEmptyOrUnderutilized`, `0s`),
+which do move running pods.
+
+To check an override file without deploying, run
+[`examples/check-nodepool-overrides.sh`](./examples/check-nodepool-overrides.sh)
+with it. The script runs `helm lint` and prints the NodePools that would be
+rendered. It only needs `helm`. The bootstrap itself checks that each
+`--helm-values` file exists before doing anything else. Once the cluster
+exists, and before it mirrors or builds images, it also renders the workload
+NodePools from those files and validates them against the cluster's
+NodePool CRD with a server-side dry run, which catches values EKS would reject
+(for example an invalid `consolidateAfter`). The dry run is skipped with
+`--use-general-node-pool`, which does not create the pool.
 
 ## Common subcommands
 
@@ -91,11 +251,48 @@ migration-assistant help
 the typical CI invocation. `--skip-console-exec` keeps the run
 non-interactive (no console handoff).
 
-Run `migration-assistant help` for the complete list including legacy
-`aws-bootstrap.sh` flags. A few legacy flags are not yet implemented in
-this CLI (`--build`, `--tls-mode`, `--deploy-import-vpc-cfn`,
-`--vpc-id`, `--subnet-ids`, `--use-general-node-pool`, …); the CLI
-warns and ignores them rather than silently pretending to honor them.
+Run `migration-assistant help` for the complete list of accepted flags. Some
+`aws-bootstrap.sh` functionality is not implemented by this CLI, including
+`--build`, `--tls-mode`, `--deploy-import-vpc-cfn`, `--vpc-id`,
+`--subnet-ids`, and `--use-general-node-pool`. The CLI warns and ignores these
+flags. Use `aws-bootstrap.sh` directly when you need that functionality.
+
+## Tagging everything the deployment creates
+
+```bash
+./aws-bootstrap.sh --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev \
+  --region us-east-1 --tags CostCenter=1234,Owner=platform-team
+```
+
+`--tags` covers two separate mechanisms, because AWS has no single one:
+
+- **CloudFormation stack tags.** Identical to filling in the console's
+  Tags step. CloudFormation copies them onto every taggable resource it
+  creates.
+- **EKS Auto Mode resources.** Nodes, EBS volumes, ENIs and load
+  balancers are created *after* the stack, by Auto Mode, so stack tags
+  never reach them. Auto Mode reads the tags to apply from in-cluster
+  objects instead, so `aws-bootstrap.sh` also:
+  - creates a custom `NodeClass` carrying the tags (the built-in
+    `default` NodeClass is owned by EKS and cannot be edited) and
+    disables the built-in `system`/`general-purpose` NodePools, whose
+    nodes are hard-wired to it;
+  - sets `tagSpecification_N` parameters on the `auto-ebs-sc`
+    StorageClass so provisioned volumes are tagged;
+  - emits load balancer tag annotations for any Service or Ingress the
+    chart creates.
+
+This requires the cluster IAM role to permit user-defined tags on Auto
+Mode resources. The solution CloudFormation template declares that
+policy, and `aws-bootstrap.sh --tags` also ensures the same named inline
+policy so older, adopted, and hand-built clusters need no manual IAM
+changes. The caller needs `iam:PutRolePolicy` on the cluster role;
+without it, adding a tag turns every `RunInstances` into `AccessDenied`.
+
+Two caveats: `--tags` is incompatible with `--use-general-node-pool`
+(it deletes that pool), and StorageClass `parameters` are immutable, so
+changing the tag set on an existing release means deleting
+`auto-ebs-sc` first. The script checks for both and tells you.
 
 ## Adopting a stack you deployed elsewhere
 

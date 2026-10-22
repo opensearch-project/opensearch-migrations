@@ -7,13 +7,16 @@ import java.util.Properties;
  * Duplicated from KafkaConfig.applySaslAuthProperties to avoid a cross-module dependency.
  */
 class KafkaSaslAuthHelper {
+    static final String AUTH_TYPE_SSL = "ssl";
     static final String AUTH_TYPE_MSK_IAM = "msk-iam";
     static final String AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
 
     private KafkaSaslAuthHelper() {}
 
     static void applySaslAuthProperties(Properties props, String authType, String kafkaUserName, String kafkaPassword) {
-        if (AUTH_TYPE_MSK_IAM.equals(authType)) {
+        if (AUTH_TYPE_SSL.equals(authType)) {
+            props.setProperty("security.protocol", "SSL");
+        } else if (AUTH_TYPE_MSK_IAM.equals(authType)) {
             props.setProperty("security.protocol", "SASL_SSL");
             props.setProperty("sasl.mechanism", "AWS_MSK_IAM");
             props.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");

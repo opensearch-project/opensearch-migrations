@@ -14,7 +14,6 @@ sourceClusters:
       repos:
         default:
           awsRegion: us-east-2
-          endpoint: localstack://10.96.152.89:4566
           repoPathUri: s3://migrations-default-123456789012-dev-us-east-2
       snapshots:
         snap1:
@@ -50,10 +49,11 @@ snapshotMigrationConfigs:
 traffic:
   proxies:
     capture-proxy:
-      source: source
+      source: "source"
+      skipApproval: true
       proxyConfig:
         listenPort: 9201
   replayers:
     replay1:
-      fromProxy: capture-proxy
+      fromCapturedTraffic: capture-proxy
       toTarget: target

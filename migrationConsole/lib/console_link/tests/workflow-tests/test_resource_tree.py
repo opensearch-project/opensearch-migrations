@@ -1,9 +1,11 @@
 """Tests for resource_tree.py — resource-centric tree building and formatting."""
 
 
+from rich.tree import Tree
+
 from console_link.workflow.resource_tree import (
-    ResourceNode,
-    _build_tree_from_raw, _nest_topics_under_kafka,
+    PHASE_SYMBOLS, ResourceNode,
+    _build_tree_from_raw, _nest_topics_under_kafka, _render_resource,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
     mark_not_configured_groups,
@@ -21,7 +23,7 @@ def make_cr(plural, name, phase='Ready', spec=None, status=None, depends_on=None
     }
 
 
-def make_resource(plural='snapshotmigrations', name='test', phase='Running',
+def make_resource(plural='snapshotmigrations', name='test', phase='Pending',
                   spec=None, status=None, depends_on=None):
     return ResourceNode(
         name=name, plural=plural, phase=phase,
@@ -52,7 +54,7 @@ class TestBuildTreeFromRaw:
 
     def test_multiple_resources_in_same_group(self):
         raw = {'trafficreplays': [
-            make_cr('trafficreplays', 'replay-a', 'Running'),
+            make_cr('trafficreplays', 'replay-a', 'Ready'),
             make_cr('trafficreplays', 'replay-b', 'Pending'),
         ]}
         sections = _build_tree_from_raw(raw)
@@ -337,3 +339,25 @@ class TestMarkNotConfiguredGroups:
         for s in sections:
             for g in s.groups:
                 assert g.not_configured is False
+
+
+# --- PHASE_SYMBOLS ---
+
+class TestPhaseSymbols:
+    # Long-lived and terminal phases from statusSchemaFor in
+    # orchestrationSpecs/packages/schemas/src/generateMigrationResources.ts.
+    # Approval gates are not rendered in the resource tree.
+    RESOURCE_PHASES = ['Created', 'Pending', 'Ready', 'Completed', 'Deleting', 'Error']
+
+    def test_symbols_cover_exactly_the_resource_phases(self):
+        # 'Unknown' is the fallback for a resource with no status.phase.
+        assert set(PHASE_SYMBOLS) == set(self.RESOURCE_PHASES) | {'Unknown'}
+
+    def test_rendered_label_uses_phase_symbol(self):
+        unknown_symbol = PHASE_SYMBOLS['Unknown'][0]
+        for phase in self.RESOURCE_PHASES:
+            tree = Tree('root')
+            _render_resource(tree, make_resource(phase=phase), show_live_status=False)
+            label = str(tree.children[0].label)
+            assert PHASE_SYMBOLS[phase][0] in label, phase
+            assert unknown_symbol not in label, phase

@@ -36,15 +36,30 @@ import {
 } from "./plainObject";
 import {TypeToken} from "./sharedTypes";
 
+/**
+ * Kubernetes environment variables use either a direct value or one valueFrom
+ * source. Keeping the source forms exclusive lets the renderer narrow safely
+ * and prevents ambiguous or incomplete source objects at the builder boundary.
+ */
+export type EnvironmentVariableValueSource<T extends PlainObject> =
+    | {
+        configMapKeyRef: ConfigMapKeySelector;
+        secretKeyRef?: never;
+        type: TypeToken<T>;
+    }
+    | {
+        configMapKeyRef?: never;
+        secretKeyRef: ConfigMapKeySelector;
+        type: TypeToken<T>;
+    };
+
 export type ExpressionOrConfigMapValue<T extends PlainObject> =
     | AllowLiteralOrExpression<T> & {
-    type?: never;
-    from?: never
-}
-    | {
-    from: ConfigMapKeySelector;
-    type: TypeToken<T>;
-};
+        configMapKeyRef?: never;
+        secretKeyRef?: never;
+        type?: never;
+    }
+    | EnvironmentVariableValueSource<T>;
 
 export type LowercaseOnly<S extends string> =
     S extends Lowercase<S> ? S : never;
@@ -59,7 +74,7 @@ export type WorkflowAndTemplatesScope<
         currentTemplateName?: string
     };
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
-export type DataOrConfigMapScope = Record<string, ExpressionOrConfigMapValue<PlainObject>>;
+export type DataOrConfigMapScope = Record<string, ExpressionOrConfigMapValue<string>>;
 export type GenericScope = Record<string, any>;
 export type TasksOutputsScope = Record<string, TasksWithOutputs<any, any>>;
 export type TemplateSignaturesScopeTyped<Sigs extends Record<string, { inputs: any; outputs?: any }>> = {

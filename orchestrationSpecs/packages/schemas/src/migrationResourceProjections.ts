@@ -2,6 +2,7 @@ import {z} from "zod";
 import {
     ChecksumDependency,
     FieldMeta,
+    OTEL_EXPORT_CONTROL_FIELD_MASK,
     USER_CREATE_SNAPSHOT_OPTIONS,
     USER_METADATA_OPTIONS,
     USER_PROXY_OPTIONS,
@@ -46,6 +47,12 @@ interface InternalProjectedField {
     invariant?: FieldInvariant;
 }
 
+// Export enablement is normalized to endpoint presence before Argo/resource projection.
+const USER_PROXY_RESOURCE_OPTIONS = z.object(USER_PROXY_OPTIONS.shape)
+    .omit(OTEL_EXPORT_CONTROL_FIELD_MASK);
+const USER_CREATE_SNAPSHOT_RESOURCE_OPTIONS = z.object(USER_CREATE_SNAPSHOT_OPTIONS.shape)
+    .omit(OTEL_EXPORT_CONTROL_FIELD_MASK);
+
 export interface ResourceProjection {
     kind: string;
     plural: string;
@@ -67,7 +74,7 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
     {
         resourceKind: "CaptureProxy",
         sourceSchema: "USER_PROXY_OPTIONS",
-        schema: USER_PROXY_OPTIONS,
+        schema: USER_PROXY_RESOURCE_OPTIONS,
     },
     {
         resourceKind: "TrafficReplay",
@@ -78,7 +85,7 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
     {
         resourceKind: "DataSnapshot",
         sourceSchema: "USER_CREATE_SNAPSHOT_OPTIONS",
-        schema: USER_CREATE_SNAPSHOT_OPTIONS,
+        schema: USER_CREATE_SNAPSHOT_RESOURCE_OPTIONS,
     },
     {
         resourceKind: "SnapshotMigration",
@@ -111,6 +118,8 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
 
     {resourceKind: "KafkaCluster", specPath: ["version"], schema: z.string(), changeRestriction: "gated"},
     {resourceKind: "KafkaCluster", specPath: ["auth", "type"], schema: z.enum(["scram-sha-512", "none"]), changeRestriction: "impossible"},
+    {resourceKind: "KafkaCluster", specPath: ["clusterSpecOverrides"], schema: GENERIC_JSON_OBJECT, changeRestriction: "gated"},
+    {resourceKind: "KafkaCluster", specPath: ["nodePoolSpecOverrides"], schema: GENERIC_JSON_OBJECT, changeRestriction: "gated"},
     {resourceKind: "KafkaCluster", specPath: ["nodePool", "replicas"], schema: z.number().min(1), changeRestriction: "gated"},
     {resourceKind: "KafkaCluster", specPath: ["nodePool", "roles"], schema: z.array(z.string()), changeRestriction: "impossible"},
     {resourceKind: "KafkaCluster", specPath: ["nodePool", "storage", "size"], schema: z.string(), changeRestriction: "gated"},
@@ -118,19 +127,96 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
 
     {resourceKind: "CapturedTraffic", specPath: ["kafkaClusterName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["kafkaBrokers"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "CapturedTraffic", specPath: ["kafkaManagedByWorkflow"], schema: z.boolean(), changeRestriction: "impossible"},
+    {resourceKind: "CapturedTraffic", specPath: ["kafkaAuthType"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "CapturedTraffic", specPath: ["kafkaEnableMSKAuth"], schema: z.boolean(), changeRestriction: "impossible"},
+    {resourceKind: "CapturedTraffic", specPath: ["kafkaSecretName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "CapturedTraffic", specPath: ["kafkaCaSecretName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "CapturedTraffic", specPath: ["kafkaUserName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["topicName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["partitions"], schema: z.number().min(1), changeRestriction: "gated", invariant: "nonDecreasing"},
     {resourceKind: "CapturedTraffic", specPath: ["replicas"], schema: z.number().min(1), changeRestriction: "gated"},
     {resourceKind: "CapturedTraffic", specPath: ["topicConfig"], schema: GENERIC_JSON_OBJECT, changeRestriction: "gated"},
+    {resourceKind: "CapturedTraffic", specPath: ["sourceLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["sourceKind"], schema: z.enum(["proxy", "s3"]), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["s3SourceUri"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["loadStarted"], schema: z.boolean(), changeRestriction: "impossible"},
 
+    {resourceKind: "CaptureProxy", specPath: ["sourceLabel"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "CaptureProxy", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "CaptureProxy", specPath: ["sourceEndpoint"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "CaptureProxy", specPath: ["sourceAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
+    // Source auth is intentionally absent: the proxy forwards network traffic without authenticating to the source.
+
+    {resourceKind: "DataSnapshot", specPath: ["sourceLabel"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceEndpoint"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceSolrContextPath"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceAuthType"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceAuthBasicSecretName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceAuthSigv4Region"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceAuthSigv4Service"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceAuthMtlsClientSecretName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["sourceAuthMtlsCaCertHash"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["snapshotLabel"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["repoName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["repoPathUri"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["repoAwsRegion"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["repoEndpoint"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["repoS3RoleArn"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["repoUseLocalStack"], schema: z.boolean(), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["mode"], schema: z.enum(["create", "import"]), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["solrExternalBackupName"], schema: z.string(), changeRestriction: "impossible"},
+    // solrCollections is a Solr-only field on ARGO_CREATE_SNAPSHOT_OPTIONS (not the user schema),
+    // so it is projected here as an internal field rather than via the USER_CREATE_SNAPSHOT_OPTIONS
+    // schema projection. Kept impossible to match its prior restriction and the other artifact-scope fields.
+    {resourceKind: "DataSnapshot", specPath: ["solrCollections"], schema: z.array(z.string()), changeRestriction: "impossible"},
+    {resourceKind: "DataSnapshot", specPath: ["solrTopology"], schema: z.string(), changeRestriction: "impossible"},
+
     {resourceKind: "SnapshotMigration", specPath: ["migrationLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["sourceLabel"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["sourceEndpoint"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["sourceAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
+    // Source auth belongs to DataSnapshot; migration stages consume the resulting snapshot, not the source cluster.
     {resourceKind: "SnapshotMigration", specPath: ["targetLabel"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["targetEndpoint"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["targetAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["targetAuthType"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["targetAuthBasicSecretName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["targetAuthSigv4Region"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["targetAuthSigv4Service"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["targetAuthMtlsClientSecretName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["targetAuthMtlsCaCertHash"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["snapshotLabel"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["snapshotSourceType"], schema: z.enum(["dataSnapshot", "external", "externalPrepared"]).describe(
+        "How this migration obtains its snapshot. 'dataSnapshot': a workflow-generated snapshot represented by a " +
+        "DataSnapshot dependency (ES/OS or Solr create-backup). 'external': an externally-managed ES/OS snapshot used " +
+        "directly with no workflow preparation. 'externalPrepared': a Solr externally-managed backup that still needs " +
+        "schema upload — a DataSnapshot CR exists (import-prepare) but the resolved name is the external backup name."
+    ), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["dataSnapshotResourceName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["externalSnapshotName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["snapshotRepoName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["snapshotRepoPathUri"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["snapshotRepoAwsRegion"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["snapshotRepoEndpoint"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["snapshotRepoS3RoleArn"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "SnapshotMigration", specPath: ["snapshotRepoUseLocalStack"], schema: z.boolean(), changeRestriction: "impossible"},
+
+    {resourceKind: "TrafficReplay", specPath: ["fromCapturedTraffic"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["fromCapturedTrafficSourceKind"], schema: z.enum(["proxy", "s3"]), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["sourceLabel"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetLabel"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetEndpoint"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetAuthType"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetAuthBasicSecretName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetAuthSigv4Region"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetAuthSigv4Service"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetAuthMtlsClientSecretName"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "TrafficReplay", specPath: ["targetAuthMtlsCaCertHash"], schema: z.string(), changeRestriction: "impossible"},
 ] as const;
 
 function prefixedFieldName(prefix: string | undefined, fieldName: string): string {
