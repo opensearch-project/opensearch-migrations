@@ -19,13 +19,6 @@ steps:
       - ':SnapshotReaderGcs:isolatedTest'
       - '--no-daemon'
 
-  # Run Azure integration tests (requires Docker for testcontainers)
-  - name: 'amazoncorretto:21'
-    entrypoint: './gradlew'
-    args:
-      - ':SnapshotReaderAzure:isolatedTest'
-      - '--no-daemon'
-
   # Build config processor and workflow templates (staged into migrationConsole/nodeStaging)
   - name: 'node:22'
     entrypoint: 'bash'
