@@ -66,9 +66,9 @@ def match_names(names, pattern):
     return [n for n in names if n == pattern]
 
 
-def list_migration_resources(namespace, plurals=None):
+def list_migration_resources(namespace, plurals=None, custom_api=None):
     """List CRD instances. Returns list of (plural, name, phase, deps)."""
-    custom = client.CustomObjectsApi()
+    custom = custom_api or client.CustomObjectsApi()
     results = []
     for plural in plurals or RESETTABLE_PLURALS:
         try:
@@ -90,18 +90,18 @@ def list_migration_resources(namespace, plurals=None):
     return results
 
 
-def list_migration_resources_full(namespace):
+def list_migration_resources_full(namespace, custom_api=None):
     """List all migration CRD instances with full objects."""
-    return list_resources_full(namespace, RESETTABLE_PLURALS)
+    return list_resources_full(namespace, RESETTABLE_PLURALS, custom_api)
 
 
-def list_resources_full(namespace, resource_type_filter):
+def list_resources_full(namespace, resource_type_filter, custom_api=None):
     """List CRD instances with full objects.
 
     Returns dict keyed by plural containing lists of CR dicts.
     resource_type_filter is required — caller must specify which resource types to list.
     """
-    custom = client.CustomObjectsApi()
+    custom = custom_api or client.CustomObjectsApi()
     results = {}
     for plural in resource_type_filter:
         try:

@@ -30,13 +30,11 @@
     {
       "fromSource": "source",
       "toTarget": "target",
-      "perSnapshotConfig": {
-        "snap1": [
-          {
-            "label": "docs",
-            "documentBackfillConfig": {}
-          }
-        ]
+      "fromSnapshot": "snap1",
+      "slices": {
+        "docs": {
+          "documentBackfillConfig": {}
+        }
       }
     }
   ]

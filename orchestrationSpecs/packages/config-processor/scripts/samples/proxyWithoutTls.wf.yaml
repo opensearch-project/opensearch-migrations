@@ -4,35 +4,6 @@
 # resolves workflow-managed Kafka auth to SCRAM-SHA-512. That means the
 # migration applications use the TLS listener, bootstrap on 9093, and generated
 # Kafka user / secret resources.
-kafkaClusterConfiguration:
-  custom:
-    autoCreate:
-      # Sample-only overrides for local POC testing — single-broker, RF=1.
-      # Not safe for prod. These files are not packaged to the migration console.
-      clusterSpecOverrides:
-        kafka:
-          config:
-            add.partitions.to.txn.retry.backoff.max.ms: 100
-            offsets.topic.replication.factor: 1
-            transaction.state.log.replication.factor: 1
-            transaction.state.log.min.isr: 1
-            default.replication.factor: 1
-            min.insync.replicas: 1
-      nodePoolSpecOverrides:
-        replicas: 1
-        roles:
-          - controller
-          - broker
-        storage:
-          type: persistent-claim
-          size: 1Gi
-          deleteClaim: true
-      topicSpecOverrides:
-        partitions: 2
-        replicas: 1
-        config:
-          retention.ms: 604800000
-          segment.bytes: 1073741824
 
 sourceClusters:
   source:
@@ -54,9 +25,41 @@ targetClusters:
 snapshotMigrationConfigs: []
 
 traffic:
+  kafkaClusters:
+    custom:
+      autoCreate:
+        # Sample-only overrides for local POC testing — single-broker, RF=1.
+        # Not safe for prod. These files are not packaged to the migration console.
+        clusterSpecOverrides:
+          kafka:
+            config:
+              add.partitions.to.txn.retry.backoff.max.ms: 100
+              offsets.topic.replication.factor: 1
+              transaction.state.log.replication.factor: 1
+              transaction.state.log.min.isr: 1
+              default.replication.factor: 1
+              min.insync.replicas: 1
+        nodePoolSpecOverrides:
+          replicas: 1
+          roles:
+            - controller
+            - broker
+          storage:
+            type: persistent-claim
+            size: 1Gi
+            deleteClaim: true
+      topics:
+        capture-proxy:
+          specOverrides:
+            partitions: 2
+            replicas: 1
+            config:
+              retention.ms: 604800000
+              segment.bytes: 1073741824
   proxies:
     capture-proxy:
       kafka: custom
+      kafkaTopic: capture-proxy
       source: "source"
       proxyConfig:
         listenPort: 9201

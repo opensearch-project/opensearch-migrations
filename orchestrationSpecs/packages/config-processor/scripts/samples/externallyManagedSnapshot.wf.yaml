@@ -27,10 +27,10 @@ targetClusters:
 snapshotMigrationConfigs:
   - fromSource: source
     toTarget: target
-    perSnapshotConfig:
-      existingSnap:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
+    fromSnapshot: existingSnap
+    slice: default
+    metadataMigrationConfig: {}
+    documentBackfillConfig: {}
 traffic:
   proxies: {}
   replayers: {}

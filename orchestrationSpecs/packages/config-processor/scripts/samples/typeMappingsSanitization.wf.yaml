@@ -1,18 +1,25 @@
 sourceClusters:
-  prodSolr:
+  prod-solr:
     version: "SOLR 8.11.4"
     endpoint: "https://solr.example.com:8983"
 
 targetClusters:
-  prodOs:
+  prod-os:
     endpoint: "https://target.example.com:9200"
 
 snapshotMigrationConfigs: []
 
 traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture: {}
   proxies:
     capture:
-      source: prodSolr
+      kafka: default
+      kafkaTopic: capture
+      source: prod-solr
       proxyConfig:
         listenPort: 9201
         tls:
@@ -28,7 +35,7 @@ traffic:
   replayers:
     replay:
       fromCapturedTraffic: capture
-      toTarget: prodOs
+      toTarget: prod-os
       replayerConfig:
         requestTransforms:
           - transformName: TypeMappingSanitizationTransformerProvider
@@ -49,7 +56,7 @@ traffic:
                     path: featureFlags.json
           - entryPoint:
               javascriptFile:
-                image: "123456789012.dkr.ecr.us-east-1.amazonaws.com/replay-transforms@sha256:abc123"
+                image: "123456789012.dkr.ecr.us-east-1.amazonaws.com/replay-transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 path: request.js
             context:
               values:

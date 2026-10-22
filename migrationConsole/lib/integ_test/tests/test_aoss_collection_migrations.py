@@ -56,10 +56,11 @@ def test_migration_branches_share_snapshot_and_have_disjoint_allowlists():
 
     for migration in config["snapshotMigrationConfigs"]:
         assert migration["fromSource"] == "source"
+        assert migration["fromSnapshot"] == SNAPSHOT_NAME
         target_name = migration["toTarget"]
-        migration_pass = migration["perSnapshotConfig"][SNAPSHOT_NAME][0]
-        metadata_allowlist = migration_pass["metadataMigrationConfig"]["indexAllowlist"]
-        backfill_allowlist = migration_pass["documentBackfillConfig"]["indexAllowlist"]
+        assert migration["slice"].startswith("slice-")
+        metadata_allowlist = migration["metadataMigrationConfig"]["indexAllowlist"]
+        backfill_allowlist = migration["documentBackfillConfig"]["indexAllowlist"]
         assert metadata_allowlist == backfill_allowlist
         assert metadata_allowlist == AOSS_COLLECTIONS[target_name]["expected_indices"]
         allowlists[target_name] = set(metadata_allowlist)

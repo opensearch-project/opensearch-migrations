@@ -1,6 +1,3 @@
-kafkaClusterConfiguration:
-  default:
-    autoCreate: {}
 sourceClusters:
   source:
     endpoint: https://elasticsearch-master-headless:9200
@@ -30,12 +27,19 @@ targetClusters:
 snapshotMigrationConfigs:
   - fromSource: source
     toTarget: target
-    perSnapshotConfig:
-      snap1:
-        - metadataMigrationConfig: {}
+    fromSnapshot: snap1
+    slice: default
+    metadataMigrationConfig: {}
 traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        proxy1: {}
   proxies:
     proxy1:
+      kafka: default
+      kafkaTopic: proxy1
       source: source
       proxyConfig:
         listenPort: 9201

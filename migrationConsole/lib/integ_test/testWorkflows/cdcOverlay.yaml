@@ -85,23 +85,29 @@ spec:
               --argjson trafficTopicPartitions '{{inputs.parameters.trafficTopicPartitions}}' \
               --argjson replayerPodReplicas '{{inputs.parameters.replayerPodReplicas}}' \
               '. + {
-              "kafkaClusterConfiguration": {
-                "default": {
-                  "autoCreate": {
-                    "nodePoolSpecOverrides": (
-                      $kafkaNodePoolSpecOverrides + {
-                        "replicas": $kafkaBrokerReplicas
+              "traffic": {
+                "kafkaClusters": {
+                  "default": {
+                    "autoCreate": {
+                      "nodePoolSpecOverrides": (
+                        $kafkaNodePoolSpecOverrides + {
+                          "replicas": $kafkaBrokerReplicas
+                        }
+                      )
+                    },
+                    "topics": {
+                      "capture-proxy": {
+                        "specOverrides": {
+                          "partitions": $trafficTopicPartitions
+                        }
                       }
-                    ),
-                    "topicSpecOverrides": {
-                      "partitions": $trafficTopicPartitions
                     }
                   }
-                }
-              },
-              "traffic": {
+                },
                 "proxies": {
                   "capture-proxy": {
+                    "kafka": "default",
+                    "kafkaTopic": "capture-proxy",
                     "source": "source1",
                     "proxyConfig": ({
                       "listenPort": 9201,
@@ -116,7 +122,7 @@ spec:
                         "mode": "certManager",
                         "issuerRef": {"name": "migrations-ca", "kind": "ClusterIssuer"},
                         "dnsNames": ["capture-proxy.ma.svc.cluster.local", "capture-proxy"],
-                        "clientAuth": {"trustedClientCaPem": $clientAuthPem, "required": false}
+                        "clientAuth": {"trustedClientCaPem": $clientAuthPem}
                       }
                     } else {} end))
                   }
@@ -204,23 +210,29 @@ spec:
               .sourceClusters |= with_entries(.value |= del(.snapshotInfo))
               | .snapshotMigrationConfigs = []
               | . + {
-                "kafkaClusterConfiguration": {
-                  "default": {
-                    "autoCreate": {
-                      "nodePoolSpecOverrides": (
-                        $kafkaNodePoolSpecOverrides + {
-                          "replicas": $kafkaBrokerReplicas
+                "traffic": {
+                  "kafkaClusters": {
+                    "default": {
+                      "autoCreate": {
+                        "nodePoolSpecOverrides": (
+                          $kafkaNodePoolSpecOverrides + {
+                            "replicas": $kafkaBrokerReplicas
+                          }
+                        )
+                      },
+                      "topics": {
+                        "capture-proxy": {
+                          "specOverrides": {
+                            "partitions": $trafficTopicPartitions
+                          }
                         }
-                      ),
-                      "topicSpecOverrides": {
-                        "partitions": $trafficTopicPartitions
                       }
                     }
-                  }
-                },
-                "traffic": {
+                  },
                   "proxies": {
                     "capture-proxy": {
+                      "kafka": "default",
+                      "kafkaTopic": "capture-proxy",
                       "source": "source1",
                       "proxyConfig": ({
                         "listenPort": 9201,
@@ -235,7 +247,7 @@ spec:
                           "mode": "certManager",
                           "issuerRef": {"name": "migrations-ca", "kind": "ClusterIssuer"},
                           "dnsNames": ["capture-proxy.ma.svc.cluster.local", "capture-proxy"],
-                          "clientAuth": {"trustedClientCaPem": $clientAuthPem, "required": false}
+                          "clientAuth": {"trustedClientCaPem": $clientAuthPem}
                         }
                       } else {} end))
                     }

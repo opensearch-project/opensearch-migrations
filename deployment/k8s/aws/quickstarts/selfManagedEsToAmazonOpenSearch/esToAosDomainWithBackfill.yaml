@@ -40,21 +40,24 @@ targetClusters:
 snapshotMigrationConfigs:
   - fromSource: source
     toTarget: target
-    perSnapshotConfig:
-      snap1:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
-
-kafkaClusterConfiguration:
-  default:
-    autoCreate:
-      topicSpecOverrides:
-        # Must be at least the proxy podReplicas + 1 (one slot for the rolling-update surge pod).
-        partitions: 4
+    fromSnapshot: snap1
+    slice: default
+    metadataMigrationConfig: {}
+    documentBackfillConfig: {}
 
 traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture-proxy:
+          specOverrides:
+            # Must be at least the proxy podReplicas + 1 (one slot for the rolling-update surge pod).
+            partitions: 4
   proxies:
     capture-proxy:
+      kafka: default
+      kafkaTopic: capture-proxy
       source: source
       proxyConfig:
         listenPort: 9201

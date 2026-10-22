@@ -25,12 +25,14 @@ class TreeStateManager:
     def reset(self, root_label: str) -> None:
         self.tree.clear()
         self.tree.root.label = root_label
+        self.tree.show_root = True
 
     def rebuild(self, workflow_data: Dict) -> None:
         """Full rebuild for first load or workflow restart."""
         self._workflow_data = workflow_data
         self.tree.clear()
         self.tree.root.label = "[bold]Workflow Steps[/]"
+        self.tree.show_root = True
         nodes = filter_tree_nodes(build_nested_workflow_tree(workflow_data))
         overlay_approval_gate_status(nodes, self._namespace)
         overlay_data_snapshot_creation_status(nodes, self._namespace)
@@ -41,6 +43,7 @@ class TreeStateManager:
     def update(self, workflow_data: Dict) -> None:
         """Incremental update for ongoing workflow."""
         self._workflow_data = workflow_data
+        self.tree.show_root = True
         nodes = filter_tree_nodes(build_nested_workflow_tree(workflow_data))
         overlay_approval_gate_status(nodes, self._namespace)
         overlay_data_snapshot_creation_status(nodes, self._namespace)
