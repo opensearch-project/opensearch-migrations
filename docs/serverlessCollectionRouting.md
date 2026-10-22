@@ -51,7 +51,8 @@ them, which keeps an index's metadata and its documents in the same collection.
 ```
 
 With these lists, `shared-config` goes to `common`, and `tenant-a-2024` and `tenant-a_2025` go to the `tenant-a`
-collection.
+collection. Every selected source index must match an entry, and a run with an unmatched index fails before
+writing anything, as described in [Validation](#validation).
 
 ## How entries match
 
