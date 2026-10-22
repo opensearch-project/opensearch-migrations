@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.Objects;
-import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -10,6 +9,7 @@ import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
@@ -124,42 +124,39 @@ public class DocumentMigrationPipeline {
     /**
      * Migrate all documents for a single partition from source to sink.
      *
-     * @param partition        the partition to migrate
-     * @param collectionName   the target collection name
-     * @param startingPosition the source position to resume from (0 for start)
+     * @param partition      the partition to migrate
+     * @param collectionName the target collection name
+     * @param startingCursor the source cursor to resume after (null to start at the beginning)
      * @return a Flux of progress cursors, one per batch written
      */
-    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
+    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, String startingCursor) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
-            return source.readDocuments(partition, startingPosition)
+            return source.readDocuments(partition, startingCursor)
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
-                    // Preserve the source position before handing the batch to the sink.
-                    var lastPosition = batch.get(batch.size() - 1).position();
-                    var sourceMetrics = MigrationMetrics.Operations.fromDocuments(batch);
+                    var sourceMetrics = MigrationMetrics.Operations.fromDocuments(
+                        batch.stream().map(PositionedDocument::document).toList());
                     return Mono.defer(() -> sink.writeBatch(collectionName, batch))
-                        .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
+                        .map(result -> new CompletedBatch(sourceMetrics, result))
                         .doFinally(s -> activeBatches.decrementAndGet());
                 }, batchConcurrency)
-                // Advance checkpoints in emission order; writes may complete out of order.
-                .scan(new ProgressCursor(partition, startingPosition, 0, 0, MigrationMetrics.ZERO), (previous, batch) -> {
-                    var result = batch.result();
-                    var sourceMetrics = batch.sourceMetrics();
-                    totalDocs.addAndGet(result.docsInBatch());
-                    totalBytes.addAndGet(result.bytesInBatch());
-                    return new ProgressCursor(
-                        partition,
-                        batch.lastPosition().isPresent()
-                            ? Math.addExact(batch.lastPosition().getAsLong(), 1)
-                            : Math.addExact(previous.nextPosition(), Math.addExact(sourceMetrics.upserts(), sourceMetrics.deletes())),
-                        result.docsInBatch(),
-                        result.bytesInBatch(),
-                        previous.metrics().plus(new MigrationMetrics(sourceMetrics, result.target(), result.requests()))
-                    );
-                })
+                // Accumulate metrics in emission order. Writes may complete out of order.
+                .scan(new ProgressCursor(partition, Objects.requireNonNullElse(startingCursor, ""), 0, 0, MigrationMetrics.ZERO),
+                    (previous, batch) -> {
+                        var result = batch.result();
+                        totalDocs.addAndGet(result.docsInBatch());
+                        totalBytes.addAndGet(result.bytesInBatch());
+                        return new ProgressCursor(
+                            partition,
+                            result.cursorAfter(),
+                            result.docsInBatch(),
+                            result.bytesInBatch(),
+                            previous.metrics().plus(new MigrationMetrics(batch.sourceMetrics(), result.target(), result.requests()))
+                        );
+                    })
                 .skip(1)
                 .onErrorMap(e -> !(e instanceof PipelineException),
                     e -> new PipelineException("Failed migrating partition " + partition, e));
@@ -168,9 +165,7 @@ public class DocumentMigrationPipeline {
 
     // Sonar flags the compiler-generated record constructor parameters as unused.
     @SuppressWarnings("java:S1172")
-    private record CompletedBatch(
-        OptionalLong lastPosition, MigrationMetrics.Operations sourceMetrics, BatchResult result
-    ) {}
+    private record CompletedBatch(MigrationMetrics.Operations sourceMetrics, BatchResult result) {}
 
     /**
      * Migrate all partitions for a collection. Creates the collection first, then migrates
@@ -187,7 +182,7 @@ public class DocumentMigrationPipeline {
             .thenMany(
                 Flux.fromIterable(partitions)
                     .flatMap(
-                        partition -> migratePartition(partition, collectionName, 0),
+                        partition -> migratePartition(partition, collectionName, null),
                         partitionConcurrency
                     )
             );
@@ -206,7 +201,7 @@ public class DocumentMigrationPipeline {
     /**
      * Batching predicate that groups documents by count and byte size.
      */
-    static class BatchPredicate implements java.util.function.Predicate<Document> {
+    static class BatchPredicate implements java.util.function.Predicate<PositionedDocument> {
         private final int maxDocs;
         private final long maxBytes;
         private int currentCount;
@@ -218,9 +213,9 @@ public class DocumentMigrationPipeline {
         }
 
         @Override
-        public boolean test(Document doc) {
+        public boolean test(PositionedDocument positioned) {
             currentCount++;
-            currentBytes += doc.sourceLength();
+            currentBytes += positioned.document().sourceLength();
 
             if (currentCount >= maxDocs || currentBytes >= maxBytes) {
                 currentCount = 0;

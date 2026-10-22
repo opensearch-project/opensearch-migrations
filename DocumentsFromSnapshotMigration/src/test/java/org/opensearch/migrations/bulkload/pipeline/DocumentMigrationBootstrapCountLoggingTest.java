@@ -33,7 +33,8 @@ class DocumentMigrationBootstrapCountLoggingTest {
         var partition = new EsShardPartition("snap", "idx", 0);
         var source = mock(DocumentSource.class);
         when(source.listPartitions("idx")).thenReturn(List.of(partition));
-        when(source.readDocuments(partition, 0)).thenReturn(Flux.empty());
+        when(source.findPartition("idx", partition.name())).thenReturn(Optional.of(partition));
+        when(source.readDocuments(partition, null)).thenReturn(Flux.empty());
         when(source.snapshotDocumentCounts(partition)).thenReturn(count);
         var bootstrap = DocumentMigrationBootstrap.builder()
             .documentSource(source).targetClient(mock(OpenSearchClient.class)).build();
@@ -41,11 +42,11 @@ class DocumentMigrationBootstrapCountLoggingTest {
              var context = DocumentMigrationTestContext.factory().noOtelTracking().createReindexContext()) {
             bootstrap.runPartitionMigration(
                 new WorkItemAndDuration(Instant.now().plusSeconds(60),
-                    new WorkItemAndDuration.WorkItem("idx", 0, 0L)),
+                    new WorkItemAndDuration.WorkItem("idx", partition.name(), null)),
                 new PipelineConfig(source, mock(DocumentSink.class), 10, 1000, 1), context);
             var expected = count.map(counts -> Long.toString(counts.liveDocuments())).orElse("unknown");
             assertTrue(logs.getLogEvents().stream().anyMatch(line ->
-                line.contains("Partition migration stats:") && line.contains("sourcePartition=snap/idx/0")
+                line.contains("Partition migration stats:") && line.contains("partition=snap/idx/0")
                     && line.contains("shardLiveLuceneDocs=" + expected)));
         }
     }

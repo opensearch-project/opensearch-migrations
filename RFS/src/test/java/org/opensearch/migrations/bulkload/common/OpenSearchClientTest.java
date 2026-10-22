@@ -28,6 +28,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneAdapter;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
@@ -244,7 +245,8 @@ class OpenSearchClientTest {
         var documents = IntStream.range(0, 4).mapToObj(i -> new Document("source-" + i,
             "{\"v\":1}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of())).toList();
         var source = mock(DocumentSource.class);
-        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+        when(source.readDocuments(partition, null)).thenReturn(Flux.range(0, documents.size())
+            .map(i -> new PositionedDocument(documents.get(i), Integer.toString(i + 1))));
         IJsonTransformer transformer = input -> {
             var operations = (List<Map<String, Object>>) input;
             return IntStream.range(0, outputCount).mapToObj(i -> {
@@ -261,8 +263,8 @@ class OpenSearchClientTest {
         var sink = new OpenSearchDocumentSink(openSearchClient, () -> transformer,
             false, DocumentExceptionAllowlist.empty(), null);
         var cursor = new DocumentMigrationPipeline(source, sink, 10, 10000)
-            .migratePartition(partition, "idx", 0).blockLast();
-        assertEquals(4, cursor.nextPosition());
+            .migratePartition(partition, "idx", null).blockLast();
+        assertEquals("4", cursor.cursorAfter());
         assertEquals(new MigrationMetrics.Operations(4, 0, 28), cursor.metrics().source());
         long outputBytes = 0;
         for (int i = 0; i < outputCount; i++) {
