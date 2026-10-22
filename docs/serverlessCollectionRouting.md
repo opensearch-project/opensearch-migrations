@@ -14,8 +14,8 @@ Collection routing applies to metadata migration and document backfill. Traffic 
 target would need a custom transformation that adds the `x-amz-aoss-collection-name` header to each request, and a
 request that spans indices in different collections, such as a mixed `_bulk`, can't be routed that way. The
 workflow configuration doesn't allow a replayer to point at a collection-routed target yet. The migration console's
-cluster commands, such as `connection-check` and `cat-indices`, don't send the collection header either, so they
-don't work against a collection-routed target.
+cluster commands, such as `connection-check` and `cat-indices`, don't send the collection header either, so most
+of them don't work against a collection-routed target.
 
 ## Configuration
 
