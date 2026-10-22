@@ -9,6 +9,8 @@ import java.util.Optional;
 
 
 public interface LuceneLeafReader {
+    /** Counts matching live postings in a single-valued metadata field. */
+    long countLiveDocumentsWithTermPrefix(String fieldName, String prefix) throws IOException;
 
     /**
      * Default {@code position_increment_gap} for analyzed text fields (100). Overridable
