@@ -335,4 +335,14 @@ public class AzureRepoTest {
         var exception = new CannotListBlobs("container-name", "directory", new RuntimeException("cause"));
         assertThat(exception, instanceOf(SnapshotReadFailure.class));
     }
+
+    @Test
+    void Create_RejectsBothAccountKeyAndSasToken() {
+        var thrown = assertThrows(
+            IllegalArgumentException.class,
+            () -> AzureRepo.create(testDir, testRepoUri, null, "key", "token", mockFileFinder)
+        );
+
+        assertThat(thrown.getMessage(), containsString("not both"));
+    }
 }

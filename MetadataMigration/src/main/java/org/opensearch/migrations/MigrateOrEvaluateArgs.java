@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 
 
+import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.cli.OutputFormat;
@@ -41,6 +42,17 @@ public class MigrateOrEvaluateArgs {
             names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
             description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS, Azurite for Azure)"))
     public String endpoint = null;
+
+    @Parameter(required = false,
+        names = { ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE },
+        description = "Optional. Storage account key for an azure:// repo. Mutually exclusive with --azure-storage-sas-token. "
+            + "If neither is set, the ambient Azure identity is used.")
+    public String azureStorageAccountKey = null;
+
+    @Parameter(required = false,
+        names = { ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE },
+        description = "Optional. SAS token for an azure:// repo. Mutually exclusive with --azure-storage-account-key.")
+    public String azureStorageSasToken = null;
 
     @ParametersDelegate
     public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();

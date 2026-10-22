@@ -356,6 +356,18 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void validateArgs_rejectsAzureRepoWithBothAccountKeyAndSasToken() {
+        var args = validEsArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        args.localDir = "/tmp/azure";
+        args.azureStorageAccountKey = "key";
+        args.azureStorageSasToken = "token";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), equalTo("Supply either --azure-storage-account-key or --azure-storage-sas-token, not both."));
+    }
+
+    @Test
     void validateArgs_rejectsMissingSnapshotName() {
         var args = validEsArgs();
         args.snapshotName = null;

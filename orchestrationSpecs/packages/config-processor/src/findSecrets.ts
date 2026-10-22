@@ -38,6 +38,13 @@ export function scrapeSecrets(userConfig: Partial<z.infer<typeof OVERALL_MIGRATI
         .map(ac => ac.basic.secretName);
 }
 
+export function scrapeAzureSecrets(userConfig: Partial<z.infer<typeof OVERALL_MIGRATION_CONFIG>>) {
+    return getClustersFromMap(userConfig.sourceClusters ?? {})
+        .flatMap(c => Object.values(c?.snapshotInfo?.repos ?? {}))
+        .map(r => r?.azureCredentialsSecretName)
+        .filter((s): s is string => !!s);
+}
+
 export function getCategorizedCredentialsSecretsFromConfig(
     userConfig: Partial<z.infer<typeof OVERALL_MIGRATION_CONFIG>>
 ) {
@@ -88,7 +95,7 @@ export async function main() {
 
     // Validation passed — scrape secrets
     const secrets = getCategorizedCredentialsSecretsFromConfig(data);
-    process.stdout.write(JSON.stringify({valid: true, ...secrets}));
+    process.stdout.write(JSON.stringify({valid: true, ...secrets, azureSecrets: scrapeAzureSecrets(data)}));
 }
 
 if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {

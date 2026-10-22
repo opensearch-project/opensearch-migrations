@@ -75,6 +75,19 @@ public class ClusterReaderExtractorTest {
     }
 
     @Test
+    void testExtractClusterReader_invalidAzureSnapshot_bothAccountKeyAndSasToken() {
+        var args = new MigrateOrEvaluateArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        args.localDir = "/tmp/azure";
+        args.azureStorageAccountKey = "key";
+        args.azureStorageSasToken = "token";
+        var extractor = new ClusterReaderExtractor(args);
+
+        var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
+        assertThat(exception.getMessage(), equalTo("Supply either --azure-storage-account-key or --azure-storage-sas-token, not both."));
+    }
+
+    @Test
     void testExtractClusterReader_validGcsSnapshot_missingVersion() {
         var args = new MigrateOrEvaluateArgs();
         args.repoUri = "gs://foo/bar";

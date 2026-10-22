@@ -58,6 +58,9 @@ public class ClusterReaderExtractor {
                 if (arguments.localDir == null) {
                     throw new ParameterException("If an Azure repo is being used, --local-dir must be set");
                 }
+                if (arguments.azureStorageAccountKey != null && arguments.azureStorageSasToken != null) {
+                    throw new ParameterException("Supply either --azure-storage-account-key or --azure-storage-sas-token, not both.");
+                }
             }
             case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
             // A null repoUri is valid here: the remote-source path is checked below.
@@ -98,6 +101,8 @@ public class ClusterReaderExtractor {
                 Path.of(arguments.localDir),
                 a.azureUri(),
                 arguments.endpoint,
+                arguments.azureStorageAccountKey,
+                arguments.azureStorageSasToken,
                 fileFinder
             );
             case RepoUri.S3RepoUri s -> S3Repo.create(

@@ -165,17 +165,19 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
 
-// Provider-agnostic repository config. The URI scheme (s3://, gs://, or azure://) determines the backend.
-// S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
-// Azure: storage account is 3-24 lowercase alphanumerics and the container is 3-63 lowercase
-// alphanumerics and hyphens, with no leading, trailing, or consecutive hyphen. The container is
-// checked in two independent parts: the lookahead bounds its length in characters, stopping at the
-// next `/` or the end, and `[a-z0-9]+(?:-[a-z0-9]+)*` encodes the three hyphen rules. Counting
-// repetitions of a hyphen-optional group instead would bound groups, not characters. This is the
-// only place Azure naming rules are checked; AzureUri on the Java side splits the URI without
-// validating either name.
+// Name lengths: S3 bucket 3-63, GCS bucket 3-222 (dotted names), Azure account 3-24, Azure container 3-63.
+const S3_BUCKET_PATTERN = "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]";
+const GCS_BUCKET_PATTERN = "[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]";
+const AZURE_ACCOUNT_PATTERN = "[a-z0-9]{3,24}";
+// The lookahead bounds the container's length; the rest rules out leading, trailing and repeated hyphens.
+const AZURE_CONTAINER_PATTERN = "(?=[a-z0-9-]{3,63}(?:\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*";
+const REPO_SUBPATH_PATTERN = "(\\/[a-zA-Z0-9!\\-_.*'()/]*)?";
+const REPO_PATH_URI_PATTERN = new RegExp(
+    `^(?:s3:\\/\\/${S3_BUCKET_PATTERN}|gs:\\/\\/${GCS_BUCKET_PATTERN}` +
+    `|azure:\\/\\/${AZURE_ACCOUNT_PATTERN}\\/${AZURE_CONTAINER_PATTERN})${REPO_SUBPATH_PATTERN}$`);
+
 export const REPO_CONFIG = z.object({
-    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\/\/[a-z0-9]{3,24}\/(?=[a-z0-9-]{3,63}(?:\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
+    repoPathUri: z.string().regex(REPO_PATH_URI_PATTERN)
         .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', " +
             "or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. " +
             "The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. " +
@@ -193,15 +195,18 @@ export const REPO_CONFIG = z.object({
     s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
             "Used for s3:// URIs only; ignored for gs:// and azure://. " +
-            "Leave empty if the cluster's own IAM role already has S3 access.")
+            "Leave empty if the cluster's own IAM role already has S3 access."),
+    azureCredentialsSecretName: z.string().regex(/^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$/).default("").optional()
+        .describe("Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the " +
+            "migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. " +
+            "Leave empty to use the ambient Azure identity.")
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
     "The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. " +
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
     "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). " +
     "For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its " +
-    "keystore, while the migration tools' own Azure reader authenticates separately from the " +
-    "AZURE_STORAGE_ACCOUNT_KEY or AZURE_STORAGE_SAS_TOKEN environment variable, falling back to the " +
-    "ambient Azure identity chain when neither is set.");
+    "keystore, while the migration tools' own Azure reader authenticates separately, from " +
+    "azureCredentialsSecretName when set and otherwise from the ambient Azure identity.");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;

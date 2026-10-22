@@ -180,6 +180,17 @@ public class RfsMigrateDocuments {
         public String endpoint = null;
 
         @Parameter(required = false,
+            names = { ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE },
+            description = "Optional. Storage account key for an azure:// repo. Mutually exclusive with --azure-storage-sas-token. "
+                + "If neither is set, the ambient Azure identity is used.")
+        public String azureStorageAccountKey = null;
+
+        @Parameter(required = false,
+            names = { ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE },
+            description = "Optional. SAS token for an azure:// repo. Mutually exclusive with --azure-storage-account-key.")
+        public String azureStorageSasToken = null;
+
+        @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
             description = "The absolute path to the directory where we'll put the Lucene docs. Required when --source-type is SNAPSHOT.")
         public String luceneDir;
@@ -537,6 +548,11 @@ public class RfsMigrateDocuments {
                         "If an Azure repo is being used, --local-dir must be set."
                     );
                 }
+                if (args.azureStorageAccountKey != null && args.azureStorageSasToken != null) {
+                    throw new ParameterException(
+                        "Supply either --azure-storage-account-key or --azure-storage-sas-token, not both."
+                    );
+                }
             }
             case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
         }
@@ -824,6 +840,8 @@ public class RfsMigrateDocuments {
                     Paths.get(arguments.localDir),
                     a.azureUri(),
                     arguments.endpoint,
+                    arguments.azureStorageAccountKey,
+                    arguments.azureStorageSasToken,
                     finder);
                 case RepoUri.S3RepoUri s -> S3Repo.create(
                     Paths.get(arguments.localDir),

@@ -22,9 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class AzureRepo implements SourceRepo {
 
-    static final String ACCOUNT_KEY_ENV = "AZURE_STORAGE_ACCOUNT_KEY";
-    static final String SAS_TOKEN_ENV = "AZURE_STORAGE_SAS_TOKEN";
-
     private final Path localDir;
     private final BlobContainerClient containerClient;
     private final SnapshotFileFinder fileFinder;
@@ -38,30 +35,37 @@ public class AzureRepo implements SourceRepo {
     }
 
     public static AzureRepo create(Path localDir, AzureUri azureUri, SnapshotFileFinder finder) {
-        return create(localDir, azureUri, null, finder);
+        return create(localDir, azureUri, null, null, null, finder);
     }
 
-    public static AzureRepo create(Path localDir, AzureUri azureUri, String endpoint, SnapshotFileFinder finder) {
+    public static AzureRepo create(
+        Path localDir,
+        AzureUri azureUri,
+        String endpoint,
+        String accountKey,
+        String sasToken,
+        SnapshotFileFinder finder
+    ) {
+        boolean hasAccountKey = accountKey != null && !accountKey.isEmpty();
+        boolean hasSasToken = sasToken != null && !sasToken.isEmpty();
+        if (hasAccountKey && hasSasToken) {
+            throw new IllegalArgumentException("Supply either an Azure storage account key or a SAS token, not both");
+        }
+
         var builder = new BlobServiceClientBuilder();
 
-        // Azurite and other emulators use path-style addressing, with the storage account as the
-        // first path segment (http://host:10000/devstoreaccount1). Real Azure Blob Storage uses
-        // host-style addressing (https://<account>.blob.core.windows.net).
+        // Emulators address the account by path; Azure uses https://<account>.blob.core.windows.net.
         String resolvedEndpoint = (endpoint != null && !endpoint.isEmpty())
             ? stripTrailingSlash(endpoint) + "/" + azureUri.accountName
             : "https://" + azureUri.accountName + ".blob.core.windows.net";
         builder.endpoint(resolvedEndpoint);
         log.atInfo().setMessage("Using Azure Blob endpoint: {}").addArgument(resolvedEndpoint).log();
 
-        String accountKey = System.getenv(ACCOUNT_KEY_ENV);
-        String sasToken = System.getenv(SAS_TOKEN_ENV);
-        if (accountKey != null && !accountKey.isEmpty()) {
+        if (hasAccountKey) {
             builder.credential(new StorageSharedKeyCredential(azureUri.accountName, accountKey));
-        } else if (sasToken != null && !sasToken.isEmpty()) {
+        } else if (hasSasToken) {
             builder.credential(new AzureSasCredential(sasToken));
         } else {
-            // No explicit secret supplied, so fall back to the ambient identity chain (managed
-            // identity on AKS, Azure CLI login locally, workload identity federation).
             builder.credential(new DefaultAzureCredentialBuilder().build());
         }
 
@@ -167,11 +171,7 @@ public class AzureRepo implements SourceRepo {
         try {
             containerClient.getBlobClient(azureUri.key).downloadToFile(localPath.toString(), true);
         } catch (BlobStorageException e) {
-            // A failed download (missing blob, access denied, or a service error that exhausted
-            // the client's retries) is a non-retriable snapshot read failure. Classify it so the
-            // worker surfaces the snapshot path + cause and exits with the dedicated code instead
-            // of dying with a generic, unlabeled error. Local filesystem errors are not
-            // BlobStorageException and keep their own classification.
+            // Local filesystem errors are not BlobStorageException, so they keep their own classification.
             throw new CouldNotReadFromAzure(azureUri.containerName, azureUri.key, e);
         }
     }
@@ -215,9 +215,7 @@ public class AzureRepo implements SourceRepo {
         List<String> strippedKeys = new ArrayList<>();
         try {
             for (BlobItem item : containerClient.listBlobsByHierarchy("/", options, (Duration) null)) {
-                // BlobItem.isPrefix() returns a boxed java.lang.Boolean and is null for real blobs,
-                // so compare rather than unbox. Prefixes are the "subdirectories" of the root and
-                // are not top-level files.
+                // isPrefix() returns a boxed Boolean that is null for real blobs.
                 if (Boolean.TRUE.equals(item.isPrefix())) {
                     continue;
                 }
@@ -234,9 +232,7 @@ public class AzureRepo implements SourceRepo {
             throw new CannotListBlobs(azureRepoUri.containerName, prefixKey, e);
         }
 
-        // Listing a prefix that matches nothing returns zero items and throws nothing, so this
-        // explicit check is the only thing that surfaces a missing or misspelled repo root. A
-        // missing container, by contrast, throws BlobStorageException above.
+        // An empty listing throws nothing, so a missing repo root is only detected here.
         if (strippedKeys.isEmpty()) {
             throw new CannotFindSnapshotRepoRoot(azureRepoUri.containerName, prefixKey);
         }
@@ -257,8 +253,7 @@ public class AzureRepo implements SourceRepo {
         }
     }
 
-    // Intentionally NOT a SnapshotReadFailure: this is a local filesystem problem, not a problem
-    // reading the snapshot.
+    // Not a SnapshotReadFailure: this is a local filesystem problem.
     public static class CantCreateLocalDir extends RfsException {
         public CantCreateLocalDir(Path localPath, Throwable cause) {
             super("Failed to create the Azure local download directory: " + localPath, cause);
