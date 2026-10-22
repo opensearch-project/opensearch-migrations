@@ -10,8 +10,7 @@ public class ArgNameConstants {
     }
 
     public static final Pattern POSSIBLE_CREDENTIALS_ARG_FLAG_NAMES =
-        Pattern.compile("--(?:(?:target|source|coordinator|kafka(?:Traffic)?)(?:(?:-u|U)sername|(?:-p|P)assword)"
-            + "|azure(?:-s|S)torage(?:(?:-a|A)ccount(?:-k|K)ey|(?:-s|S)as(?:-t|T)oken))");
+        Pattern.compile("--(?:target|source|coordinator|kafka(?:Traffic)?)(?:(?:-u|U)sername|(?:-p|P)assword)");
 
     public static final String TARGET_PASSWORD_ARG_KEBAB_CASE = "--target-password";
     public static final String TARGET_PASSWORD_ARG_CAMEL_CASE = "--targetPassword";
@@ -29,6 +28,12 @@ public class ArgNameConstants {
     public static final String AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE = "--azureStorageAccountKey";
     public static final String AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE = "--azure-storage-sas-token";
     public static final String AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE = "--azureStorageSasToken";
+    public static final Set<String> AZURE_STORAGE_CREDENTIAL_ARGS = Set.of(
+        AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE,
+        AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE,
+        AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE,
+        AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE
+    );
     public static final Set<String> CENSORED_ARGS = Set.of(
         AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE,
         AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE,
