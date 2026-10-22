@@ -36,9 +36,7 @@ def fake_blob_sdk(monkeypatch):
     storage_pkg = types.ModuleType("azure.storage")
     blob_mod = types.ModuleType("azure.storage.blob")
     blob_mod.BlobServiceClient = MagicMock(name="BlobServiceClient")
-    # azure-core is imported from the same try as azure-storage-blob, so it needs a stub too.
-    # AzureSasCredential is the real class: the point of wrapping a SAS token is the type, so a
-    # mock would let the assertions pass against a bare string.
+    # azure-core needs a stub too; AzureSasCredential stays real because the wrapper type is what is asserted.
     core_pkg = types.ModuleType("azure.core")
     credentials_mod = types.ModuleType("azure.core.credentials")
     credentials_mod.AzureSasCredential = AzureSasCredential
@@ -112,8 +110,7 @@ class TestAzureContainerClient:
         artifact_store._azure_container_client("myacct", "mycontainer")
         kwargs = fake_blob_sdk.BlobServiceClient.call_args.kwargs
         assert kwargs["account_url"] == "https://myacct.blob.core.windows.net"
-        # Assert the wrapper type, not just the value: a bare string is only interpreted as a SAS
-        # token when every query parameter is one the SDK recognizes.
+        # Assert the wrapper type: a bare string is only read as a SAS token if the SDK knows every parameter.
         assert isinstance(kwargs["credential"], AzureSasCredential)
         assert kwargs["credential"].signature == "the-sas"
 
@@ -133,8 +130,9 @@ class TestAzureContainerClient:
         with pytest.raises(ArtifactStoreError, match="azure-identity is required"):
             artifact_store._azure_container_client("myacct", "mycontainer")
 
-    def test_endpoint_override_is_used_as_account_url(self, monkeypatch, fake_blob_sdk):
-        monkeypatch.setenv(artifact_store.ARTIFACT_ENDPOINT_ENV, "http://127.0.0.1:10000/devstoreaccount1")
+    @pytest.mark.parametrize("endpoint", ["http://127.0.0.1:10000", "http://127.0.0.1:10000/"])
+    def test_endpoint_override_gets_the_account_appended(self, monkeypatch, fake_blob_sdk, endpoint):
+        monkeypatch.setenv(artifact_store.ARTIFACT_ENDPOINT_ENV, endpoint)
         monkeypatch.setenv(artifact_store.AZURE_ACCOUNT_KEY_ENV, "the-key")
         artifact_store._azure_container_client("devstoreaccount1", "mycontainer")
         fake_blob_sdk.BlobServiceClient.assert_called_once_with(
@@ -144,11 +142,9 @@ class TestAzureContainerClient:
 
     @pytest.mark.parametrize("endpoint,account", [
         (None, "myacct"),
-        ("http://127.0.0.1:10000/devstoreaccount1", "devstoreaccount1"),
-        # The case the stubbed tests above cannot see. An emulator reached by service DNS is how
-        # the chart already addresses the GCS emulator, and a bare account key here made the real
-        # SDK raise "Unable to determine account name for shared key credential".
-        ("http://azurite.migrations.svc.cluster.local:10000/devstoreaccount1", "devstoreaccount1"),
+        ("http://127.0.0.1:10000", "devstoreaccount1"),
+        # An emulator addressed by service DNS: a bare account key made the real SDK fail here.
+        ("http://azurite.migrations.svc.cluster.local:10000", "devstoreaccount1"),
     ])
     def test_real_sdk_accepts_the_credential_for_any_endpoint(self, monkeypatch, endpoint, account):
         monkeypatch.setenv(artifact_store.AZURE_ACCOUNT_KEY_ENV, "a2V5")

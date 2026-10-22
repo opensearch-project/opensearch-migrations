@@ -79,13 +79,9 @@ def _gcs_client():
 
 
 def _azure_container_client(account: str, container: str):
-    """Build a container client for azure://<account>/<container>.
+    """Build a container client for azure://<account>/<container>, resolving credentials like AzureRepo.create.
 
-    Credential precedence matches the Java reader in AzureRepo.create: account key, then SAS
-    token, then DefaultAzureCredential. An endpoint override is used verbatim as the account
-    URL, like the s3 and gcs branches, so an emulator override must already include the
-    account path segment (for example http://127.0.0.1:10000/devstoreaccount1).
-    """
+    An endpoint override is a base URL; the account is appended to it, as in AzureRepo.create."""
     try:
         from azure.storage.blob import BlobServiceClient
         # azure-core ships as a hard dependency of azure-storage-blob, so one check covers both.
@@ -95,22 +91,16 @@ def _azure_container_client(account: str, container: str):
             "azure-storage-blob is required for Azure Blob Storage artifact support"
         ) from e
 
-    account_url = os.getenv(ARTIFACT_ENDPOINT_ENV) or f"https://{account}.blob.core.windows.net"
+    endpoint = os.getenv(ARTIFACT_ENDPOINT_ENV)
+    account_url = f"{endpoint.rstrip('/')}/{account}" if endpoint else f"https://{account}.blob.core.windows.net"
 
     account_key = os.getenv(AZURE_ACCOUNT_KEY_ENV)
     sas_token = os.getenv(AZURE_SAS_TOKEN_ENV)
     if account_key:
-        # Name the account explicitly rather than passing the key as a bare string. Given a bare
-        # string the SDK infers the account from the host, which it can only do for
-        # *.blob.core.* or a literal localhost, and otherwise raises ValueError. That would make
-        # an account key unusable against an emulator reached by service DNS, which is how the
-        # chart already addresses the GCS emulator. This mirrors the Java reader's
-        # StorageSharedKeyCredential(accountName, key).
+        # Name the account: given a bare key the SDK infers it from the host, which fails for service DNS.
         credential = {"account_name": account, "account_key": account_key}
     elif sas_token:
-        # Wrapped rather than passed as a bare string, matching AzureRepo.create. A bare string
-        # is only treated as a SAS token when every query parameter is one the SDK recognizes,
-        # so an unrecognized parameter would silently reinterpret the token as an account key.
+        # Wrap the token: a bare string with an unrecognized query parameter is read as an account key.
         credential = AzureSasCredential(sas_token)
     else:
         try:
@@ -160,10 +150,7 @@ def read_artifact_text(key: str) -> str:
     elif scheme == "azure":
         account, container = _parse_azure_uri(uri)
         try:
-            # Client construction is inside the try so that a credential or endpoint problem
-            # becomes an ArtifactStoreError like every other failure here, since callers catch
-            # only that. The passthrough keeps the SDK-missing message from being rewrapped
-            # into a "could not read" message that hides what to install.
+            # Constructed inside the try so credential or endpoint problems surface as ArtifactStoreError.
             container_client = _azure_container_client(account, container)
             data = container_client.get_blob_client(key).download_blob().readall()
             return data.decode("utf-8", errors="replace")
