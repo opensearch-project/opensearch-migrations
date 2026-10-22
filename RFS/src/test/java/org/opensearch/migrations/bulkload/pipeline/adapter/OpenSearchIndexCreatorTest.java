@@ -28,7 +28,7 @@ class OpenSearchIndexCreatorTest {
         OpenSearchIndexCreator.createIndex(client, metadata, MAPPER, null);
 
         var body = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client).createIndex(eq("idx"), body.capture(), isNull());
+        verify(client).createIndex(eq("idx"), body.capture(), isNull(), isNull());
         assertThat(body.getValue().get("settings").toString(), equalTo("{\"number_of_shards\":\"1\"}"));
     }
 

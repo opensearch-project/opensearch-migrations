@@ -283,6 +283,7 @@ jobs:
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "180"
 
+  # Runs 0021 (Classic collections) and 0024 (per-account endpoint routing to NextGen collections)
   eks-aoss-integ-test:
     if: |
       github.event_name == 'push' ||

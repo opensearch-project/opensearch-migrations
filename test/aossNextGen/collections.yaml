@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  NextGen OpenSearch Serverless collections for the collection routing integration test
+  (test 0024 in vars/eksAOSSIntegPipeline.groovy). The per-account endpoint only serves NextGen
+  collections, which the sample CDK used for other test clusters cannot create yet.
+
+Parameters:
+  CollectionPrefix:
+    Type: String
+    Description: Names the collection group and prefixes both collections (<prefix>-search, <prefix>-vectors).
+    AllowedPattern: "^[a-z][a-z0-9-]{2,19}$"
+  DataAccessPrincipals:
+    Type: CommaDelimitedList
+    Description: IAM role ARNs granted full access to the collections and their indices.
+  MaxIndexingCapacityInOcu:
+    Type: Number
+    Default: 16
+    MinValue: 2
+  MaxSearchCapacityInOcu:
+    Type: Number
+    Default: 4
+    MinValue: 2
+
+Resources:
+  EncryptionPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub "${CollectionPrefix}-enc"
+      Type: encryption
+      Policy: !Sub >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/${CollectionPrefix}-*"]}],"AWSOwnedKey":true}
+
+  # Public access keeps the test free of VPC endpoint setup; access is still limited to the data access policy.
+  NetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub "${CollectionPrefix}-net"
+      Type: network
+      Policy: !Sub >-
+        [{"Rules":[{"ResourceType":"collection","Resource":["collection/${CollectionPrefix}-*"]}],"AllowFromPublic":true}]
+
+  DataAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    Properties:
+      Name: !Sub "${CollectionPrefix}-data"
+      Type: data
+      Policy: !Sub
+        - >-
+          [{"Rules":[
+          {"ResourceType":"collection","Resource":["collection/${CollectionPrefix}-*"],"Permission":["aoss:*"]},
+          {"ResourceType":"index","Resource":["index/${CollectionPrefix}-*/*"],"Permission":["aoss:*"]}],
+          "Principal":["${Principals}"]}]
+        - Principals: !Join ['","', !Ref DataAccessPrincipals]
+
+  CollectionGroup:
+    Type: AWS::OpenSearchServerless::CollectionGroup
+    Properties:
+      Name: !Ref CollectionPrefix
+      Generation: NEXTGEN
+      StandbyReplicas: DISABLED
+      CapacityLimits:
+        MaxIndexingCapacityInOcu: !Ref MaxIndexingCapacityInOcu
+        MaxSearchCapacityInOcu: !Ref MaxSearchCapacityInOcu
+
+  SearchCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    DependsOn: [EncryptionPolicy, NetworkPolicy, DataAccessPolicy, CollectionGroup]
+    Properties:
+      Name: !Sub "${CollectionPrefix}-search"
+      Type: SEARCH
+      CollectionGroupName: !Ref CollectionPrefix
+
+  VectorCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    DependsOn: [EncryptionPolicy, NetworkPolicy, DataAccessPolicy, CollectionGroup]
+    Properties:
+      Name: !Sub "${CollectionPrefix}-vectors"
+      Type: VECTORSEARCH
+      CollectionGroupName: !Ref CollectionPrefix
+
+Outputs:
+  SearchCollectionName:
+    Value: !Sub "${CollectionPrefix}-search"
+  SearchCollectionEndpoint:
+    Value: !GetAtt SearchCollection.CollectionEndpoint
+  VectorCollectionName:
+    Value: !Sub "${CollectionPrefix}-vectors"
+  VectorCollectionEndpoint:
+    Value: !GetAtt VectorCollection.CollectionEndpoint

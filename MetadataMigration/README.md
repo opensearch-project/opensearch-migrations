@@ -173,3 +173,5 @@ Metadata migration supports Amazon OpenSearch Serverless collections as a target
 - `model_id` references are removed (Serverless does not support training APIs)
 
 Serverless collections must be pre-created via the AWS API. Index creation within a collection is handled by the metadata migration tool via the standard OpenSearch API.
+
+To migrate through the per-account endpoint, which serves every NextGen collection in an account, pass `--target-collection-routed` and a `--collection-routing` object whose static and regex lists map each source index to a collection. Templates are then created in every collection that a migrated index routes to. See [Routing Indices to OpenSearch Serverless Collections](../docs/serverlessCollectionRouting.md).

@@ -17,6 +17,8 @@ public class ConnectionContextTestParams implements ConnectionContext.IParams {
     private boolean insecure = true;
     @Builder.Default
     private boolean disableCompression = false;
+    @Builder.Default
+    private boolean collectionRouted = false;
 
     private Path caCert;
     private Path clientCert;
