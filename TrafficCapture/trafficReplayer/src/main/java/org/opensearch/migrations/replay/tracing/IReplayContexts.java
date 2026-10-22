@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
+import java.time.Duration;
 import java.time.Instant;
 
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -69,6 +70,12 @@ public interface IReplayContexts {
         public static final String BYTES_WRITTEN_TO_TARGET = "bytesWrittenToTarget";
         public static final String BYTES_READ_FROM_TARGET = "bytesReadFromTarget";
         public static final String TUPLE_COMPARISON = "tupleComparison";
+        public static final String TUPLE_SOURCE_FIRST_BYTE_DURATION = "tupleSourceFirstByteDuration";
+        public static final String TUPLE_TARGET_FIRST_BYTE_DURATION = "tupleTargetFirstByteDuration";
+        public static final String TUPLE_SOURCE_RESPONSE_DURATION = "tupleSourceResponseDuration";
+        public static final String TUPLE_TARGET_RESPONSE_DURATION = "tupleTargetResponseDuration";
+        public static final String TUPLE_RESPONSE_DURATION_DIFFERENCE = "tupleResponseDurationDifference";
+        public static final String TUPLE_RESPONSE_DURATION_RATIO = "tupleResponseDurationRatio";
     }
 
     final class TraceAttributes {
@@ -385,6 +392,10 @@ public interface IReplayContexts {
         AttributeKey<String> METHOD_KEY = AttributeKey.stringKey("method");
         AttributeKey<String> HTTP_VERSION_KEY = AttributeKey.stringKey("version");
         AttributeKey<String> ENDPOINT_KEY = AttributeKey.stringKey("endpoint");
+        AttributeKey<String> SPAN_KEY = AttributeKey.stringKey("span");
+        AttributeKey<Boolean> TARGET_SLOWER_KEY = AttributeKey.booleanKey("targetSlower");
+        String FIRST_BYTE_SPAN = "firstByte";
+        String TOTAL_SPAN = "total";
 
         @Override
         default String getActivityName() {
@@ -396,6 +407,16 @@ public interface IReplayContexts {
         void setTargetStatus(Integer targetStatus);
 
         void setMethod(String method);
+
+        /**
+         * Sets the source's spans from its last request byte to its final response's first and last bytes.
+         */
+        void setSourceResponseTiming(Duration firstByte, Duration total);
+
+        /**
+         * Sets the target's spans from its last request byte to its final response's first and last bytes.
+         */
+        void setTargetResponseTiming(Duration firstByte, Duration total);
 
         void setEndpoint(String endpointUrl);
 

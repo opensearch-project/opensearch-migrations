@@ -105,13 +105,13 @@ class LuceneSnapshotSourceDeltaTest {
         when(extractor.listIndices("current")).thenReturn(List.of("added"));
         var entry = shard("current", "added", 0);
         when(extractor.listShards("current", "added")).thenReturn(List.of(entry));
-        when(extractor.readDocuments(eq(entry), eq(WORK_DIR), eq(0), isNull(), eq(false)))
+        when(extractor.readDocuments(eq(entry), eq(WORK_DIR), eq(0), isNull(), eq(false), any()))
             .thenReturn(Flux.just(document("new", 5)));
 
         var docs = source(mode).readDocuments(new EsShardPartition("current", "added", 0), 0).collectList().block();
         if (mode == DeltaMode.DELETES_ONLY) {
             assertEquals(List.of(), docs);
-            verify(extractor, never()).readDocuments(any(), any(), anyInt(), any(), anyBoolean());
+            verify(extractor, never()).readDocuments(any(), any(), anyInt(), any(), anyBoolean(), any());
         } else {
             assertEquals(List.of("new"), docs.stream().map(Document::id).toList());
             assertEquals(Document.Operation.UPSERT, docs.get(0).operation());
@@ -127,7 +127,7 @@ class LuceneSnapshotSourceDeltaTest {
         var entry = shard("previous", "removed", 0);
         when(extractor.listShards("previous", "removed")).thenReturn(List.of(entry));
         var storedSource = "{\"tenant\":\"tenant-a\"}".getBytes(StandardCharsets.UTF_8);
-        when(extractor.readDocuments(eq(entry), eq(WORK_DIR), eq(0), isNull(), eq(false)))
+        when(extractor.readDocuments(eq(entry), eq(WORK_DIR), eq(0), isNull(), eq(false), any()))
             .thenReturn(Flux.just(new LuceneDocumentChange(
                 8, "old", "type", storedSource, "route", DocumentChangeType.INDEX)));
 
@@ -161,17 +161,18 @@ class LuceneSnapshotSourceDeltaTest {
     }
 
     @Test
-    void resumeCountsEmittedDocumentsRatherThanLuceneIdsWithDeletedOrNestedGaps() {
+    void resumeUsesLucenePositionsWithDeletedOrNestedGaps() {
         when(extractor.listIndices("previous")).thenReturn(List.of());
         when(extractor.listIndices("current")).thenReturn(List.of("added"));
         var entry = shard("current", "added", 0);
         when(extractor.listShards("current", "added")).thenReturn(List.of(entry));
-        when(extractor.readDocuments(eq(entry), eq(WORK_DIR), eq(0), isNull(), eq(false)))
-            .thenReturn(Flux.just(document("first", 3), document("second", 8), document("third", 15)));
+        when(extractor.readDocuments(eq(entry), eq(WORK_DIR), eq(9), isNull(), eq(false), any()))
+            .thenReturn(Flux.just(document("third", 15)));
 
         var docs = source(DeltaMode.UPDATES_ONLY)
-            .readDocuments(new EsShardPartition("current", "added", 0), 2).collectList().block();
+            .readDocuments(new EsShardPartition("current", "added", 0), 9).collectList().block();
         assertEquals(List.of("third"), docs.stream().map(Document::id).toList());
+        assertEquals(15, docs.get(0).position().orElseThrow());
     }
 
     @Test
@@ -182,12 +183,13 @@ class LuceneSnapshotSourceDeltaTest {
         var previous = shard("previous", "shared", 0);
         when(extractor.listShards("current", "shared")).thenReturn(List.of(current));
         when(extractor.listShards("previous", "shared")).thenReturn(List.of(previous));
-        when(extractor.readDeltaDocuments(eq(current), eq(previous), eq(DeltaMode.UPDATES_ONLY), eq(WORK_DIR), any()))
+        when(extractor.readDeltaDocuments(eq(current), eq(previous), eq(DeltaMode.UPDATES_ONLY), eq(WORK_DIR), any(), any()))
             .thenReturn(Flux.just(document("first", 3), document("second", 15)));
 
         var docs = source(DeltaMode.UPDATES_ONLY)
             .readDocuments(new EsShardPartition("current", "shared", 0), 1).collectList().block();
         assertEquals(List.of("second"), docs.stream().map(Document::id).toList());
+        assertEquals(1, docs.get(0).position().orElseThrow());
     }
 
     private static LuceneDocumentChange document(String id, int luceneId) {

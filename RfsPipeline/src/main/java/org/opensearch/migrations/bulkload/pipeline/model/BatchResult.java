@@ -9,9 +9,21 @@ package org.opensearch.migrations.bulkload.pipeline.model;
  */
 public record BatchResult(
     long docsInBatch,
-    long bytesInBatch
+    long bytesInBatch,
+    MigrationMetrics.Operations target,
+    MigrationMetrics.Requests requests
 ) {
+    public BatchResult(long docsInBatch, long bytesInBatch) {
+        this(docsInBatch, bytesInBatch, MigrationMetrics.Requests.ZERO);
+    }
+
+    public BatchResult(long docsInBatch, long bytesInBatch, MigrationMetrics.Requests requests) {
+        this(docsInBatch, bytesInBatch, MigrationMetrics.Operations.ZERO, requests);
+    }
+
     public BatchResult {
+        java.util.Objects.requireNonNull(target);
+        java.util.Objects.requireNonNull(requests);
         if (docsInBatch < 0) {
             throw new IllegalArgumentException("docsInBatch must be >= 0, got " + docsInBatch);
         }

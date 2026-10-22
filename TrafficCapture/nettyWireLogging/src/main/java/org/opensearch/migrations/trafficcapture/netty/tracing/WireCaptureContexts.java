@@ -200,8 +200,8 @@ public interface WireCaptureContexts extends IWireCaptureContexts {
         }
 
         @Override
-        public RequestContext.MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().requestInstruments;
+        public MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().blockingInstruments;
         }
     }
 
@@ -232,8 +232,8 @@ public interface WireCaptureContexts extends IWireCaptureContexts {
         }
 
         @Override
-        public RequestContext.MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().requestInstruments;
+        public MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().waitingForResponseInstruments;
         }
     }
 

@@ -11,6 +11,8 @@ import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -37,6 +39,18 @@ class SnapshotExtractorTest {
         when(snapshotReader.getIndexMetadata()).thenReturn(indexMetadataFactory);
         when(shardMetadataFactory.getRepoDataProvider()).thenReturn(repoDataProvider);
         return SnapshotExtractor.create(Version.fromString("ES 7.10"), snapshotReader, sourceRepo);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1_07_06_99, 7_10_02_99, 0x08000000 | 1_03_00_99})
+    void legacyIndexCreationVersionsUseTypeMetadata(int version) {
+        assertEquals("_type", SnapshotExtractor.nestedPathField(version));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {8_00_00_99, 9_00_00_99, 0x08000000 | 2_00_00_99, 0x08000000 | 3_00_00_99})
+    void modernIndexCreationVersionsUseNestedPathMetadata(int version) {
+        assertEquals("_nested_path", SnapshotExtractor.nestedPathField(version));
     }
 
     @Test

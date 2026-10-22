@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
@@ -11,6 +12,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepoAccessor;
@@ -43,6 +45,8 @@ import reactor.core.publisher.Flux;
  */
 @Slf4j
 public class SnapshotExtractor {
+
+    private static final int OPENSEARCH_VERSION_MASK = 0x08000000;
 
     @Getter
     private final Version version;
@@ -166,6 +170,16 @@ public class SnapshotExtractor {
 
     public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
                                                      FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return readDocuments(shard, workDir, startDocIdx, mappingContext, useRecoverySource, null);
+    }
+
+    /**
+     * @param snapshotCountsSink receives the shard's document counts once the reader is
+     *                         open. May be null.
+     */
+    public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
+                                                     FieldMappingContext mappingContext, boolean useRecoverySource,
+                                                     Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -182,7 +196,21 @@ public class SnapshotExtractor {
         // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource);
+        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx,
+            mappingContext, useRecoverySource, snapshotCountsSink == null ? null : nestedPathField(shard),
+            snapshotCountsSink);
+    }
+
+    private String nestedPathField(ShardEntry shard) {
+        var settings = snapshotReader.getIndexMetadata().fromRepo(shard.snapshotName(), shard.indexName()).getSettings();
+        return nestedPathField(settings.path("index").path("version").path("created").asInt());
+    }
+
+    static String nestedPathField(int indexCreationVersion) {
+        boolean modern = indexCreationVersion >= OPENSEARCH_VERSION_MASK
+            ? (indexCreationVersion ^ OPENSEARCH_VERSION_MASK) >= 2_00_00_99
+            : indexCreationVersion >= 8_00_00_99;
+        return modern ? "_nested_path" : "_type";
     }
 
     /**
@@ -203,6 +231,17 @@ public class SnapshotExtractor {
         Path workDir,
         Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory
     ) {
+        return readDeltaDocuments(currentShard, previousShard, deltaMode, workDir, deltaContextFactory, null);
+    }
+
+    public Flux<LuceneDocumentChange> readDeltaDocuments(
+        ShardEntry currentShard,
+        ShardEntry previousShard,
+        DeltaMode deltaMode,
+        Path workDir,
+        Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory,
+        Consumer<SnapshotDocumentCounts> snapshotCounts
+    ) {
         return Flux.using(
             () -> {
                 // A recreated index can reuse Lucene filenames for different contents. Keep the
@@ -218,6 +257,9 @@ public class SnapshotExtractor {
             readers -> {
                 DeltaLuceneReader.DeltaResult deltaResult;
                 try (var deltaContext = deltaContextFactory.get()) {
+                    if (snapshotCounts != null) {
+                        snapshotCounts.accept(LuceneReader.countSnapshotDocuments(readers.current(), nestedPathField(currentShard)));
+                    }
                     deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
                         readers.previous(), readers.current(), 0, deltaContext);
                 }

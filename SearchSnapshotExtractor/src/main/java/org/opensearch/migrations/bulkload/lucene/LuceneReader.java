@@ -1,16 +1,19 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -49,9 +52,23 @@ public class LuceneReader {
     }
 
     public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext,
+            useRecoverySource, null, null);
+    }
+
+    /**
+     * @param snapshotCountsSink receives the shard's document counts once the reader is
+     *                         open, before any documents are emitted. May be null.
+     */
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource, String nestedPathField, Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
         return Flux.using(
             () -> indexReader.getReader(segmentsFileName),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource),
+            reader -> {
+                if (snapshotCountsSink != null) {
+                    snapshotCountsSink.accept(countSnapshotDocuments(reader, nestedPathField));
+                }
+                return readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource);
+            },
             reader -> {
                 try {
                     reader.close();
@@ -83,6 +100,23 @@ public class LuceneReader {
                     useRecoverySource)
             )
             .subscribeOn(LUCENE_IO_SCHEDULER);
+    }
+
+    public static SnapshotDocumentCounts countSnapshotDocuments(LuceneDirectoryReader reader, String nestedPathField) {
+        long live = 0;
+        long nested = 0;
+        try {
+            for (var leaf : reader.leaves()) {
+                var segment = leaf.reader();
+                var liveDocs = segment.getLiveDocs();
+                live += liveDocs == null ? segment.maxDoc() : liveDocs.cardinality();
+                nested += segment.countLiveDocumentsWithTermPrefix(nestedPathField,
+                    "_type".equals(nestedPathField) ? "__" : "");
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to count snapshot documents", e);
+        }
+        return new SnapshotDocumentCounts(live, nested, reader.maxDocIncludingSoftDeletes() - live);
     }
 
     /**

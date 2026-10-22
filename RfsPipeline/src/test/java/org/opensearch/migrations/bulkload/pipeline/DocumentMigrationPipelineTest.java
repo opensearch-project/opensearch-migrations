@@ -47,8 +47,8 @@ class DocumentMigrationPipelineTest {
             .then(() -> await(subscribed))
             .then(() -> second.tryEmitValue(new BatchResult(1, 2)))
             .then(() -> first.tryEmitValue(new BatchResult(1, 2)))
-            .expectNextMatches(cursor -> cursor.lastDocProcessed() == 11)
-            .expectNextMatches(cursor -> cursor.lastDocProcessed() == 12)
+            .expectNextMatches(cursor -> cursor.nextPosition() == 11)
+            .expectNextMatches(cursor -> cursor.nextPosition() == 12)
             .expectComplete()
             .verify(Duration.ofSeconds(10));
     }
@@ -63,8 +63,8 @@ class DocumentMigrationPipelineTest {
             .migratePartition(PARTITION, "index", 7);
 
         StepVerifier.create(migration.repeat(1))
-            .expectNextMatches(cursor -> cursor.lastDocProcessed() == 8)
-            .expectNextMatches(cursor -> cursor.lastDocProcessed() == 8)
+            .expectNextMatches(cursor -> cursor.nextPosition() == 8)
+            .expectNextMatches(cursor -> cursor.nextPosition() == 8)
             .expectComplete()
             .verify(Duration.ofSeconds(10));
     }
@@ -85,7 +85,7 @@ class DocumentMigrationPipelineTest {
             .migratePartition(PARTITION, "index", 0).collectList().block(Duration.ofSeconds(10));
 
         assertTrue(progress.size() > 1000);
-        assertEquals(10000, progress.get(progress.size() - 1).lastDocProcessed());
+        assertEquals(10000, progress.get(progress.size() - 1).nextPosition());
     }
 
     private static Document document(String id) {

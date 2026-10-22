@@ -215,7 +215,7 @@ class LuceneSnapshotSourceInitializationTest {
             assertTrue(written.isEmpty());
             var cursors = migration.collectList().block(TIMEOUT);
             assertEquals(1, cursors.size());
-            assertEquals(1, cursors.get(0).lastDocProcessed());
+            assertEquals(1, cursors.get(0).nextPosition());
             assertEquals(List.of("document"), written.stream().map(Document::id).toList());
         }
     }
@@ -244,12 +244,12 @@ class LuceneSnapshotSourceInitializationTest {
             when(extractor.listSnapshots()).thenReturn(List.of("previous", "current"));
             when(extractor.listIndices("previous")).thenReturn(List.of(INDEX));
             when(extractor.listShards("previous", INDEX)).thenReturn(List.of(previous));
-            when(extractor.readDeltaDocuments(eq(current), eq(previous), eq(DeltaMode.UPDATES_ONLY), eq(workDir), any()))
+            when(extractor.readDeltaDocuments(eq(current), eq(previous), eq(DeltaMode.UPDATES_ONLY), eq(workDir), any(), any()))
                 // Delta reader initialization occurs when its returned publisher is subscribed.
                 .thenAnswer(invocation -> Flux.defer(initialize));
             builder.delta("previous", DeltaMode.UPDATES_ONLY, () -> mock(IRfsContexts.IDeltaStreamContext.class));
         } else {
-            when(extractor.readDocuments(eq(current), eq(workDir), eq(0), isNull(), eq(false)))
+            when(extractor.readDocuments(eq(current), eq(workDir), eq(0), isNull(), eq(false), any()))
                 .thenAnswer(invocation -> initialize.get());
         }
         return builder.build();

@@ -22,8 +22,12 @@ message ReadObservation {
 message ReadSegmentObservation {
   bytes data = 2;
 }
+// The proxy finished forwarding a captured request to the source: the observation's ts is when the write of
+// the request's last bytes to the source completed, that is, when they were handed to the source socket. The
+// proxy emits one per captured EndOfMessageIndication, in the same order, each after its EndOfMessageIndication
+// and before the next request's reads. Like every other observation, its order within a connection is
+// guaranteed but its existence is not: a forward that fails, or a connection whose capture ends first, has none.
 message ProxyFinishesForwardingRequestObservation {
-  bool timedOut = 1;
 }
 message WriteObservation {
   bytes data = 1;
@@ -57,7 +61,7 @@ message TrafficObservation {
     ConnectObservation connect = 3;
     ReadObservation read = 4;
     ReadSegmentObservation readSegment = 5;
-    ProxyFinishesForwardingRequestObservation requestReleasedDownstream = 6;
+    ProxyFinishesForwardingRequestObservation requestForwarded = 6;
     WriteObservation write = 8;
     WriteSegmentObservation writeSegment = 9;
     DisconnectObservation disconnect = 10;

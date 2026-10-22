@@ -23,12 +23,25 @@ import io.netty.util.ReferenceCountUtil;
  * implementation starting point.</p>
  */
 public class InterimHttpResponseHandler extends ChannelInboundHandlerAdapter {
+    private final Runnable onInterimResponse;
     private boolean discardingInterimResponse;
+
+    public InterimHttpResponseHandler() {
+        this(() -> {});
+    }
+
+    /** @param onInterimResponse runs as each discarded interim response begins */
+    public InterimHttpResponseHandler(Runnable onInterimResponse) {
+        this.onInterimResponse = onInterimResponse;
+    }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         if (msg instanceof HttpResponse response) {
             discardingInterimResponse = isInterim(response);
+            if (discardingInterimResponse) {
+                onInterimResponse.run();
+            }
         }
 
         if (discardingInterimResponse) {
