@@ -297,7 +297,7 @@ data:
         },
         {
           "type": "row",
-          "title": "End-to-end flow",
+          "title": "Response comparisons",
           "collapsed": false,
           "gridPos": {
             "h": 1,
@@ -307,6 +307,363 @@ data:
           },
           "panels": [],
           "id": 9
+        },
+        {
+          "type": "timeseries",
+          "title": "Status-code match % (includes missing source responses)",
+          "description": "Matching tuples divided by all tuples, including tuples without a source response.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * sum(rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval])) / sum(rate(tupleComparison_total[$__rate_interval]))",
+              "legendFormat": "Match %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 0,
+            "y": 6
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 10
+        },
+        {
+          "type": "timeseries",
+          "title": "Status-code mismatches per graph period (source → target)",
+          "description": "Mismatched tuples counted in each graph interval by method and source → target status-code class (stacked); tuples without a source response are labelled as such.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "label_replace(sum by (method, sourceStatusCode, targetStatusCode) (increase(tupleComparison_total{statusCodesMatch=\"false\"}[$__interval])), \"sourceStatusCode\", \"no source response\", \"sourceStatusCode\", \"\")",
+              "legendFormat": "\u007b\u007bmethod\u007d\u007d \u007b\u007bsourceStatusCode\u007d\u007d → \u007b\u007btargetStatusCode\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 8,
+            "y": 6
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 11
+        },
+        {
+          "type": "timeseries",
+          "title": "Status-code matches per second",
+          "description": "Matching tuples per second by method and status-code class (stacked).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (method, targetStatusCode) (rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval]))",
+              "legendFormat": "\u007b\u007bmethod\u007d\u007d \u007b\u007btargetStatusCode\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 16,
+            "y": 6
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 12
+        },
+        {
+          "type": "timeseries",
+          "title": "Response time, source vs target (mean ms)",
+          "description": "Time from the request's last byte to the first byte and to the last byte of the final response, on each side, plus p95 of the complete response, from buckets topped at 2 minutes. Values are per request pair, for requests whose status codes matched; the target is measured under replay load and speedup.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(tupleSourceFirstByteDuration_milliseconds_sum[$__rate_interval])) / sum(rate(tupleSourceFirstByteDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Source: request → first byte"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(tupleTargetFirstByteDuration_milliseconds_sum[$__rate_interval])) / sum(rate(tupleTargetFirstByteDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Target: request → first byte"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(tupleSourceResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(tupleSourceResponseDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Source: request → response complete"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(tupleTargetResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(tupleTargetResponseDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Target: request → response complete"
+            },
+            {
+              "refId": "E",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tupleSourceResponseDuration_milliseconds_bucket[$__rate_interval])))",
+              "legendFormat": "Source: response complete p95"
+            },
+            {
+              "refId": "F",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tupleTargetResponseDuration_milliseconds_bucket[$__rate_interval])))",
+              "legendFormat": "Target: response complete p95"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 12
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 13
+        },
+        {
+          "type": "timeseries",
+          "title": "Response time difference, target − source (ms)",
+          "description": "Mean of each pair's target − source, with p10, p50 and p90; positive means the target is slower. The percentiles join the not-slower magnitudes, negated, to the slower ones, and interpolate within the duration buckets. Values are per request pair, for requests whose status codes matched; the target is measured under replay load and speedup.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "((sum(rate(tupleResponseDurationDifference_milliseconds_sum{span=\"firstByte\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)) - (sum(rate(tupleResponseDurationDifference_milliseconds_sum{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval]))",
+              "legendFormat": "To first byte mean"
+            },
+            {
+              "refId": "B",
+              "expr": "(-histogram_quantile(scalar(clamp(1 - (0.1 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval]))) and on() ((0.1 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) <= (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)))) or on() (histogram_quantile(scalar(clamp(((0.1 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) - (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"firstByte\",targetSlower=\"true\"}[$__rate_interval]))) and on() ((0.1 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) > (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))))",
+              "legendFormat": "To first byte p10"
+            },
+            {
+              "refId": "C",
+              "expr": "(-histogram_quantile(scalar(clamp(1 - (0.5 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval]))) and on() ((0.5 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) <= (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)))) or on() (histogram_quantile(scalar(clamp(((0.5 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) - (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"firstByte\",targetSlower=\"true\"}[$__rate_interval]))) and on() ((0.5 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) > (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))))",
+              "legendFormat": "To first byte p50"
+            },
+            {
+              "refId": "D",
+              "expr": "(-histogram_quantile(scalar(clamp(1 - (0.9 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval]))) and on() ((0.9 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) <= (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)))) or on() (histogram_quantile(scalar(clamp(((0.9 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) - (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"firstByte\",targetSlower=\"true\"}[$__rate_interval]))) and on() ((0.9 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\"}[$__rate_interval])) or vector(0))) > (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"firstByte\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))))",
+              "legendFormat": "To first byte p90"
+            },
+            {
+              "refId": "E",
+              "expr": "((sum(rate(tupleResponseDurationDifference_milliseconds_sum{span=\"total\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)) - (sum(rate(tupleResponseDurationDifference_milliseconds_sum{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval]))",
+              "legendFormat": "To response complete mean"
+            },
+            {
+              "refId": "F",
+              "expr": "(-histogram_quantile(scalar(clamp(1 - (0.1 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"total\",targetSlower=\"false\"}[$__rate_interval]))) and on() ((0.1 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) <= (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)))) or on() (histogram_quantile(scalar(clamp(((0.1 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) - (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"total\",targetSlower=\"true\"}[$__rate_interval]))) and on() ((0.1 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) > (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))))",
+              "legendFormat": "To response complete p10"
+            },
+            {
+              "refId": "G",
+              "expr": "(-histogram_quantile(scalar(clamp(1 - (0.5 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"total\",targetSlower=\"false\"}[$__rate_interval]))) and on() ((0.5 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) <= (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)))) or on() (histogram_quantile(scalar(clamp(((0.5 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) - (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"total\",targetSlower=\"true\"}[$__rate_interval]))) and on() ((0.5 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) > (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))))",
+              "legendFormat": "To response complete p50"
+            },
+            {
+              "refId": "H",
+              "expr": "(-histogram_quantile(scalar(clamp(1 - (0.9 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"total\",targetSlower=\"false\"}[$__rate_interval]))) and on() ((0.9 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) <= (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0)))) or on() (histogram_quantile(scalar(clamp(((0.9 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) - (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))) / clamp_min((sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"true\"}[$__rate_interval])) or vector(0)), 1e-9), 0, 1)), sum by (le) (rate(tupleResponseDurationDifference_milliseconds_bucket{span=\"total\",targetSlower=\"true\"}[$__rate_interval]))) and on() ((0.9 * (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\"}[$__rate_interval])) or vector(0))) > (sum(rate(tupleResponseDurationDifference_milliseconds_count{span=\"total\",targetSlower=\"false\"}[$__rate_interval])) or vector(0))))",
+              "legendFormat": "To response complete p90"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 12
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 14
+        },
+        {
+          "type": "timeseries",
+          "title": "Response time difference, target vs source (%)",
+          "description": "Median (p50) over pairs of target / source − 1, with p10 and p90; positive means the target is slower. The ratio floors each side's duration at 1 ms, so sub-millisecond responses don't produce extreme ratios. Percentiles interpolate within log-spaced buckets from 0.01 to 100. Values are per request pair, for requests whose status codes matched; the target is measured under replay load and speedup.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * (histogram_quantile(0.5, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"firstByte\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To first byte p50"
+            },
+            {
+              "refId": "B",
+              "expr": "100 * (histogram_quantile(0.1, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"firstByte\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To first byte p10"
+            },
+            {
+              "refId": "C",
+              "expr": "100 * (histogram_quantile(0.9, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"firstByte\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To first byte p90"
+            },
+            {
+              "refId": "D",
+              "expr": "100 * (histogram_quantile(0.5, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"total\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To response complete p50"
+            },
+            {
+              "refId": "E",
+              "expr": "100 * (histogram_quantile(0.1, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"total\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To response complete p10"
+            },
+            {
+              "refId": "F",
+              "expr": "100 * (histogram_quantile(0.9, sum by (le) (rate(tupleResponseDurationRatio_bucket{span=\"total\"}[$__rate_interval]))) - 1)",
+              "legendFormat": "To response complete p90"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 12
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 15
+        },
+        {
+          "type": "row",
+          "title": "End-to-end flow",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 20
+          },
+          "panels": [],
+          "id": 16
         },
         {
           "type": "timeseries",
@@ -354,7 +711,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 6
+            "y": 21
           },
           "options": {
             "legend": {
@@ -367,7 +724,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 10
+          "id": 17
         },
         {
           "type": "timeseries",
@@ -420,7 +777,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 6
+            "y": 21
           },
           "options": {
             "legend": {
@@ -433,7 +790,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 11
+          "id": 18
         },
         {
           "type": "timeseries",
@@ -497,7 +854,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 6
+            "y": 21
           },
           "options": {
             "legend": {
@@ -510,7 +867,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 12
+          "id": 19
         },
         {
           "type": "row",
@@ -520,10 +877,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 13
+            "y": 28
           },
           "panels": [],
-          "id": 13
+          "id": 20
         },
         {
           "type": "text",
@@ -533,13 +890,13 @@ data:
             "h": 1,
             "w": 6,
             "x": 0,
-            "y": 14
+            "y": 29
           },
           "options": {
             "mode": "markdown",
             "content": "### Capture proxy"
           },
-          "id": 14
+          "id": 21
         },
         {
           "type": "text",
@@ -549,13 +906,13 @@ data:
             "h": 1,
             "w": 6,
             "x": 6,
-            "y": 14
+            "y": 29
           },
           "options": {
             "mode": "markdown",
             "content": "### Kafka → replayer consumer"
           },
-          "id": 15
+          "id": 22
         },
         {
           "type": "text",
@@ -565,13 +922,13 @@ data:
             "h": 1,
             "w": 6,
             "x": 12,
-            "y": 14
+            "y": 29
           },
           "options": {
             "mode": "markdown",
             "content": "### Replayer intake"
           },
-          "id": 16
+          "id": 23
         },
         {
           "type": "text",
@@ -581,13 +938,13 @@ data:
             "h": 1,
             "w": 6,
             "x": 18,
-            "y": 14
+            "y": 29
           },
           "options": {
             "mode": "markdown",
             "content": "### Replayer → target"
           },
-          "id": 17
+          "id": 24
         },
         {
           "type": "timeseries",
@@ -663,7 +1020,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 15
+            "y": 30
           },
           "options": {
             "legend": {
@@ -676,7 +1033,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 18
+          "id": 25
         },
         {
           "type": "timeseries",
@@ -714,7 +1071,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 15
+            "y": 30
           },
           "options": {
             "legend": {
@@ -727,7 +1084,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 19
+          "id": 26
         },
         {
           "type": "timeseries",
@@ -775,7 +1132,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 15
+            "y": 30
           },
           "options": {
             "legend": {
@@ -788,7 +1145,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 20
+          "id": 27
         },
         {
           "type": "timeseries",
@@ -901,7 +1258,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 15
+            "y": 30
           },
           "options": {
             "legend": {
@@ -914,7 +1271,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 21
+          "id": 28
         },
         {
           "type": "row",
@@ -924,10 +1281,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 22
+            "y": 37
           },
           "panels": [],
-          "id": 22
+          "id": 29
         },
         {
           "type": "timeseries",
@@ -975,7 +1332,7 @@ data:
             "h": 8,
             "w": 6,
             "x": 0,
-            "y": 23
+            "y": 38
           },
           "options": {
             "legend": {
@@ -988,7 +1345,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 23
+          "id": 30
         },
         {
           "type": "timeseries",
@@ -1048,7 +1405,7 @@ data:
             "h": 8,
             "w": 6,
             "x": 6,
-            "y": 23
+            "y": 38
           },
           "options": {
             "legend": {
@@ -1061,7 +1418,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 24
+          "id": 31
         },
         {
           "type": "timeseries",
@@ -1109,7 +1466,7 @@ data:
             "h": 8,
             "w": 6,
             "x": 12,
-            "y": 23
+            "y": 38
           },
           "options": {
             "legend": {
@@ -1122,7 +1479,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 25
+          "id": 32
         },
         {
           "type": "timeseries",
@@ -1219,7 +1576,7 @@ data:
             "h": 8,
             "w": 6,
             "x": 18,
-            "y": 23
+            "y": 38
           },
           "options": {
             "legend": {
@@ -1232,7 +1589,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 26
+          "id": 33
         },
         {
           "type": "row",
@@ -1242,10 +1599,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 31
+            "y": 46
           },
           "panels": [],
-          "id": 27
+          "id": 34
         },
         {
           "type": "timeseries",
@@ -1263,16 +1620,21 @@ data:
             },
             {
               "refId": "B",
-              "expr": "sum(rate(gatheringResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(gatheringResponseDuration_milliseconds_count[$__rate_interval]))",
-              "legendFormat": "Gather response (source latency)"
+              "expr": "sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"captureProxy\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"captureProxy\"}[$__rate_interval]))",
+              "legendFormat": "Wait for source's first byte"
             },
             {
               "refId": "C",
+              "expr": "sum(rate(gatheringResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(gatheringResponseDuration_milliseconds_count[$__rate_interval]))",
+              "legendFormat": "Gather source response"
+            },
+            {
+              "refId": "D",
               "expr": "sum(rate(kafkaCommitDuration_milliseconds_sum[$__rate_interval])) / sum(rate(kafkaCommitDuration_milliseconds_count[$__rate_interval]))",
               "legendFormat": "Kafka publish → ack"
             },
             {
-              "refId": "D",
+              "refId": "E",
               "expr": "histogram_quantile(0.95, sum by (le) (rate(kafkaCommitDuration_milliseconds_bucket[$__rate_interval])))",
               "legendFormat": "Kafka publish → ack p95"
             }
@@ -1288,7 +1650,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 32
+            "y": 47
           },
           "options": {
             "legend": {
@@ -1301,7 +1663,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 28
+          "id": 35
         },
         {
           "type": "timeseries",
@@ -1356,7 +1718,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 32
+            "y": 47
           },
           "options": {
             "legend": {
@@ -1369,7 +1731,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 29
+          "id": 36
         },
         {
           "type": "timeseries",
@@ -1402,7 +1764,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 32
+            "y": 47
           },
           "options": {
             "legend": {
@@ -1415,7 +1777,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 30
+          "id": 37
         },
         {
           "type": "timeseries",
@@ -1438,22 +1800,22 @@ data:
             },
             {
               "refId": "C",
-              "expr": "sum(rate(requestConnectingDuration_milliseconds_sum[$__rate_interval])) / sum(rate(requestConnectingDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "expr": "sum(rate(requestConnectingDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(requestConnectingDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval])) / 1000",
               "legendFormat": "Connect"
             },
             {
               "refId": "D",
-              "expr": "sum(rate(requestSendingDuration_milliseconds_sum[$__rate_interval])) / sum(rate(requestSendingDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "expr": "sum(rate(requestSendingDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(requestSendingDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval])) / 1000",
               "legendFormat": "Send"
             },
             {
               "refId": "E",
-              "expr": "sum(rate(waitingForResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "expr": "sum(rate(waitingForResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(waitingForResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval])) / 1000",
               "legendFormat": "Wait for response"
             },
             {
               "refId": "F",
-              "expr": "sum(rate(receivingResponseDuration_milliseconds_sum[$__rate_interval])) / sum(rate(receivingResponseDuration_milliseconds_count[$__rate_interval])) / 1000",
+              "expr": "sum(rate(receivingResponseDuration_milliseconds_sum{otel_scope_name=\"replayer\"}[$__rate_interval])) / sum(rate(receivingResponseDuration_milliseconds_count{otel_scope_name=\"replayer\"}[$__rate_interval])) / 1000",
               "legendFormat": "Receive response"
             }
           ],
@@ -1468,7 +1830,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 32
+            "y": 47
           },
           "options": {
             "legend": {
@@ -1481,7 +1843,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 31
+          "id": 38
         },
         {
           "type": "row",
@@ -1491,10 +1853,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 39
+            "y": 54
           },
           "panels": [],
-          "id": 32
+          "id": 39
         },
         {
           "type": "timeseries",
@@ -1537,7 +1899,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 40
+            "y": 55
           },
           "options": {
             "legend": {
@@ -1550,7 +1912,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 33
+          "id": 40
         },
         {
           "type": "timeseries",
@@ -1593,7 +1955,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 40
+            "y": 55
           },
           "options": {
             "legend": {
@@ -1606,7 +1968,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 34
+          "id": 41
         },
         {
           "type": "timeseries",
@@ -1649,7 +2011,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 40
+            "y": 55
           },
           "options": {
             "legend": {
@@ -1662,7 +2024,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 35
+          "id": 42
         },
         {
           "type": "timeseries",
@@ -1705,7 +2067,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 40
+            "y": 55
           },
           "options": {
             "legend": {
@@ -1718,7 +2080,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 36
+          "id": 43
         },
         {
           "type": "row",
@@ -1728,10 +2090,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 47
+            "y": 62
           },
           "panels": [],
-          "id": 37
+          "id": 44
         },
         {
           "type": "timeseries",
@@ -1794,7 +2156,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 48
+            "y": 63
           },
           "options": {
             "legend": {
@@ -1807,7 +2169,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 38
+          "id": 45
         },
         {
           "type": "timeseries",
@@ -1860,7 +2222,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 48
+            "y": 63
           },
           "options": {
             "legend": {
@@ -1873,7 +2235,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 39
+          "id": 46
         },
         {
           "type": "timeseries",
@@ -1916,7 +2278,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 48
+            "y": 63
           },
           "options": {
             "legend": {
@@ -1929,7 +2291,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 40
+          "id": 47
         },
         {
           "type": "text",
@@ -1938,13 +2300,13 @@ data:
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 48
+            "y": 63
           },
           "options": {
             "mode": "markdown",
             "content": "This panel exists only on the CloudWatch dashboard: it reads AWS/ES domain metrics (CPUUtilization, JVMMemoryPressure, ThreadpoolWriteQueue, ThreadpoolWriteRejected, 5xx, IndexingLatency) for the target domain, which are not exported to Prometheus. Open the CloudWatch capture-replay dashboard and pick the domain there."
           },
-          "id": 41
+          "id": 48
         },
         {
           "type": "row",
@@ -1954,10 +2316,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 55
+            "y": 70
           },
           "panels": [],
-          "id": 42
+          "id": 49
         },
         {
           "type": "timeseries",
@@ -2028,7 +2390,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 56
+            "y": 71
           },
           "options": {
             "legend": {
@@ -2041,7 +2403,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 43
+          "id": 50
         },
         {
           "type": "timeseries",
@@ -2133,7 +2495,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 56
+            "y": 71
           },
           "options": {
             "legend": {
@@ -2146,7 +2508,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 44
+          "id": 51
         },
         {
           "type": "timeseries",
@@ -2217,7 +2579,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 56
+            "y": 71
           },
           "options": {
             "legend": {
@@ -2230,7 +2592,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 45
+          "id": 52
         },
         {
           "type": "timeseries",
@@ -2273,7 +2635,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 56
+            "y": 71
           },
           "options": {
             "legend": {
@@ -2286,7 +2648,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 46
+          "id": 53
         },
         {
           "type": "row",
@@ -2296,10 +2658,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 63
+            "y": 78
           },
           "panels": [],
-          "id": 47
+          "id": 54
         },
         {
           "type": "timeseries",
@@ -2327,7 +2689,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 64
+            "y": 79
           },
           "options": {
             "legend": {
@@ -2340,7 +2702,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 48
+          "id": 55
         },
         {
           "type": "timeseries",
@@ -2368,7 +2730,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 64
+            "y": 79
           },
           "options": {
             "legend": {
@@ -2381,7 +2743,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 49
+          "id": 56
         },
         {
           "type": "timeseries",
@@ -2409,7 +2771,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 64
+            "y": 79
           },
           "options": {
             "legend": {
@@ -2422,7 +2784,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 50
+          "id": 57
         },
         {
           "type": "text",
@@ -2431,164 +2793,26 @@ data:
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 64
+            "y": 79
           },
           "options": {
             "mode": "markdown",
             "content": "This panel exists only on the CloudWatch dashboard: it reads the AWS/ES Nodes metric for the target domain, which is not exported to Prometheus."
           },
-          "id": 51
+          "id": 58
         },
         {
           "type": "row",
-          "title": "Correctness and result tuples",
+          "title": "Result tuples",
           "collapsed": false,
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 71
+            "y": 86
           },
           "panels": [],
-          "id": 52
-        },
-        {
-          "type": "timeseries",
-          "title": "Status-code match % (includes missing source responses)",
-          "description": "Matching tuples divided by all tuples, including tuples without a source response.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "100 * sum(rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval])) / sum(rate(tupleComparison_total[$__rate_interval]))",
-              "legendFormat": "Match %"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percent",
-              "min": 0,
-              "max": 100
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 0,
-            "y": 72
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "id": 53
-        },
-        {
-          "type": "timeseries",
-          "title": "Status-code mismatches per graph period (source → target)",
-          "description": "Mismatched tuples counted in each graph interval by method and source → target status-code class (stacked); tuples without a source response are labelled as such.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "label_replace(sum by (method, sourceStatusCode, targetStatusCode) (increase(tupleComparison_total{statusCodesMatch=\"false\"}[$__interval])), \"sourceStatusCode\", \"no source response\", \"sourceStatusCode\", \"\")",
-              "legendFormat": "\u007b\u007bmethod\u007d\u007d \u007b\u007bsourceStatusCode\u007d\u007d → \u007b\u007btargetStatusCode\u007d\u007d"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "min": 0,
-              "custom": {
-                "stacking": {
-                  "mode": "normal",
-                  "group": "A"
-                },
-                "fillOpacity": 40
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 8,
-            "y": 72
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "id": 54
-        },
-        {
-          "type": "timeseries",
-          "title": "Status-code matches per second",
-          "description": "Matching tuples per second by method and status-code class (stacked).",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum by (method, targetStatusCode) (rate(tupleComparison_total{statusCodesMatch=\"true\"}[$__rate_interval]))",
-              "legendFormat": "\u007b\u007bmethod\u007d\u007d \u007b\u007btargetStatusCode\u007d\u007d"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ops",
-              "min": 0,
-              "custom": {
-                "stacking": {
-                  "mode": "normal",
-                  "group": "A"
-                },
-                "fillOpacity": 40
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 16,
-            "y": 72
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "id": 55
+          "id": 59
         },
         {
           "type": "timeseries",
@@ -2643,7 +2867,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 78
+            "y": 87
           },
           "options": {
             "legend": {
@@ -2656,7 +2880,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 56
+          "id": 60
         },
         {
           "type": "timeseries",
@@ -2694,7 +2918,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 78
+            "y": 87
           },
           "options": {
             "legend": {
@@ -2707,7 +2931,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 57
+          "id": 61
         },
         {
           "type": "timeseries",
@@ -2760,7 +2984,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 78
+            "y": 87
           },
           "options": {
             "legend": {
@@ -2773,7 +2997,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 58
+          "id": 62
         },
         {
           "type": "row",
@@ -2783,10 +3007,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 84
+            "y": 93
           },
           "panels": [],
-          "id": 59
+          "id": 63
         },
         {
           "type": "text",
@@ -2795,13 +3019,13 @@ data:
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 85
+            "y": 94
           },
           "options": {
             "mode": "markdown",
             "content": "This panel exists only on the CloudWatch dashboard: it reads AWS/ES domain metrics (CPUUtilization, JVMMemoryPressure, ThreadpoolWriteQueue, ThreadpoolWriteRejected, 5xx) for the source domain, which are not exported to Prometheus. Open the CloudWatch capture-replay dashboard and pick the domain there."
           },
-          "id": 60
+          "id": 64
         },
         {
           "type": "timeseries",
@@ -2829,7 +3053,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 85
+            "y": 94
           },
           "options": {
             "legend": {
@@ -2842,7 +3066,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 61
+          "id": 65
         },
         {
           "type": "timeseries",
@@ -2870,7 +3094,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 85
+            "y": 94
           },
           "options": {
             "legend": {
@@ -2883,7 +3107,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 62
+          "id": 66
         },
         {
           "type": "timeseries",
@@ -2911,7 +3135,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 85
+            "y": 94
           },
           "options": {
             "legend": {
@@ -2924,7 +3148,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 63
+          "id": 67
         },
         {
           "type": "timeseries",
@@ -2995,7 +3219,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 92
+            "y": 101
           },
           "options": {
             "legend": {
@@ -3008,7 +3232,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 64
+          "id": 68
         },
         {
           "type": "timeseries",
@@ -3036,7 +3260,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 92
+            "y": 101
           },
           "options": {
             "legend": {
@@ -3049,7 +3273,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 65
+          "id": 69
         },
         {
           "type": "timeseries",
@@ -3084,7 +3308,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 92
+            "y": 101
           },
           "options": {
             "legend": {
@@ -3097,7 +3321,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 66
+          "id": 70
         }
       ],
       "templating": {

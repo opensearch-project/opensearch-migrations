@@ -743,7 +743,7 @@ public final class NettyPacketToHttpConsumer
                 pipeline.addLast(
                     new RequestMethodAwareHttpResponseDecoder(outboundRequestMethod)
                 );
-                pipeline.addLast(new InterimHttpResponseHandler());
+                pipeline.addLast(new InterimHttpResponseHandler(responseBuilder::markInterimResponse));
                 pipeline.addLast(
                     RESPONSE_WATCHER_HANDLER,
                     new BacksideHttpWatcherHandler(responseBuilder)
@@ -878,6 +878,9 @@ public final class NettyPacketToHttpConsumer
                                 finishResponse(responseBuilder.build(), false);
                                 return;
                             }
+                            // The request's last write has completed. Instant.now() matches the time base of
+                            // the response packets' receipt times, so the two are directly comparable.
+                            responseBuilder.setRequestSentTime(Instant.now());
                             if (requestPhase != RequestPhase.RECEIVING) {
                                 transitionTo(RequestPhase.WAITING);
                             }

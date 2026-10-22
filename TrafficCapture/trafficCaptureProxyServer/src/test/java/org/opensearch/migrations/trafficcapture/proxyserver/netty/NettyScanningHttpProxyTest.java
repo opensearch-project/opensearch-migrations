@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,6 +36,7 @@ import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
 import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import lombok.Lombok;
@@ -137,13 +139,25 @@ class NettyScanningHttpProxyTest {
                 .toArray();
             Assertions.assertEquals(NUM_INTERACTIONS, eomIndices.length);
             for (int eomIndex : eomIndices) {
-                Assertions.assertTrue(observations.get(eomIndex - 1).hasRead());
-                Assertions.assertTrue(observations.get(eomIndex + 1).hasWrite());
+                var lastRead = observations.get(eomIndex - 1);
+                Assertions.assertTrue(lastRead.hasRead());
+                // The request's last bytes reach the source after its end of message and before its response.
+                var forwarded = observations.get(eomIndex + 1);
+                Assertions.assertTrue(forwarded.hasRequestForwarded());
+                Assertions.assertFalse(
+                    instantOf(forwarded).isBefore(instantOf(lastRead)),
+                    "the forward completes no earlier than the request's last read"
+                );
+                Assertions.assertTrue(observations.get(eomIndex + 2).hasWrite());
                 var eom = observations.get(eomIndex).getEndOfMessageIndicator();
                 Assertions.assertEquals(14, eom.getFirstLineByteLength());
                 Assertions.assertEquals(711, eom.getHeadersByteLength());
             }
         }
+    }
+
+    private static Instant instantOf(TrafficObservation observation) {
+        return Instant.ofEpochSecond(observation.getTs().getSeconds(), observation.getTs().getNanos());
     }
 
     @Test
