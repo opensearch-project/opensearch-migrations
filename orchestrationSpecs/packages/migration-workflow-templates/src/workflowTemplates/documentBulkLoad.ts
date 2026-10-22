@@ -52,7 +52,12 @@ import {
     scalingFromOptions,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
-import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {
+    COMPONENT_LABEL,
+    COMPONENTS,
+    MIGRATION_RESOURCE_UID_LABEL,
+    workloadSelectorLabels,
+} from "./commonUtils/resourceLabels";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -258,6 +263,7 @@ function getRfsDeploymentManifest
             name: makeStringTypeProxy(deploymentName),
             ownerReferences,
             labels: {
+                [COMPONENT_LABEL]: COMPONENTS.RFS_WORKER,
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
@@ -272,21 +278,17 @@ function getRfsDeploymentManifest
             strategy: {
                 type: "RollingUpdate",
                 rollingUpdate: {
-                    maxUnavailable: 1,
-                    maxSurge: 1
+                    maxUnavailable: "5%",
+                    maxSurge: "10%"
                 }
             },
             selector: {
-                matchLabels: {
-                    app: "bulk-loader",
-                    "deployment-name": makeStringTypeProxy(deploymentName)
-                },
+                matchLabels: workloadSelectorLabels(COMPONENTS.RFS_WORKER, args.crdUid),
             },
             template: {
                 metadata: {
                     labels: {
-                        app: "bulk-loader",
-                        "deployment-name": makeStringTypeProxy(deploymentName),
+                        [COMPONENT_LABEL]: COMPONENTS.RFS_WORKER,
                         "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                         "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
@@ -393,6 +395,9 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
                 RFS_MONITOR_WORKFLOW_UID_LABEL: expr.literal(RFS_MONITOR_WORKFLOW_UID_LABEL),
                 RFS_MONITOR_SESSION_LABEL: expr.literal(RFS_MONITOR_SESSION_LABEL),
                 MIGRATION_RESOURCE_UID_LABEL: expr.literal(MIGRATION_RESOURCE_UID_LABEL),
+                COMPONENT_LABEL: expr.literal(COMPONENT_LABEL),
+                MONITOR_COMPONENT: expr.literal(COMPONENTS.RFS_MONITOR),
+                MONITOR_TASK: expr.literal("reindexFromSnapshot"),
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("applyRfsMonitorCronJob.sh")])
@@ -507,6 +512,7 @@ function makeRfsPodDisruptionBudgetDefinition(
 ) {
     const deploymentName = getRfsDeploymentName(inputs.sessionName);
     const labels = {
+        [COMPONENT_LABEL]: COMPONENTS.RFS_WORKER,
         "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
         "migrations.opensearch.org/source": inputs.sourceK8sLabel,
         "migrations.opensearch.org/target": inputs.targetK8sLabel,
@@ -525,10 +531,7 @@ function makeRfsPodDisruptionBudgetDefinition(
     return makePodDisruptionBudgetDefinition({
         name: deploymentName,
         minAvailable: workflowParameterAsNumber(inputs.minPodReplicas),
-        matchLabels: {
-            app: "bulk-loader",
-            "deployment-name": deploymentName
-        },
+        matchLabels: workloadSelectorLabels(COMPONENTS.RFS_WORKER, inputs.crdUid),
         labels,
         ownerReferences,
     });
@@ -720,7 +723,11 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                             coordinatorImage: b.inputs.imageCoordinatorClusterLocation,
                             ownerName: b.inputs.crdName,
                             ownerUid: b.inputs.crdUid,
-                            minPodReplicas: minAvailableForSingleReplicaDependency(scaling.minPodReplicas)
+                            minPodReplicas: minAvailableForSingleReplicaDependency(scaling.minPodReplicas),
+                            sourceK8sLabel: b.inputs.sourceLabel,
+                            targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                            snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                            fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                         }),
                     {when: {templateExp: createRfsCluster}}
                 )

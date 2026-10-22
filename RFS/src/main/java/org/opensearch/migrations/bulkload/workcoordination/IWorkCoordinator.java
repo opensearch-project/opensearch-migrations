@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -104,6 +105,12 @@ public interface IWorkCoordinator extends AutoCloseable {
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException;
 
+    void completeWorkItem(
+        String workItemId,
+        Map<String, Object> committedMetrics,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException;
+
     /**
      * Release the lease on a work item without marking it complete, so that another worker can
      * pick it up immediately.  Intended for the case where the current worker is shutting down
@@ -141,6 +148,15 @@ public interface IWorkCoordinator extends AutoCloseable {
         List<String> successorWorkItemIds,
         int initialNextAcquisitionLeaseExponent,
         Instant deadline,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException;
+
+    void createSuccessorWorkItemsAndMarkComplete(
+        String workItemId,
+        List<String> successorWorkItemIds,
+        int initialNextAcquisitionLeaseExponent,
+        Instant deadline,
+        Map<String, Object> committedMetrics,
         Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException;
 

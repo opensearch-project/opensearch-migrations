@@ -7,7 +7,8 @@
 # Usage:
 #   helm upgrade --install tc . -f values.yaml -f valuesNoAuth.yaml
 #
-# On EKS, use valuesEksNoAuth.yaml (which layers AFTER valuesEks.yaml) instead.
+# This is for the SearchGuard image (the values.yaml default). For the open-source source
+# (valuesOss.yaml / valuesEks.yaml), see "No-Auth Mode" in README.md.
 #
 # What this changes vs values.yaml:
 #   ES source:

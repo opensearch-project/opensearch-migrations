@@ -1,7 +1,8 @@
 package org.opensearch.migrations.bulkload.common;
 
-import java.util.Collections;
 import java.util.Set;
+
+import org.opensearch.migrations.ExceptionTypeAllowlist;
 
 import lombok.Value;
 
@@ -11,13 +12,21 @@ import lombok.Value;
  */
 @Value
 public class DocumentExceptionAllowlist {
-    Set<String> allowedExceptionTypes;
+    ExceptionTypeAllowlist exceptionTypes;
+
+    public DocumentExceptionAllowlist(Set<String> allowedExceptionTypes) {
+        exceptionTypes = new ExceptionTypeAllowlist(allowedExceptionTypes);
+    }
     
     public static DocumentExceptionAllowlist empty() {
-        return new DocumentExceptionAllowlist(Collections.emptySet());
+        return new DocumentExceptionAllowlist(Set.of());
     }
     
     public boolean isAllowed(String exceptionType) {
-        return allowedExceptionTypes.contains(exceptionType);
+        return exceptionTypes.isAllowed(exceptionType);
+    }
+
+    public Set<String> getAllowedExceptionTypes() {
+        return exceptionTypes.allowedTypes();
     }
 }

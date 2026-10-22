@@ -99,6 +99,7 @@ def call(Map config = [:]) {
                 when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
+                        configureMavenCache()
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
                     }
                 }
@@ -112,7 +113,6 @@ def call(Map config = [:]) {
                                 def bootstrap = resolveBootstrap(
                                     useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
                                     build: params.BUILD,
-                                    skipTestImages: true,
                                     version: params.VERSION
                                 )
 
@@ -155,7 +155,6 @@ def call(Map config = [:]) {
                                 def bootstrap = resolveBootstrap(
                                     useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
                                     build: params.BUILD,
-                                    skipTestImages: true,
                                     version: params.VERSION
                                 )
                                 bootstrapMA(
@@ -327,6 +326,9 @@ def call(Map config = [:]) {
                     ],
                     extraVerifyStacks: [buildStackName],
                 )
+            }
+            cleanup {
+                cleanupMavenCache()
             }
         }
     }

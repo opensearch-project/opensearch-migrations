@@ -1,23 +1,30 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+import org.opensearch.migrations.testfixtures.SupportedClusters;
 import org.opensearch.migrations.utils.FileSystemUtils;
 
 import io.opentelemetry.sdk.metrics.data.LongPointData;
@@ -222,6 +229,24 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
+            var sourceVersion = sourceCluster.getContainerVersion().getVersion();
+            var extractor = SnapshotExtractor.create(sourceVersion,
+                SnapshotReaderRegistry.getSnapshotReader(sourceVersion, sourceRepo, false), sourceRepo);
+            var countsContext = DocumentMigrationTestContext.factory().noOtelTracking();
+            try (var source = LuceneSnapshotSource.builder(extractor, snapshot2Name,
+                    Files.createTempDirectory(localDirectory.toPath(), "delta-counts"))
+                .delta(snapshot1Name, DeltaMode.UPDATES_AND_DELETES,
+                    () -> new RfsContexts.DeltaStreamContext(countsContext, null)).build()) {
+                var partition = source.listPartitions(indexName).get(0);
+                var changes = source.readDocuments(partition, null).map(PositionedDocument::document).collectList().block();
+                var metrics = MigrationMetrics.Operations.fromDocuments(changes);
+                Assertions.assertEquals(1, metrics.upserts());
+                Assertions.assertEquals(1, metrics.deletes());
+                Assertions.assertEquals(2, source.snapshotDocumentCounts(partition).orElseThrow().liveDocuments());
+                Assertions.assertEquals(0, source.snapshotDocumentCounts(partition).orElseThrow().nestedDocuments());
+                Assertions.assertTrue(source.requiresOrderedWrites());
+            }
+
             // === ACTION: Migrate state change between snapshot1 and snapshot2
             var targetClusterOperations = new ClusterOperations(targetCluster);
             // Create docIdDeletedOnSecondSnapshot to verify it's deleted when going from snapshot1 -> snapshot2
@@ -270,7 +295,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 assertDeltaMetrics(testDocMigrationContext, 3, 1, 1);
             }
 
-            // Run second time reversing base and current snapshot
+            // Run second time reversing base and current snapshot.
             targetClusterOperations.delete("/.migrations_working_state");
             {
                 final var testDocMigrationContext = DocumentMigrationTestContext.factory()

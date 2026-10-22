@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
@@ -65,6 +66,8 @@ public class LuceneSnapshotSource implements DocumentSource {
      *  be subscribed for several partitions at once. */
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> shardEntryCache = new ConcurrentHashMap<>();
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> previousShardEntryCache = new ConcurrentHashMap<>();
+
+    private final Map<Partition, SnapshotDocumentCounts> snapshotCounts = new ConcurrentHashMap<>();
 
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
@@ -212,6 +215,16 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
+    public Optional<SnapshotDocumentCounts> snapshotDocumentCounts(Partition partition) {
+        return Optional.ofNullable(snapshotCounts.get(partition));
+    }
+
+    @Override
+    public boolean requiresOrderedWrites() {
+        return isDeltaMode();
+    }
+
+    @Override
     public Flux<PositionedDocument> readDocuments(Partition partition, String startingCursor) {
         var esPartition = (EsShardPartition) partition;
         var entry = resolveShardEntry(esPartition, shardEntryCache);
@@ -231,6 +244,9 @@ public class LuceneSnapshotSource implements DocumentSource {
             var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
             if (previousEntry == null) {
                 log.info("No previous partition for {} — treating as full read (all additions)", partition);
+                if (deltaMode == DeltaMode.DELETES_ONLY) {
+                    return Flux.empty();
+                }
                 return readRegularDocuments(entry, partition, startingCursor);
             }
             long alreadyEmitted = parseCursor(startingCursor, DELTA_CURSOR_PREFIX, partition);
@@ -239,7 +255,8 @@ public class LuceneSnapshotSource implements DocumentSource {
             // the same cursors.
             return Flux.defer(() -> {
                 var emitted = new AtomicLong(alreadyEmitted);
-                return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
+                return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory,
+                        current -> snapshotCounts.put(partition, current))
                     .skip(alreadyEmitted)
                     .map(luceneDoc -> new PositionedDocument(
                         luceneAdapter.fromLucene(luceneDoc),
@@ -259,7 +276,8 @@ public class LuceneSnapshotSource implements DocumentSource {
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startDocIdx), mappingContext, useRecoverySource)
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startDocIdx), mappingContext, useRecoverySource,
+                count -> snapshotCounts.put(partition, count))
             // Resume at the doc after this one; the read starts *at* the index it is given.
             .map(luceneDoc -> new PositionedDocument(
                 luceneAdapter.fromLucene(luceneDoc),
@@ -297,5 +315,6 @@ public class LuceneSnapshotSource implements DocumentSource {
     public void close() {
         shardEntryCache.clear();
         previousShardEntryCache.clear();
+        snapshotCounts.clear();
     }
 }

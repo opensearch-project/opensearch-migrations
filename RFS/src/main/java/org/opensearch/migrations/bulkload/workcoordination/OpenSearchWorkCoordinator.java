@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Spliterators;
 import java.util.function.BiPredicate;
@@ -22,6 +23,7 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Lombok;
@@ -78,6 +80,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     // must be cleared before upgrading across this boundary.  Without the bump a new worker
     // acquires an old-format id and then fails to parse it, after taking the lease.
     public static final String SCRIPT_VERSION = "4.0";
+    public static final String COMMITTED_METRICS_FIELD_NAME = "committed_metrics";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
     public static final String CLIENT_TIMESTAMP_TEMPLATE = "{CLIENT_TIMESTAMP}";
     public static final String EXPIRATION_WINDOW_TEMPLATE = "{EXPIRATION_WINDOW}";
@@ -691,18 +694,46 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws InterruptedException {
-            retryWithExponentialBackoff(
-                () -> completeWorkItemWithoutRetry(workItemId, contextSupplier),
-                completionRetryConfig.maxRetries(),
-                completionRetryConfig.initialDelayMs(),
-                completionRetryConfig.maxDelayMs(),
-                "completeWorkItem[" + workItemId + "]",
-                ignored -> {}
-            );
+        completeWorkItem(workItemId, null, contextSupplier);
+    }
+
+    @Override
+    public void completeWorkItem(
+        String workItemId,
+        Map<String, Object> committedMetrics,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws InterruptedException {
+        retryWithExponentialBackoff(
+            () -> completeWorkItemWithoutRetry(workItemId, committedMetrics, contextSupplier),
+            completionRetryConfig.maxRetries(),
+            completionRetryConfig.initialDelayMs(),
+            completionRetryConfig.maxDelayMs(),
+            "completeWorkItem[" + workItemId + "]",
+            ignored -> {}
+        );
+    }
+
+    private String withCommittedMetrics(String body, Map<String, Object> metrics) throws IOException {
+        if (metrics == null) {
+            return body;
+        }
+        var root = objectMapper.readTree(body);
+        var script = (ObjectNode) root.get("script");
+        var params = (ObjectNode) script.get("params");
+        params.set("committedMetrics", objectMapper.valueToTree(metrics));
+        script.put("source", script.get("source").asText() + """
+            if (ctx._source.committed_metrics != null
+                && !ctx._source.committed_metrics.equals(params.committedMetrics)) {
+                throw new IllegalArgumentException("Committed metrics cannot be replaced");
+            }
+            ctx._source.committed_metrics = params.committedMetrics;
+            """);
+        return objectMapper.writeValueAsString(root);
     }
 
     private void completeWorkItemWithoutRetry(
         String workItemId,
+        Map<String, Object> committedMetrics,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException {
         try (var ctx = contextSupplier.get()) {
@@ -735,7 +766,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 AbstractedHttpClient.POST_METHOD,
                 getPathForUpdates(workItemId),
                 null,
-                body
+                withCommittedMetrics(body, committedMetrics)
             );
             if (DocumentModificationResult.UPDATED != getResult(response)) {
                 throw new IllegalStateException(
@@ -1078,7 +1109,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private void updateWorkItemWithSuccessors(String workItemId, List<String> successorWorkItemIds) throws IOException, NonRetryableException {
+    private void updateWorkItemWithSuccessors(String workItemId, List<String> successorWorkItemIds,
+                                               Map<String, Object> committedMetrics) throws IOException, NonRetryableException {
         final var updateSuccessorWorkItemsTemplate = "{\n"
                 + "  \"script\": {\n"
                 + "    \"lang\": \"painless\",\n"
@@ -1113,7 +1145,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 AbstractedHttpClient.POST_METHOD,
                 getPathForUpdates(workItemId),
                 null,
-                body
+                withCommittedMetrics(body, committedMetrics)
         );
         try {
             DocumentModificationResult modificationResult = getResult(response);
@@ -1222,6 +1254,19 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             Instant deadline,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
+        createSuccessorWorkItemsAndMarkComplete(workItemId, successorWorkItemIds,
+            successorNextAcquisitionLeaseExponent, deadline, null, contextSupplier);
+    }
+
+    @Override
+    public void createSuccessorWorkItemsAndMarkComplete(
+        String workItemId,
+        List<String> successorWorkItemIds,
+        int successorNextAcquisitionLeaseExponent,
+        Instant deadline,
+        Map<String, Object> committedMetrics,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException {
         if (successorWorkItemIds.contains(workItemId)) {
             throw new IllegalArgumentException(String.format("successorWorkItemIds %s can not not contain the parent workItemId: %s", successorWorkItemIds, workItemId));
         }
@@ -1230,7 +1275,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
         try (var ctx = contextSupplier.get()) {
             retryWithExponentialBackoff(
-                    () -> updateWorkItemWithSuccessors(workItemId, successorWorkItemIds),
+                    () -> updateWorkItemWithSuccessors(workItemId, successorWorkItemIds, committedMetrics),
                     MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
                     Long.MAX_VALUE,
@@ -1248,7 +1293,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
-                    () -> completeWorkItemWithoutRetry(workItemId, ctx::getCompleteWorkItemContext),
+                    () -> completeWorkItemWithoutRetry(workItemId, null, ctx::getCompleteWorkItemContext),
                     completionRetryConfig.maxRetries(),
                     completionRetryConfig.initialDelayMs(),
                     completionRetryConfig.maxDelayMs(),

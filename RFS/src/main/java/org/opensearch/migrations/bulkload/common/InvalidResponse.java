@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class InvalidResponse extends RfsException {
     private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[([a-zA-Z0-9_.-]+)\\].+");
+    private static final Pattern ROUTING_SHARDS_TOO_SMALL = Pattern.compile("index\\.number_of_routing_shards \\[\\d+\\] must be >= index\\.number_of_shards \\[\\d+\\]");
     private static final Pattern PRIVATE_SETTING = Pattern.compile(".*private index setting \\[([a-zA-Z0-9_.-]+)\\] can not be set explicitly.*");
     private static final Pattern VERSION_MASK_ERROR = Pattern.compile("Version id \\d+ must contain OpenSearch mask");
     private static final Pattern VERSION_PARSE_ERROR = Pattern.compile("Failed to parse value \\[\\d+\\] for setting \\[index\\.version\\.created\\]");
@@ -179,28 +180,39 @@ public class InvalidResponse extends RfsException {
             var reason = entry.getValue().asText();
             var type = entry.getKey().asText();
 
+            // Patterns use find() because OpenSearch Serverless wraps reasons as
+            // "OpenSearch exception [type=..., reason=<original reason>]- server : [envoy]"
+
             // Try matching "unknown setting [X]..."
             var matcher = UNKNOWN_SETTING.matcher(reason);
-            if (matcher.matches()) {
+            if (matcher.find()) {
                 return Map.entry(type, matcher.group(1));
             }
 
             // Try matching "private index setting [X] can not be set explicitly"
             matcher = PRIVATE_SETTING.matcher(reason);
-            if (matcher.matches()) {
+            if (matcher.find()) {
                 return Map.entry(type, matcher.group(1));
+            }
+
+            // Try matching "index.number_of_routing_shards [N] must be >= index.number_of_shards [M]",
+            // e.g. a routing_num_shards copied from a snapshot that is smaller than the shard count
+            // the target uses (OpenSearch Serverless picks its own shard count)
+            matcher = ROUTING_SHARDS_TOO_SMALL.matcher(reason);
+            if (matcher.find()) {
+                return Map.entry(type, "index.number_of_routing_shards");
             }
 
             // Try matching "Version id N must contain OpenSearch mask" — caused by ES 8.x
             // IndexVersion IDs in index.version.created that lack the OpenSearch MASK bit
             matcher = VERSION_MASK_ERROR.matcher(reason);
-            if (matcher.matches()) {
+            if (matcher.find()) {
                 return Map.entry(type, "index.version.created");
             }
 
             // since OS 3.6.0 the error message is different
             matcher = VERSION_PARSE_ERROR.matcher(reason);
-            if (matcher.matches()) {
+            if (matcher.find()) {
                 return Map.entry(type, "index.version.created");
             }
 

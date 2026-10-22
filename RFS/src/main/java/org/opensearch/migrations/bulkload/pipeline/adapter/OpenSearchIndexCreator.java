@@ -4,8 +4,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
+import org.opensearch.migrations.bulkload.common.InternalIndexSettingNames;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.parsing.ObjectNodeUtils;
@@ -87,28 +87,6 @@ final class OpenSearchIndexCreator {
         obj.fields().forEachRemaining(entry -> convertDeprecatedFieldTypes(entry.getValue()));
     }
 
-    /**
-     * Prefixes of internal settings that should be stripped by pattern.
-     * Any setting starting with these prefixes (after optional "index." prefix) is removed.
-     * This catches new sub-keys added in future ES/OS versions.
-     */
-    private static final Set<String> INTERNAL_SETTING_PREFIXES = Set.of(
-        "version.",       // index.version.created, index.version.upgraded, etc.
-        "blocks.",        // index.blocks.write, index.blocks.read_only, etc.
-        "resize.",        // index.resize.source.name, index.resize.source.uuid
-        "routing.allocation.include.",
-        "routing.allocation.require.",
-        "routing.allocation.exclude."
-    );
-
-    /**
-     * Exact internal settings to strip (after optional "index." prefix).
-     */
-    private static final Set<String> INTERNAL_SETTINGS_EXACT = Set.of(
-        "creation_date", "provided_name", "uuid", "version", "mapping", "mapper",
-        "history.uuid", "verified_before_close"
-    );
-
     private static void stripInternalSettings(ObjectNode settings) {
         // Strip settings that are internal to the source cluster and should not be
         // applied to the target. Uses both exact matches and prefix patterns to
@@ -136,10 +114,10 @@ final class OpenSearchIndexCreator {
     }
 
     private static boolean isInternalSetting(String key) {
-        if (INTERNAL_SETTINGS_EXACT.contains(key)) {
+        if (InternalIndexSettingNames.EXTENDED_EXACT.contains(key)) {
             return true;
         }
-        for (String prefix : INTERNAL_SETTING_PREFIXES) {
+        for (String prefix : InternalIndexSettingNames.EXTENDED_PREFIXES) {
             if (key.startsWith(prefix) || key.equals(prefix.substring(0, prefix.length() - 1))) {
                 return true;
             }

@@ -15,13 +15,13 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.utils.FileSystemUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;

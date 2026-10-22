@@ -13,12 +13,11 @@ import java.util.Objects;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
-import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.SneakyThrows;
@@ -32,6 +31,8 @@ public final class BulkNdjson {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final JsonFactory JSON_FACTORY = new JsonFactory();
     private static final byte[] NEWLINE_BYTES = "\n".getBytes(StandardCharsets.UTF_8);
+    private static final int ESTIMATED_ACTION_BYTES = 256;
+    private static final int MAX_INITIAL_BUFFER_BYTES = 16 * 1024 * 1024;
 
     /**
      * Write a single operation to an output stream in NDJSON format.
@@ -39,37 +40,55 @@ public final class BulkNdjson {
      * @param out The output stream to write to
      * @param mapper The ObjectMapper to use for serialization
      */
-    @SneakyThrows
     public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
+        writeOperationAndCountBody(op, out, mapper);
+    }
+
+    @SneakyThrows
+    private static long writeOperationAndCountBody(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
+        if (op.getRawDocument() != null) {
+            return writeRawOperationAndCountBody(op.getOperationType().getValue(), op.getOperation(),
+                op.isIncludeDocument() ? op.getRawDocument() : null, out, mapper);
+        }
         // action line: {"<op>": {...meta...}}
-        Map<String, Object> meta = mapper.convertValue(op.getOperation(), new TypeReference<>() {});
-        Map<String, Object> actionLine = Map.of(op.getOperationType().name().toLowerCase(), meta);
+        Map<String, Object> actionLine = Map.of(op.getOperationType().getValue(), op.getOperation());
 
         out.write(mapper.writeValueAsBytes(actionLine));
 
         // optional source/payload
         if (op.isIncludeDocument() && op.getDocument() != null) {
             out.write(NEWLINE_BYTES);
-            out.write(mapper.writeValueAsBytes(op.getDocument()));
+            var body = mapper.writeValueAsBytes(op.getDocument());
+            out.write(body);
+            return body.length;
         }
+        return 0;
     }
 
     /**
      * Write an action line + raw source bytes to an output stream in NDJSON format.
      * Skips Jackson deserialization/reserialization of the document body.
      */
-    @SneakyThrows
     public static void writeRawOperation(String operationType, BaseOperationMeta meta,
                                          byte[] rawSource, OutputStream out, ObjectMapper mapper) {
-        Map<String, Object> metaMap = mapper.convertValue(meta, new TypeReference<>() {});
-        Map<String, Object> actionLine = Map.of(operationType, metaMap);
+        writeRawOperationAndCountBody(operationType, meta, rawSource, out, mapper);
+    }
+
+    @SneakyThrows
+    private static long writeRawOperationAndCountBody(String operationType, BaseOperationMeta meta,
+                                                       byte[] rawSource, OutputStream out, ObjectMapper mapper) {
+        // Jackson already serializes the metadata's unwrapped fields. Avoid a
+        // metadata -> Map -> JSON round trip on every document, including raw writes.
+        Map<String, Object> actionLine = Map.of(operationType, meta);
         out.write(mapper.writeValueAsBytes(actionLine));
 
         if (rawSource != null && rawSource.length > 0) {
             validateJsonBytes(rawSource);
             out.write(NEWLINE_BYTES);
             out.write(rawSource);
+            return rawSource.length;
         }
+        return 0;
     }
 
     /**
@@ -101,18 +120,34 @@ public final class BulkNdjson {
         List<? extends Document> docs,
         String indexName, boolean stripIds, ObjectMapper mapper
     ) {
-        try (var baos = new ByteArrayOutputStream()) {
+        return serializeRaw(docs, indexName, stripIds, mapper).bytes();
+    }
+
+    public static SerializedBulk serializeRaw(
+        List<? extends Document> docs, String indexName, boolean stripIds, ObjectMapper mapper
+    ) {
+        long sourceBytes = docs.stream()
+            .mapToLong(doc -> doc.operation() == Document.Operation.DELETE ? 0 : doc.sourceLength())
+            .sum();
+        try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, docs.size()))) {
+            long upserts = 0;
             for (var doc : docs) {
-                String opType = doc.operation() == Document.Operation.DELETE ? "delete" : "index";
+                boolean isDelete = doc.operation() == Document.Operation.DELETE;
+                if (!isDelete) {
+                    upserts++;
+                }
+                String opType = isDelete ? "delete" : "index";
                 String docId = stripIds ? null : doc.id();
                 String routing = doc.hints().get(Document.HINT_ROUTING);
-                var meta = doc.operation() == Document.Operation.DELETE
+                var meta = isDelete
                     ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(routing).build()
-                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(routing).build();
-                writeRawOperation(opType, meta, doc.source(), baos, mapper);
+                    : BulkOperationConverter.indexMetadata(doc, indexName, stripIds);
+                // Delta deletions retain the old source for diagnostics, but bulk deletes have no payload.
+                writeRawOperation(opType, meta, isDelete ? null : doc.source(), baos, mapper);
                 baos.write(NEWLINE_BYTES);
             }
-            return baos.toByteArray();
+            return new SerializedBulk(baos.toByteArray(),
+                new MigrationMetrics.Operations(upserts, docs.size() - upserts, sourceBytes));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -137,12 +172,38 @@ public final class BulkNdjson {
      * Avoids the byte[]→Map→byte[] round-trip for document bodies.
      */
     public static byte[] toBulkNdjsonBytes(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
-        try (var baos = new ByteArrayOutputStream()) {
-            writeAll(ops, baos, mapper);
-            return baos.toByteArray();
+        return serialize(ops, mapper).bytes();
+    }
+
+    @SuppressWarnings({"java:S100", "java:S1186"})
+    public record SerializedBulk(byte[] bytes, MigrationMetrics.Operations operations) {}
+
+    public static SerializedBulk serialize(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
+        long sourceBytes = ops.stream()
+            .mapToLong(op -> op.isIncludeDocument() && op.getRawDocument() != null ? op.getRawDocument().length : 0)
+            .sum();
+        try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, ops.size()))) {
+            long upserts = 0;
+            long bodyBytes = 0;
+            for (var op : ops) {
+                if (op instanceof IndexOp) {
+                    upserts++;
+                }
+                bodyBytes += writeOperationAndCountBody(op, baos, mapper);
+                baos.write(NEWLINE_BYTES);
+            }
+            return new SerializedBulk(baos.toByteArray(),
+                new MigrationMetrics.Operations(upserts, ops.size() - upserts, bodyBytes));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static int initialBufferSize(long sourceBytes, int operationCount) {
+        // Source lengths are already known on the raw path. Reserve room for them
+        // and typical action lines to avoid repeatedly copying multi-megabyte bodies
+        // as the buffer grows. This is an allocation estimate, not a request-size limit.
+        return (int) Math.min(MAX_INITIAL_BUFFER_BYTES, sourceBytes + (long) ESTIMATED_ACTION_BYTES * operationCount);
     }
 
     /**

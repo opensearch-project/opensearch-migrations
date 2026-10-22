@@ -5,7 +5,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
@@ -14,6 +16,7 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -95,7 +98,7 @@ public class DocumentMigrationPipeline {
         this.maxDocsPerBatch = maxDocsPerBatch;
         this.maxBytesPerBatch = maxBytesPerBatch;
         this.partitionConcurrency = partitionConcurrency;
-        this.batchConcurrency = batchConcurrency;
+        this.batchConcurrency = source.requiresOrderedWrites() ? 1 : batchConcurrency;
     }
 
     /** Snapshot of pipeline progress, safe to read from any thread. */
@@ -134,23 +137,35 @@ public class DocumentMigrationPipeline {
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
-                    return sink.writeBatch(collectionName, batch)
-                        .map(result -> {
-                            totalDocs.addAndGet(result.docsInBatch());
-                            totalBytes.addAndGet(result.bytesInBatch());
-                            return new ProgressCursor(
-                                partition,
-                                result.cursorAfter(),
-                                result.docsInBatch(),
-                                result.bytesInBatch()
-                            );
-                        })
+                    var sourceMetrics = MigrationMetrics.Operations.fromDocuments(
+                        batch.stream().map(PositionedDocument::document).toList());
+                    return Mono.defer(() -> sink.writeBatch(collectionName, batch))
+                        .map(result -> new CompletedBatch(sourceMetrics, result))
                         .doFinally(s -> activeBatches.decrementAndGet());
                 }, batchConcurrency)
+                // Accumulate metrics in emission order. Writes may complete out of order.
+                .scan(new ProgressCursor(partition, Objects.requireNonNullElse(startingCursor, ""), 0, 0, MigrationMetrics.ZERO),
+                    (previous, batch) -> {
+                        var result = batch.result();
+                        totalDocs.addAndGet(result.docsInBatch());
+                        totalBytes.addAndGet(result.bytesInBatch());
+                        return new ProgressCursor(
+                            partition,
+                            result.cursorAfter(),
+                            result.docsInBatch(),
+                            result.bytesInBatch(),
+                            previous.metrics().plus(new MigrationMetrics(batch.sourceMetrics(), result.target(), result.requests()))
+                        );
+                    })
+                .skip(1)
                 .onErrorMap(e -> !(e instanceof PipelineException),
                     e -> new PipelineException("Failed migrating partition " + partition, e));
         });
     }
+
+    // Sonar flags the compiler-generated record constructor parameters as unused.
+    @SuppressWarnings("java:S1172")
+    private record CompletedBatch(MigrationMetrics.Operations sourceMetrics, BatchResult result) {}
 
     /**
      * Migrate all partitions for a collection. Creates the collection first, then migrates

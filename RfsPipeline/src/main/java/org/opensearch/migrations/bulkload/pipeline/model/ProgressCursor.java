@@ -13,16 +13,19 @@ import java.util.Objects;
  * @param cursorAfter  the source-defined cursor that resumes after this batch, must not be null
  * @param docsInBatch  the number of documents in this batch
  * @param bytesInBatch the total bytes of document sources in this batch
+ * @param metrics      cumulative metrics for the partition through this batch
  */
 public record ProgressCursor(
     Partition partition,
     String cursorAfter,
     long docsInBatch,
-    long bytesInBatch
+    long bytesInBatch,
+    MigrationMetrics metrics
 ) {
     public ProgressCursor {
         Objects.requireNonNull(partition, "partition must not be null");
         Objects.requireNonNull(cursorAfter, "cursorAfter must not be null");
+        Objects.requireNonNull(metrics, "metrics must not be null");
         if (docsInBatch < 0) {
             throw new IllegalArgumentException("docsInBatch must be >= 0, got " + docsInBatch);
         }

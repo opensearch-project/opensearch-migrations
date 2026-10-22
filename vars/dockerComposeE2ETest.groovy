@@ -67,6 +67,7 @@ def call(Map config = [:]) {
                             // so the non-login Jenkins sh step can forward it to buildDockerImages.sh.
                             def ptcEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
                             withEnv(ptcEndpoint ? ["ECR_PULL_THROUGH_ENDPOINT=${ptcEndpoint}"] : []) {
+                                configureMavenCache()
                                 sh './deployment/cdk/opensearch-service-migration/buildDockerImages.sh'
                             }
                         }
@@ -77,7 +78,15 @@ def call(Map config = [:]) {
             stage('Docker Compose Up') {
                 steps {
                     timeout(time: 5, unit: 'MINUTES') {
-                        sh './gradlew -p TrafficCapture dockerSolution:composeUp -x test -x spotlessCheck --info --stacktrace'
+                        script {
+                            def kafkaRunId = env.BUILD_TAG.replaceAll('[^A-Za-z0-9._-]', '-')
+                            withEnv([
+                                "KAFKA_TRAFFIC_TOPIC=logging-traffic-topic-${kafkaRunId}",
+                                "KAFKA_TRAFFIC_GROUP_ID=logging-group-${kafkaRunId}"
+                            ]) {
+                                sh './gradlew -p TrafficCapture dockerSolution:composeUp -x test -x spotlessCheck --info --stacktrace'
+                            }
+                        }
                         sh 'docker ps'
                     }
                 }
@@ -105,6 +114,9 @@ def call(Map config = [:]) {
                     archiveArtifacts artifacts: 'logs/docker/**', allowEmptyArchive: true
                     sh './gradlew -p TrafficCapture dockerSolution:composeDown -x test -x spotlessCheck || true'
                 }
+            }
+            cleanup {
+                cleanupMavenCache()
             }
         }
     }

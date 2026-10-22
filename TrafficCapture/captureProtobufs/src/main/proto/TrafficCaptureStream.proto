@@ -22,13 +22,23 @@ message ReadObservation {
 message ReadSegmentObservation {
   bytes data = 2;
 }
+// The proxy finished forwarding a captured request to the source: the observation's ts is when the write of
+// the request's last bytes to the source completed, that is, when they were handed to the source socket. The
+// proxy emits one per captured EndOfMessageIndication, in the same order, each after its EndOfMessageIndication
+// and before the next request's reads. Like every other observation, its order within a connection is
+// guaranteed but its existence is not: a forward that fails, or a connection whose capture ends first, has none.
 message ProxyFinishesForwardingRequestObservation {
-  bool timedOut = 1;
 }
 message WriteObservation {
   bytes data = 1;
 }
 message WriteSegmentObservation {
+  bytes data = 2;
+}
+message InterimResponseObservation {
+  bytes data = 1;
+}
+message InterimResponseSegmentObservation {
   bytes data = 2;
 }
 message CloseObservation {}
@@ -45,12 +55,13 @@ message RequestIntentionallyDropped {}
 
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
+  optional uint64 connectionObservationSequence = 18;
   oneof Capture {
     BindObservation bind = 2;
     ConnectObservation connect = 3;
     ReadObservation read = 4;
     ReadSegmentObservation readSegment = 5;
-    ProxyFinishesForwardingRequestObservation requestReleasedDownstream = 6;
+    ProxyFinishesForwardingRequestObservation requestForwarded = 6;
     WriteObservation write = 8;
     WriteSegmentObservation writeSegment = 9;
     DisconnectObservation disconnect = 10;
@@ -64,6 +75,8 @@ message TrafficObservation {
     EndOfMessageIndication endOfMessageIndicator = 15;
 
     RequestIntentionallyDropped requestDropped = 16;
+    InterimResponseObservation interimResponse = 17;
+    InterimResponseSegmentObservation interimResponseSegment = 19;
   }
 }
 
@@ -73,9 +86,32 @@ message TrafficStream {
   optional int32 priorRequestsReceived = 6;
   optional bool lastObservationWasUnterminatedRead = 7; // there were previous Read observations encountered that
                                                         // have yet to have EOM observations after them
+  reserved 8; // the Kafka partition comes only from Kafka record metadata
   repeated TrafficObservation subStream = 2;
   oneof index {
     int32 number = 3;
     int32 numberOfThisLastChunk = 4;
+  }
+}
+
+message WriterPartitionHeartbeat {
+  string writerNodeId = 1;
+  reserved 2; // the Kafka partition comes only from Kafka record metadata
+  int64 heartbeatIntervalMillis = 3; // informational only
+  optional int64 emittedAtMillis = 4; // diagnostic only
+}
+
+message CaptureCapabilityProbe {
+  string writerNodeId = 1;
+  string probeId = 2;
+}
+
+// Every Kafka application-record value uses this envelope. The active oneof field identifies the
+// payload type without relying on Kafka headers or attempting multiple protobuf decodes.
+message CaptureRecord {
+  oneof payload {
+    TrafficStream trafficStream = 1;
+    WriterPartitionHeartbeat writerPartitionHeartbeat = 2;
+    CaptureCapabilityProbe captureCapabilityProbe = 3;
   }
 }

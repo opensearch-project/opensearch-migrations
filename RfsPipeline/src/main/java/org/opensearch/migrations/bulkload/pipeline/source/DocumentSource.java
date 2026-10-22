@@ -1,6 +1,10 @@
 package org.opensearch.migrations.bulkload.pipeline.source;
 
+import java.util.Optional;
+
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
+import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 
 /**
  * Port for reading documents from any source — snapshot, remote cluster, S3, Solr, or synthetic
@@ -24,6 +28,16 @@ public interface DocumentSource extends PartitionEnumerator, DocumentStream, Aut
      * which is retained through Phase 1 and removed after.
      */
     CollectionMetadata readCollectionMetadata(String collectionName);
+
+    /** Whole-partition snapshot counts, independent of resume position; empty until available. */
+    default Optional<SnapshotDocumentCounts> snapshotDocumentCounts(Partition partition) {
+        return Optional.empty();
+    }
+
+    /** Whether operations on the same document can depend on an earlier batch. */
+    default boolean requiresOrderedWrites() {
+        return false;
+    }
 
     @Override
     default void close() throws Exception {

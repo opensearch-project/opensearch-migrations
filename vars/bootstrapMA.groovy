@@ -32,7 +32,13 @@
  *       // exclusive with resolveBootstrap(useGeneralNodePool: true).
  *       resourceTags: "Key=Value,Key2=Value2",
  *       // Optional, TEST ONLY — also DENY the cluster role from creating anything untagged.
- *       enforceTagsOnCreateForTests: true
+ *       enforceTagsOnCreateForTests: true,
+ *       // Optional — override the chart's general-work-pool NodePool. Keys are those under
+ *       // workloadsNodePool in the chart's values.yaml; passed to aws-bootstrap.sh as a
+ *       // --helm-values file, so it goes through the same cluster check a deployer's would.
+ *       // Has no effect with resolveBootstrap(useGeneralNodePool: true), which skips that pool.
+ *       // Pair with verifyWorkloadNodePool() to assert the NodePool and its nodes match.
+ *       workloadsNodePool: [architectures: ["arm64"], minInstanceGeneration: 7]
  *   )
  */
 def call(Map config = [:]) {
@@ -73,7 +79,17 @@ def call(Map config = [:]) {
     // create behaves. Only meaningful alongside resourceTags.
     def enforceTagsFlag = config.enforceTagsOnCreateForTests ? '--enforce-tags-on-create-for-tests' : ''
 
-    sh """
+    // general-work-pool overrides. JSON is valid YAML, so writeJSON produces a values file helm
+    // reads directly. Absolute path because the release bootstrap runs from /tmp.
+    def helmValuesFlag = ''
+    if (config.workloadsNodePool) {
+        def workloadValuesFile = "tmp/workloads-nodepool-overrides.yaml"
+        writeJSON file: workloadValuesFile, json: [workloadsNodePool: config.workloadsNodePool], pretty: 2
+        helmValuesFlag = "--helm-values '${pwd()}/${workloadValuesFile}'"
+    }
+
+    try {
+        sh """
         ${bootstrap.script} \
           ${deployFlag} \
           --stack-name "${stackName}" \
@@ -86,13 +102,29 @@ def call(Map config = [:]) {
           ${imageSourceFlag} \
           ${resourceTagsFlag} \
           ${enforceTagsFlag} \
+          ${helmValuesFlag} \
           --skip-console-exec \
           --skip-setting-k8s-context \
           --kubectl-context "${kubectlContext}" \
           --region ${region} \
           2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
-    """
+        """
+    } catch (Exception bootstrapError) {
+        // CFN/EKS may already exist even when image building or Helm installation
+        // fails. Preserve their exports so eksPostCleanup can run EKS teardown
+        // before deleting the stack, rather than skipping it without a cluster name.
+        try {
+            recordExports(stackName, region)
+        } catch (Exception exportsError) {
+            echo "bootstrapMA: Could not recover stack exports after bootstrap failure: ${exportsError.message}"
+        }
+        throw bootstrapError
+    }
 
+    recordExports(stackName, region)
+}
+
+def recordExports(String stackName, String region) {
     def exportsMap = parseCfnExports(stackName: stackName, region: region)
     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']

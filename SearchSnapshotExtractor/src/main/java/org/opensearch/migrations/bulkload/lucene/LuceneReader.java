@@ -1,16 +1,19 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -49,9 +52,23 @@ public class LuceneReader {
     }
 
     public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext,
+            useRecoverySource, null, null);
+    }
+
+    /**
+     * @param snapshotCountsSink receives the shard's document counts once the reader is
+     *                         open, before any documents are emitted. May be null.
+     */
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource, String nestedPathField, Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
         return Flux.using(
             () -> indexReader.getReader(segmentsFileName),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource),
+            reader -> {
+                if (snapshotCountsSink != null) {
+                    snapshotCountsSink.accept(countSnapshotDocuments(reader, nestedPathField));
+                }
+                return readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource);
+            },
             reader -> {
                 try {
                     reader.close();
@@ -83,6 +100,23 @@ public class LuceneReader {
                     useRecoverySource)
             )
             .subscribeOn(LUCENE_IO_SCHEDULER);
+    }
+
+    public static SnapshotDocumentCounts countSnapshotDocuments(LuceneDirectoryReader reader, String nestedPathField) {
+        long live = 0;
+        long nested = 0;
+        try {
+            for (var leaf : reader.leaves()) {
+                var segment = leaf.reader();
+                var liveDocs = segment.getLiveDocs();
+                live += liveDocs == null ? segment.maxDoc() : liveDocs.cardinality();
+                nested += segment.countLiveDocumentsWithTermPrefix(nestedPathField,
+                    "_type".equals(nestedPathField) ? "__" : "");
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to count snapshot documents", e);
+        }
+        return new SnapshotDocumentCounts(live, nested, reader.maxDocIncludingSoftDeletes() - live);
     }
 
     /**
@@ -135,6 +169,13 @@ public class LuceneReader {
     public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 Path indexDirectoryPath, DocumentChangeType operation,
                                                 FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return Flux.defer(() -> readDocsFromSegmentSubscription(readerAndBase, docStartingId,
+            indexDirectoryPath, operation, mappingContext, useRecoverySource));
+    }
+
+    private static Flux<LuceneDocumentChange> readDocsFromSegmentSubscription(ReaderAndBase readerAndBase,
+            int docStartingId, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, boolean useRecoverySource) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -170,10 +211,13 @@ public class LuceneReader {
         // sourceless to honor the cursor's monotonic-docId contract. For stored-source
         // (non-sourceless) reads the cursor is unused, so we keep the parallel fast path.
         int innerConcurrency = (mappingContext != null) ? 1 : SEGMENT_READ_CONCURRENCY;
+        var session = new SegmentReadSession(segmentReader);
         return Flux.fromStream(idxStream.boxed())
             .flatMapSequential(docIdx -> Mono.defer(() -> {
                     try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource);
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
+                            getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex,
+                            useRecoverySource, session.forCurrentThread());
                         return Mono.justOrEmpty(document);
                     } catch (Exception e) {
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
@@ -185,7 +229,10 @@ public class LuceneReader {
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
                 }).subscribeOn(LUCENE_IO_SCHEDULER), innerConcurrency, 1)
-            .doFinally(sig -> termIndex.close());
+            .doFinally(sig -> {
+                session.close();
+                termIndex.close();
+            });
     }
 
     /**
@@ -221,9 +268,17 @@ public class LuceneReader {
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
             final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
             FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource) {
+        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath,
+            operation, mappingContext, termIndex, useRecoverySource, null);
+    }
+
+    private static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
+            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource,
+            SegmentReadSession.Reader worker) {
         LuceneDocument document;
         try {
-            document = reader.document(luceneDocId);
+            document = worker == null ? reader.document(luceneDocId) : worker.document(luceneDocId);
         } catch (IOException e) {
             log.atError().setCause(e).setMessage("Failed to read document at Lucene index location {}")
                 .addArgument(luceneDocId).log();
@@ -304,8 +359,21 @@ public class LuceneReader {
             return null; // Skip these
         }
 
+        // _version is a numeric doc value, not a stored field returned by document().
+        // Read it outside the catch above so an I/O failure fails the work item
+        // instead of silently dropping the document.
+        Long version = operation == DocumentChangeType.INDEX ? readVersion(reader, luceneDocId, worker) : null;
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
+        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes,
+            routing, operation, version);
+    }
+
+    private static Long readVersion(LuceneLeafReader reader, int luceneDocId, SegmentReadSession.Reader worker) {
+        try {
+            return worker == null ? (Long) reader.getNumericValue(luceneDocId, "_version") : worker.version(luceneDocId);
+        } catch (IOException e) {
+            throw Lombok.sneakyThrow(e);
+        }
     }
 
     /**

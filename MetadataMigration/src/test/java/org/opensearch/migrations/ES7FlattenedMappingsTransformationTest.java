@@ -3,9 +3,9 @@ package org.opensearch.migrations;
 import java.io.File;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;

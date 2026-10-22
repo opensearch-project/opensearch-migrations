@@ -15,9 +15,11 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,6 +48,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     private final OpenSearchClient client;
     private final IJsonTransformer transformer;
+    private final List<BulkOperationTransformer> nativeTransformers;
     private final boolean allowServerGeneratedIds;
     private final boolean allowMissingDocumentIds;
     private final DocumentExceptionAllowlist allowlist;
@@ -72,6 +75,8 @@ public class OpenSearchDocumentSink implements DocumentSink {
     ) {
         this.client = client;
         this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
+        this.nativeTransformers = this.transformer == null ? List.of()
+            : this.transformer.getNativeStages(BulkOperationTransformer.class).orElse(null);
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowMissingDocumentIds = allowMissingDocumentIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
@@ -113,6 +118,9 @@ public class OpenSearchDocumentSink implements DocumentSink {
             .then();
     }
 
+    // A fully skipped batch still counts as a batch, matching OpenSearchClient.
+    private static final MigrationMetrics.Requests SKIPPED_BATCH_REQUESTS = new MigrationMetrics.Requests(1, 0, 0, 0, 0);
+
     @Override
     public Mono<BatchResult> writeBatch(String collectionName, List<PositionedDocument> batch) {
         long bytesInBatch = batch.stream()
@@ -123,15 +131,24 @@ public class OpenSearchDocumentSink implements DocumentSink {
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
-        if (transformer == null) {
+        if (nativeTransformers != null && nativeTransformers.isEmpty()) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
             var documents = dropMissingIds(batch.stream()
                 .map(PositionedDocument::document)
                 .collect(Collectors.toList()), Document::id, collectionName);
             if (documents.isEmpty()) {
-                return Mono.just(new BatchResult(batch.size(), bytesInBatch, cursorAfter));
+                return Mono.just(new BatchResult(batch.size(), bytesInBatch, cursorAfter, SKIPPED_BATCH_REQUESTS));
             }
             bulkMono = client.sendBulkRequestRaw(collectionName, documents,
+                requestContext, allowServerGeneratedIds, allowlist);
+        } else if (nativeTransformers != null) {
+            var operations = batch.stream()
+                .map(p -> BulkOperationConverter.fromRawDocument(p.document(), collectionName))
+                .collect(Collectors.toList());
+            for (var nativeTransformer : nativeTransformers) {
+                operations = nativeTransformer.transformOperations(operations);
+            }
+            bulkMono = client.sendBulkRequest(collectionName, operations,
                 requestContext, allowServerGeneratedIds, allowlist);
         } else {
             var bulkOps = batch.stream()
@@ -141,13 +158,14 @@ public class OpenSearchDocumentSink implements DocumentSink {
             List<BulkOperationSpec> opsToSend =
                 dropMissingIds(applyTransformation(bulkOps), OpenSearchDocumentSink::documentIdOf, collectionName);
             if (opsToSend.isEmpty()) {
-                return Mono.just(new BatchResult(batch.size(), bytesInBatch, cursorAfter));
+                return Mono.just(new BatchResult(batch.size(), bytesInBatch, cursorAfter, SKIPPED_BATCH_REQUESTS));
             }
             bulkMono = client.sendBulkRequest(collectionName, opsToSend,
                 requestContext, allowServerGeneratedIds, allowlist);
         }
 
-        return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch, cursorAfter)));
+        return bulkMono.map(response ->
+            new BatchResult(batch.size(), bytesInBatch, cursorAfter, response.target, response.requests));
     }
 
     /**
@@ -195,7 +213,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
             }
         }
         var asMaps = ops.stream()
-            .map(op -> OBJECT_MAPPER.convertValue(op, Map.class))
+            .map(op -> op.toTransformerMap(OBJECT_MAPPER))
             .toList();
         var transformed = transformer.transformJson(asMaps);
         if (transformed instanceof List) {
