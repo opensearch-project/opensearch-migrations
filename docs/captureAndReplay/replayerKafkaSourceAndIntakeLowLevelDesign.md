@@ -51,7 +51,7 @@ The proposed top-level Java components are:
 | `ReplayIntakeOwner` | Decode and apply records; own source reconstruction, broker-time state, demand, and record associations |
 | `PartitionIntakeState` | All replay-intake state for one partition generation |
 | `WriterPartitionTimeState` | Heartbeat baseline or restart fallback for one writer and partition |
-| `SourceConnectionState` | One process-local source HTTP assembly lifetime |
+| `SourceConnectionState` | One process-local source HTTP assembly window (§9) |
 | `RecordWorkTracker` | Whether one indivisible Kafka record still has associated work |
 | `GenerationCleanupTracker` | Whether every process-local object from one revoked generation is clean |
 
@@ -94,8 +94,8 @@ record CancellationDeadline(long monotonicDeadlineNanos) {}
 partition locally. It is not Kafka's group generation and is never serialized.
 
 `ConnectionProcessingId.localSequence` is allocated whenever replay intake begins fresh
-process-local source assembly for a captured connection. It distinguishes a later fresh lifetime
-from an expired lifetime whose target or tuple work is still finishing.
+process-local source assembly for a captured connection. It distinguishes a later fresh assembly window
+(§9) from an expired window whose target or tuple work is still finishing.
 
 `ReplayRequestId` is the only request identity used across replay intake, target connection,
 request replay, and tuple output.
@@ -637,10 +637,10 @@ PartitionIntakeState
 
 All maps are changed only by the replay-intake thread.
 
-`activeSourceConnectionsByCapturedConnectionId` points only to the current source-assembly lifetime.
+`activeSourceConnectionsByCapturedConnectionId` points only to the current assembly window.
 Older expired `ConnectionProcessingId` values may remain in
-`activeConnectionProcessingById` while their target and tuple work finishes. A new source lifetime
-replaces only the current captured-identity mapping; it does not mutate the old lifetime.
+`activeConnectionProcessingById` while their target and tuple work finishes. A new assembly window
+replaces only the current captured-identity mapping; it does not mutate the old window.
 
 ## 7. Applying one Kafka record
 
@@ -740,6 +740,15 @@ It then sets `completionEmitted=true` before submitting `RecordProcessingFinishe
 
 ## 9. Source connection state
 
+A captured connection's **lifetime** runs from the proxy's first observation for it to its
+`CloseObservation`. Replay intake never assumes that it sees all of a lifetime. An **assembly window** is
+one replayer process's continuous reconstruction of part of a lifetime, held in one
+`SourceConnectionState` and identified by one `ConnectionProcessingId`. A window begins with the first
+observation the process reads for the connection, which can be anywhere in the lifetime, for example
+after the process resumes from a committed offset. It ends at the captured close, at expiration, or when
+the process stops owning the partition, so it can stop short of the lifetime's end. A later window for
+the same connection starts fresh and inherits nothing from an earlier one.
+
 `SourceConnectionState` owns only source-side HTTP assembly:
 
 ```text
@@ -757,7 +766,7 @@ SourceConnectionState
 It does not own a target channel, target attempt, tuple, Kafka consumer, or commit position.
 
 The first observation in fresh reconstruction establishes the process-local sequence baseline.
-Later observations in that lifetime must be contiguous.
+Later observations in that window must be contiguous.
 
 The state uses `TrafficStream.priorRequestsReceived` and
 `TrafficStream.lastObservationWasUnterminatedRead` to decide whether input begins in the tail of an
@@ -869,8 +878,8 @@ and may contribute to tuple processing, but the count does not change.
 2. completes any source-response assembly with
    `SourceResponseComplete(CONNECTION_CLOSE)`;
 3. sends the ordered `AdmitCapturedClose` command to the applicable target-connection owner;
-4. marks the current process-local source lifetime closed; and
-5. prevents later observations from joining that lifetime.
+4. marks the current assembly window closed; and
+5. prevents later observations from joining that window.
 
 If no target-connection owner exists because no request was reconstituted, replay intake does not
 create one merely to process the close. Source-side close processing is sufficient.
@@ -895,7 +904,7 @@ assembly, replay intake:
 2. releases that request-assembly's record associations;
 3. advances the captured request ordinal exactly once;
 4. returns to the between-requests phase; and
-5. leaves the process-local source connection lifetime open.
+5. leaves the assembly window open.
 
 It creates no `ReplayRequestId`, target admission, source-response result, or tuple. A later request
 on the same connection reconstructs normally with the next ordinal. For an inherited tail, the marker
@@ -903,6 +912,18 @@ only ends discard: there are no process-local request associations to release, a
 already reserved its ordinal. A marker received when neither an incomplete request is under assembly nor
 an inherited tail is being discarded is a capture-protocol violation: it cannot truthfully describe the
 condition the marker exists to distinguish from accidental loss.
+
+### 9.5 Request forwarded
+
+`requestForwarded` records when the proxy finished writing a captured request to the source (the
+capture protocol's §4.1). It follows its request's end-of-message indicator and precedes the next
+request's first read. Replay intake records its `ts` on that request's source response, where it starts
+the source response spans; tuple construction has no other start for them.
+
+A request with no `requestForwarded` has no source spans. That is not a violation: an observation's order
+is guaranteed within a connection, but its existence is not. A `requestForwarded` that does not follow an
+end-of-message indicator in that order is a capture-protocol violation, unless the assembly window began
+after that indicator.
 
 ## 10. Writer heartbeat and broker time
 
@@ -969,7 +990,7 @@ For each affected `SourceConnectionState`, replay intake:
 Already-reconstituted requests and tuple work continue.
 
 A later observation for the captured identity creates a new `ConnectionProcessingId` and fresh
-source assembly. It cannot route into the expired lifetime.
+source assembly. It cannot route into the expired window.
 
 ## 11. Retry source-response boundary
 
@@ -1318,7 +1339,7 @@ the process supervisor immediately.
 - Periodic `TrafficStream` boundaries do not change request or response reconstruction.
 - Fresh reconstruction discards an incomplete preceding message using the continuity fields.
 - The first sequence value establishes the process-local baseline; later values are contiguous.
-- Expiration and a later fresh lifetime for the same captured identity coexist without sharing
+- Expiration and a later fresh assembly window for the same captured identity coexist without sharing
   state or messages.
 - `ConnectionExceptionObservation` does not close source assembly.
 

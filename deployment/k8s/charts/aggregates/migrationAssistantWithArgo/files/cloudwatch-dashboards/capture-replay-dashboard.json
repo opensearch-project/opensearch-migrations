@@ -393,6 +393,256 @@
             "type": "text",
             "x": 0,
             "y": 5,
+            "width": 8,
+            "height": 1,
+            "properties": {
+                "markdown": "## Response comparisons",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 8,
+            "y": 5,
+            "width": 16,
+            "height": 1,
+            "properties": {
+                "markdown": "Response times are per request pair, for requests whose status codes matched. The target is measured under replay load and speedup.",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 6,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Status-code match % (includes missing source responses)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0))",
+                            "label": "Match %",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 100
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 6,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Status-code mismatches per graph period (source → target)",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum')",
+                            "label": "${PROP('Dim.method')} ${PROP('Dim.sourceStatusCode')} → ${PROP('Dim.targetStatusCode')}",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum')",
+                            "label": "${PROP('Dim.method')} no source response → ${PROP('Dim.targetStatusCode')}",
+                            "id": "e2",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "mismatches",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 6,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Status-code matches per second",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60) / 60",
+                            "label": "${PROP('Dim.method')} ${PROP('Dim.targetStatusCode')}",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ]
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 12,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Response time, source vs target (mean ms)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
+                            "label": "Source: request → first byte",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
+                            "label": "Target: request → first byte",
+                            "id": "e2",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
+                            "label": "Source: request → response complete",
+                            "id": "e3",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
+                            "label": "Target: request → response complete",
+                            "id": "e4",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ms",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 12,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Response time difference, target − source (mean ms)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "(FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\"', 'SampleCount', 60))",
+                            "label": "To first byte",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\"', 'SampleCount', 60))",
+                            "label": "To response complete",
+                            "id": "e2",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ms",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 12,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Response time difference, target vs source (%, duration-weighted)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) - 1)",
+                            "label": "To first byte (Σ target / Σ source − 1, duration-weighted)",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) - 1)",
+                            "label": "To response complete (Σ target / Σ source − 1, duration-weighted)",
+                            "id": "e2",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "% slower (+) / faster (−)",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 18,
             "width": 24,
             "height": 1,
             "properties": {
@@ -403,7 +653,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 6,
+            "y": 19,
             "width": 8,
             "height": 7,
             "properties": {
@@ -499,7 +749,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 6,
+            "y": 19,
             "width": 8,
             "height": 7,
             "properties": {
@@ -637,7 +887,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 6,
+            "y": 19,
             "width": 8,
             "height": 7,
             "properties": {
@@ -746,7 +996,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 13,
+            "y": 26,
             "width": 6,
             "height": 1,
             "properties": {
@@ -757,7 +1007,7 @@
         {
             "type": "text",
             "x": 6,
-            "y": 13,
+            "y": 26,
             "width": 6,
             "height": 1,
             "properties": {
@@ -768,7 +1018,7 @@
         {
             "type": "text",
             "x": 12,
-            "y": 13,
+            "y": 26,
             "width": 6,
             "height": 1,
             "properties": {
@@ -779,7 +1029,7 @@
         {
             "type": "text",
             "x": 18,
-            "y": 13,
+            "y": 26,
             "width": 6,
             "height": 1,
             "properties": {
@@ -790,7 +1040,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 14,
+            "y": 27,
             "width": 6,
             "height": 7,
             "properties": {
@@ -847,7 +1097,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 14,
+            "y": 27,
             "width": 6,
             "height": 7,
             "properties": {
@@ -914,7 +1164,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 14,
+            "y": 27,
             "width": 6,
             "height": 7,
             "properties": {
@@ -1023,7 +1273,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 14,
+            "y": 27,
             "width": 6,
             "height": 7,
             "properties": {
@@ -1155,7 +1405,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 21,
+            "y": 34,
             "width": 6,
             "height": 8,
             "properties": {
@@ -1264,7 +1514,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 21,
+            "y": 34,
             "width": 6,
             "height": 8,
             "properties": {
@@ -1385,7 +1635,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 21,
+            "y": 34,
             "width": 6,
             "height": 8,
             "properties": {
@@ -1507,7 +1757,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 21,
+            "y": 34,
             "width": 6,
             "height": 8,
             "properties": {
@@ -1625,7 +1875,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 29,
+            "y": 42,
             "width": 6,
             "height": 7,
             "properties": {
@@ -1659,7 +1909,7 @@
                     ],
                     [
                         "OpenSearchMigrations",
-                        "gatheringResponseDuration",
+                        "waitingForResponseDuration",
                         "OTelLib",
                         "captureProxy",
                         "qualifier",
@@ -1673,14 +1923,14 @@
                     [
                         {
                             "expression": "m3",
-                            "label": "Gather response (source latency)",
+                            "label": "Wait for source's first byte",
                             "id": "e4",
                             "visible": true
                         }
                     ],
                     [
                         "OpenSearchMigrations",
-                        "kafkaCommitDuration",
+                        "gatheringResponseDuration",
                         "OTelLib",
                         "captureProxy",
                         "qualifier",
@@ -1694,14 +1944,14 @@
                     [
                         {
                             "expression": "m5",
-                            "label": "Kafka publish → ack",
+                            "label": "Gather source response",
                             "id": "e6",
                             "visible": true
                         }
                     ],
                     [
                         "OpenSearchMigrations",
-                        "captureConnectionDuration",
+                        "kafkaCommitDuration",
                         "OTelLib",
                         "captureProxy",
                         "qualifier",
@@ -1715,8 +1965,29 @@
                     [
                         {
                             "expression": "m7",
-                            "label": "Client connection lifetime",
+                            "label": "Kafka publish → ack",
                             "id": "e8",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "captureConnectionDuration",
+                        "OTelLib",
+                        "captureProxy",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m9",
+                            "stat": "Average",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m9",
+                            "label": "Client connection lifetime",
+                            "id": "e10",
                             "visible": false
                         }
                     ]
@@ -1726,7 +1997,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 29,
+            "y": 42,
             "width": 6,
             "height": 7,
             "properties": {
@@ -1817,7 +2088,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 29,
+            "y": 42,
             "width": 6,
             "height": 7,
             "properties": {
@@ -1882,7 +2153,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 29,
+            "y": 42,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2010,7 +2281,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 36,
+            "y": 49,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2111,7 +2382,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 36,
+            "y": 49,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2212,7 +2483,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 36,
+            "y": 49,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2313,7 +2584,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 36,
+            "y": 49,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2414,7 +2685,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 43,
+            "y": 56,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2560,7 +2831,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 43,
+            "y": 56,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2690,7 +2961,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 43,
+            "y": 56,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2752,7 +3023,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 43,
+            "y": 56,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2826,7 +3097,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 50,
+            "y": 63,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2915,7 +3186,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 50,
+            "y": 63,
             "width": 6,
             "height": 7,
             "properties": {
@@ -2987,7 +3258,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 50,
+            "y": 63,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3076,7 +3347,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 50,
+            "y": 63,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3156,7 +3427,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 57,
+            "y": 70,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3209,7 +3480,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 57,
+            "y": 70,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3241,7 +3512,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 57,
+            "y": 70,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3286,7 +3557,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 57,
+            "y": 70,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3318,113 +3589,18 @@
         {
             "type": "text",
             "x": 0,
-            "y": 64,
+            "y": 77,
             "width": 24,
             "height": 1,
             "properties": {
-                "markdown": "## Correctness and result tuples",
+                "markdown": "## Result tuples",
                 "background": "transparent"
             }
         },
         {
             "type": "metric",
             "x": 0,
-            "y": 65,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Status-code match % (includes missing source responses)",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "placeholder-region",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "100 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0))",
-                            "label": "Match %",
-                            "id": "e1",
-                            "visible": true
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "min": 0,
-                        "max": 100
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 8,
-            "y": 65,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Status-code mismatches per graph period (source → target)",
-                "view": "timeSeries",
-                "stacked": true,
-                "region": "placeholder-region",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum')",
-                            "label": "${PROP('Dim.method')} ${PROP('Dim.sourceStatusCode')} → ${PROP('Dim.targetStatusCode')}",
-                            "id": "e1",
-                            "visible": true
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum')",
-                            "label": "${PROP('Dim.method')} no source response → ${PROP('Dim.targetStatusCode')}",
-                            "id": "e2",
-                            "visible": true
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "mismatches",
-                        "showUnits": false
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 16,
-            "y": 65,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Status-code matches per second",
-                "view": "timeSeries",
-                "stacked": true,
-                "region": "placeholder-region",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60) / 60",
-                            "label": "${PROP('Dim.method')} ${PROP('Dim.targetStatusCode')}",
-                            "id": "e1",
-                            "visible": true
-                        }
-                    ]
-                ]
-            }
-        },
-        {
-            "type": "metric",
-            "x": 0,
-            "y": 71,
+            "y": 78,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3511,7 +3687,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 71,
+            "y": 78,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3563,7 +3739,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 71,
+            "y": 78,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3693,7 +3869,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 77,
+            "y": 84,
             "width": 24,
             "height": 1,
             "properties": {
@@ -3704,7 +3880,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 78,
+            "y": 85,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3770,7 +3946,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 78,
+            "y": 85,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3795,7 +3971,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 78,
+            "y": 85,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3820,7 +3996,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 78,
+            "y": 85,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3845,7 +4021,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 85,
+            "y": 92,
             "width": 8,
             "height": 7,
             "properties": {
@@ -3934,7 +4110,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 85,
+            "y": 92,
             "width": 8,
             "height": 7,
             "properties": {
@@ -3996,7 +4172,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 85,
+            "y": 92,
             "width": 8,
             "height": 7,
             "properties": {

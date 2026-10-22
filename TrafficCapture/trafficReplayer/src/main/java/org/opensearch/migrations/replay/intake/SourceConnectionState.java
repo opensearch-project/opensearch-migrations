@@ -132,6 +132,14 @@ public final class SourceConnectionState {
     private boolean framedResponseComplete;
     private boolean responseFramingFallback;
     private ReplayRequestId framedResponseCompletedAwaitingNextRequest;
+    /**
+     * The latest end-of-message indicator whose request-forwarded observation hasn't arrived, or null. Its request
+     * is null for an end-of-message indicator that reconstituted none, such as one ending an inherited tail, so
+     * that its forward still pairs with it. One at most is awaited: a forward precedes the next request's reads.
+     */
+    private AwaitingForward awaitingForward;
+    private boolean endOfMessageSeenThisWindow;
+    private ReplayRequestId requestReconstitutedByThisObservation;
     private Lifetime lifetime = Lifetime.OPEN;
     private Instant latestObservationTime = Instant.EPOCH;
 
@@ -224,8 +232,12 @@ public final class SourceConnectionState {
         if (observation.hasRequestDropped()) {
             return applyRequestDropped();
         }
+        if (observation.hasRequestForwarded()) {
+            return applyRequestForwarded(observation);
+        }
 
-        return switch (phase) {
+        requestReconstitutedByThisObservation = null;
+        var outcome = switch (phase) {
             case DISCARDING_INHERITED_TAIL -> applyWhileDiscardingInheritedTail(observation);
             case BETWEEN_REQUESTS ->
                 applyBetweenRequests(observation, containingRecord, logAppendTimeMillis, trafficContext);
@@ -234,6 +246,42 @@ public final class SourceConnectionState {
             case ASSEMBLING_RESPONSE ->
                 applyToResponse(observation, containingRecord, logAppendTimeMillis, trafficContext);
         };
+        if (observation.hasEndOfMessageIndicator()) {
+            endOfMessageSeenThisWindow = true;
+            awaitingForward = new AwaitingForward(requestReconstitutedByThisObservation);
+        }
+        return outcome;
+    }
+
+    /** An end-of-message indicator still owed its request-forwarded observation; null when it reconstituted none. */
+    private record AwaitingForward(ReplayRequestId requestId) {}
+
+    /**
+     * Records when the proxy finished writing a request to the source, which is where the source's response
+     * spans start. A forward follows its request's end-of-message indicator and precedes the next request's
+     * reads, but is never guaranteed to arrive. One with no end-of-message indicator awaiting it is out of order,
+     * unless this assembly window has seen no end-of-message indicator yet: the window began after that
+     * forward's indicator. A response that already completed keeps no forward.
+     */
+    private ObservationOutcome applyRequestForwarded(TrafficObservation observation) {
+        var awaiting = awaitingForward;
+        awaitingForward = null;
+        if (awaiting == null) {
+            if (!endOfMessageSeenThisWindow) {
+                return ObservationOutcome.none();
+            }
+            throw new CaptureProtocolViolation(
+                "RequestForwarded for " + connectionProcessingId
+                    + " arrived with no end-of-message indicator awaiting it"
+            );
+        }
+        if (awaiting.requestId() != null) {
+            var response = responseStateByRequest.get(awaiting.requestId());
+            if (response != null) {
+                response.setRequestForwardedTimestamp(timestampOf(observation));
+            }
+        }
+        return ObservationOutcome.none();
     }
 
     /**
@@ -380,8 +428,9 @@ public final class SourceConnectionState {
             return added(assembly);
         }
         if (observation.hasWriteSegment()) {
-            finalResponseBeforeRequestEnd(timestamp)
-                .addSegment(observation.getWriteSegment().getData().toByteArray());
+            var response = finalResponseBeforeRequestEnd(timestamp);
+            response.noteDataTimestamp(timestamp);
+            response.addSegment(observation.getWriteSegment().getData().toByteArray());
             return added(assembly);
         }
         return ObservationOutcome.none();
@@ -404,8 +453,9 @@ public final class SourceConnectionState {
             return added(association);
         }
         if (observation.hasWriteSegment()) {
-            responseUnderAssembly(timestamp)
-                .addSegment(observation.getWriteSegment().getData().toByteArray());
+            var response = responseUnderAssembly(timestamp);
+            response.noteDataTimestamp(timestamp);
+            response.addSegment(observation.getWriteSegment().getData().toByteArray());
             return added(association);
         }
         if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
@@ -473,6 +523,7 @@ public final class SourceConnectionState {
 
         incomingRequest = null;
         responseBeingAssembledFor = replayRequestId;
+        requestReconstitutedByThisObservation = replayRequestId;
         responseRequestMethod = requestMethod(request);
         responseStateByRequest.put(
             replayRequestId,
@@ -714,6 +765,8 @@ public final class SourceConnectionState {
         IReplayContexts.ITrafficStreamsLifecycleContext trafficContext
     ) {
         if (incomingRequest == null) {
+            // A forward always precedes the next request's reads, so none still awaited can arrive now.
+            awaitingForward = null;
             incomingRequest = new HttpMessageAndTimestamp.Request(firstPacketTimestamp);
             if (trafficContext != null) {
                 requestContext = trafficContext.createRequestContext(
@@ -839,6 +892,7 @@ public final class SourceConnectionState {
      * without advancing it would replay at the wrong moment while looking correct byte for byte.
      */
     private static void appendTo(HttpMessageAndTimestamp message, byte[] packet, Instant timestamp) {
+        message.noteDataTimestamp(timestamp);
         message.add(packet);
         message.setLastPacketTimestamp(timestamp);
     }

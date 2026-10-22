@@ -33,14 +33,21 @@ def per_min(m, sel=""):
     return f"({rate(m, sel)} * 60) or vector(0)"
 
 
-def mean(h, scale=1):
-    e = f"sum(rate({h}_sum[{RI}])) / sum(rate({h}_count[{RI}]))"
+def mean(h, scale=1, sel=""):
+    s = f"{{{sel}}}" if sel else ""
+    e = f"sum(rate({h}_sum{s}[{RI}])) / sum(rate({h}_count{s}[{RI}]))"
     return e if scale == 1 else f"{e} / {scale}"
 
 
-def p95(h, scale=1):
-    e = f"histogram_quantile(0.95, sum by (le) (rate({h}_bucket[{RI}])))"
+def p95(h, scale=1, sel=""):
+    s = f"{{{sel}}}" if sel else ""
+    e = f"histogram_quantile(0.95, sum by (le) (rate({h}_bucket{s}[{RI}])))"
     return e if scale == 1 else f"{e} / {scale}"
+
+
+# The proxy and the replayer both export waitingForResponseDuration, so pin the scope where a name is shared.
+PROXY = 'otel_scope_name="captureProxy"'
+REPLAYER = 'otel_scope_name="replayer"'
 
 
 def hottest(g, by="exported_instance"):
@@ -219,7 +226,8 @@ def proxy_latency():
     return (P("Proxy latency (mean ms)", "Windowed means (histogram sum/count rates) plus p95 of Kafka publish "
                                          "→ ack." + TOPB, unit="ms")
             .q(mean("gatheringRequestDuration_milliseconds"), "Gather request")
-            .q(mean("gatheringResponseDuration_milliseconds"), "Gather response (source latency)")
+            .q(mean("waitingForResponseDuration_milliseconds", sel=PROXY), "Wait for source's first byte")
+            .q(mean("gatheringResponseDuration_milliseconds"), "Gather source response")
             .q(mean("kafkaCommitDuration_milliseconds"), "Kafka publish → ack")
             .q(p95("kafkaCommitDuration_milliseconds"), "Kafka publish → ack p95"))
 
@@ -403,7 +411,7 @@ def target_latency():
     p.q(p95("targetTransactionDuration_milliseconds", 1000), "Target transaction p95")
     for h, lab in [("requestConnectingDuration", "Connect"), ("requestSendingDuration", "Send"),
                    ("waitingForResponseDuration", "Wait for response"), ("receivingResponseDuration", "Receive response")]:
-        p.q(mean(h + "_milliseconds", 1000), lab)
+        p.q(mean(h + "_milliseconds", 1000, sel=REPLAYER), lab)
     return p
 
 
@@ -451,6 +459,92 @@ def status_mismatches():
 def status_matches():
     return (P("Status-code matches per second", "Matching tuples per second by method and status-code class (stacked).", unit="ops", stacked=True)
             .q(f'sum by (method, targetStatusCode) (rate(tupleComparison_total{{statusCodesMatch="true"}}[{RI}]))', "{{method}} {{targetStatusCode}}"))
+
+
+# Per request pair, for tuples whose status codes matched, the replayer records both sides' spans from the request's
+# last byte to the final response's first byte and to its last byte. Histograms can't hold the signed difference, so
+# tupleResponseDurationDifference holds its magnitude with targetSlower, and tupleResponseDurationRatio holds
+# max(1 ms, target) / max(1 ms, source) in log-spaced buckets around 1.
+SRC_FIRST, TGT_FIRST = "tupleSourceFirstByteDuration_milliseconds", "tupleTargetFirstByteDuration_milliseconds"
+SRC_TOTAL, TGT_TOTAL = "tupleSourceResponseDuration_milliseconds", "tupleTargetResponseDuration_milliseconds"
+DIFF = "tupleResponseDurationDifference_milliseconds"
+RATIO = "tupleResponseDurationRatio"
+SPANS = [("firstByte", "To first byte"), ("total", "To response complete")]
+COMPARE = (" Values are per request pair, for requests whose status codes matched; the target is measured under "
+           "replay load and speedup.")
+
+
+def signed_mean_difference(span):
+    """The exact mean of target − source: slower magnitudes less the others, over every pair."""
+    def total(slower):
+        return f"(sum(rate({DIFF}_sum{{span=\"{span}\",targetSlower=\"{slower}\"}}[{RI}])) or vector(0))"
+    return f"({total('true')} - {total('false')}) / sum(rate({DIFF}_count{{span=\"{span}\"}}[{RI}]))"
+
+
+def signed_difference_quantile(q, span):
+    """The q-quantile of target − source, from the magnitude histograms split by targetSlower.
+
+    Negating the not-slower magnitudes and joining them to the slower ones gives the signed distribution, so with
+    Nf pairs not slower and N in all, the quantile is -(the not-slower magnitude at 1 - qN/Nf) when qN <= Nf, and
+    otherwise the slower magnitude at (qN - Nf)/Nt.
+    """
+    def sel(slower=None):
+        return f'span="{span}"' + (f',targetSlower="{slower}"' if slower else "")
+
+    def count(slower=None):
+        return f"(sum(rate({DIFF}_count{{{sel(slower)}}}[{RI}])) or vector(0))"
+
+    def magnitude(phi, slower):
+        # Both sides are evaluated before "and on()" discards one, so clamp the unused side's quantile into range.
+        return (f"histogram_quantile(scalar(clamp({phi}, 0, 1)), "
+                f"sum by (le) (rate({DIFF}_bucket{{{sel(slower)}}}[{RI}])))")
+
+    def nonzero(n):
+        return f"clamp_min({n}, 1e-9)"
+
+    rank, nf, nt = f"({q} * {count()})", count("false"), count("true")
+    return (f"(-{magnitude(f'1 - {rank} / {nonzero(nf)}', 'false')} and on() ({rank} <= {nf})) or on() "
+            f"({magnitude(f'({rank} - {nf}) / {nonzero(nt)}', 'true')} and on() ({rank} > {nf}))")
+
+
+def ratio_pct(quantile, span):
+    return (f"100 * (histogram_quantile({quantile}, sum by (le) (rate({RATIO}_bucket{{span=\"{span}\"}}[{RI}]))) "
+            "- 1)")
+
+
+def response_times():
+    return (P("Response time, source vs target (mean ms)", "Time from the request's last byte to the first byte "
+              "and to the last byte of the final response, on each side, plus p95 of the complete response, from "
+              "buckets topped at 2 minutes." + COMPARE, unit="ms")
+            .q(mean(SRC_FIRST), "Source: request → first byte")
+            .q(mean(TGT_FIRST), "Target: request → first byte")
+            .q(mean(SRC_TOTAL), "Source: request → response complete")
+            .q(mean(TGT_TOTAL), "Target: request → response complete")
+            .q(p95(SRC_TOTAL), "Source: response complete p95")
+            .q(p95(TGT_TOTAL), "Target: response complete p95"))
+
+
+def response_time_diff():
+    p = P("Response time difference, target − source (ms)", "Mean of each pair's target − source, with p10, p50 "
+          "and p90; positive means the target is slower. The percentiles join the not-slower magnitudes, negated, "
+          "to the slower ones, and interpolate within the duration buckets." + COMPARE, unit="ms", mn=None)
+    for span, label in SPANS:
+        p.q(signed_mean_difference(span), f"{label} mean")
+        for q in (0.1, 0.5, 0.9):
+            p.q(signed_difference_quantile(q, span), f"{label} p{round(q * 100)}")
+    return p
+
+
+def response_time_pct():
+    p = P("Response time difference, target vs source (%)", "Median (p50) over pairs of target / source − 1, with p10 "
+          "and p90; positive means the target is slower. The ratio floors each side's duration at 1 ms, so "
+          "sub-millisecond responses don't produce extreme ratios. Percentiles interpolate within log-spaced "
+          "buckets from 0.01 to 100." + COMPARE, unit="percent", mn=None)
+    for span, label in SPANS:
+        p.q(ratio_pct(0.5, span), f"{label} p50")
+        p.q(ratio_pct(0.1, span), f"{label} p10")
+        p.q(ratio_pct(0.9, span), f"{label} p90")
+    return p
 
 
 # --- tuples ---
@@ -575,17 +669,23 @@ def layout():
         x += wd
     ps.append(kpi_target_text(x, y, 4, 3))
     y += 3
+    ps.append(row("Response comparisons", y))
+    y += 1
+    for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
+        ps.append(b().build(i * 8, y, 8, 6))
+    y += 6
+    # Taller than the status-code row: these panels carry up to eight legend entries.
+    for i, b in enumerate([response_times, response_time_diff, response_time_pct]):
+        ps.append(b().build(i * 8, y, 8, 8))
+    y += 8
     ps.append(row("End-to-end flow", y))
     y += 1
     for i, b in enumerate([flow_requests, flow_bytes, flow_lag]):
         ps.append(b().build(i * 8, y, 8, 7))
     y += 7
     y = layout_grid(ps, y)
-    ps.append(row("Correctness and result tuples", y))
+    ps.append(row("Result tuples", y))
     y += 1
-    for i, b in enumerate([status_match_pct, status_mismatches, status_matches]):
-        ps.append(b().build(i * 8, y, 8, 6))
-    y += 6
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
         ps.append(b().build(i * 8, y, 8, 6))
     y += 6

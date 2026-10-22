@@ -42,6 +42,12 @@ public interface IChannelConnectionCaptureSerializer<T> {
 
     void commitEndOfHttpMessageIndicator(Instant timestamp) throws IOException;
 
+    /**
+     * Records that the write of a captured request's last bytes to the source completed at {@code timestamp}.
+     * Called once per committed end-of-message indicator, in the same order.
+     */
+    void addRequestForwardedEvent(Instant timestamp) throws IOException;
+
     CompletableFuture<T> flushCommitAndResetStream(boolean isFinal) throws IOException;
 
     void cancelCaptureForCurrentRequest(Instant timestamp) throws IOException;
