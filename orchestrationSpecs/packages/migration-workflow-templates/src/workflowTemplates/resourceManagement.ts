@@ -3,20 +3,15 @@ import {
     AllowLiteralOrExpression,
     BaseExpression,
     expr,
-    ExpressionType,
-    FunctionExpression,
     INTERNAL,
     InputParamDef,
     InputParametersRecord,
     makeDirectTypeProxy,
     makeStringTypeProxy,
-    NonSerializedPlainObject,
     selectInputsForRegister,
     Serialized,
     TemplateBuilder,
-    ToJsonExpression,
     typeToken,
-    UnquotedTypeWrapper,
     WorkflowAndTemplatesScope,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -88,22 +83,6 @@ function placeholderStatusFields<T extends StringStatusFields>(fields: T): Recor
         proxied[String(key)] = `{{inputs.parameters.${String(key)}}}`;
     }
     return proxied;
-}
-
-function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: BaseExpression<T, ExpressionType>): T {
-    // Resource templates substitute Argo expressions before kubectl parses the YAML.
-    // toJSON keeps quote-heavy strings, arrays, and objects valid as YAML literals.
-    const jsonExpression = new FunctionExpression<
-        Serialized<T>,
-        T,
-        ExpressionType,
-        "complicatedExpression",
-        readonly [BaseExpression<T, ExpressionType>]
-    >(
-        "toJSON",
-        [value] as const
-    ) as unknown as ToJsonExpression<Serialized<T>, "complicatedExpression">;
-    return new UnquotedTypeWrapper<T>(jsonExpression, "yaml-safe-json") as never;
 }
 
 function buildPatchStatusTemplate<
@@ -338,6 +317,9 @@ function makeSnapshotMigrationManifest(
     const targetIdentity = expr.get(config, "targetConnectionIdentity");
     const snapshotNameResolution = expr.get(config, "snapshotNameResolution");
     const snapshotRepo = expr.dig(config, ["snapshotConfig", "repoConfig"], expr.makeDict({}));
+    const previousDataSnapshotName = expr.dig(config,
+        ["delta", "previousSnapshotNameResolution", "dataSnapshotResourceName"], "");
+    const previousMigrationName = expr.dig(config, ["previousMigrationResourceName"], "");
     const hasDataSnapshotResource = expr.hasKey(snapshotNameResolution, "dataSnapshotResourceName");
     const hasExternalSnapshotName = expr.hasKey(snapshotNameResolution, "externalSnapshotName");
     const snapshotSourceType = expr.ternary(
@@ -349,6 +331,90 @@ function makeSnapshotMigrationManifest(
         ),
         expr.literal("external")
     );
+    const baseSpec = expr.makeDict({
+        // Written by tryApply so the live CR carries its reset-DAG edge (workflow reset reads
+        // spec.dependsOn). A SnapshotMigration depends on its DataSnapshot when one exists; an
+        // externally-managed ES/OS snapshot with no DataSnapshot has no upstream CR edge.
+        dependsOn: expr.concatArrays(
+            expr.ternary(
+                hasDataSnapshotResource,
+                expr.toArray(expr.dig(snapshotNameResolution, ["dataSnapshotResourceName"], expr.literal(""))),
+                expr.literal([])),
+            expr.ternary(expr.isEmpty(previousDataSnapshotName), expr.literal([]), expr.toArray(previousDataSnapshotName)),
+            expr.ternary(expr.isEmpty(previousMigrationName), expr.literal([]), expr.toArray(previousMigrationName))
+        ),
+        migrationLabel: expr.get(config, "migrationLabel"),
+        sourceVersion: expr.dig(sourceIdentity, ["version"], expr.literal("")),
+        sourceLabel: expr.dig(sourceIdentity, ["label"], expr.literal("")),
+        sourceEndpoint: expr.dig(sourceIdentity, ["endpoint"], expr.literal("")),
+        sourceAllowInsecure: expr.dig(sourceIdentity, ["allowInsecure"], false),
+        targetLabel: expr.dig(targetIdentity, ["label"], expr.literal("")),
+        targetEndpoint: expr.dig(targetIdentity, ["endpoint"], expr.literal("")),
+        targetAllowInsecure: expr.dig(targetIdentity, ["allowInsecure"], false),
+        targetAuthType: expr.dig(targetIdentity, ["authType"], expr.literal("none")),
+        targetAuthBasicSecretName: expr.dig(targetIdentity, ["authBasicSecretName"], expr.literal("")),
+        targetAuthSigv4Region: expr.dig(targetIdentity, ["authSigv4Region"], expr.literal("")),
+        targetAuthSigv4Service: expr.dig(targetIdentity, ["authSigv4Service"], expr.literal("")),
+        targetAuthMtlsClientSecretName: expr.dig(targetIdentity, ["authMtlsClientSecretName"], expr.literal("")),
+        targetAuthMtlsCaCertHash: expr.dig(targetIdentity, ["authMtlsCaCertHash"], expr.literal("")),
+        snapshotLabel: expr.dig(config, ["snapshotConfig", "label"], expr.literal("")),
+        snapshotSourceType,
+        dataSnapshotResourceName: expr.dig(snapshotNameResolution, ["dataSnapshotResourceName"], expr.literal("")),
+        externalSnapshotName: expr.dig(snapshotNameResolution, ["externalSnapshotName"], expr.literal("")),
+        snapshotRepoName: expr.dig(snapshotRepo, ["repoName"], expr.literal("")),
+        snapshotRepoPathUri: expr.dig(snapshotRepo, ["repoPathUri"], expr.literal("")),
+        snapshotRepoAwsRegion: expr.dig(snapshotRepo, ["awsRegion"], expr.literal("")),
+        snapshotRepoEndpoint: expr.dig(snapshotRepo, ["endpoint"], expr.literal("")),
+        snapshotRepoS3RoleArn: expr.dig(snapshotRepo, ["s3RoleArn"], expr.literal("")),
+        snapshotRepoUseLocalStack: expr.dig(snapshotRepo, ["useLocalStack"], false),
+        metadataMigrationJvmArgs: expr.dig(config, ["metadataMigrationConfig", "jvmArgs"], expr.literal("")),
+        metadataMigrationLoggingConfigurationOverrideConfigMap: expr.dig(config, ["metadataMigrationConfig", "loggingConfigurationOverrideConfigMap"], expr.literal("")),
+        metadataMigrationResources: expr.dig(config, ["metadataMigrationConfig", "resources"], expr.makeDict({})),
+        metadataMigrationComponentTemplateAllowlist: expr.dig(config, ["metadataMigrationConfig", "componentTemplateAllowlist"], expr.literal([])),
+        metadataMigrationIndexAllowlist: expr.dig(config, ["metadataMigrationConfig", "indexAllowlist"], expr.literal([])),
+        metadataMigrationIndexTemplateAllowlist: expr.dig(config, ["metadataMigrationConfig", "indexTemplateAllowlist"], expr.literal([])),
+        metadataMigrationAllowLooseVersionMatching: expr.dig(config, ["metadataMigrationConfig", "allowLooseVersionMatching"], true),
+        metadataMigrationClusterAwarenessAttributes: expr.dig(config, ["metadataMigrationConfig", "clusterAwarenessAttributes"], 1),
+        metadataMigrationEnableSourcelessMigrations: expr.dig(config, ["metadataMigrationConfig", "enableSourcelessMigrations"], false),
+        metadataMigrationUseRecoverySource: expr.dig(config, ["metadataMigrationConfig", "useRecoverySource"], false),
+        metadataMigrationOtelTraceCollectorEndpoint: expr.dig(config, ["metadataMigrationConfig", "otelTraceCollectorEndpoint"], expr.literal("")),
+        metadataMigrationOtelMetricsCollectorEndpoint: expr.dig(config, ["metadataMigrationConfig", "otelMetricsCollectorEndpoint"], expr.literal("")),
+        metadataMigrationOutput: expr.dig(config, ["metadataMigrationConfig", "output"], expr.literal("HUMAN_READABLE")),
+        metadataMigrationTransformerConfigBase64: expr.dig(config, ["metadataMigrationConfig", "transformerConfigBase64"], expr.literal("")),
+        metadataMigrationTransformerConfig: expr.dig(config, ["metadataMigrationConfig", "transformerConfig"], expr.literal("")),
+        metadataMigrationTransformerConfigFile: expr.dig(config, ["metadataMigrationConfig", "transformerConfigFile"], expr.literal("")),
+        metadataMigrationFileSourceVolumes: expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumes"], expr.literal([])),
+        metadataMigrationFileSourceVolumeMounts: expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumeMounts"], expr.literal([])),
+        documentBackfillPodReplicas: documentBackfillScaling.documentBackfillPodReplicas,
+        documentBackfillMinPodReplicas: documentBackfillScaling.documentBackfillMinPodReplicas,
+        documentBackfillJvmArgs: expr.dig(config, ["documentBackfillConfig", "jvmArgs"], expr.literal("")),
+        documentBackfillLoggingConfigurationOverrideConfigMap: expr.dig(config, ["documentBackfillConfig", "loggingConfigurationOverrideConfigMap"], expr.literal("")),
+        documentBackfillUseTargetClusterForWorkCoordination: expr.dig(config, ["documentBackfillConfig", "useTargetClusterForWorkCoordination"], false),
+        documentBackfillResources: expr.dig(config, ["documentBackfillConfig", "resources"], expr.makeDict({})),
+        documentBackfillIndexAllowlist: expr.dig(config, ["documentBackfillConfig", "indexAllowlist"], expr.literal([])),
+        documentBackfillAllowLooseVersionMatching: expr.dig(config, ["documentBackfillConfig", "allowLooseVersionMatching"], true),
+        documentBackfillEnableSourcelessMigrations: expr.dig(config, ["documentBackfillConfig", "enableSourcelessMigrations"], false),
+        documentBackfillUseRecoverySource: expr.dig(config, ["documentBackfillConfig", "useRecoverySource"], false),
+        documentBackfillPositionGapStopword: expr.dig(config, ["documentBackfillConfig", "positionGapStopword"], expr.literal("a")),
+        documentBackfillDocTransformerConfigBase64: expr.dig(config, ["documentBackfillConfig", "docTransformerConfigBase64"], expr.literal("")),
+        documentBackfillDocTransformerConfig: expr.dig(config, ["documentBackfillConfig", "docTransformerConfig"], expr.literal("")),
+        documentBackfillDocTransformerConfigFile: expr.dig(config, ["documentBackfillConfig", "docTransformerConfigFile"], expr.literal("")),
+        documentBackfillFileSourceVolumes: expr.dig(config, ["documentBackfillConfig", "fileSourceVolumes"], expr.literal([])),
+        documentBackfillFileSourceVolumeMounts: expr.dig(config, ["documentBackfillConfig", "fileSourceVolumeMounts"], expr.literal([])),
+        documentBackfillDocumentsPerBulkRequest: expr.dig(config, ["documentBackfillConfig", "documentsPerBulkRequest"], 0x7fffffff),
+        documentBackfillDocumentsSizePerBulkRequest: expr.dig(config, ["documentBackfillConfig", "documentsSizePerBulkRequest"], 10 * 1024 * 1024),
+        documentBackfillInitialLeaseDuration: expr.dig(config, ["documentBackfillConfig", "initialLeaseDuration"], expr.literal("PT1H")),
+        documentBackfillMaxConnections: expr.dig(config, ["documentBackfillConfig", "maxConnections"], 10),
+        documentBackfillMaxShardSizeBytes: expr.dig(config, ["documentBackfillConfig", "maxShardSizeBytes"], 80 * 1024 * 1024 * 1024),
+        documentBackfillOtelTraceCollectorEndpoint: expr.dig(config, ["documentBackfillConfig", "otelTraceCollectorEndpoint"], expr.literal("")),
+        documentBackfillOtelMetricsCollectorEndpoint: expr.dig(config, ["documentBackfillConfig", "otelMetricsCollectorEndpoint"], expr.literal("")),
+        documentBackfillServerGeneratedIds: expr.dig(config, ["documentBackfillConfig", "serverGeneratedIds"], expr.literal("AUTO")),
+        documentBackfillEmitDocType: expr.dig(config, ["documentBackfillConfig", "emitDocType"], expr.literal("AUTO")),
+        documentBackfillAllowedDocExceptionTypes: expr.dig(config, ["documentBackfillConfig", "allowedDocExceptionTypes"], expr.literal([])),
+        documentBackfillCoordinatorRetryMaxRetries: expr.dig(config, ["documentBackfillConfig", "coordinatorRetryMaxRetries"], 7),
+        documentBackfillCoordinatorRetryInitialDelayMs: expr.dig(config, ["documentBackfillConfig", "coordinatorRetryInitialDelayMs"], 1000),
+        documentBackfillCoordinatorRetryMaxDelayMs: expr.dig(config, ["documentBackfillConfig", "coordinatorRetryMaxDelayMs"], 64000),
+    });
     return {
         apiVersion: CRD_API_VERSION,
         kind: "SnapshotMigration",
@@ -363,101 +429,21 @@ function makeSnapshotMigrationManifest(
                 [MIGRATION_LABEL]: makeStringTypeProxy(expr.get(config, "migrationLabel")),
             }
         },
-        spec: {
-            // Written by tryApply so the live CR carries its reset-DAG edge (workflow reset reads
-            // spec.dependsOn). A SnapshotMigration depends on its DataSnapshot when one exists; an
-            // externally-managed ES/OS snapshot with no DataSnapshot has no upstream CR edge.
-            dependsOn: makeDirectTypeProxy(expr.ternary(
-                hasDataSnapshotResource,
-                expr.toArray(expr.dig(snapshotNameResolution, ["dataSnapshotResourceName"], expr.literal(""))),
-                expr.literal([])
-            )),
-            migrationLabel: makeStringTypeProxy(expr.get(config, "migrationLabel")),
-            sourceVersion: makeStringTypeProxy(expr.dig(sourceIdentity, ["version"], expr.literal(""))),
-            sourceLabel: makeStringTypeProxy(expr.dig(sourceIdentity, ["label"], expr.literal(""))),
-            sourceEndpoint: makeStringTypeProxy(expr.dig(sourceIdentity, ["endpoint"], expr.literal(""))),
-            sourceAllowInsecure: makeDirectTypeProxy(expr.dig(sourceIdentity, ["allowInsecure"], false)),
-            targetLabel: makeStringTypeProxy(expr.dig(targetIdentity, ["label"], expr.literal(""))),
-            targetEndpoint: makeStringTypeProxy(expr.dig(targetIdentity, ["endpoint"], expr.literal(""))),
-            targetAllowInsecure: makeDirectTypeProxy(expr.dig(targetIdentity, ["allowInsecure"], false)),
-            targetAuthType: makeStringTypeProxy(expr.dig(targetIdentity, ["authType"], expr.literal("none"))),
-            targetAuthBasicSecretName: makeStringTypeProxy(
-                expr.dig(targetIdentity, ["authBasicSecretName"], expr.literal(""))
+        // Omit optional immutable fields on ordinary backfills so existing CRs remain valid.
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            baseSpec,
+            expr.mergeDicts(
+                expr.ternary(expr.hasKey(config, "delta"), expr.makeDict({
+                    deltaMode: expr.dig(config, ["delta", "mode"], ""),
+                    previousDataSnapshotResourceName: previousDataSnapshotName,
+                    previousExternalSnapshotName: expr.dig(config,
+                        ["delta", "previousSnapshotNameResolution", "externalSnapshotName"], ""),
+                }), expr.makeDict({})),
+                expr.ternary(expr.hasKey(config, "previousMigrationResourceName"), expr.makeDict({
+                    previousMigrationResourceName: previousMigrationName,
+                }), expr.makeDict({})),
             ),
-            targetAuthSigv4Region: makeStringTypeProxy(
-                expr.dig(targetIdentity, ["authSigv4Region"], expr.literal(""))
-            ),
-            targetAuthSigv4Service: makeStringTypeProxy(
-                expr.dig(targetIdentity, ["authSigv4Service"], expr.literal(""))
-            ),
-            targetAuthMtlsClientSecretName: makeStringTypeProxy(
-                expr.dig(targetIdentity, ["authMtlsClientSecretName"], expr.literal(""))
-            ),
-            targetAuthMtlsCaCertHash: makeStringTypeProxy(
-                expr.dig(targetIdentity, ["authMtlsCaCertHash"], expr.literal(""))
-            ),
-            snapshotLabel: makeStringTypeProxy(expr.dig(config, ["snapshotConfig", "label"], expr.literal(""))),
-            snapshotSourceType: makeStringTypeProxy(snapshotSourceType),
-            dataSnapshotResourceName: makeStringTypeProxy(
-                expr.dig(snapshotNameResolution, ["dataSnapshotResourceName"], expr.literal(""))
-            ),
-            externalSnapshotName: makeStringTypeProxy(
-                expr.dig(snapshotNameResolution, ["externalSnapshotName"], expr.literal(""))
-            ),
-            snapshotRepoName: makeStringTypeProxy(expr.dig(snapshotRepo, ["repoName"], expr.literal(""))),
-            snapshotRepoPathUri: makeStringTypeProxy(expr.dig(snapshotRepo, ["repoPathUri"], expr.literal(""))),
-            snapshotRepoAwsRegion: makeStringTypeProxy(expr.dig(snapshotRepo, ["awsRegion"], expr.literal(""))),
-            snapshotRepoEndpoint: makeStringTypeProxy(expr.dig(snapshotRepo, ["endpoint"], expr.literal(""))),
-            snapshotRepoS3RoleArn: makeStringTypeProxy(expr.dig(snapshotRepo, ["s3RoleArn"], expr.literal(""))),
-            snapshotRepoUseLocalStack: makeDirectTypeProxy(expr.dig(snapshotRepo, ["useLocalStack"], false)),
-            metadataMigrationJvmArgs: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "jvmArgs"], expr.literal(""))),
-            metadataMigrationLoggingConfigurationOverrideConfigMap: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "loggingConfigurationOverrideConfigMap"], expr.literal(""))),
-            metadataMigrationResources: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "resources"], expr.makeDict({}))),
-            metadataMigrationComponentTemplateAllowlist: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "componentTemplateAllowlist"], expr.literal([]))),
-            metadataMigrationIndexAllowlist: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "indexAllowlist"], expr.literal([]))),
-            metadataMigrationIndexTemplateAllowlist: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "indexTemplateAllowlist"], expr.literal([]))),
-            metadataMigrationAllowLooseVersionMatching: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "allowLooseVersionMatching"], true)),
-            metadataMigrationClusterAwarenessAttributes: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "clusterAwarenessAttributes"], 1)),
-            metadataMigrationEnableSourcelessMigrations: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "enableSourcelessMigrations"], false)),
-            metadataMigrationUseRecoverySource: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "useRecoverySource"], false)),
-            metadataMigrationOtelTraceCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelTraceCollectorEndpoint"], expr.literal(""))),
-            metadataMigrationOtelMetricsCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelMetricsCollectorEndpoint"], expr.literal(""))),
-            metadataMigrationOutput: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "output"], expr.literal("HUMAN_READABLE"))),
-            metadataMigrationTransformerConfigBase64: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfigBase64"], expr.literal(""))),
-            metadataMigrationTransformerConfig: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfig"], expr.literal(""))),
-            metadataMigrationTransformerConfigFile: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfigFile"], expr.literal(""))),
-            metadataMigrationFileSourceVolumes: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumes"], expr.literal([]))),
-            metadataMigrationFileSourceVolumeMounts: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "fileSourceVolumeMounts"], expr.literal([]))),
-            documentBackfillPodReplicas: makeDirectTypeProxy(documentBackfillScaling.documentBackfillPodReplicas),
-            documentBackfillMinPodReplicas: makeDirectTypeProxy(documentBackfillScaling.documentBackfillMinPodReplicas),
-            documentBackfillJvmArgs: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "jvmArgs"], expr.literal(""))),
-            documentBackfillLoggingConfigurationOverrideConfigMap: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "loggingConfigurationOverrideConfigMap"], expr.literal(""))),
-            documentBackfillUseTargetClusterForWorkCoordination: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "useTargetClusterForWorkCoordination"], false)),
-            documentBackfillResources: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "resources"], expr.makeDict({}))),
-            documentBackfillIndexAllowlist: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "indexAllowlist"], expr.literal([]))),
-            documentBackfillAllowLooseVersionMatching: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "allowLooseVersionMatching"], true)),
-            documentBackfillEnableSourcelessMigrations: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "enableSourcelessMigrations"], false)),
-            documentBackfillUseRecoverySource: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "useRecoverySource"], false)),
-            documentBackfillPositionGapStopword: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "positionGapStopword"], expr.literal("a"))),
-            documentBackfillDocTransformerConfigBase64: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfigBase64"], expr.literal(""))),
-            documentBackfillDocTransformerConfig: makeYamlJsonLiteralProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfig"], expr.literal(""))),
-            documentBackfillDocTransformerConfigFile: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfigFile"], expr.literal(""))),
-            documentBackfillFileSourceVolumes: makeYamlJsonLiteralProxy(expr.dig(config, ["documentBackfillConfig", "fileSourceVolumes"], expr.literal([]))),
-            documentBackfillFileSourceVolumeMounts: makeYamlJsonLiteralProxy(expr.dig(config, ["documentBackfillConfig", "fileSourceVolumeMounts"], expr.literal([]))),
-            documentBackfillDocumentsPerBulkRequest: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "documentsPerBulkRequest"], 0x7fffffff)),
-            documentBackfillDocumentsSizePerBulkRequest: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "documentsSizePerBulkRequest"], 10 * 1024 * 1024)),
-            documentBackfillInitialLeaseDuration: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "initialLeaseDuration"], expr.literal("PT1H"))),
-            documentBackfillMaxConnections: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxConnections"], 10)),
-            documentBackfillMaxShardSizeBytes: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxShardSizeBytes"], 80 * 1024 * 1024 * 1024)),
-            documentBackfillOtelTraceCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "otelTraceCollectorEndpoint"], expr.literal(""))),
-            documentBackfillOtelMetricsCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "otelMetricsCollectorEndpoint"], expr.literal(""))),
-            documentBackfillServerGeneratedIds: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "serverGeneratedIds"], expr.literal("AUTO"))),
-            documentBackfillEmitDocType: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "emitDocType"], expr.literal("AUTO"))),
-            documentBackfillAllowedDocExceptionTypes: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "allowedDocExceptionTypes"], expr.literal([]))),
-            documentBackfillCoordinatorRetryMaxRetries: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "coordinatorRetryMaxRetries"], 7)),
-            documentBackfillCoordinatorRetryInitialDelayMs: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "coordinatorRetryInitialDelayMs"], 1000)),
-            documentBackfillCoordinatorRetryMaxDelayMs: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "coordinatorRetryMaxDelayMs"], 64000)),
-        },
+        )),
     };
 }
 
@@ -1282,6 +1268,26 @@ export const ResourceManagement = WorkflowBuilder.create({
         configChecksum: "",
         checksumForReplayer: ""
     }))
+    .addTemplate("patchSnapshotSequenceCheckpoint", t => buildPatchStatusTemplate(t, "SnapshotMigration", {
+        sequenceCompletionChecksum: "",
+        checksumForReplayer: ""
+    }))
+    .addTemplate("readSnapshotSequenceCheckpoint", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b.setDefinition({
+            action: "get",
+            manifest: {
+                apiVersion: CRD_API_VERSION,
+                kind: "SnapshotMigration",
+                metadata: {name: expr.yamlSafeString(b.inputs.resourceName)},
+            },
+            // A partially successful baseline cannot be the base of a later delta.
+            successCondition: "status.documentBackfill.phase == Completed",
+            failureCondition: "status.documentBackfill.phase == CompletedWithErrors",
+        }))
+        .addJsonPathOutput("completedChecksum", "{.status.sequenceCompletionChecksum}", typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
     .addTemplate("patchSnapshotMigrationOutputEvaluate", t =>
         buildPatchOutputTemplate(t, "SnapshotMigration", "metadataEvaluate"))
     .addTemplate("patchSnapshotMigrationOutputMigrate", t =>

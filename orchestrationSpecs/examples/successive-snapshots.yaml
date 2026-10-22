@@ -1,0 +1,29 @@
+# Run with: workflow configure edit --stdin < successive-snapshots.yaml
+# Replace endpoints, repository URI, region, and authentication for your deployment.
+sourceClusters:
+  source:
+    endpoint: https://source.example.com:9200
+    version: ES 7.10
+    snapshotInfo:
+      repos:
+        migration:
+          repoPathUri: s3://migration-snapshots/successive
+          awsRegion: us-east-1
+targetClusters:
+  target:
+    endpoint: https://target.example.com:9200
+snapshotMigrationConfigs:
+  - fromSource: source
+    toTarget: target
+    backfill:
+      snapshot:
+        repoName: migration
+        createSnapshotConfig:
+          indexAllowlist: [orders]
+      metadataMigrationConfig: {}
+      documentBackfillConfig:
+        indexAllowlist: [orders]
+      repeat:
+        maxRuns: 3
+        until:
+          snapshotLag: 2m

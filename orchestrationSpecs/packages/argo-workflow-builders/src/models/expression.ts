@@ -664,12 +664,12 @@ class ExprBuilder {
     }
 
     add<
-        L extends BaseExpression<boolean, CL>,
-        R extends BaseExpression<boolean, CR>,
+        L extends BaseExpression<number, CL>,
+        R extends BaseExpression<number, CR>,
         CL extends ExpressionType = ExprC<L>,
         CR extends ExpressionType = ExprC<R>,
     >(l: L, r: R) {
-        return new InfixExpression("+", l, r);
+        return new InfixExpression<number, CL, CR>("+", l, r, typeToken<number>());
     }
 
     subtract<
@@ -1019,6 +1019,10 @@ class ExprBuilder {
     }
 
     // Array operations
+    asInt(value: BaseExpression<number | string, any>): BaseExpression<number, "complicatedExpression"> {
+        return fn<number, ExpressionType, "complicatedExpression">("asInt", value);
+    }
+
     index<
         A extends BaseExpression<any[], any>,
         I extends BaseExpression<number, any>

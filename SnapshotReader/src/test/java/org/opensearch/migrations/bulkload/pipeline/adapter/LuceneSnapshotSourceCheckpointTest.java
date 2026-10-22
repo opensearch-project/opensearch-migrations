@@ -30,6 +30,8 @@ class LuceneSnapshotSourceCheckpointTest {
     @CsvSource({"false, 0", "false, 14", "true, 0", "true, 14"})
     void reportsSnapshotCountAfterResumedReadIncludingNewDeltaShards(boolean delta, long liveCount) {
         var extractor = mock(SnapshotExtractor.class);
+        when(extractor.listSnapshots()).thenReturn(List.of("previous", "current"));
+        when(extractor.listIndices("current")).thenReturn(List.of("idx"));
         var current = new SnapshotExtractor.ShardEntry("current", "idx", "id", 0, mock(ShardMetadata.class));
         when(extractor.listShards("current", "idx")).thenReturn(List.of(current));
         when(extractor.listShards("previous", "idx")).thenReturn(List.of());
@@ -54,7 +56,10 @@ class LuceneSnapshotSourceCheckpointTest {
     @Test
     void deltaResumeUsesStreamOrderAcrossDeletionsAndAdditions() {
         var extractor = mock(SnapshotExtractor.class);
+        when(extractor.listSnapshots()).thenReturn(List.of("previous", "current"));
+        when(extractor.listIndices("current")).thenReturn(List.of("idx"));
         var current = new SnapshotExtractor.ShardEntry("current", "idx", "id", 0, mock(ShardMetadata.class));
+        when(extractor.listIndices("previous")).thenReturn(List.of("idx"));
         var previous = new SnapshotExtractor.ShardEntry("previous", "idx", "id", 0, mock(ShardMetadata.class));
         when(extractor.listShards("current", "idx")).thenReturn(List.of(current));
         when(extractor.listShards("previous", "idx")).thenReturn(List.of(previous));

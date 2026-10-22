@@ -10,7 +10,8 @@ set -eu
 : "${SNAPSHOT_MIGRATION_NAME:?}"
 : "${SM_UID:?}"
 : "${CONFIG_CHECKSUM:?}"
-: "${CHECKSUM_FOR_REPLAYER:?}"
+# Snapshot sequences publish this checksum only after the backfill approval checkpoint.
+: "${CHECKSUM_FOR_REPLAYER?}"
 : "${RFS_DEPLOYMENT_NAME:?}"
 : "${RFS_COORDINATOR_NAME:?}"
 : "${USES_DEDICATED_COORDINATOR:?}"

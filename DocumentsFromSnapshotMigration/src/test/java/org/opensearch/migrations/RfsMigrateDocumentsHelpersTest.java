@@ -391,7 +391,7 @@ class RfsMigrateDocumentsHelpersTest {
         // delta mode intentionally left null
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
-        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--experimental-delta-mode"));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--delta-mode"));
     }
 
     @Test
@@ -402,7 +402,38 @@ class RfsMigrateDocumentsHelpersTest {
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(),
-            org.hamcrest.Matchers.containsString("--experimental-previous-snapshot-name"));
+            org.hamcrest.Matchers.containsString("--previous-snapshot-name"));
+    }
+
+    @Test
+    void deltaOptionsAcceptTheWorkflowInlineJsonAndLegacyFlags() {
+        var args = validEsArgs();
+        JsonCommandLineParser.newBuilder().addObject(args).build().parse(new String[] {
+            "---INLINE-JSON", "{\"previousSnapshotName\":\"baseline\", \"deltaMode\":\"DELETES_ONLY\"}"
+        });
+        assertThat(args.experimental.previousSnapshotName, equalTo("baseline"));
+        assertThat(args.experimental.experimentalDeltaMode, equalTo(DeltaMode.DELETES_ONLY));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+
+        var legacy = validEsArgs();
+        JsonCommandLineParser.newBuilder().addObject(legacy).build().parse(new String[] {
+            "--target-host", "http://localhost:9200",
+            "--experimental-previous-snapshot-name", "baseline", "--experimental-delta-mode", "UPDATES_ONLY"
+        });
+        assertThat(legacy.experimental.previousSnapshotName, equalTo("baseline"));
+        assertThat(legacy.experimental.experimentalDeltaMode, equalTo(DeltaMode.UPDATES_ONLY));
+    }
+
+    @Test
+    void deltaValidationRejectsGeneratedIdsAndSourceReconstruction() {
+        var args = validEsArgs();
+        args.experimental.previousSnapshotName = "baseline";
+        args.experimental.experimentalDeltaMode = DeltaMode.UPDATES_ONLY;
+        args.serverGeneratedIds = RfsMigrateDocuments.ServerGeneratedIdMode.ALWAYS;
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        args.serverGeneratedIds = RfsMigrateDocuments.ServerGeneratedIdMode.NEVER;
+        args.experimental.enableSourcelessMigrations = true;
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
     }
 
     @Test

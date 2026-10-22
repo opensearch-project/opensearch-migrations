@@ -118,6 +118,26 @@ class Snapshot(ABC):
         """Get the status of the snapshot."""
         pass
 
+    def status_json(self, deep_check: bool = False) -> dict:
+        """Machine-readable state and the source's snapshot timestamp, without display-time rounding."""
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            result = self.status(deep_check=False)
+            if not result.success:
+                raise SnapshotStatusUnavailable(result.value)
+            return {"state": result.value}
+        raw = get_latest_snapshot_status_raw(
+            self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
+        details = raw.details
+        return {
+            **(SnapshotStatus.from_snapshot_info(details).model_dump(mode="json") if deep_check else {}),
+            "state": raw.state,
+            "snapshot_start_time_in_millis": (
+                details.get("start_time_in_millis") or details.get("stats", {}).get("start_time_in_millis")
+            ),
+        }
+
     @abstractmethod
     def delete(self, *args, **kwargs) -> str:
         """Delete a snapshot."""
@@ -714,7 +734,7 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     snapshot_info = snapshots[0]
     state = snapshot_info.get("state")
     if not deep_check:
-        return SnapshotStateAndDetails(state, None)
+        return SnapshotStateAndDetails(state, snapshot_info)
 
     # For deep check, try status API first (for running snapshots)
     try:
