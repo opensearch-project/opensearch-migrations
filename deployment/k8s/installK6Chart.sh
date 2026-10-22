@@ -43,6 +43,9 @@ CHART="${K6_CHART:-${SCRIPT_DIR}/charts/components/k6LoadTest}"
 RUNNER_IMAGE="${K6_IMAGE:-}"
 OPERATOR_IMAGE="${K6_OPERATOR_IMAGE:-}"
 REGISTRY_PREFIX="${REGISTRY_PREFIX:-}"
+# The tag of the default runner and operator images: whatever tag the images were built with
+# (LOCAL_IMAGE_TAG for kindTesting.sh builds), since a versioned build pushes only that tag.
+IMAGE_TAG="${K6_IMAGE_TAG:-${LOCAL_IMAGE_TAG:-latest}}"
 
 # ECR flattens every image into ONE repository and distinguishes them by tag
 # (<repo>:migrations_k6_runner_latest). Every other registry keeps the <prefix>migrations/<image>
@@ -137,16 +140,16 @@ cmd_install() {
   fi
   if [[ -z "$RUNNER_IMAGE" ]]; then
     if [[ "$REGISTRY_PREFIX" =~ $ECR_PATTERN ]]; then
-      RUNNER_IMAGE="${REGISTRY_PREFIX%/}:migrations_k6_runner_latest"
+      RUNNER_IMAGE="${REGISTRY_PREFIX%/}:migrations_k6_runner_${IMAGE_TAG}"
     else
-      RUNNER_IMAGE="${REGISTRY_PREFIX}migrations/k6_runner:latest"
+      RUNNER_IMAGE="${REGISTRY_PREFIX}migrations/k6_runner:${IMAGE_TAG}"
     fi
   fi
   if [[ -z "$OPERATOR_IMAGE" ]]; then
     if [[ "$REGISTRY_PREFIX" =~ $ECR_PATTERN ]]; then
-      OPERATOR_IMAGE="${REGISTRY_PREFIX%/}:migrations_k6_operator_latest"
+      OPERATOR_IMAGE="${REGISTRY_PREFIX%/}:migrations_k6_operator_${IMAGE_TAG}"
     else
-      OPERATOR_IMAGE="${REGISTRY_PREFIX}migrations/k6_operator:latest"
+      OPERATOR_IMAGE="${REGISTRY_PREFIX}migrations/k6_operator:${IMAGE_TAG}"
     fi
   fi
 

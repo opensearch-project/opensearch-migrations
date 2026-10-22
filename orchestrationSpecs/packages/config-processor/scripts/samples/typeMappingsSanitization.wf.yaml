@@ -7,11 +7,21 @@ targetClusters:
   prod-os:
     endpoint: "https://target.example.com:9200"
 
+snapshotMigrationConfigs: []
+
 traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture: {}
   proxies:
     capture:
+      kafka: default
+      kafkaTopic: capture
       source: prod-solr
       proxyConfig:
+        listenPort: 9201
         tls:
           mode: certManager
           issuerRef:
@@ -46,7 +56,7 @@ traffic:
                     path: featureFlags.json
           - entryPoint:
               javascriptFile:
-                image: "123456789012.dkr.ecr.us-east-1.amazonaws.com/replay-transforms@sha256:abc123"
+                image: "123456789012.dkr.ecr.us-east-1.amazonaws.com/replay-transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 path: request.js
             context:
               values:

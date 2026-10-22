@@ -1,6 +1,8 @@
 """Tests for resource_tree.py — resource-centric tree building and formatting."""
 
 
+from rich.tree import Tree
+
 from console_link.workflow.resource_tree import (
     CONFIG_MODE_CURRENT_WORKFLOW,
     CONFIG_MODE_DEPLOYED,
@@ -9,7 +11,9 @@ from console_link.workflow.resource_tree import (
     ResourceGroup,
     ResourceNode,
     ResourceSection,
+    PHASE_SYMBOLS,
     _build_tree_from_raw,
+    _render_resource,
     active_approval_node,
     apply_config_overlays,
     approval_target_ref,
@@ -1008,3 +1012,19 @@ class TestMarkNotConfiguredGroups:
         for s in sections:
             for g in s.groups:
                 assert g.not_configured is False
+
+
+class TestPhaseSymbols:
+    RESOURCE_PHASES = ['Created', 'Pending', 'Ready', 'Completed', 'Deleting', 'Error']
+
+    def test_symbols_cover_resource_phases(self):
+        assert set(self.RESOURCE_PHASES).issubset(PHASE_SYMBOLS)
+
+    def test_rendered_label_uses_phase_symbol(self):
+        unknown_symbol = PHASE_SYMBOLS['Unknown'][0]
+        for phase in self.RESOURCE_PHASES:
+            tree = Tree('root')
+            _render_resource(tree, make_resource(phase=phase), show_live_status=False)
+            label = str(tree.children[0].label)
+            assert PHASE_SYMBOLS[phase][0] in label, phase
+            assert unknown_symbol not in label, phase

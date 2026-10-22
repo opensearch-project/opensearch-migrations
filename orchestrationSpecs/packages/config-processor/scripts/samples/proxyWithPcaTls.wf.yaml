@@ -1,8 +1,5 @@
 # Capture proxy with AWS PCA-signed TLS certificate
 # Demonstrates TLS certificate provisioning via cert-manager + AWS Private CA
-kafkaClusterConfiguration:
-  default:
-    autoCreate: {}
 
 sourceClusters:
   source:
@@ -18,8 +15,15 @@ targetClusters:
 snapshotMigrationConfigs: []
 
 traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture-proxy: {}
   proxies:
     capture-proxy:
+      kafka: default
+      kafkaTopic: capture-proxy
       source: "source"
       proxyConfig:
         listenPort: 9201

@@ -32,7 +32,7 @@ function storedArray(key: string): unknown[] {
 function encodeBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) binary += String.fromCodePoint(byte);
   return globalThis.btoa(binary)
     .replaceAll("+", "-")
     .replaceAll("/", "_")
@@ -47,7 +47,10 @@ function decodeBase64Url(value: string): string {
     "=",
   );
   const binary = globalThis.atob(padded);
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const bytes = Uint8Array.from(
+    binary,
+    (character) => character.codePointAt(0) ?? 0,
+  );
   return new TextDecoder().decode(bytes);
 }
 

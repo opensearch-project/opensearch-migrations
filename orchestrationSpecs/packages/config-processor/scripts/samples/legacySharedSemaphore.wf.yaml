@@ -1,5 +1,5 @@
 sourceClusters:
-  legacySource:
+  legacy-source:
     endpoint: https://elasticsearch-master-headless:9200
     allowInsecure: true
     version: ES 5.6.0
@@ -25,18 +25,20 @@ targetClusters:
   target:
     endpoint: https://opensearch-cluster-master-headless:9200
     allowInsecure: true
-    version: OS 2.11
     authConfig:
       basic:
         secretName: target-creds
 snapshotMigrationConfigs:
-  - fromSource: legacySource
+  - fromSource: legacy-source
     toTarget: target
-    perSnapshotConfig:
-      s1:
-        - metadataMigrationConfig: {}
-      s2:
-        - documentBackfillConfig: {}
+    fromSnapshot: s1
+    slice: metadata
+    metadataMigrationConfig: {}
+  - fromSource: legacy-source
+    toTarget: target
+    fromSnapshot: s2
+    slice: backfill
+    documentBackfillConfig: {}
 traffic:
   proxies: {}
   replayers: {}

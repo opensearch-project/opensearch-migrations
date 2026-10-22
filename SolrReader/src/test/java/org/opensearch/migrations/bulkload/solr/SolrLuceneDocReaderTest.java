@@ -278,6 +278,10 @@ class SolrLuceneDocReaderTest {
         // Anonymous LuceneLeafReader: forwards everything except document(), which throws.
         var throwingReader = new LuceneLeafReader() {
             @Override
+            public long countLiveDocumentsWithTermPrefix(String fieldName, String prefix) throws java.io.IOException {
+                return realReader.countLiveDocumentsWithTermPrefix(fieldName, prefix);
+            }
+            @Override
             public org.opensearch.migrations.bulkload.lucene.LuceneDocument document(int luceneDocId)
                     throws java.io.IOException {
                 throw new java.io.IOException("simulated read failure");

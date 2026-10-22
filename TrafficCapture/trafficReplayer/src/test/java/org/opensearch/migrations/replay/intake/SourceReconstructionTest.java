@@ -882,6 +882,40 @@ class SourceReconstructionTest {
             List.of(finalResponse),
             sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
         );
+        var response = sink.responses.get(0);
+        Assertions.assertEquals(
+            Instant.ofEpochSecond(7),
+            response.getFirstDataTimestamp(),
+            "the final response's first byte is its own write, not the request end or an interim response"
+        );
+        Assertions.assertEquals(Instant.ofEpochSecond(7), response.getLastPacketTimestamp());
+    }
+
+    @Test
+    void segmentedFinalResponseRecordsItsFirstSegmentAsItsFirstData() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                interim(3, "HTTP/1.1 102 Processing\r\n\r\n"),
+                writeSegment(4, "HTTP/1.1 200 OK\r\n"),
+                writeSegment(5, "Content-Length: 0\r\n\r\n"),
+                segmentEnd(6),
+                close(7)
+            )
+        );
+
+        applyAll(script);
+
+        var response = sink.responses.get(0);
+        Assertions.assertEquals(Instant.ofEpochSecond(2), response.getFirstPacketTimestamp());
+        Assertions.assertEquals(Instant.ofEpochSecond(4), response.getFirstDataTimestamp());
+        Assertions.assertEquals(Instant.ofEpochSecond(6), response.getLastPacketTimestamp());
     }
 
     @Test
@@ -1264,6 +1298,174 @@ class SourceReconstructionTest {
             sink.requestIds.get(0).capturedRequestOrdinal(),
             "three completed requests plus one inherited incomplete request occupy ordinals zero through three"
         );
+    }
+
+    private static final String OK_RESPONSE = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+
+    @Test
+    void aRequestForwardSetsWhenItsResponsesRequestReachedTheSource() {
+        applyAll(new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, read(1, REQUEST_BYTES), endOfMessage(2), requestForwarded(3), write(4, OK_RESPONSE), close(5))
+        ));
+
+        Assertions.assertEquals(1, sink.responses.size());
+        Assertions.assertEquals(Instant.ofEpochSecond(3), sink.responses.get(0).getRequestForwardedTimestamp());
+        assertNoProtocolViolations();
+    }
+
+    @Test
+    void eachRequestOnAConnectionPairsWithItsOwnForward() {
+        applyAll(new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                requestForwarded(3),
+                write(4, OK_RESPONSE),
+                read(5, REQUEST_BYTES),
+                endOfMessage(6),
+                requestForwarded(7),
+                write(8, OK_RESPONSE),
+                close(9)
+            )
+        ));
+
+        Assertions.assertEquals(
+            List.of(Instant.ofEpochSecond(3), Instant.ofEpochSecond(7)),
+            sink.responses.stream().map(HttpMessageAndTimestamp.Response::getRequestForwardedTimestamp).toList()
+        );
+        assertNoProtocolViolations();
+    }
+
+    @Test
+    void aMissingForwardLeavesItsResponseWithoutOneAndTheNextRequestKeepsItsOwn() {
+        applyAll(new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                write(3, OK_RESPONSE),
+                read(4, REQUEST_BYTES),
+                endOfMessage(5),
+                requestForwarded(6),
+                write(7, OK_RESPONSE),
+                close(8)
+            )
+        ));
+
+        Assertions.assertEquals(2, sink.responses.size());
+        Assertions.assertNull(sink.responses.get(0).getRequestForwardedTimestamp());
+        Assertions.assertEquals(Instant.ofEpochSecond(6), sink.responses.get(1).getRequestForwardedTimestamp());
+        assertNoProtocolViolations();
+    }
+
+    @Test
+    void aForwardWithNoEndOfMessageAwaitingItIsAProtocolViolation() {
+        applyAll(new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, read(1, REQUEST_BYTES), endOfMessage(2), requestForwarded(3), requestForwarded(4))
+        ));
+
+        Assertions.assertEquals(1, protocolViolationCount());
+    }
+
+    @Test
+    void aForwardAfterTheNextRequestBeganIsAProtocolViolation() {
+        applyAll(new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                write(3, OK_RESPONSE),
+                read(4, REQUEST_BYTES),
+                requestForwarded(5)
+            )
+        ));
+
+        Assertions.assertEquals(1, protocolViolationCount());
+    }
+
+    @Test
+    void aResponseThatCompletedBeforeItsForwardKeepsNone() {
+        var postHead = "POST /thing HTTP/1.1\r\nContent-Length: 4\r\n\r\n";
+        applyAll(new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, postHead),
+                write(2, "HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\n\r\n"),
+                read(3, "body"),
+                endOfMessage(4),
+                requestForwarded(5),
+                close(6)
+            )
+        ));
+
+        Assertions.assertEquals(1, sink.responses.size());
+        Assertions.assertNull(sink.responses.get(0).getRequestForwardedTimestamp());
+        assertNoProtocolViolations();
+    }
+
+    @Test
+    void aForwardBeforeTheLifetimesFirstEndOfMessageBelongsToAnEarlierRequest() {
+        var resumedAfterAnEndOfMessage = TrafficStream.newBuilder()
+            .setNodeId(WRITER)
+            .setConnectionId(CONNECTION)
+            .setNumber(1)
+            .setPriorRequestsReceived(1)
+            .addAllSubStream(List.of(
+                requestForwarded(1),
+                write(2, OK_RESPONSE),
+                read(3, REQUEST_BYTES),
+                endOfMessage(4),
+                requestForwarded(5),
+                write(6, OK_RESPONSE),
+                close(7)
+            ))
+            .build();
+        applyAll(new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            resumedAfterAnEndOfMessage
+        ));
+
+        Assertions.assertEquals(1, sink.responses.size());
+        Assertions.assertEquals(Instant.ofEpochSecond(5), sink.responses.get(0).getRequestForwardedTimestamp());
+        assertNoProtocolViolations();
+    }
+
+    private void assertNoProtocolViolations() {
+        Assertions.assertEquals(0, protocolViolationCount());
+    }
+
+    private long protocolViolationCount() {
+        return drainSource().stream()
+            .filter(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
+            .count();
     }
 
     /** A drop marker without the captured prefix it describes is a capture-protocol violation. */
@@ -1734,6 +1936,15 @@ class SourceReconstructionTest {
     private static TrafficObservation segmentEnd(long sequence) {
         return observation(sequence)
             .setSegmentEnd(EndOfSegmentsIndication.getDefaultInstance())
+            .build();
+    }
+
+    private static TrafficObservation requestForwarded(long sequence) {
+        return observation(sequence)
+            .setRequestForwarded(
+                org.opensearch.migrations.trafficcapture.protos.ProxyFinishesForwardingRequestObservation
+                    .getDefaultInstance()
+            )
             .build();
     }
 

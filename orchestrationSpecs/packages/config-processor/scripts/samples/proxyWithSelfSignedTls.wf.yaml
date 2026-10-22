@@ -1,7 +1,4 @@
 # Capture proxy with self-signed TLS certificate (for kind / non-AWS)
-kafkaClusterConfiguration:
-  default:
-    autoCreate: {}
 
 sourceClusters:
   source:
@@ -17,8 +14,15 @@ targetClusters:
 snapshotMigrationConfigs: []
 
 traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture-proxy: {}
   proxies:
     capture-proxy:
+      kafka: default
+      kafkaTopic: capture-proxy
       source: "source"
       proxyConfig:
         listenPort: 9201

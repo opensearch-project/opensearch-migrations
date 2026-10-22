@@ -154,7 +154,10 @@ def k6OperatorEntry = [
     contextDir: "TrafficCapture/trafficLoadTest/k6Operator",
     imageName:  "k6_operator",
     imageTag:   "latest",
+    // The image build downloads Go modules for its tests and the controller, so it honors the
+    // builder's GOPROXY the same way as k6Runner above.
     buildArgs: [
+        GOPROXY: System.getenv("GOPROXY") ?: "",
         BUILDER_IMAGE: ptc.rewrite(
             "docker.io/library/golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648"
         ),

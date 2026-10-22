@@ -48,6 +48,7 @@ namespace="ma"
 build=false
 use_public_images=true
 skip_console_exec=false
+helm_upgrade=false
 stage_filter=""
 extra_helm_values=""
 disable_general_purpose_pool=false
@@ -72,7 +73,6 @@ ignore_checks=false
 push_images_to_ecr=true
 ma_images_source=""
 skip_setting_k8s_context=false
-skip_test_images=false
 with_load_test_images=false
 image_tag="latest"
 kubectl_context=""
@@ -87,6 +87,9 @@ while [[ $# -gt 0 ]]; do
     --namespace) namespace="$2"; shift 2 ;;
     --build) build=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
+    # Undocumented on purpose (not in --help): Migration Assistant releases aren't backward compatible yet,
+    # so upgrading an existing release in place is unsupported. For developers redeploying their own builds.
+    --helm-upgrade) helm_upgrade=true; shift 1 ;;
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
     --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
@@ -116,7 +119,8 @@ while [[ $# -gt 0 ]]; do
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     --kubectl-context) kubectl_context="$2"; shift 2 ;;
-    --skip-test-images) skip_test_images=true; shift 1 ;;
+    # Accepted for older callers; the EKS build never includes test-only images now.
+    --skip-test-images) shift 1 ;;
     --with-load-test-images) with_load_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
@@ -205,7 +209,6 @@ while [[ $# -gt 0 ]]; do
       echo "                                            to every kubectl/helm command, or set the context yourself."
       echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
       echo "                                            Useful for CI systems that need a predictable context name."
-      echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
       echo "  --with-load-test-images                   Also build the load-test runner and patched operator images."
       echo "                                            They are not part of the standard image set. Only the k6"
       echo "                                            load-test cases (Test008x) need them. Requires --build."
@@ -1478,6 +1481,36 @@ ensure_auto_node_access_entry() {
     }
 }
 
+# DescribeCluster can still report ACTIVE before an asynchronous update starts, and becomes ACTIVE
+# again even if the update fails. Only the returned update ID identifies the operation we must wait
+# for: https://docs.aws.amazon.com/eks/latest/APIReference/API_UpdateClusterConfig.html
+wait_for_eks_config_update() {
+  local update_id="$1" status attempt
+  if [[ -z "$update_id" || "$update_id" == "None" ]]; then
+    echo "Error: EKS did not return an update ID." >&2
+    return 1
+  fi
+  echo "  Waiting for EKS configuration update ${update_id}..."
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    status=$(aws eks describe-update \
+      --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --update-id "$update_id" \
+      --region "${AWS_CFN_REGION}" --query 'update.status' --output text) || return 1
+    case "$status" in
+      Successful) return 0 ;;
+      InProgress) sleep 30 ;;
+      *)
+        echo "Error: EKS configuration update ${update_id} ended with status ${status}." >&2
+        aws eks describe-update \
+          --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --update-id "$update_id" \
+          --region "${AWS_CFN_REGION}" --output json >&2 || true
+        return 1
+        ;;
+    esac
+  done
+  echo "Error: Timed out waiting for EKS configuration update ${update_id} after 20 minutes." >&2
+  return 1
+}
+
 configure_tagged_auto_mode_compute() {
   echo ""
   echo "Configuring EKS Auto Mode to tag the resources it creates..."
@@ -1522,10 +1555,6 @@ configure_tagged_auto_mode_compute() {
   echo "  Node role:       $node_role_name"
   echo "  Subnets:         $subnet_ids_text"
   echo "  Security group:  $cluster_sg"
-
-  if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
-    enforce_tags_on_cluster_role_for_tests
-  fi
 
   # The NodeClass carries the tags; Auto Mode stamps them on the instance, its launch template,
   # its ENIs and its root/ephemeral volumes. The NodePool exists so that pods -- including the
@@ -1617,15 +1646,31 @@ EOF
     # A cluster with no built-in NodePools is expected to carry no compute-level node role -- the
     # role lives on the custom NodeClass applied above instead.
     # https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#_cluster_without_built_in_node_pools
-    aws eks update-cluster-config \
+    local update_id
+    update_id=$(aws eks update-cluster-config \
       --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
       --region "${AWS_CFN_REGION}" \
       --compute-config '{"enabled": true, "nodePools": []}' \
       --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
-      --storage-config '{"blockStorage":{"enabled": true}}' >/dev/null
-    echo "  Waiting for the cluster update to complete..."
-    aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
-    echo "  Built-in NodePools disabled; all compute now comes from ${AUTO_MODE_TAGGED_NODE_CLASS}."
+      --storage-config '{"blockStorage":{"enabled": true}}' \
+      --query 'update.id' --output text) || return 1
+    wait_for_eks_config_update "$update_id" || return 1
+  fi
+
+  # The default NodeClass can still issue untagged RunInstances validation requests while EKS
+  # removes the built-in compute resources. Wait for Kubernetes deletion too, including on a rerun
+  # that already sees nodePools=[] but interrupted the previous handoff. kubectl's delete waiter
+  # succeeds immediately for resources that are already absent.
+  echo "  Waiting for the built-in NodePools and default NodeClass to be removed..."
+  kubectl --context="${KUBE_CONTEXT}" wait --for=delete \
+    nodepool/system nodepool/general-purpose nodeclass/default --timeout=20m || return 1
+  echo "  Built-in compute removed; all compute now comes from ${AUTO_MODE_TAGGED_NODE_CLASS}."
+
+  # Enforce only after the untaggable default NodeClass is gone. Attaching the test policy earlier
+  # races its final validation calls and leaves historical IAM denials in the CloudTrail verdict,
+  # even when every subsequent workload uses the tagged NodeClass successfully.
+  if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
+    enforce_tags_on_cluster_role_for_tests
   fi
 }
 
@@ -1900,17 +1945,18 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
+  # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
+  # direct access to a local Docker daemon from the target environment.
+  source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
   BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
-  if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
+  if builder_status=$(docker buildx inspect "$BUILDER_NAME" 2>/dev/null) \
+      && buildx_nodes_are_ready <<< "$builder_status"; then
     echo "Buildkit already configured and healthy, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
     # Remove stale builder if it exists but failed health check above (e.g. orphaned
     # from a previous interrupted run). This is safe — the builder is recreated below.
     docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
-    # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
-    # direct access to a local Docker daemon from the target environment.
-    source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
     if [[ "$push_images_to_ecr" == "true" ]]; then
       # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
       # from Docker Hub. mirror_images_to_ecr already copied this image above.
@@ -1935,8 +1981,9 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  skip_test_arg=""
-  [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
+  # Test-only images (the SearchGuard Elasticsearch used by the Docker Compose and ECS solutions)
+  # are never needed on EKS: the testClusters source there uses the public elasticsearch-oss image.
+  skip_test_arg="-PskipTestImages=true"
 
   "$base_dir/gradlew" -p "$base_dir" ${BUILD_TARGETS} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
     || { echo "Image build failed, retrying in 10s..."; sleep 10; \
@@ -1998,7 +2045,7 @@ else
   HELM_VALUES_FLAGS="-f ${ma_chart_dir}/values.yaml -f ${ma_chart_dir}/valuesEks.yaml"
 fi
 
-check_existing_ma_release "$namespace" "$namespace"
+[[ "$helm_upgrade" == "true" ]] || check_existing_ma_release "$namespace" "$namespace"
 
 # Build TLS-related helm --set flags and create Pod Identity Associations
 TLS_HELM_FLAGS=""
@@ -2129,7 +2176,7 @@ if [[ -n "$extra_helm_values" ]]; then
 fi
 # Suppress trace to avoid leaking helm values in logs
 set +x
-helm install "$namespace" "${ma_chart_dir}" \
+helm $([[ "$helm_upgrade" == "true" ]] && echo "upgrade --install" || echo install) "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
   --create-namespace \

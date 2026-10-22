@@ -303,7 +303,10 @@ function ActivitySelectionDialog({
           <legend>Sources and targets</legend>
           <div className="activity-selection-options">
             {targets.map((target) => (
-              <label key={target.nodeId}>
+              <label
+                aria-label={`${target.kind} ${target.clusterName}`}
+                key={target.nodeId}
+              >
                 <input
                   checked={selectedTargetIds.has(target.nodeId)}
                   onChange={(event) => setSelectedTargetIds((current) => (
@@ -327,7 +330,7 @@ function ActivitySelectionDialog({
           <legend>Activity types</legend>
           <div className="activity-selection-options">
             {types.map((type) => (
-              <label key={type.id}>
+              <label aria-label={type.label} key={type.id}>
                 <input
                   checked={selectedTypeIds.has(type.id)}
                   onChange={(event) => setSelectedTypeIds((current) => (

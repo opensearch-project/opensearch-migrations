@@ -41,7 +41,13 @@ import {
     SCALABLE_WORKLOAD_INPUTS,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
-import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {
+    COMPONENT_LABEL,
+    COMPONENTS,
+    MIGRATION_RESOURCE_UID_LABEL,
+    WORKLOAD_SELECTOR_LABEL_KEYS,
+    workloadSelectorLabels,
+} from "./commonUtils/resourceLabels";
 import {
     workloadNodePoolResolvedInput,
     workloadNodeSelector,
@@ -159,7 +165,7 @@ function makeProxyServiceManifest(
         },
         spec: {
             type: makeStringTypeProxy(serviceType),
-            selector: {"migrations/proxy": proxyName},
+            selector: workloadSelectorLabels(COMPONENTS.CAPTURE_PROXY, ownerUid),
             ports: [{
                 port: makeDirectTypeProxy(listenPort),
                 targetPort: makeDirectTypeProxy(listenPort),
@@ -375,6 +381,7 @@ function makeProxyDeploymentManifest(args: {
             name: args.proxyName,
             ownerReferences: makeOwnerReferences(args.proxyName, args.ownerUid),
             labels: {
+                [COMPONENT_LABEL]: COMPONENTS.CAPTURE_PROXY,
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
@@ -391,10 +398,10 @@ function makeProxyDeploymentManifest(args: {
                     maxUnavailable: "5%"
                 }
             },
-            selector: {matchLabels: {"migrations/proxy": args.proxyName}},
+            selector: {matchLabels: workloadSelectorLabels(COMPONENTS.CAPTURE_PROXY, args.ownerUid)},
             template: {
                 metadata: {labels: {
-                    "migrations/proxy": args.proxyName,
+                    [COMPONENT_LABEL]: COMPONENTS.CAPTURE_PROXY,
                     "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                     "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                     "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
@@ -404,7 +411,7 @@ function makeProxyDeploymentManifest(args: {
                     nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
                     tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
                     topologySpreadConstraints: makeDirectTypeProxy(
-                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, ["migrations/proxy"])
+                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, WORKLOAD_SELECTOR_LABEL_KEYS)
                     ),
                     containers: [podConfig.container],
                     volumes: podConfig.volumes
@@ -505,8 +512,9 @@ export const SetupCapture = WorkflowBuilder.create({
             .setDefinition(makePodDisruptionBudgetDefinition({
                 name: b.inputs.proxyName,
                 minAvailable: workflowParameterAsNumber(b.inputs.minPodReplicas),
-                matchLabels: {"migrations/proxy": b.inputs.proxyName},
+                matchLabels: workloadSelectorLabels(COMPONENTS.CAPTURE_PROXY, b.inputs.ownerUid),
                 labels: {
+                    [COMPONENT_LABEL]: COMPONENTS.CAPTURE_PROXY,
                     "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
                     "migrations.opensearch.org/source": b.inputs.sourceK8sLabel,
                     "migrations.opensearch.org/task": b.inputs.taskK8sLabel,

@@ -7,6 +7,7 @@ from console_link.workflow.resource_tree import (
     CONFIG_MODE_CURRENT_WORKFLOW,
     CONFIG_MODE_DEPLOYED,
     CONFIG_MODE_PENDING_SUBMIT,
+    PHASE_SYMBOLS,
     ResourceNode, ResourceGroup, ResourceSection,
 )
 from console_link.workflow.tui.resource_tree_state_manager import (
@@ -344,3 +345,11 @@ class TestIncrementalUpdate:
         assert workflow_node.data['resource_path'] == 'snapshotmigration.bf-1'
         assert workflow_node.data['resource_log_node_id'] == 'pod-1'
         assert pod_node.data['resource_path'] == 'snapshotmigration.bf-1'
+
+
+class TestResourceLabel:
+    def test_label_uses_phase_symbol(self):
+        for phase in ['Created', 'Pending', 'Ready', 'Completed', 'Deleting', 'Error']:
+            label = ResourceTreeStateManager._resource_label(make_resource('r', phase=phase))
+            assert PHASE_SYMBOLS[phase][0] in label, phase
+            assert PHASE_SYMBOLS['Unknown'][0] not in label, phase

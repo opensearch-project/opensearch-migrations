@@ -26,14 +26,14 @@ export function clusterCurlTargets(
     }];
   });
   const seen = new Set<string>();
-  return targets
-    .sort((left, right) => (
-      left.order - right.order
-      || left.clusterName.localeCompare(right.clusterName)
-    ))
-    .flatMap(({ clusterName, nodeId }) => {
-      if (seen.has(nodeId)) return [];
-      seen.add(nodeId);
-      return [{ clusterName, nodeId }];
-    });
+  const sortedTargets = [...targets];
+  sortedTargets.sort((left, right) => (
+    left.order - right.order
+    || left.clusterName.localeCompare(right.clusterName)
+  ));
+  return sortedTargets.flatMap(({ clusterName, nodeId }) => {
+    if (seen.has(nodeId)) return [];
+    seen.add(nodeId);
+    return [{ clusterName, nodeId }];
+  });
 }

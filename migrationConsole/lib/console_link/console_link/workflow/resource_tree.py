@@ -34,6 +34,8 @@ PHASE_SYMBOLS = {
     'Succeeded': ('✓', 'green'),
     'Running': ('▶', 'yellow'),
     'Pending': ('○', 'cyan'),
+    'Created': ('○', 'cyan'),
+    'Deleting': ('⊘', 'yellow'),
     PENDING_CONFIG_PHASE: ('○', 'cyan'),
     DEPLOYED_CONFIG_PHASE: ('✓', 'green'),
     'Initialized': ('○', 'cyan'),
@@ -1138,7 +1140,16 @@ def _render_group(parent_tree, group: ResourceGroup, show_live_status: bool = Tr
 
 
 # Phases shown in the resource label (settled states)
-DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error', PENDING_CONFIG_PHASE, DEPLOYED_CONFIG_PHASE}
+DISPLAY_PHASES = {
+    'Ready',
+    'Completed',
+    'Created',
+    'Deleting',
+    'Failed',
+    'Error',
+    PENDING_CONFIG_PHASE,
+    DEPLOYED_CONFIG_PHASE,
+}
 
 
 def _render_resource(parent_node, resource: ResourceNode, show_live_status: bool = True) -> None:

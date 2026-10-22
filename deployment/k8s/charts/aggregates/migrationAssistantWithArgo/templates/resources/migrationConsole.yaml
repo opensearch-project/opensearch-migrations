@@ -363,7 +363,7 @@ spec:
           volumeMounts:
             - name: workflow-schema
               mountPath: /root/schema
-    {{- if $sharedLogsVolumeEnabled }}
+    {{- if or $sharedLogsVolumeEnabled .Values.logs.hostLogsVolume.enabled }}
             - name: shared-logs
               mountPath: /shared-logs-output
     {{- end }}
@@ -371,7 +371,12 @@ spec:
         - name: workflow-schema
           emptyDir:
             sizeLimit: 1Gi
-    {{- if $sharedLogsVolumeEnabled  }}
+    {{- if .Values.logs.hostLogsVolume.enabled }}
+        - name: shared-logs
+          hostPath:
+            path: {{ .Values.logs.hostLogsVolume.path | quote }}
+            type: DirectoryOrCreate
+    {{- else if $sharedLogsVolumeEnabled }}
         - name: shared-logs
           persistentVolumeClaim:
             claimName: {{ .Values.logs.sharedLogsVolume.name }}

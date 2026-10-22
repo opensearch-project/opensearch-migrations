@@ -123,7 +123,7 @@ pub const IMAGES: &[&str] = &[
     "quay.io/prometheus-operator/prometheus-config-reloader:v0.82.0",
     "quay.io/prometheus/node-exporter:v1.9.1",
     "quay.io/prometheus/alertmanager:v0.28.1",
-    "quay.io/kiwigrid/k8s-sidecar:1.30.11",
+    "quay.io/kiwigrid/k8s-sidecar:2.14.1",
     "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
     "registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.5.3",
     "docker.io/bats/bats:v1.4.1",

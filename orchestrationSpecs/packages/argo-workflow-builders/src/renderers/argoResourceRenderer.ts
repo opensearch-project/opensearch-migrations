@@ -23,7 +23,6 @@ import {
     YamlPlainSafeStringExpression
 } from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
-import * as _ from 'lodash';
 import {RawYaml, toSafeYamlOutput} from "../utils";
 import {SynchronizationConfig} from "../models/synchronization";
 
@@ -177,9 +176,16 @@ function formatContainerEnvs(envVars: Record<string, ExpressionOrConfigMapValue<
     const result: any[] = [];
     Object.entries(envVars).forEach(([key, value]) => {
         const transformedValue = transformExpressionsDeep(value);
+        let renderedValue: unknown = transformedValue;
+        if (isEnvironmentVariableValueSource(value)) {
+            const {type: _type, ...valueFrom} = transformedValue as EnvironmentVariableValueSource<string> & {
+                type?: unknown
+            };
+            renderedValue = valueFrom;
+        }
         const v = isEnvironmentVariableValueSource(value) ?
-            { valueFrom: _.omit(transformedValue, "type") } :
-            { value: transformedValue };
+            {valueFrom: renderedValue} :
+            {value: renderedValue};
         result.push({name: key, ...v});
     });
     return result;

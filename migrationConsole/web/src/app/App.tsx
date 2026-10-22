@@ -1803,10 +1803,26 @@ function StandaloneLogs({ nodeId }: Readonly<{ nodeId: string }>) {
 
 
 function StandaloneRuntimeDashboard() {
-  useState(() => {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
     hydrateRuntimeDashboardFromHash();
-    return true;
-  });
+    setHydrated(true);
+  }, []);
+  if (!hydrated) {
+    return (
+      <main className="standalone-runtime-dashboard-page">
+        <div className="standalone-page-status">
+          <LoaderCircle aria-hidden="true" className="spin" />
+          Loading runtime dashboard
+        </div>
+      </main>
+    );
+  }
+  return <StandaloneRuntimeDashboardContent />;
+}
+
+
+function StandaloneRuntimeDashboardContent() {
   const state = useQuery({
     queryKey: ["manage-state"],
     queryFn: getManageState,

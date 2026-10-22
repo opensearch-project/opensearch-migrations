@@ -42,6 +42,42 @@ class RegistryImageBuildUtils {
         return resolveBaseImageForUrl(registry.containerUrl, group, image, tag)
     }
 
+    /**
+     * Names of the BuildKit images that other builds use as an intermediate base, i.e. whose own
+     * base-image reference (same registry, same formatter, configured tag) appears as a build arg.
+     * Comparing whole references works for every registry layout, including ECR's single-repo tags.
+     */
+    static Set<String> intermediateBaseImageNames(List<Map> projects, Registry intermediateRegistry) {
+        def referenced = projects.collectMany { cfg ->
+            (cfg.get("buildArgs", [:]) as Map).values().collect { it.toString() }
+        } as Set<String>
+        return projects.findAll { cfg ->
+            referenced.contains(resolveBaseImageForContainer(intermediateRegistry, "migrations",
+                    cfg.get("imageName").toString(), cfg.get("imageTag", "latest").toString()))
+        }.collect { it.get("imageName").toString() } as Set<String>
+    }
+
+    /**
+     * Tags to push for an image. -PimageVersion adds the version to the configured tag (usually
+     * "latest"), which releases rely on. With -PimageVersionOnly=true the version replaces the
+     * configured tag instead, so a local build with its own tag never overwrites other builds'
+     * images in a shared registry; an intermediate base still keeps its configured tag, because
+     * its consumers resolve it by that tag.
+     */
+    static List<String> imageTags(String configuredTag, String versionTag, boolean versionOnly, boolean isIntermediateBase) {
+        if (!versionTag || versionTag == configuredTag) {
+            return [configuredTag]
+        }
+        if (!versionOnly) {
+            return [configuredTag, versionTag]   // unchanged default: the configured tag stays primary
+        }
+        return isIntermediateBase ? [versionTag, configuredTag] : [versionTag]
+    }
+
+    static boolean imageVersionOnly(Project project) {
+        return project.findProperty("imageVersionOnly")?.toString()?.toBoolean() ?: false
+    }
+
     private static String resolveBaseImageForUrl(String url, String group, String image, String tag) {
         def formatter = ImageRegistryFormatterFactory.getFormatter(url)
         return formatter.getFullBaseImageIdentifier(url, group, image, tag)
@@ -253,16 +289,6 @@ class RegistryImageBuildUtils {
                                 config.baseImageName.toString(), config.baseImageTag.toString())
                     }
 
-                    def versionTag = rootProject.findProperty("imageVersion")?.toString()
-                    def publishTag = versionTag ?: config.imageTag.toString()
-                    def targetDestination = targetFormatter.getFullTargetImageIdentifier(
-                            targetReg.hostUrl,
-                            config.imageName.toString(),
-                            publishTag,
-                            config.get("repoName", null)?.toString()
-                    )
-                    def registryDestination = targetDestination[0]
-
                     // For intermediate images (built in the same pipeline), resolve the
                     // digest at execution time by reading the producer's --metadata-file output.
                     if (baseEndpoint == intermediateRegistry.hostUrl && !intermediateRegistry.isEcr()) {
@@ -296,19 +322,24 @@ class RegistryImageBuildUtils {
                             }
                         }
                         to {
-                            // If single arch and no explicit version is provided, append a suffix
-                            // to the default image tag (e.g. image:latest_arm64) and also publish
-                            // the unsuffixed default tag for local deployments. When imageVersion is
-                            // provided, publish only that explicit tag.
-                            def dest = registryDestination
-                            if (targetArch != "multi" && !versionTag) dest = "${registryDestination}_${targetArch}"
-                            image = dest
-
-                            def tagList = []
-                            if (targetArch != "multi" && !versionTag) {
-                                tagList.add(publishTag)
+                            // See imageTags. Jib images are never intermediate bases.
+                            def pushTags = imageTags(config.imageTag.toString(),
+                                    rootProject.findProperty("imageVersion")?.toString(),
+                                    imageVersionOnly(rootProject), false)
+                            def refs = pushTags.collect { tag ->
+                                targetFormatter.getFullTargetImageIdentifier(targetReg.hostUrl, config.imageName.toString(),
+                                        tag, config.get("repoName", null)?.toString())[0].toString()
                             }
-                            if (tagList) tags = tagList.unique()
+                            def tagPart = { String ref -> ref.split(":")[-1] }
+                            if (targetArch != "multi") {
+                                // Single arch: <tag>_<arch>, plus every unsuffixed tag that BuildKit images
+                                // also get, so local deployments of <image>:<tag> find every image.
+                                image = "${refs[0]}_${targetArch}"
+                                tags = refs.collect { tagPart(it) } + refs.drop(1).collect { "${tagPart(it)}_${targetArch}".toString() }
+                            } else {
+                                image = refs[0]
+                                tags = refs.drop(1).collect { tagPart(it) }
+                            }
                         }
                         extraDirectories {
                             paths {
@@ -392,7 +423,8 @@ class RegistryImageBuildUtils {
         }
     }
 
-    private void registerBuildKitTasks(Project project, Map cfg, Registry finalRegistry, Registry intermediateRegistry, Map<String, String> imageToService) {
+    private void registerBuildKitTasks(Project project, Map cfg, Registry finalRegistry, Registry intermediateRegistry,
+                                       Map<String, String> imageToService, Set<String> intermediateBaseImages) {
         def versionTag = project.findProperty("imageVersion")?.toString()
         def repoName = cfg.get("repoName")?.toString()
 
@@ -427,10 +459,9 @@ class RegistryImageBuildUtils {
         def contextPath = project.file(cfg.get("contextDir", ".")).path
         def formatter = ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
 
-        def publishTag = versionTag ?: imageTag
-        def configuredTarget = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)
-        def cacheDestination = configuredTarget[1]
-        def primaryDest = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, publishTag, repoName)[0]
+        def pushTags = imageTags(imageTag, versionTag, imageVersionOnly(project), intermediateBaseImages.contains(imageName))
+        def (primaryDest, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, pushTags[0], repoName)
+        def extraDests = pushTags.drop(1).collect { formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, it, repoName)[0] }
 
         // Split build args: intermediate-image args get digest-resolved at execution time
         // by reading the producer's --metadata-file output; all others are static.
@@ -524,6 +555,7 @@ class RegistryImageBuildUtils {
                                 "--platform ${platform}",
                                 *(resolvedBuilder ? ["--builder ${resolvedBuilder}"] : []),
                                 "-t ${primaryDest}",
+                                *(extraDests.collectMany { ["-t", it.toString()] }),
                                 "--push",
                                 "--metadata-file ${metadataFile.absolutePath}",
                                 "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max,ignore-error=true",
@@ -559,6 +591,7 @@ class RegistryImageBuildUtils {
                             "--platform linux/amd64,linux/arm64",
                             *(resolvedBuilder ? ["--builder ${resolvedBuilder}"] : []),
                             "-t ${primaryDest}",
+                            *(extraDests.collectMany { ["-t", it.toString()] }),
                             "--push",
                             "--metadata-file ${multiArchMetadataFile.absolutePath}",
                             "--cache-to=type=registry,ref=${cacheDestination},mode=max,ignore-error=true",
@@ -580,8 +613,9 @@ class RegistryImageBuildUtils {
         // Build a lookup from imageName -> serviceName across all BuildKit projects,
         // so consumers can find the correct producer metadata file by image name.
         def imageToService = projects.collectEntries { [(it.get("imageName").toString()): it.get("serviceName").toString()] }
+        def intermediateBaseImages = intermediateBaseImageNames(projects, intermediateRegistry)
         projects.each { cfg ->
-            registerBuildKitTasks(rootProject, cfg, finalRegistry, intermediateRegistry, imageToService)
+            registerBuildKitTasks(rootProject, cfg, finalRegistry, intermediateRegistry, imageToService, intermediateBaseImages)
         }
     }
 
@@ -596,6 +630,7 @@ class RegistryImageBuildUtils {
             return
         }
 
+        def intermediateBaseImages = intermediateBaseImageNames(allProjects, intermediateRegistry)
         def allProjectsByTaskName = allProjects.collectEntries { cfg ->
             [("buildKit_${cfg.serviceName}".toString()): cfg]
         }
@@ -696,10 +731,9 @@ class RegistryImageBuildUtils {
                         def imageName = cfg.get("imageName").toString()
                         def imageTag = cfg.get("imageTag", "latest").toString()
                         def versionTag = project.findProperty("imageVersion")?.toString()
-                        def publishTag = versionTag ?: imageTag
-                        def configuredTarget = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)
-                        def cacheDestination = configuredTarget[1]
-                        def primaryDest = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, publishTag, repoName)[0]
+                        def pushTags = imageTags(imageTag, versionTag, imageVersionOnly(project), intermediateBaseImages.contains(imageName))
+                        def (primaryDest, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, pushTags[0], repoName)
+                        def extraDests = pushTags.drop(1).collect { formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, it, repoName)[0] }
                         def buildArgs = cfg.get("buildArgs", [:]).collectEntries { key, value ->
                             [(key.toString()): value.toString()]
                         }
@@ -720,13 +754,13 @@ class RegistryImageBuildUtils {
                         serviceToHostVisibleRef[targetName] = hostFormatter.getFullTargetImageIdentifier(
                                 targetRegistry.hostUrl,
                                 imageName,
-                                publishTag,
+                                pushTags[0],
                                 repoName
                         )[0].toString()
                         bakeDefinition.target[targetName] = [
                                 context     : project.file(cfg.get("contextDir", ".")).absolutePath,
                                 dockerfile  : "Dockerfile",
-                                tags        : [primaryDest],
+                                tags        : ([primaryDest] + extraDests),
                                 args        : buildArgs,
                                 platforms   : architecture == "multi" ? ["linux/amd64", "linux/arm64"] : ["linux/${architecture}".toString()],
                                 "cache-from": cacheFrom,

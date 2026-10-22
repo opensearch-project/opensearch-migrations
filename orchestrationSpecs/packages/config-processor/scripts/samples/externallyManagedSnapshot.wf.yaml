@@ -21,17 +21,16 @@ targetClusters:
   target:
     endpoint: https://opensearch-cluster-master-headless:9200
     allowInsecure: true
-    version: OS 2.11
     authConfig:
       basic:
         secretName: target-creds
 snapshotMigrationConfigs:
   - fromSource: source
     toTarget: target
-    perSnapshotConfig:
-      existingSnap:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
+    fromSnapshot: existingSnap
+    slice: default
+    metadataMigrationConfig: {}
+    documentBackfillConfig: {}
 traffic:
   proxies: {}
   replayers: {}

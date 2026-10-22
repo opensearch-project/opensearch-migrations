@@ -137,6 +137,12 @@ public final class ResultsToLogsConsumer {
             .toString();
     }
 
+    private static String responseTimeString(Map<String, Object> response) {
+        return Optional.ofNullable(response.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY))
+            .map(Object::toString)
+            .orElse(MISSING_STR);
+    }
+
     public static String toTransactionSummaryString(
         int index,
         RequestReplayOwner.RequestResult<
@@ -183,10 +189,10 @@ public final class ResultsToLogsConsumer {
             )
             // SOURCE/TARGET LATENCY
             .add(
-                sourceResponse.map(r -> "" + r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY)).orElse(MISSING_STR)
+                sourceResponse.map(ResultsToLogsConsumer::responseTimeString).orElse(MISSING_STR)
                     + "/" +
                     transformStreamToString(parsed.targetResponseList.stream(),
-                        r -> "" + r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY))
+                        ResultsToLogsConsumer::responseTimeString)
             )
             // method
             .add(

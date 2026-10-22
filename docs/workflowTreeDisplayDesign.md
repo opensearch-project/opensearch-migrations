@@ -329,7 +329,7 @@ Add `groupName` to the five top-level phase templates so they're self-describing
 | `setupProxies` | Use `proxyName` param (e.g. `"capture-proxy"`) |
 | `createSnapshots` | Derive from source label (e.g. `"source-snap1"`) |
 | `runSnapshotMigrations` | Use existing `resourceName` |
-| `runTrafficReplays` | Use `fromProxy` param |
+| `runTrafficReplays` | Use `fromCapturedTraffic` param |
 
 With `groupName` on these nodes, the existing filter already keeps them — no `at_root_level`
 logic needed. However, the `at_root_level` approach is more resilient as a fallback for
@@ -864,7 +864,7 @@ iteration gets its `groupName` from the loop item:
 | `setupProxies` | `proxyName` param | `"capture-proxy"` |
 | `createSnapshots` | derive from source config | `"source"` |
 | `runSnapshotMigrations` | `resourceName` param | `"source-target-snap1"` |
-| `runTrafficReplays` | `fromProxy` param | `"capture-proxy"` |
+| `runTrafficReplays` | `fromCapturedTraffic` param | `"capture-proxy"` |
 
 Each requires: (1) the target template to accept `groupName` as an input, and (2) the
 caller to pass it in `c.register({...})`.

@@ -1,7 +1,9 @@
 package org.opensearch.migrations.bulkload.pipeline.source;
 
 import java.util.List;
+import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
@@ -40,6 +42,16 @@ public interface DocumentSource extends AutoCloseable {
      * @return a cold Flux of documents
      */
     Flux<Document> readDocuments(Partition partition, long startingDocOffset);
+
+    /** Whole-partition snapshot counts, independent of resume position; empty until available. */
+    default Optional<SnapshotDocumentCounts> snapshotDocumentCounts(Partition partition) {
+        return Optional.empty();
+    }
+
+    /** Whether operations on the same document can depend on an earlier batch. */
+    default boolean requiresOrderedWrites() {
+        return false;
+    }
 
     @Override
     default void close() throws Exception {

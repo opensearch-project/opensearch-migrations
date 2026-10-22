@@ -2,6 +2,7 @@ import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-build
 import {SetupCapture} from "../src/workflowTemplates/setupCapture";
 import {Replayer} from "../src/workflowTemplates/replayer";
 import {SetupKafka} from "../src/workflowTemplates/setupKafka";
+import {WORKLOAD_SELECTOR_LABEL_KEYS} from "../src/workflowTemplates/commonUtils/resourceLabels";
 
 function template(rendered: any, templateName: string): any {
     const found = (rendered.spec?.templates ?? []).find((candidate: any) => candidate.name === templateName);
@@ -49,14 +50,14 @@ describe("capture/replay workloads spread across availability zones per the depl
         templateName => {
             const found = template(renderWorkflowTemplate(SetupCapture), templateName);
             expectZoneSpreadFromProviderConfig(found);
-            expectZoneSpreadExpression(topologySpreadLine(found.resource.manifest), ["migrations/proxy"]);
+            expectZoneSpreadExpression(topologySpreadLine(found.resource.manifest), WORKLOAD_SELECTOR_LABEL_KEYS);
         }
     );
 
     it("derives per-replayer zone spread from provider-config", () => {
         const found = template(renderWorkflowTemplate(Replayer), "createdeployment");
         expectZoneSpreadFromProviderConfig(found);
-        expectZoneSpreadExpression(topologySpreadLine(found.resource.manifest), ["migrations/replayer"]);
+        expectZoneSpreadExpression(topologySpreadLine(found.resource.manifest), WORKLOAD_SELECTOR_LABEL_KEYS);
     });
 
     it("generates Kafka broker spread only beneath the configuration's nodePoolSpecOverrides", () => {

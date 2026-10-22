@@ -9,6 +9,9 @@ source "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/backends/dockerHostedBuildkit.sh
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-ma}"
 KIND_CONTEXT="${KIND_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
 KIND_CONFIG_FILE="${KIND_CONFIG_FILE:-${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/kindClusterConfig.yaml}"
+# Logs from every node land on this machine, one directory per node (see valuesForLocalK8s.yaml).
+# They outlive the cluster; kindCleanup.sh --delete-logs removes them.
+KIND_LOGS_DIR="${KIND_LOGS_DIR:-${HOME}/.opensearch-migrations/kind/${KIND_CLUSTER_NAME}/logs}"
 set_docker_hosted_defaults
 # In-cluster pulls use the configured registry name, which containerd maps to
 # the host gateway. Host-side `docker buildx` uses the bind-mounted localhost
@@ -29,7 +32,27 @@ echo "kind will use the docker-compatible runtime exposed by that context."
 if kind get clusters | grep -qx "${KIND_CLUSTER_NAME}"; then
   echo "kind cluster ${KIND_CLUSTER_NAME} already exists, skipping create"
 else
-  kind create cluster --name "${KIND_CLUSTER_NAME}" --config "${KIND_CONFIG_FILE}"
+  # kind's config can't reference variables, so render a copy that mounts this machine's log
+  # directory into every node at /var/log/migrations-all. Each node's Fluent Bit writes to its own
+  # subdirectory there (valuesForLocalK8s.yaml), and the console reads them all.
+  rendered_kind_config="$(mktemp "${TMPDIR:-/tmp}/kind-config.XXXXXX")"
+  awk -v logs="${KIND_LOGS_DIR}" '
+    { print }
+    /^[[:space:]]*- role:[[:space:]]*(control-plane|worker)[[:space:]]*$/ {
+      indent = $0; sub(/-.*/, "", indent)
+      printf "%s  extraMounts:\n", indent
+      printf "%s    - hostPath: %s\n%s      containerPath: /var/log/migrations-all\n", indent, logs, indent
+    }' "${KIND_CONFIG_FILE}" > "${rendered_kind_config}"
+  mkdir -p "${KIND_LOGS_DIR}"
+  kind create cluster --name "${KIND_CLUSTER_NAME}" --config "${rendered_kind_config}"
+  rm -f "${rendered_kind_config}"
+fi
+
+if ! docker inspect "${KIND_CLUSTER_NAME}-control-plane" --format '{{range .Mounts}}{{.Destination}} {{end}}' \
+    | grep -qw /var/log/migrations-all; then
+  echo "The existing kind cluster has no host log directories mounted (/var/log/migrations-all)." >&2
+  echo "Delete and recreate it so this script can add them: kind delete cluster --name ${KIND_CLUSTER_NAME}" >&2
+  exit 1
 fi
 
 if [[ "${USE_LOCAL_REGISTRY:-true}" == "true" ]]; then

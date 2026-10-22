@@ -20,6 +20,17 @@ def delete_topic(kafka: Kafka, topic_name: str) -> CommandResult:
     return result
 
 
+def reset_consumer_group_offsets_to_latest(
+    kafka: Kafka,
+    group_name: str,
+    topic_name: str,
+) -> CommandResult:
+    return kafka.reset_consumer_group_offsets_to_latest(
+        group_name=group_name,
+        topic_name=topic_name,
+    )
+
+
 def describe_consumer_group(
     kafka: Kafka,
     group_name: str,

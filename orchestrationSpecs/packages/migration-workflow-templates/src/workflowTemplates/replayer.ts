@@ -41,7 +41,13 @@ import {
     scalingFromOptions,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
-import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {
+    COMPONENT_LABEL,
+    COMPONENTS,
+    MIGRATION_RESOURCE_UID_LABEL,
+    WORKLOAD_SELECTOR_LABEL_KEYS,
+    workloadSelectorLabels,
+} from "./commonUtils/resourceLabels";
 import {
     workloadNodePoolResolvedInput,
     workloadNodeSelector,
@@ -53,8 +59,6 @@ import {
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
 const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
-const REPLAYER_APP_LABEL = "replayer";
-const REPLAYER_SELECTOR_LABEL = "migrations/replayer";
 
 function base64(value: string): string {
     return Buffer.from(value, "utf8").toString("base64");
@@ -291,7 +295,7 @@ function getReplayerDeploymentManifest
             name: makeStringTypeProxy(args.name),
             ownerReferences: makeOwnerReferences(args.name, args.ownerUid),
             labels: {
-                app: REPLAYER_APP_LABEL,
+                [COMPONENT_LABEL]: COMPONENTS.TRAFFIC_REPLAYER,
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
@@ -305,15 +309,12 @@ function getReplayerDeploymentManifest
                 type: "Recreate"
             },
             selector: {
-                matchLabels: {
-                    app: REPLAYER_APP_LABEL,
-                },
+                matchLabels: workloadSelectorLabels(COMPONENTS.TRAFFIC_REPLAYER, args.ownerUid),
             },
             template: {
                 metadata: {
                     labels: {
-                        app: REPLAYER_APP_LABEL,
-                        [REPLAYER_SELECTOR_LABEL]: makeStringTypeProxy(args.name),
+                        [COMPONENT_LABEL]: COMPONENTS.TRAFFIC_REPLAYER,
                         "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                         "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
@@ -326,7 +327,7 @@ function getReplayerDeploymentManifest
                     nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
                     tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
                     topologySpreadConstraints: makeDirectTypeProxy(
-                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, [REPLAYER_SELECTOR_LABEL])
+                        workloadZoneSpreadConstraints(args.workloadZoneSpread, args.workloadZoneSpreadExtras, WORKLOAD_SELECTOR_LABEL_KEYS)
                     ),
                     containers: [finalContainerDefinition.container],
                     volumes: finalContainerDefinition.volumes
@@ -419,7 +420,7 @@ function makeReplayerPodDisruptionBudgetDefinition(
     inputs: CreatePodDisruptionBudgetInputExpressions
 ) {
     const labels = {
-        app: REPLAYER_APP_LABEL,
+        [COMPONENT_LABEL]: COMPONENTS.TRAFFIC_REPLAYER,
         "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
         "migrations.opensearch.org/source": inputs.sourceK8sLabel,
         "migrations.opensearch.org/target": inputs.targetK8sLabel,
@@ -428,9 +429,7 @@ function makeReplayerPodDisruptionBudgetDefinition(
     return makePodDisruptionBudgetDefinition({
         name: inputs.name,
         minAvailable: workflowParameterAsNumber(inputs.minPodReplicas),
-        matchLabels: {
-            [REPLAYER_SELECTOR_LABEL]: inputs.name,
-        },
+        matchLabels: workloadSelectorLabels(COMPONENTS.TRAFFIC_REPLAYER, inputs.ownerUid),
         labels,
         ownerReferences: makeOwnerReferences(inputs.name, inputs.ownerUid),
     });

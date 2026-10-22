@@ -28,19 +28,19 @@ targetClusters:
 snapshotMigrationConfigs:
   - fromSource: source
     toTarget: target
-    perSnapshotConfig:
-      snap1:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig:
-            maxConnections: 4
-            documentsPerBulkRequest: 1000
-            maxShardSizeBytes: 1000000000
-            resources:
-              requests:
-                cpu: 25m
-                memory: 1Gi
-                ephemeral-storage: 5Gi
-              limits:
-                cpu: 1000m
-                memory: 2Gi
-                ephemeral-storage: 5Gi
+    fromSnapshot: snap1
+    slice: default
+    metadataMigrationConfig: {}
+    documentBackfillConfig:
+      maxConnections: 4
+      documentsPerBulkRequest: 1000
+      maxShardSizeBytes: 1000000000
+      resources:
+        requests:
+          cpu: 25m
+          memory: 1Gi
+          ephemeral-storage: 5Gi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+          ephemeral-storage: 5Gi

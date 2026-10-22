@@ -13,10 +13,10 @@ describe("runtime dashboard URL state", () => {
   it("round trips the complete pane layout through a copyable fragment", () => {
     const curl = [{
       id: "curl-1",
-      clusterName: "source",
+      clusterName: "source-\u2713",
       nodeId: "resource:sourceconfigs:source",
       method: "GET",
-      path: "/_cat/indices?pretty&v",
+      path: "/_cat/indices?pretty&v&label=\u2713",
       body: "",
       pinned: true,
       autoRefresh: false,

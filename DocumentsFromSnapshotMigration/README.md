@@ -337,3 +337,11 @@ Common exception types that can be allowlisted:
 - Other OpenSearch/Elasticsearch document-level exception types as needed
 
 **Note:** Use this feature carefully. Allowlisting exceptions means those errors will be silently treated as success, which may mask legitimate issues if used incorrectly.
+
+## Committed metrics
+
+Document Backfill commits source/target operations, request costs, and work-item
+duration with each checkpoint, plus whole-shard snapshot counts on completion. Sum the committed ranges to measure completed
+work, and use snapshot counts to validate the target even while the source keeps
+ingesting. See [committed metrics](../docs/committedMetrics.md) for the published structure, existing coordinator archives, aggregation rules,
+and full/delta target comparison requirements.

@@ -10,7 +10,7 @@ import subprocess
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-from .autocomplete_k8s_labels import complete_label_value
+from .autocomplete_k8s_labels import complete_component_value, complete_label_value
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .argo_utils import DEFAULT_ARGO_SERVER_URL
 from .crd_utils import (
@@ -120,13 +120,14 @@ def _validate_selector_arg(ctx, selector):
         ctx.exit(1)
 
 
-def _filter_selectors(source, target, snapshot, task, from_snapshot_migration, labels):
+def _filter_selectors(source, target, snapshot, task, component, from_snapshot_migration, labels):
     selectors = []
     for key, value in (
         ('source', source),
         ('target', target),
         ('snapshot', snapshot),
         ('task', task),
+        ('component', component),
         ('from-snapshot-migration', from_snapshot_migration),
     ):
         if value:
@@ -190,7 +191,7 @@ def _resource_label_selectors(ctx, namespace, resource_name):
 
 
 def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):
-    from .autocomplete_k8s_labels import _fetch_workflow_labels
+    from .autocomplete_k8s_labels import _fetch_workflow_labels, fetch_component_values
     effective_name = None if all_workflows else workflow_name
     argo_server = kwargs.get('argo_server', DEFAULT_ARGO_SERVER_URL)
     token = kwargs.get('token')
@@ -198,6 +199,13 @@ def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):
     label_map, _ = _fetch_workflow_labels(
         effective_name or DEFAULT_WORKFLOW_NAME, namespace,
         argo_server, token, insecure)
+    try:
+        components = fetch_component_values(namespace, effective_name)
+    except Exception as e:
+        logger.debug(f"Unable to list pod components: {e}")
+        components = set()
+    if components:
+        label_map = {**label_map, 'component': components}
     if not label_map:
         click.echo("No matching pods found.")
     else:
@@ -359,10 +367,12 @@ def output_resource(ctx, list_labels, workflow_name, all_workflows, namespace, p
               help='Filter output by snapshot label')
 @click.option('--task', shell_complete=complete_label_value('task'),
               help='Filter output by task label')
+@click.option('--component', shell_complete=complete_component_value,
+              help='Filter output by component label (the piece of a task, e.g. rfs-worker)')
 @click.option('--from-snapshot-migration', shell_complete=complete_label_value('from-snapshot-migration'),
               help='Filter output by from-snapshot-migration label')
 @click.option('--label', 'labels', multiple=True,
-              help='Additional raw key=value label selector. May be used multiple times.')
+              help='Additional raw key=value (or key!=value) label selector. May be used multiple times.')
 @_output_options
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
@@ -373,6 +383,8 @@ def output_filter(ctx, **params):
     Examples:
       workflow log filter --source mycluster --target target1
       workflow log filter --snapshot snap1 --task metadataMigrate
+      workflow log filter --from-snapshot-migration m1 --component rfs-coordinator
+      workflow log filter --from-snapshot-migration m1 --label 'component!=rfs-coordinator'
       workflow log filter --label custom.example/key=value -- --since=1h
     """
     workflow_name = params['workflow_name']
@@ -383,7 +395,7 @@ def output_filter(ctx, **params):
 
     _validate_scope(ctx, all_workflows)
     if params['list_labels']:
-        _list_available_labels(workflow_name, all_workflows, namespace, **params)
+        _list_available_labels(**params)
         return
 
     selectors, passthrough_args = _split_passthrough_args(params['extra_args'])
@@ -395,7 +407,7 @@ def output_filter(ctx, **params):
 
     selectors = _filter_selectors(
         params['source'], params['target'], params['snapshot'], params['task'],
-        params['from_snapshot_migration'], labels)
+        params['component'], params['from_snapshot_migration'], labels)
     if not selectors:
         click.echo("Error: specify --list or one or more filter options.\n", err=True)
         click.echo(ctx.get_help())

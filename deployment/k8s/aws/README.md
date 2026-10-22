@@ -68,6 +68,11 @@ The Rust CLI is the operator-oriented entry point. Developers who need to
 build and deploy the currently checked-out source should use
 `aws-bootstrap.sh` directly, as described below.
 
+For an end-to-end walkthrough that builds from source, creates a self-managed
+Elasticsearch source and an Amazon OpenSearch Service domain or Serverless
+collection target, runs a backfill plus capture and replay, and observes it, see
+[Quick start: self-managed Elasticsearch to Amazon OpenSearch](quickstarts/selfManagedEsToAmazonOpenSearch/README.md).
+
 ## Build and deploy the current checkout
 
 The repository's `aws-bootstrap.sh` workflow builds the CloudFormation
@@ -96,7 +101,15 @@ repository root:
 ```
 
 To rebuild and reinstall the current checkout on an existing Migration
-Assistant CloudFormation/EKS deployment:
+Assistant CloudFormation/EKS deployment, first remove the installed release.
+The script only installs: it stops if a release named after `--namespace`
+already exists. `helm uninstall` runs the chart's pre-delete hook, which stops
+and deletes migration workflows and resources and empties the deployment's S3
+bucket, so finish or save anything you need first.
+
+```bash
+helm uninstall ma -n ma
+```
 
 ```bash
 ./deployment/k8s/aws/aws-bootstrap.sh \
