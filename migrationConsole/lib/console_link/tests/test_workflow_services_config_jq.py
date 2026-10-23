@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from console_link.models.cluster import Cluster
+from console_link.models.factories import get_snapshot
+from console_link.models.snapshot import AzureSnapshot, GcsSnapshot, S3Snapshot
 
 JQ_SCRIPT = Path(__file__).resolve().parents[3] / "workflowConfigToServicesConfig.jq"
 
@@ -90,3 +92,34 @@ def test_context_path_is_normalized_by_the_cluster():
     services = translate(solr_workflow_config(solrContextPath="tenant-a/solr/"))
 
     assert Cluster(config=services["source_cluster"]).solr_context_path == "/tenant-a/solr"
+
+
+def snapshot_workflow_config(repo_path_uri: str) -> dict:
+    return {
+        "snapshot": {
+            "snapshotName": "snap-1",
+            "label": "testsnapshot",
+            "repoConfig": {
+                "repoPathUri": repo_path_uri,
+                "awsRegion": "us-east-2",
+                "endpoint": "http://10.96.230.198:4566",
+                "s3RoleArn": "",
+                "azureCredentialsSecretName": "",
+                "useLocalStack": True,
+                "repoName": "default",
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize("repo_path_uri, key, snapshot_class", [
+    ("s3://my-bucket/path", "s3", S3Snapshot),
+    ("gs://my-bucket/path", "gcs", GcsSnapshot),
+    ("azure://myaccount/mycontainer/path", "azure", AzureSnapshot),
+])
+def test_translated_repo_config_initializes_a_snapshot(repo_path_uri, key, snapshot_class):
+    snapshot_config = translate(snapshot_workflow_config(repo_path_uri))["snapshot"]
+
+    assert list(k for k in ("s3", "gcs", "azure") if k in snapshot_config) == [key]
+    assert snapshot_config[key]["repo_uri"] == repo_path_uri
+    assert isinstance(get_snapshot(snapshot_config, None), snapshot_class)
