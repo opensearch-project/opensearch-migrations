@@ -1,4 +1,4 @@
-"""Helpers for workflow output artifacts stored in S3 or GCS."""
+"""Helpers for workflow output artifacts stored in S3, GCS, or Azure Blob Storage."""
 
 import logging
 import os
@@ -17,6 +17,10 @@ REPO_ARTIFACTS_BUCKET_ENV = "REPO_ARTIFACTS_BUCKET"
 ARTIFACT_ENDPOINT_ENV = "REPO_ARTIFACTS_ENDPOINT_URL"
 ARTIFACT_MOUNT_ENV = "REPO_ARTIFACTS_MOUNT_POINT"
 DEFAULT_ARTIFACT_MOUNT = "/artifacts"
+AZURE_ACCOUNT_KEY_ENV = "AZURE_STORAGE_ACCOUNT_KEY"
+AZURE_SAS_TOKEN_ENV = "AZURE_STORAGE_SAS_TOKEN"
+# The Blob Batch API behind delete_blobs accepts at most 256 subrequests per batch.
+AZURE_DELETE_BATCH_SIZE = 256
 
 
 class ArtifactStoreError(RuntimeError):
@@ -31,6 +35,24 @@ def _parse_bucket_uri(uri: str):
     """Parse a full bucket URI (s3://... or gs://...) into (scheme, bucket)."""
     parsed = urlparse(uri)
     return parsed.scheme, parsed.netloc
+
+
+def _parse_azure_uri(uri: str):
+    """Parse azure://<account>/<container>[/<path>] into (account, container).
+
+    Azure needs its own parser because the container is in the URI path, not the netloc:
+    urlparse("azure://acct/container/key") yields netloc="acct" and path="/container/key".
+    Reusing the (scheme, netloc) pair from _parse_bucket_uri would address the storage
+    account name as if it were a container.
+    """
+    parsed = urlparse(uri)
+    account = parsed.netloc
+    container = parsed.path.lstrip("/").split("/", 1)[0]
+    if not account or not container:
+        raise ArtifactStoreError(
+            f"invalid Azure artifact URI {uri!r}; expected azure://<account>/<container>"
+        )
+    return account, container
 
 
 def _s3_client(endpoint_url: Optional[str] = None):
@@ -54,6 +76,44 @@ def _gcs_client():
         raise ArtifactStoreError(
             "google-cloud-storage is required for GCS artifact support"
         ) from e
+
+
+def _azure_container_client(account: str, container: str):
+    """Build a container client for azure://<account>/<container>, resolving credentials like AzureRepo.create.
+
+    An endpoint override is a base URL; the account is appended to it, as in AzureRepo.create."""
+    try:
+        from azure.storage.blob import BlobServiceClient
+        # azure-core ships as a hard dependency of azure-storage-blob, so one check covers both.
+        from azure.core.credentials import AzureSasCredential
+    except ImportError as e:
+        raise ArtifactStoreError(
+            "azure-storage-blob is required for Azure Blob Storage artifact support"
+        ) from e
+
+    endpoint = os.getenv(ARTIFACT_ENDPOINT_ENV)
+    account_url = f"{endpoint.rstrip('/')}/{account}" if endpoint else f"https://{account}.blob.core.windows.net"
+
+    account_key = os.getenv(AZURE_ACCOUNT_KEY_ENV)
+    sas_token = os.getenv(AZURE_SAS_TOKEN_ENV)
+    if account_key:
+        # Name the account: given a bare key the SDK infers it from the host, which fails for service DNS.
+        credential = {"account_name": account, "account_key": account_key}
+    elif sas_token:
+        # Wrap the token: a bare string with an unrecognized query parameter is read as an account key.
+        credential = AzureSasCredential(sas_token)
+    else:
+        try:
+            from azure.identity import DefaultAzureCredential
+        except ImportError as e:
+            raise ArtifactStoreError(
+                "azure-identity is required for Azure Blob Storage artifact support "
+                f"when neither {AZURE_ACCOUNT_KEY_ENV} nor {AZURE_SAS_TOKEN_ENV} is set"
+            ) from e
+        credential = DefaultAzureCredential()
+
+    service = BlobServiceClient(account_url=account_url, credential=credential)
+    return service.get_container_client(container)
 
 
 def _mounted_artifact_path(key: str) -> Path:
@@ -86,6 +146,20 @@ def read_artifact_text(key: str) -> str:
             return blob.download_as_text(encoding="utf-8")
         except Exception as e:
             raise ArtifactStoreError(f"could not read gs://{bucket}/{key}: {e}") from e
+
+    elif scheme == "azure":
+        account, container = _parse_azure_uri(uri)
+        try:
+            # Constructed inside the try so credential or endpoint problems surface as ArtifactStoreError.
+            container_client = _azure_container_client(account, container)
+            data = container_client.get_blob_client(key).download_blob().readall()
+            return data.decode("utf-8", errors="replace")
+        except ArtifactStoreError:
+            raise
+        except Exception as e:
+            raise ArtifactStoreError(
+                f"could not read azure://{account}/{container}/{key}: {e}"
+            ) from e
 
     raise ArtifactStoreError(f"unsupported URI scheme: {uri}")
 
@@ -127,6 +201,26 @@ def _list_artifacts_gcs(bucket: str, prefix: str) -> List[Dict[str, object]]:
         raise ArtifactStoreError(f"could not list gs://{bucket}/{prefix}: {e}") from e
 
 
+def _list_artifacts_azure(account: str, container: str, prefix: str) -> List[Dict[str, object]]:
+    try:
+        # See read_artifact_text's azure branch for why construction is inside the try.
+        container_client = _azure_container_client(account, container)
+        return [
+            {
+                "key": blob.name,
+                "last_modified": blob.last_modified,
+                "size": blob.size,
+            }
+            for blob in container_client.list_blobs(name_starts_with=prefix)
+        ]
+    except ArtifactStoreError:
+        raise
+    except Exception as e:
+        raise ArtifactStoreError(
+            f"could not list azure://{account}/{container}/{prefix}: {e}"
+        ) from e
+
+
 def _list_artifacts_mounted(prefix: str) -> List[Dict[str, object]]:
     mounted_prefix = _mounted_artifact_path(prefix)
     if not mounted_prefix.exists():
@@ -151,6 +245,9 @@ def list_artifacts(prefix: str) -> List[Dict[str, object]]:
             return _list_artifacts_s3(bucket, prefix)
         if scheme == "gs":
             return _list_artifacts_gcs(bucket, prefix)
+        if scheme == "azure":
+            account, container = _parse_azure_uri(uri)
+            return _list_artifacts_azure(account, container, prefix)
 
     return _list_artifacts_mounted(prefix)
 
@@ -182,6 +279,23 @@ def _delete_artifact_prefix_gcs(bucket: str, prefix: str) -> int:
         raise ArtifactStoreError(f"could not delete gs://{bucket}/{prefix}: {e}") from e
 
 
+def _delete_artifact_prefix_azure(account: str, container: str, prefix: str) -> int:
+    try:
+        # See read_artifact_text's azure branch for why construction is inside the try.
+        container_client = _azure_container_client(account, container)
+        names = [blob.name for blob in container_client.list_blobs(name_starts_with=prefix)]
+        for start in range(0, len(names), AZURE_DELETE_BATCH_SIZE):
+            chunk = names[start:start + AZURE_DELETE_BATCH_SIZE]
+            container_client.delete_blobs(*chunk)
+        return len(names)
+    except ArtifactStoreError:
+        raise
+    except Exception as e:
+        raise ArtifactStoreError(
+            f"could not delete azure://{account}/{container}/{prefix}: {e}"
+        ) from e
+
+
 def delete_artifact_prefix(prefix: str) -> int:
     """Delete all objects under a prefix. Returns the number of deleted keys."""
     uri = _artifact_uri()
@@ -194,5 +308,8 @@ def delete_artifact_prefix(prefix: str) -> int:
         return _delete_artifact_prefix_s3(bucket, prefix)
     if scheme == "gs":
         return _delete_artifact_prefix_gcs(bucket, prefix)
+    if scheme == "azure":
+        account, container = _parse_azure_uri(uri)
+        return _delete_artifact_prefix_azure(account, container, prefix)
 
     raise ArtifactStoreError(f"unsupported URI scheme: {uri}")

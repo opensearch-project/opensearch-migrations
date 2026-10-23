@@ -51,10 +51,25 @@ public class RepoUriTest {
     }
 
     @Test
+    void parse_azureScheme_returnsAzureRepoUri() {
+        var uri = RepoUri.parse("azure://myaccount/my-container/snapshots");
+        assertInstanceOf(RepoUri.AzureRepoUri.class, uri);
+        assertEquals("azure://myaccount/my-container/snapshots", uri.rawUri());
+    }
+
+    // parse validates azure:// eagerly, like s3://, so a URI missing the container segment is
+    // rejected at argument-parsing time instead of after the tool has connected to the source.
+    @Test
+    void parse_azureSchemeWithoutContainer_throwsIllegalArgumentException() {
+        assertThrows(IllegalArgumentException.class, () -> RepoUri.parse("azure://mystorageacct"));
+    }
+
+    @Test
     void parse_unrecognizedScheme_throwsIllegalArgumentException() {
         var ex = assertThrows(IllegalArgumentException.class, () -> RepoUri.parse("ftp://host/path"));
         assertEquals(
-            "Unrecognized repo URI scheme: 'ftp://host/path'. Expected file://, s3://, gs://, or an absolute path.",
+            "Unrecognized repo URI scheme: 'ftp://host/path'. Expected file://, s3://, gs://, azure://, "
+                + "or an absolute path.",
             ex.getMessage()
         );
     }

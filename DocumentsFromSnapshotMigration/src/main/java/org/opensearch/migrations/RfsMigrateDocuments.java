@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.common.AzureRepo;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -165,13 +166,13 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
-            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
+            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path, azure://account/container/path (or bare absolute path)"))
         public String repoUri = null;
 
         @Parameter(required = false,
             names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir" },
             description = ("The absolute path to the directory on local disk to download remote repo files to.  " +
-                "Required for s3:// and gs:// repos."))
+                "Required for s3://, gs://, and azure:// repos."))
         public String localDir = null;
 
         @Parameter(required = false,
@@ -181,8 +182,19 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
-            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS, Azurite for Azure)"))
         public String endpoint = null;
+
+        @Parameter(required = false,
+            names = { ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE },
+            description = "Optional. Storage account key for an azure:// repo. Mutually exclusive with --azure-storage-sas-token. "
+                + "If neither is set, the ambient Azure identity is used.")
+        public String azureStorageAccountKey = null;
+
+        @Parameter(required = false,
+            names = { ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE },
+            description = "Optional. SAS token for an azure:// repo. Mutually exclusive with --azure-storage-account-key.")
+        public String azureStorageSasToken = null;
 
         @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
@@ -493,6 +505,9 @@ public class RfsMigrateDocuments {
                 case RepoUri.GcsRepoUri g -> throw new ParameterException(
                     "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
                 );
+                case RepoUri.AzureRepoUri a -> throw new ParameterException(
+                    "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
+                );
             }
             if (args.coordinatorArgs.host == null) {
                 throw new ParameterException(
@@ -529,6 +544,18 @@ public class RfsMigrateDocuments {
                 if (args.localDir == null) {
                     throw new ParameterException(
                         "If a GCS repo is being used, --local-dir must be set."
+                    );
+                }
+            }
+            case RepoUri.AzureRepoUri a -> {
+                if (args.localDir == null) {
+                    throw new ParameterException(
+                        "If an Azure repo is being used, --local-dir must be set."
+                    );
+                }
+                if (args.azureStorageAccountKey != null && args.azureStorageSasToken != null) {
+                    throw new ParameterException(
+                        "Supply either --azure-storage-account-key or --azure-storage-sas-token, not both."
                     );
                 }
             }
@@ -819,6 +846,13 @@ public class RfsMigrateDocuments {
                     Paths.get(arguments.localDir),
                     new GcsUri(g.rawUri()),
                     arguments.endpoint,
+                    finder);
+                case RepoUri.AzureRepoUri a -> AzureRepo.create(
+                    Paths.get(arguments.localDir),
+                    a.azureUri(),
+                    arguments.endpoint,
+                    arguments.azureStorageAccountKey,
+                    arguments.azureStorageSasToken,
                     finder);
                 case RepoUri.S3RepoUri s -> S3Repo.create(
                     Paths.get(arguments.localDir),

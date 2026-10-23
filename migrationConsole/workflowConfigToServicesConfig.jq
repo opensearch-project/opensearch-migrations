@@ -70,17 +70,24 @@ def normalizeS3Config:
     else
       .
     end)
-  | del(.repoName, .useLocalStack);
+  | del(.repoName, .useLocalStack, .azureCredentialsSecretName);
 
 # GCS has no extra fields beyond repoPathUri/endpoint at the moment.
 def normalizeGcsConfig:
   normalizeRepoUri
-  | del(.repoName, .useLocalStack, .awsRegion, .s3RoleArn);
+  | del(.repoName, .useLocalStack, .awsRegion, .s3RoleArn, .azureCredentialsSecretName);
+
+# console_link's azure snapshot takes only repo_uri; the credentials secret is read by the migration tools.
+def normalizeAzureConfig:
+  normalizeRepoUri
+  | del(.repoName, .useLocalStack, .awsRegion, .s3RoleArn, .endpoint, .azureCredentialsSecretName);
 
 def normalizeRepoConfig:
   if has("repoConfig") then
     (if (.repoConfig.repoPathUri // "" | startswith("gs://")) then
       .gcs = (.repoConfig | normalizeGcsConfig)
+    elif (.repoConfig.repoPathUri // "" | startswith("azure://")) then
+      .azure = (.repoConfig | normalizeAzureConfig)
     else
       .s3 = (.repoConfig | normalizeS3Config)
     end)

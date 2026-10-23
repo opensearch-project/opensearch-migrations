@@ -24,7 +24,21 @@ public class ArgNameConstants {
     public static final String COORDINATOR_PASSWORD_ARG_CAMEL_CASE = "--coordinatorPassword";
     public static final String COORDINATOR_USERNAME_ARG_KEBAB_CASE = "--coordinator-username";
     public static final String COORDINATOR_USERNAME_ARG_CAMEL_CASE = "--coordinatorUsername";
+    public static final String AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE = "--azure-storage-account-key";
+    public static final String AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE = "--azureStorageAccountKey";
+    public static final String AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE = "--azure-storage-sas-token";
+    public static final String AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE = "--azureStorageSasToken";
+    public static final Set<String> AZURE_STORAGE_CREDENTIAL_ARGS = Set.of(
+        AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE,
+        AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE,
+        AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE,
+        AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE
+    );
     public static final Set<String> CENSORED_ARGS = Set.of(
+        AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE,
+        AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE,
+        AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE,
+        AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE,
         TARGET_PASSWORD_ARG_KEBAB_CASE,
         TARGET_PASSWORD_ARG_CAMEL_CASE,
         SOURCE_PASSWORD_ARG_KEBAB_CASE,

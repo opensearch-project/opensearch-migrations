@@ -330,12 +330,41 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void validateArgs_acceptsAzureRepoWithLocalDir() {
+        var args = validEsArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        args.localDir = "/tmp/azure";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
     void validateArgs_rejectsGcsRepoWithoutLocalDir() {
         var args = validEsArgs();
         args.repoUri = "gs://bucket/key";
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), equalTo("If a GCS repo is being used, --local-dir must be set."));
+    }
+
+    @Test
+    void validateArgs_rejectsAzureRepoWithoutLocalDir() {
+        var args = validEsArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), equalTo("If an Azure repo is being used, --local-dir must be set."));
+    }
+
+    @Test
+    void validateArgs_rejectsAzureRepoWithBothAccountKeyAndSasToken() {
+        var args = validEsArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        args.localDir = "/tmp/azure";
+        args.azureStorageAccountKey = "key";
+        args.azureStorageSasToken = "token";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), equalTo("Supply either --azure-storage-account-key or --azure-storage-sas-token, not both."));
     }
 
     @Test
@@ -427,6 +456,20 @@ class RfsMigrateDocumentsHelpersTest {
         args.sourceVersion = Version.fromString("SOLR_8.11");
         args.repoUri = "gs://bucket/key";
         args.localDir = "/tmp/gcs";
+        args.coordinatorArgs.host = "http://localhost:9200";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("file:// or s3://"));
+    }
+
+    @Test
+    void validateArgs_solr_rejectsAzureRepoUpFront() {
+        // Same reasoning as the gs:// case above: azure:// is rejected during validation
+        // rather than later in buildSolrSourceFactory.
+        var args = new RfsMigrateDocuments.Args();
+        args.sourceVersion = Version.fromString("SOLR_8.11");
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        args.localDir = "/tmp/azure";
         args.coordinatorArgs.host = "http://localhost:9200";
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));

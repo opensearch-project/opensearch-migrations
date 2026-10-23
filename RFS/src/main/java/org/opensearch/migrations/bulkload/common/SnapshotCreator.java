@@ -112,6 +112,12 @@ public class SnapshotCreator {
                 // would be silently ignored, so the endpoint is intentionally not forwarded.
                 body.put("type", "gcs");
             }
+            case RepoUri.AzureRepoUri a -> {
+                var azureUri = a.azureUri();
+                putContainerSettings(settings, azureUri.containerName, azureUri.key);
+                // Neither the endpoint nor the storage account is forwarded: both are cluster-side client settings.
+                body.put("type", "azure");
+            }
         }
 
         body.set("settings", settings);
@@ -120,8 +126,17 @@ public class SnapshotCreator {
 
     private void putBucketSettings(ObjectNode settings, String bucket, String key) {
         settings.put("bucket", bucket);
-        if (key != null && !key.isEmpty()) {
-            settings.put("base_path", key);
+        putCommonBlobSettings(settings, key);
+    }
+
+    private void putContainerSettings(ObjectNode settings, String container, String key) {
+        settings.put("container", container);
+        putCommonBlobSettings(settings, key);
+    }
+
+    private void putCommonBlobSettings(ObjectNode settings, String basePath) {
+        if (basePath != null && !basePath.isEmpty()) {
+            settings.put("base_path", basePath);
         }
         settings.put("compress", compressionEnabled);
         if (maxSnapshotRateMBPerNode != null) {

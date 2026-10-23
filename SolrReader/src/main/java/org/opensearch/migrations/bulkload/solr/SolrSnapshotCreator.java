@@ -116,15 +116,21 @@ public class SolrSnapshotCreator {
     }
 
     /**
-     * True when the backup location is a cloud object-store URI (S3 or GCS).
+     * True when the backup location is a cloud object-store URI (S3, GCS, or Azure).
      *
      * <p>Switches over {@link RepoUri} rather than matching scheme prefixes so that adding a
      * variant to the sealed type fails to compile here instead of silently answering "not cloud"
      * and having the location treated as a filesystem path.
      *
-     * <p>Stays total: callers pass a location Solr may handle as a plain path (a bare path for
-     * file repos, or a relative path for the legacy standalone replication handler), so a value
-     * {@link RepoUri#parse} rejects answers "not cloud" rather than propagating an exception.
+     * <p>Stays total: {@code SolrBackupStrategy} resolves a file repo to its bare {@code path()}
+     * before passing it here, and for a {@code file://} URI without a leading slash that path is
+     * relative, which {@link RepoUri#parse} rejects. Solr handles it as a plain path, so a value
+     * {@code parse} rejects answers "not cloud" rather than propagating an exception.
+     *
+     * <p>The {@code azure://} arm is honest about the scheme but unreachable: {@code
+     * SolrBackupStrategy} rejects Azure before construction. It has to stay unreachable until
+     * {@link #extractS3Path} handles Azure's account/container split, since that method keeps the
+     * whole URI path and so would leave the container name in Solr's {@code location}.
      */
     static boolean isCloudRepoUri(String location) {
         if (location == null) {
@@ -139,6 +145,7 @@ public class SolrSnapshotCreator {
         return switch (parsed) {
             case RepoUri.S3RepoUri s -> true;
             case RepoUri.GcsRepoUri g -> true;
+            case RepoUri.AzureRepoUri a -> true;
             case RepoUri.FileRepoUri f -> false;
         };
     }
@@ -146,10 +153,11 @@ public class SolrSnapshotCreator {
     /**
      * Build the Solr backup `location` parameter for a specific collection.
      *
-     * <p>For cloud locations (S3/GCS), strips the scheme/bucket and appends the snapshot name so
-     * that Solr writes collection subdirectories directly under <snapshotName>/ (matching the
-     * reader's expectation). For filesystem locations, appends the snapshot name to the
-     * configured path. Returns {@code null} when {@code location} is null.
+     * <p>For cloud locations (S3, GCS, or Azure), strips the scheme/bucket and appends the snapshot
+     * name so that Solr writes collection subdirectories directly under <snapshotName>/ (matching
+     * the reader's expectation). For filesystem locations, appends the snapshot name to the
+     * configured path. Returns {@code null} when {@code location} is null. Azure is unreachable
+     * here for the reason given on {@link #isCloudRepoUri}.
      */
     static String buildPerCollectionLocation(String location, String snapshotName) {
         if (location == null) {
