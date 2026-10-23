@@ -16,6 +16,11 @@ public class OpenSearchClient_OS_2_11 extends OpenSearchClient {
         super(client, failedRequestsLogger, version, compressionMode);
     }
 
+    public OpenSearchClient_OS_2_11(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
+                                   CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
+        super(client, failedRequestsLogger, version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest);
+    }
+
     protected String getCreateIndexPath(String indexName) {
         return indexName;
     }

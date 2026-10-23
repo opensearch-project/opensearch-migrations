@@ -146,9 +146,9 @@ public class RfsMigrateDocuments {
 
     public static class Args {
         /** Default maximum documents per bulk batch. */
-        static final int DEFAULT_MAX_DOCS_PER_BATCH = Integer.MAX_VALUE;
+        static final int DEFAULT_MAX_DOCS_PER_BATCH = OpenSearchClient.DEFAULT_MAX_DOCS_PER_BULK_REQUEST;
         /** Default maximum bytes per bulk batch (10 MiB). */
-        static final long DEFAULT_MAX_BYTES_PER_BATCH = 10L * 1024 * 1024;
+        static final long DEFAULT_MAX_BYTES_PER_BATCH = OpenSearchClient.DEFAULT_MAX_BYTES_PER_BULK_REQUEST;
         /** Default number of concurrent batches in flight. */
         static final int DEFAULT_BATCH_CONCURRENCY = 10;
 
@@ -245,8 +245,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
-            description = "Optional. The maximum aggregate document size to be used in bulk requests in bytes. " +
-                "Note does not apply to single document requests. Default 10 MiB")
+            description = "Optional. The maximum bulk request body size in bytes, including action metadata and newlines. " +
+                "A document that exceeds the limit by itself is sent alone. Default 10 MiB")
         long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
 
         @Parameter(required = false,
@@ -610,7 +610,8 @@ public class RfsMigrateDocuments {
 
         var targetConnectionContext = arguments.targetArgs.toConnectionContext();
         var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
-        OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
+        OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate(
+            arguments.numDocsPerBulkRequest, arguments.numBytesPerBulkRequest);
         var targetVersion = targetClient.getClusterVersion();
 
         // Build the failed document stream sink and attach it to the target client. The sink is closed in

@@ -78,6 +78,25 @@ and `external_gte`; see the
 
 This library supports benchmarks via [Java Microbenchmark Harness or JMH](https://github.com/openjdk/jmh).  These are best to be used with A/B testing that does not involve any external systems, such as string parsers.  Run the command with `./gradlew RFS:jmh` after it has completed results will be available in {project.dir}/build/reports/jmh in addition to the human readable logs.
 
+### Bulk request serialization and batching
+
+Run the bulk benchmarks with two forked JVMs, warmup, and allocation profiling:
+
+```sh
+./gradlew :RFS:jmh -I RFS/benchmarks/bulk-request.gradle
+```
+
+`BulkRequestBenchmark` measures serialization alone and the client path through batching,
+request assembly, and response handling. A recording transport consumes the body without
+network I/O. Fixtures cover raw sources, native operations retaining raw bytes, and mapped
+documents, with one or 128 documents and bodies from 256 bytes to 64 KiB. Setup verifies
+that every fixture sends one identical, complete request within the default limit.
+
+For an A/B comparison, copy `BulkRequestBenchmark.java` and `RFS/benchmarks/` unchanged
+to a checkout of the baseline revision. Run the revisions sequentially on the same machine
+and JDK. Results, including bytes allocated per request, are written to
+`RFS/build/reports/jmh/bulk-request.json`.
+
 ### Adding a benchmark
 
 It is recommended to put benchmarks into the test code, so they are validated for correctness when not run in the benchmark suite. The following shows example annotations that are used.

@@ -54,6 +54,17 @@ public class OpenSearchClientFactory {
     }
 
     public OpenSearchClient determineVersionAndCreate(RestClient restClient, FailedRequestsLogger failedRequestsLogger) {
+        return determineVersionAndCreate(restClient, failedRequestsLogger,
+            OpenSearchClient.DEFAULT_MAX_DOCS_PER_BULK_REQUEST, OpenSearchClient.DEFAULT_MAX_BYTES_PER_BULK_REQUEST);
+    }
+
+    public OpenSearchClient determineVersionAndCreate(int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
+        return determineVersionAndCreate(null, null, maxDocsPerBulkRequest, maxBytesPerBulkRequest);
+    }
+
+    private OpenSearchClient determineVersionAndCreate(
+        RestClient restClient, FailedRequestsLogger failedRequestsLogger, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest
+    ) {
         if (version == null) {
             version = getClusterVersion();
         }
@@ -71,12 +82,11 @@ public class OpenSearchClientFactory {
         }
         var clientClass = getOpenSearchClientClass(version);
         try {
-            if (restClient == null && failedRequestsLogger == null) {
-                return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class, CompressionMode.class)
-                        .newInstance(client, new FailedRequestsLogger(), version, compressionMode);
-            }
-            return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class, CompressionMode.class)
-                    .newInstance(restClient, failedRequestsLogger, version, compressionMode);
+            return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class,
+                    CompressionMode.class, int.class, long.class)
+                .newInstance(restClient == null ? client : restClient,
+                    failedRequestsLogger == null ? new FailedRequestsLogger() : failedRequestsLogger,
+                    version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest);
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
             throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
         }

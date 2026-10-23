@@ -20,7 +20,13 @@ public class OpenSearchClient_ES_5_6 extends OpenSearchClient {
     }
 
     public OpenSearchClient_ES_5_6(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version, CompressionMode compressionMode) {
-        super(client, failedRequestsLogger, version, compressionMode);
+        this(client, failedRequestsLogger, version, compressionMode,
+            DEFAULT_MAX_DOCS_PER_BULK_REQUEST, DEFAULT_MAX_BYTES_PER_BULK_REQUEST);
+    }
+
+    public OpenSearchClient_ES_5_6(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
+                                  CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
+        super(client, failedRequestsLogger, version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest);
         if (version.getFlavor() != Flavor.ELASTICSEARCH && version.getMajor() != 5) {
             log.atWarn().setMessage("OpenSearchClient_ES_5_6 created for cluster with version {}").addArgument(version.toString()).log();
         }
