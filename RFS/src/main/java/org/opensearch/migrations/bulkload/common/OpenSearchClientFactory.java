@@ -55,7 +55,7 @@ public class OpenSearchClientFactory {
 
     public OpenSearchClient determineVersionAndCreate(RestClient restClient, FailedRequestsLogger failedRequestsLogger) {
         return determineVersionAndCreate(restClient, failedRequestsLogger,
-            OpenSearchClient.DEFAULT_MAX_DOCS_PER_BULK_REQUEST, OpenSearchClient.DEFAULT_MAX_BYTES_PER_BULK_REQUEST);
+            Integer.MAX_VALUE, Long.MAX_VALUE);
     }
 
     public OpenSearchClient determineVersionAndCreate(int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {

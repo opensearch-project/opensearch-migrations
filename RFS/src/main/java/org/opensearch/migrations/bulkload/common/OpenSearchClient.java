@@ -71,8 +71,6 @@ public abstract class OpenSearchClient {
         .maxBackoff(BULK_MAX_BACKOFF);
     public static final int BULK_TRUNCATED_RESPONSE_MAX_LENGTH = 1500;
     public static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
-    public static final int DEFAULT_MAX_DOCS_PER_BULK_REQUEST = Integer.MAX_VALUE;
-    public static final long DEFAULT_MAX_BYTES_PER_BULK_REQUEST = 10L * 1024 * 1024;
 
     protected final RestClient client;
     protected final FailedRequestsLogger failedRequestsLogger;
@@ -98,8 +96,8 @@ public abstract class OpenSearchClient {
     }
 
     protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version, CompressionMode compressionMode) {
-        this(client, failedRequestsLogger, version, compressionMode,
-            DEFAULT_MAX_DOCS_PER_BULK_REQUEST, DEFAULT_MAX_BYTES_PER_BULK_REQUEST);
+        // Callers that omit limits retain the supplied batches; the CLI supplies its configured limits.
+        this(client, failedRequestsLogger, version, compressionMode, Integer.MAX_VALUE, Long.MAX_VALUE);
     }
 
     protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
