@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageException;
 import com.google.cloud.storage.StorageOptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -18,6 +19,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers
@@ -81,5 +85,17 @@ public class GcsRepoIntegrationTest {
 
         Path dataFile = repo.getSnapshotRepoDataFilePath();
         assertTrue(Files.exists(dataFile));
+    }
+
+    @Test
+    void missingBlobIsClassifiedAndLeavesNoLocalFile(@TempDir Path tempDir) {
+        var gcsUri = new GcsUri("gs://" + BUCKET_NAME + "/missing");
+        var repo = GcsRepo.create(tempDir, gcsUri, gcsEndpoint, new BaseSnapshotFileFinder());
+
+        var exception = assertThrows(GcsRepo.CouldNotReadFromGcs.class, () -> repo.getGlobalMetadataFilePath("snap1"));
+
+        assertNotNull(SnapshotReadFailures.find(exception));
+        assertEquals(404, ((StorageException) exception.getCause()).getCode());
+        assertFalse(Files.exists(tempDir.resolve("meta-snap1.dat")));
     }
 }
