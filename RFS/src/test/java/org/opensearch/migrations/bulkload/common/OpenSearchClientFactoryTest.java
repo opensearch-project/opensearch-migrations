@@ -21,7 +21,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mock.Strictness;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -31,6 +32,7 @@ import reactor.util.retry.Retry;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
@@ -93,21 +95,36 @@ class OpenSearchClientFactoryTest {
     OpenSearchClientFactory openSearchClientFactory;
 
     @ParameterizedTest
-    @ValueSource(strings = {"ES 5.6", "ES 6.8", "OS 2.11"})
-    void constructsClientsWithExplicitBulkLimits(String version) {
+    @CsvSource({
+        "ES 5.6,  1, 1024, 3",
+        "ES 6.8,  1, 1024, 3",
+        "OS 2.11, 1, 1024, 3",
+        "ES 5.6,  100, 64, 3",
+        "ES 6.8,  100, 64, 3",
+        "OS 2.11, 100, 64, 3",
+        "ES 5.6,  100, 1024, 1",
+        "ES 6.8,  100, 1024, 1",
+        "OS 2.11, 100, 1024, 1"
+    })
+    void constructsClientsWithExplicitBulkLimits(String version, int maxDocs, long maxBytes, int expectedRequests) {
         doReturn(Version.fromString(version)).when(openSearchClientFactory).getClusterVersion();
         when(connectionContext.isDisableCompression()).thenReturn(true);
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
         var docs = List.of(
             new Document("a", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
-            new Document("b", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()));
+            new Document("b", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("c", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()));
 
-        var client = openSearchClientFactory.determineVersionAndCreate(1, 1024);
+        var client = openSearchClientFactory.determineVersionAndCreate(maxDocs, maxBytes);
         var response = client.sendBulkRequestRaw("idx", docs, null, false, DocumentExceptionAllowlist.empty()).block();
 
-        assertEquals(2, response.requests.total());
-        verify(restClient, times(2)).postAsyncBytes(any(), any(), any(), any());
+        assertEquals(expectedRequests, response.requests.total());
+        var requests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(expectedRequests)).postAsyncBytes(any(), requests.capture(), any(), any());
+        assertTrue(requests.getAllValues().stream().allMatch(bytes -> bytes.length <= maxBytes));
+        assertTrue(requests.getAllValues().stream()
+            .allMatch(bytes -> new String(bytes, StandardCharsets.UTF_8).lines().count() / 2 <= maxDocs));
     }
 
     @BeforeEach

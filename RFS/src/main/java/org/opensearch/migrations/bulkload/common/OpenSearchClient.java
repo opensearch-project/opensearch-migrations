@@ -25,7 +25,6 @@ import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
-import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.pipeline.BatchSizePredicate;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -90,15 +89,6 @@ public abstract class OpenSearchClient {
     // Canonical work-item id (index + shard + checkpoint) for the work item currently being
     // processed. Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
     private volatile String failedDocumentStreamWorkItemId;
-
-    protected OpenSearchClient(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
-        this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
-    }
-
-    protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version, CompressionMode compressionMode) {
-        // Callers that omit limits retain the supplied batches; the CLI supplies its configured limits.
-        this(client, failedRequestsLogger, version, compressionMode, Integer.MAX_VALUE, Long.MAX_VALUE);
-    }
 
     protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
                                CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {

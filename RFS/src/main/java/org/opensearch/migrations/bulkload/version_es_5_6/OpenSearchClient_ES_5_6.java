@@ -13,17 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class OpenSearchClient_ES_5_6 extends OpenSearchClient {
     public OpenSearchClient_ES_5_6(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
-        super(connectionContext, version, compressionMode);
-        if (version.getFlavor() != Flavor.ELASTICSEARCH && version.getMajor() != 5) {
-            log.atWarn().setMessage("OpenSearchClient_ES_5_6 created for cluster with version {}").addArgument(version.toString()).log();
-        }
+        this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
     }
 
     public OpenSearchClient_ES_5_6(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version, CompressionMode compressionMode) {
-        super(client, failedRequestsLogger, version, compressionMode);
-        if (version.getFlavor() != Flavor.ELASTICSEARCH && version.getMajor() != 5) {
-            log.atWarn().setMessage("OpenSearchClient_ES_5_6 created for cluster with version {}").addArgument(version.toString()).log();
-        }
+        this(client, failedRequestsLogger, version, compressionMode, Integer.MAX_VALUE, Long.MAX_VALUE);
     }
 
     public OpenSearchClient_ES_5_6(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,

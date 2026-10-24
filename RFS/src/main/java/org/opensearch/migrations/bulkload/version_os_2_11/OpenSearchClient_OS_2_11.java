@@ -9,11 +9,11 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 public class OpenSearchClient_OS_2_11 extends OpenSearchClient {
     public OpenSearchClient_OS_2_11(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
-        super(connectionContext, version, compressionMode);
+        this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
     }
 
     public OpenSearchClient_OS_2_11(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version, CompressionMode compressionMode) {
-        super(client, failedRequestsLogger, version, compressionMode);
+        this(client, failedRequestsLogger, version, compressionMode, Integer.MAX_VALUE, Long.MAX_VALUE);
     }
 
     public OpenSearchClient_OS_2_11(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
