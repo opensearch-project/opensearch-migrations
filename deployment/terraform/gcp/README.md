@@ -209,6 +209,35 @@ For production workloads, **keep the 80 GiB default** and size the nodes
 appropriately — undersizing `maxShardSizeBytes` will cause the migration to
 fail mid-shard if a real shard exceeds the configured ceiling.
 
+## Sizing: Kafka broker storage
+
+In-cluster Kafka brokers run on the default node pool, and their storage is a
+persistent volume claim per broker, not a node disk. Terraform does not size it.
+The workflow config does, through `nodePoolSpecOverrides.storage`, and the
+default is a **2 GiB** smoke-test volume on the cluster's default storage class
+(`standard-rwo`).
+
+A capture-and-replay run can fill 2 GiB quickly, and a broker that runs out of
+space marks its log directory offline and will not restart. Before capturing
+real traffic, set the size and storage class in the workflow config:
+
+```yaml
+kafkaClusterConfiguration:
+  default:
+    autoCreate:
+      nodePoolSpecOverrides:
+        storage:
+          type: persistent-claim
+          size: 200Gi
+          deleteClaim: true
+          class: premium-rwo
+```
+
+See [the Kafka user guide](../../../orchestrationSpecs/KAFKA_USER_GUIDE.md) for
+the other Kafka overrides. An existing Kafka cluster is also configured in the
+workflow config, under `kafkaClusterConfiguration.<name>.existing`, and needs no
+Terraform changes.
+
 ## Bring Your Own Snapshot (BYOS)
 
 The default Argo workflows create a fresh snapshot in the configured GCS
