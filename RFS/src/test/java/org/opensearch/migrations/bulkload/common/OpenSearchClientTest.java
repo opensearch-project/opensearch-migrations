@@ -291,7 +291,7 @@ class OpenSearchClientTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void rawRetriesPreserveTheSizedDocumentBytes(boolean generateIds) {
-        var body = "{\"value\":1e2}".getBytes(StandardCharsets.UTF_8);
+        var body = "{\r\n\"value\":1e2,\n\"text\":\"é\\n\\r\"\r\n}".getBytes(StandardCharsets.UTF_8);
         var documents = List.of(
             new Document("d1", body, Document.Operation.UPSERT, Map.of(), Map.of()),
             new Document("d2", body, Document.Operation.UPSERT, Map.of(), Map.of()));
@@ -307,6 +307,10 @@ class OpenSearchClientTest {
         var requests = ArgumentCaptor.forClass(byte[].class);
         verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
         org.junit.jupiter.api.Assertions.assertArrayEquals(requests.getAllValues().get(0), requests.getAllValues().get(1));
+        var lines = new String(requests.getAllValues().get(0), StandardCharsets.UTF_8).split("\n");
+        assertEquals(4, lines.length, "Two operations must have exactly four NDJSON lines");
+        assertEquals("{  \"value\":1e2, \"text\":\"é\\n\\r\"  }", lines[1]);
+        assertEquals(lines[1], lines[3]);
     }
 
     @ParameterizedTest

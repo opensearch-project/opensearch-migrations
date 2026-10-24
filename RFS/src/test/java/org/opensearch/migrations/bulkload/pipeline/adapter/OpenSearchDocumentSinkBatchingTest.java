@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -114,6 +115,39 @@ class OpenSearchDocumentSinkBatchingTest {
 
         assertEquals(List.of(1, 1), requestCounts());
         assertTrue(requests.stream().allMatch(bytes -> bytes.length <= limit));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"raw", "native"})
+    void multilineSourceUsesOneBodyLineAndExactByteLimits(String path) throws Exception {
+        var source = "{\r\n  \"text\":\"é\\n\\r\\\"\",\n  \"value\":1e2,\r  \"values\":[1,\n2]\n}\r\n";
+        var singleLine = source.replace('\r', ' ').replace('\n', ' ');
+        var docs = List.of(doc("d1", source), doc("d2", source), doc("d3", source));
+        var expected = serialized(List.of(doc("d1", singleLine), doc("d2", singleLine)));
+        var result = sink(identity(path), Integer.MAX_VALUE, expected.length)
+            .writeBatch("idx", docs).block(Duration.ofSeconds(10));
+
+        assertEquals(List.of(2, 1), requestCounts());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(expected, requests.get(0));
+        assertTrue(requests.stream().allMatch(bytes -> bytes.length <= expected.length));
+        assertEquals(List.of("d1", "d2", "d3"), sentIds());
+        for (var request : requests) {
+            var lines = new String(request, StandardCharsets.UTF_8).split("\n");
+            for (int i = 1; i < lines.length; i += 2) {
+                assertEquals(singleLine, lines[i], "Preserve escapes and numeric spelling");
+                assertEquals(MAPPER.readTree(source), MAPPER.readTree(lines[i]));
+            }
+        }
+        assertEquals(source.getBytes(StandardCharsets.UTF_8).length * 3L, result.bytesInBatch());
+        assertEquals(singleLine.getBytes(StandardCharsets.UTF_8).length * 3L, result.target().bytes());
+        assertEquals(source, new String(docs.get(0).source(), StandardCharsets.UTF_8),
+            "The original source must remain intact for diagnostics");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\n\"text\":\"invalid\nstring\"}", "{\"text\":\"invalid\rstring\"}", "{\n\"value\":}"})
+    void rejectsInvalidJsonBeforeNormalizingLineBreaks(String source) {
+        assertThrows(IOException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER));
     }
 
     @Test

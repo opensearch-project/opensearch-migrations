@@ -30,7 +30,7 @@ public final class BulkNdjson {
 
     /**
      * The exact bytes of an operation, retained for batching, sending, and retries.
-     * Raw bodies reference the original source array; transformed bodies are serialized once.
+     * Single-line raw bodies reference the original source array; transformed bodies are serialized once.
      */
     public record EncodedOperation(byte[] action, byte[] body, boolean upsert) {
         /** Includes the final newline and, when present, the separator before the body. */
@@ -78,18 +78,30 @@ public final class BulkNdjson {
     ) {
         byte[] body = rawSource != null && rawSource.length > 0 ? rawSource : null;
         if (body != null) {
-            validateJsonBytes(body);
+            body = singleLineJson(body);
         }
         return new EncodedOperation(mapper.writeValueAsBytes(Map.of(operationType.getValue(), meta)), body,
             operationType == OperationType.INDEX);
     }
 
-    /** Validate raw JSON once, before retaining its bytes for sending and retries. */
-    static void validateJsonBytes(byte[] bytes) throws IOException {
+    /** Validate before replacing line-break whitespace, preserving escapes and numeric spelling. */
+    private static byte[] singleLineJson(byte[] bytes) throws IOException {
         try (JsonParser parser = JSON_FACTORY.createParser(bytes)) {
             while (parser.nextToken() != null) {
                 // Consume all tokens to verify structural validity without materializing the body.
             }
+            if (parser.currentLocation().getLineNr() == 1) {
+                return bytes;
+            }
+            // Valid JSON cannot contain literal CR/LF inside strings. Replace whitespace with spaces
+            // so the bulk body occupies one line, without changing token boundaries or byte length.
+            var singleLine = bytes.clone();
+            for (int i = 0; i < singleLine.length; i++) {
+                if (singleLine[i] == '\n' || singleLine[i] == '\r') {
+                    singleLine[i] = ' ';
+                }
+            }
+            return singleLine;
         } catch (IOException e) {
             throw new IOException("Raw source bytes are not valid JSON", e);
         }
