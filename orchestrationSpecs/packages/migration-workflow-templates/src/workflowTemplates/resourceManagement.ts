@@ -681,6 +681,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                         ),
                         includeGlobalState: makeDirectTypeProxy(
                             expr.dig(snapshotOptions, ["includeGlobalState"], true)
+                        ),
+                        skipRepositoryVerification: makeDirectTypeProxy(
+                            expr.dig(snapshotOptions, ["skipRepositoryVerification"], false)
                         )
                     }
                 }

@@ -106,6 +106,13 @@ public class CreateSnapshot {
         public boolean includeGlobalState = true;
 
         @Parameter(
+                names = {"--skip-repository-verification"},
+                required = false,
+                description = "Register the snapshot repository with verify=false, skipping the cluster's check that "
+                    + "every node can write to it. Intended for storage emulators. Defaults to false.")
+        public boolean skipRepositoryVerification = false;
+
+        @Parameter(
             required = false,
             names = { "--otel-trace-collector-endpoint", "--otelTraceCollectorEndpoint" },
             arity = 1,

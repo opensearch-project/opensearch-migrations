@@ -71,6 +71,10 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         this.args = args;
         this.repoUri = RepoUri.parse(args.repoUri);
         validateSolrRepoSupported(repoUri);
+        if (args.skipRepositoryVerification) {
+            throw new ParameterException("--skip-repository-verification does not apply to Solr sources, "
+                + "which do not register a snapshot repository");
+        }
         this.connectionContext = args.sourceArgs.toConnectionContext();
         this.httpClient = new SolrHttpClient(connectionContext);
         this.mode = CreateSnapshot.getSnapshotMode(args);

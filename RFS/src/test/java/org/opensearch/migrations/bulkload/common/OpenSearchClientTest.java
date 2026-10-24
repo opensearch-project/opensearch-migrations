@@ -760,4 +760,28 @@ class OpenSearchClientTest {
         assertEquals(java.util.Base64.getEncoder().encodeToString(unknown),
             record.getValue().getRequestItem().path("documentBase64").asText());
     }
+
+    @ParameterizedTest
+    @CsvSource({
+        "true, _snapshot/my-repo",
+        "false, _snapshot/my-repo?verify=false"
+    })
+    void registerSnapshotRepo_addsVerifyFalseOnlyWhenVerificationIsSkipped(boolean verify, String expectedPath) {
+        when(restClient.putAsync(any(), any(), any())).thenReturn(Mono.just(new HttpResponse(200, "", null, "{}")));
+        var settings = OBJECT_MAPPER.createObjectNode().put("type", "fs");
+
+        openSearchClient.registerSnapshotRepo("my-repo", settings, mock(IRfsContexts.ICreateSnapshotContext.class), verify);
+
+        verify(restClient).putAsync(eq(expectedPath), eq(settings.toString()), any());
+    }
+
+    @Test
+    void registerSnapshotRepo_verifiesByDefault() {
+        when(restClient.putAsync(any(), any(), any())).thenReturn(Mono.just(new HttpResponse(200, "", null, "{}")));
+        var settings = OBJECT_MAPPER.createObjectNode().put("type", "fs");
+
+        openSearchClient.registerSnapshotRepo("my-repo", settings, mock(IRfsContexts.ICreateSnapshotContext.class));
+
+        verify(restClient).putAsync(eq("_snapshot/my-repo"), eq(settings.toString()), any());
+    }
 }

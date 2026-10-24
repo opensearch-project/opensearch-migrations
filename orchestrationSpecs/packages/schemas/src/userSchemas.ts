@@ -952,6 +952,9 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = withOtelExportOptions(z.obje
         .describe("[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. " +
             "Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.")
         .changeRestriction('impossible'),
+    skipRepositoryVerification: z.boolean().default(false).optional()
+        .describe("[Expert] Registers the snapshot repository with verify=false, skipping the source cluster's check that every node can write to it. " +
+            "Intended for storage emulators whose URLs the cluster's repository plugin cannot verify against. Not supported for Solr sources."),
 })).describe("Process-level options for the CreateSnapshot command, controlling which indices are snapshotted and rate limiting.");
 
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS);

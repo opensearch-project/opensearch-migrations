@@ -131,6 +131,55 @@ public class TestCreateSnapshot {
     }
 
     @Test
+    public void testRepoRegisterSkipsVerificationWhenRequested() throws Exception {
+        var snapshotName = "my_snap";
+        var snapshotRepoName = "my_snapshot_repo";
+
+        ArrayList<Map.Entry<FullHttpRequest, String>> capturedRequestList = new ArrayList<>();
+        try (var destinationServer = SimpleNettyHttpServer.makeNettyServer(false,
+                Duration.ofMinutes(10),
+                fl -> {
+                    if (Objects.equals(fl.uri(), "/")) {
+                        return new SimpleHttpResponse(ROOT_RESPONSE_HEADERS, ROOT_RESPONSE_ES_7_10_2, "OK", 200);
+                    } else if (Objects.equals(fl.uri(), "/_cluster/settings?include_defaults=true")) {
+                        return new SimpleHttpResponse(CLUSTER_SETTINGS_COMPATIBILITY_HEADERS, CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED,
+                                "OK", 200);
+                    }
+                    capturedRequestList.add(new AbstractMap.SimpleEntry<>(fl, fl.content().toString(StandardCharsets.UTF_8)));
+                    return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
+                }))
+        {
+            final var endpoint = destinationServer.localhostEndpoint().toString();
+
+            var sourceClient = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(endpoint)
+                    .insecure(true)
+                    .build()
+                    .toConnectionContext()).determineVersionAndCreate();
+            var snapshotCreator = new SnapshotCreator(
+                    snapshotName,
+                    snapshotRepoName,
+                    sourceClient,
+                    RepoUri.parse("azure://myaccount/mycontainer/path-to-repo"),
+                    List.of(),
+                    snapshotContext.createSnapshotCreateContext(),
+                    false,
+                    true,
+                    null,
+                    null,
+                    null,
+                    null,
+                    true
+            );
+            SnapshotRunner.run(snapshotCreator);
+
+            Assertions.assertEquals("/_snapshot/" + snapshotRepoName + "?verify=false", capturedRequestList.get(0).getKey().uri());
+            Assertions.assertEquals(HttpMethod.PUT, capturedRequestList.get(0).getKey().method());
+            Assertions.assertEquals("/_snapshot/" + snapshotRepoName + "/" + snapshotName, capturedRequestList.get(1).getKey().uri());
+        }
+    }
+
+    @Test
     public void testSnapshotCreateWithIndexAllowlist() throws Exception {
         var snapshotName = "my_snap";
         var snapshotRepoName = "my_snapshot_repo";

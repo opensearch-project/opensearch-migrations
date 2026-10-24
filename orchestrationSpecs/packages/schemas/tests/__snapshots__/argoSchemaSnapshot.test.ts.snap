@@ -367,6 +367,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                                 "default": true,
                                                 "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
                                                 "changeRestriction": "impossible"
+                                              },
+                                              "skipRepositoryVerification": {
+                                                "type": "boolean",
+                                                "default": false,
+                                                "description": "[Expert] Registers the snapshot repository with verify=false, skipping the source cluster's check that every node can write to it. Intended for storage emulators whose URLs the cluster's repository plugin cannot verify against. Not supported for Solr sources."
                                               }
                                             },
                                             "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."
@@ -1624,6 +1629,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "includeGlobalState": {
                             "type": "boolean",
                             "default": true
+                          },
+                          "skipRepositoryVerification": {
+                            "type": "boolean",
+                            "default": false
                           },
                           "mode": {
                             "type": "string",
@@ -3971,6 +3980,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "default": true,
                                       "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist.",
                                       "changeRestriction": "impossible"
+                                    },
+                                    "skipRepositoryVerification": {
+                                      "type": "boolean",
+                                      "default": false,
+                                      "description": "[Expert] Registers the snapshot repository with verify=false, skipping the source cluster's check that every node can write to it. Intended for storage emulators whose URLs the cluster's repository plugin cannot verify against. Not supported for Solr sources."
                                     }
                                   },
                                   "description": "Configuration for creating a new Elasticsearch/OpenSearch snapshot of the source cluster."

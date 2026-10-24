@@ -29,6 +29,7 @@ public class SnapshotCreator {
     private final String endpoint;
     private final Integer maxSnapshotRateMBPerNode;
     private final String roleArn;
+    private final boolean skipRepositoryVerification;
 
     public SnapshotCreator(
         String snapshotName,
@@ -67,6 +68,25 @@ public class SnapshotCreator {
         Integer maxSnapshotRateMBPerNode,
         String roleArn
     ) {
+        this(snapshotName, snapshotRepoName, client, repoUri, indexAllowlist, context, compressionEnabled,
+            includeGlobalState, region, endpoint, maxSnapshotRateMBPerNode, roleArn, false);
+    }
+
+    public SnapshotCreator(
+        String snapshotName,
+        String snapshotRepoName,
+        OpenSearchClient client,
+        RepoUri repoUri,
+        List<String> indexAllowlist,
+        IRfsContexts.ICreateSnapshotContext context,
+        boolean compressionEnabled,
+        boolean includeGlobalState,
+        String region,
+        String endpoint,
+        Integer maxSnapshotRateMBPerNode,
+        String roleArn,
+        boolean skipRepositoryVerification
+    ) {
         this.snapshotName = snapshotName;
         this.snapshotRepoName = snapshotRepoName;
         this.indexAllowlist = indexAllowlist;
@@ -79,6 +99,7 @@ public class SnapshotCreator {
         this.endpoint = endpoint;
         this.maxSnapshotRateMBPerNode = maxSnapshotRateMBPerNode;
         this.roleArn = roleArn;
+        this.skipRepositoryVerification = skipRepositoryVerification;
     }
 
     public ObjectNode getRequestBodyForRegisterRepo() {
@@ -157,7 +178,7 @@ public class SnapshotCreator {
 
         // Register the repo; it's fine if it already exists
         try {
-            client.registerSnapshotRepo(getSnapshotRepoName(), settings, context);
+            client.registerSnapshotRepo(getSnapshotRepoName(), settings, context, !skipRepositoryVerification);
             log.atInfo().setMessage("Snapshot repo registration successful").log();
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Snapshot repo registration failed").log();

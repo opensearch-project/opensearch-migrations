@@ -11,9 +11,15 @@ import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.TestResources;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testfixtures.AzuriteContainer;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 
@@ -124,12 +130,28 @@ public class AzureSnapshotMigrationTest extends SourceTestBase {
             }
             sourceOps.post("/" + WRITTEN_INDEX + "/_refresh", null);
 
-            // verify=false: ES 7.10 derives blob names from host-style URLs, so its cleanup misnames Azurite blobs.
-            var registration = sourceOps.put("/_snapshot/azure_repo?verify=false",
-                "{\"type\": \"azure\", \"settings\": {\"container\": \"" + CONTAINER_NAME
-                    + "\", \"base_path\": \"" + WRITTEN_PREFIX + "\", \"compress\": true}}");
-            assertEquals(200, registration.getKey(), registration.getValue());
-            sourceOps.takeSnapshot("azure_repo", WRITTEN_SNAPSHOT, WRITTEN_INDEX);
+            var sourceClient = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                .host(source.getUrl())
+                .insecure(true)
+                .build()
+                .toConnectionContext()).determineVersionAndCreate();
+            // Skip verification: ES 7.10 derives blob names from host-style URLs, so its cleanup misnames Azurite blobs.
+            var snapshotCreator = new SnapshotCreator(
+                WRITTEN_SNAPSHOT,
+                "azure_repo",
+                sourceClient,
+                RepoUri.parse(repoUri(WRITTEN_PREFIX)),
+                List.of(WRITTEN_INDEX),
+                SnapshotTestContext.factory().noOtelTracking().createSnapshotCreateContext(),
+                true,
+                true,
+                null,
+                null,
+                null,
+                null,
+                true
+            );
+            SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
 
             migrateFromAzure(target, repoUri(WRITTEN_PREFIX), WRITTEN_SNAPSHOT, WRITTEN_INDEX);
 
