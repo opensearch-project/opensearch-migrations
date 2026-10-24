@@ -120,8 +120,8 @@ class OpenSearchDocumentSinkBatchingTest {
     @ParameterizedTest
     @ValueSource(strings = {"raw", "native"})
     void multilineSourceUsesOneBodyLineAndExactByteLimits(String path) throws Exception {
-        var source = "{\r\n  \"text\":\"é\\n\\r\\\"\",\n  \"value\":1e2,\r  \"values\":[1,\n2]\n}\r\n";
-        var singleLine = source.replace('\r', ' ').replace('\n', ' ');
+        var source = "{\r\n\t\"text\":\"é雪😀\\n\\r\\t\\\"\",\n  \"value\":1e2,\r  \"values\":[1,\n2]\n}\r\n";
+        var singleLine = source.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ');
         var docs = List.of(doc("d1", source), doc("d2", source), doc("d3", source));
         var expected = serialized(List.of(doc("d1", singleLine), doc("d2", singleLine)));
         var result = sink(identity(path), Integer.MAX_VALUE, expected.length)
@@ -148,6 +148,22 @@ class OpenSearchDocumentSinkBatchingTest {
     @ValueSource(strings = {"{\n\"text\":\"invalid\nstring\"}", "{\"text\":\"invalid\rstring\"}", "{\n\"value\":}"})
     void rejectsInvalidJsonBeforeNormalizingLineBreaks(String source) {
         assertThrows(IOException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER));
+    }
+
+    @Test
+    void rejectsUnescapedControlBytesInsideStrings() {
+        for (char control = 0; control < ' '; control++) {
+            var source = "{\n\"text\":\"before" + control + "after\"}";
+            assertThrows(IOException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER),
+                "Invalid control byte " + (int) control + " must not be replaced with a space");
+        }
+    }
+
+    @Test
+    void singleLineSourceRetainsOriginalBytes() {
+        var document = doc("d1", "\t{\"text\":\"é雪😀\\n\\r\\t\"}\t");
+
+        assertSame(document.source(), BulkNdjson.encodeRaw(document, "idx", false, MAPPER).body());
     }
 
     @Test

@@ -84,7 +84,7 @@ public final class BulkNdjson {
             operationType == OperationType.INDEX);
     }
 
-    /** Validate before replacing line-break whitespace, preserving escapes and numeric spelling. */
+    /** Validate before normalizing whitespace, preserving escapes and numeric spelling. */
     private static byte[] singleLineJson(byte[] bytes) throws IOException {
         try (JsonParser parser = JSON_FACTORY.createParser(bytes)) {
             while (parser.nextToken() != null) {
@@ -93,13 +93,11 @@ public final class BulkNdjson {
             if (parser.currentLocation().getLineNr() == 1) {
                 return bytes;
             }
-            // Valid JSON cannot contain literal CR/LF inside strings. Replace whitespace with spaces
-            // so the bulk body occupies one line, without changing token boundaries or byte length.
-            var singleLine = bytes.clone();
-            for (int i = 0; i < singleLine.length; i++) {
-                if (singleLine[i] == '\n' || singleLine[i] == '\r') {
-                    singleLine[i] = ' ';
-                }
+            // After validation, bytes below space can only be JSON whitespace (tab, CR, LF).
+            // Copy them as spaces; unsigned conversion preserves multibyte UTF-8 unchanged.
+            var singleLine = new byte[bytes.length];
+            for (int i = 0; i < bytes.length; i++) {
+                singleLine[i] = (byte) Math.max(' ', Byte.toUnsignedInt(bytes[i]));
             }
             return singleLine;
         } catch (IOException e) {
