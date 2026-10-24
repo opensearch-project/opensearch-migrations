@@ -1,0 +1,61 @@
+{{- if index .Values.conditionalPackageInstalls "azurite" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.azureStorageConfiguration.localAzuriteEndpoint }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: azurite
+  ports:
+    - name: blob
+      port: 10000
+      targetPort: 10000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azurite
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: azurite
+  template:
+    metadata:
+      labels:
+        app: azurite
+    spec:
+      containers:
+        - name: azurite
+          # Older Azurite releases reject the API version azure-storage-blob 12.35.1 sends.
+          image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+          args:
+            - "azurite-blob"
+            - "--blobHost"
+            - "0.0.0.0"
+            - "--blobPort"
+            - "10000"
+            - "--location"
+            - "/data"
+            # Clients reach Azurite by its dotted service DNS name. Without this flag Azurite takes
+            # the account from the first host label instead of the /devstoreaccount1 path segment.
+            - "--disableProductStyleUrl"
+            - "--disableTelemetry"
+          ports:
+            - containerPort: 10000
+          volumeMounts:
+            - name: azurite-data
+              mountPath: /data
+          # Azurite rejects unauthenticated HTTP requests, so probe the socket.
+          readinessProbe:
+            tcpSocket:
+              port: 10000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+      volumes:
+        - name: azurite-data
+          emptyDir: {}
+{{- end }}

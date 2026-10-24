@@ -22,6 +22,7 @@ conditionalPackageInstalls:
   # Packages for testing and local development
   localstack: true
   fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for local testing
+  azurite: false          # local Azure Blob Storage emulator for azure:// snapshot testing
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false
@@ -232,6 +233,16 @@ gcsBucketConfiguration:
   serviceAccountName: "migrations-service-account"
   useLocalGcs: false   # set true for kind; wires fake-gcs-server as the GCS endpoint
   localGcsEndpoint: "fake-gcs-server"  # K8s service name for fake-gcs-server
+
+azureStorageConfiguration:
+  useLocalAzurite: false       # set true for kind; wires Azurite as the Azure Blob endpoint
+  localAzuriteEndpoint: "azurite"  # K8s service name for Azurite; clusterWorkflows.yaml assumes "azurite"
+  accountName: ""
+  containerName: ""
+  endpoint: ""
+  localCredentialsSecretName: "azurite-test-creds"
+  containerOperationImage: "mcr.microsoft.com/azure-cli:2.91.0"
+  containerOperationImagePullPolicy: "IfNotPresent"
 
 kafkaExternal:
   enabled: false

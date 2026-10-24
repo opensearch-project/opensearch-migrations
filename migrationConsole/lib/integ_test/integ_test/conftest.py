@@ -10,6 +10,7 @@
 #              variables, so they only run in the BYOS pipeline — not the local k8s jobs.
 #   0020       GCS snapshot migration tests
 #   0021       Combined AOSS collection test (search, time-series, vector)
+#   0022       Azure snapshot migration tests
 #   0024       AOSS per-account endpoint routing to NextGen collections (0022-0023 are retired)
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
@@ -47,6 +48,7 @@ from .test_cases.solr_tests import *
 from .test_cases.observability_tests import *
 from .test_cases.byoc_captured_traffic_tests import *
 from .test_cases.gcs_snapshot_tests import *
+from .test_cases.azure_snapshot_tests import *
 from .test_cases.k6_load_test_tests import *
 
 logger = logging.getLogger(__name__)
