@@ -1,0 +1,24 @@
+{{- if index .Values.conditionalPackageInstalls "azurite" }}
+{{- $account := .Values.azureStorageConfiguration.accountName | default "devstoreaccount1" }}
+{{- $container := .Values.azureStorageConfiguration.containerName | default "migration-test-bucket" }}
+{{- $localEndpoint := printf "http://%s.%s.svc.cluster.local:10000" .Values.azureStorageConfiguration.localAzuriteEndpoint .Release.Namespace }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: migrations-default-azure-config
+  labels:
+    workflows.argoproj.io/configmap-type: Parameter
+data:
+  AZURE_STORAGE_ACCOUNT: {{ $account | quote }}
+  AZURE_CONTAINER_NAME: {{ $container | quote }}
+  # Base URL without the account: the snapshot readers append /<account> themselves.
+  {{- if .Values.azureStorageConfiguration.useLocalAzurite }}
+  ENDPOINT: {{ $localEndpoint | quote }}
+  {{- else }}
+  ENDPOINT: {{ .Values.azureStorageConfiguration.endpoint | default "" | quote }}
+  {{- end }}
+  BUCKET_URI: {{ printf "azure://%s/%s" $account $container | quote }}
+  # Present only because Argo v4 requires every configMapKeyRef key; see gcsSnapshotConfigMap.yaml.
+  SNAPSHOT_ROLE_ARN: ""
+  AWS_REGION: ""
+{{- end }}
