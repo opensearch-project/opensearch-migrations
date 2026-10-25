@@ -90,7 +90,7 @@ To see the default shard size, use the `--help` CLI option:
 | --target-password                 | The password for target cluster authentication                                                                                                           |
 | --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                            |
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
-| --documents-size-per-bulk-request | Optional. The maximum aggregate document size to be used in bulk requests in bytes. Default: 10 MiB                                                      |
+| --documents-size-per-bulk-request | Optional. Maximum bulk request body size in bytes, including action metadata and newlines. A document exceeding the limit by itself is sent alone. Default: 10 MiB |
 | --allowed-doc-exception-types     | Optional. Comma-separated list of document-level exception types to treat as successful operations. Enables idempotent migrations by allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success. Default: none |
 
 ## Advanced Arguments
