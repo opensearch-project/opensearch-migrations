@@ -102,6 +102,31 @@ fn env_with_stage(mut env: Env, args: &[String]) -> Env {
     env
 }
 
+/// Flags that consume the FOLLOWING token as their value. Used when scanning
+/// for a positional argument so the flag's value isn't mistaken for it. Keep in
+/// sync with the value flags honored by the simple subcommands (`stage_from_args`).
+const VALUE_FLAGS: &[&str] = &["--stage"];
+
+/// The first positional (non-flag) token, skipping the *value* of any
+/// value-taking flag. `--stage NAME` consumes two tokens; `--stage=NAME`, `-v`,
+/// and other bare flags consume one. This is why `agent --stage x kiro-cli`
+/// resolves the agent to `kiro-cli` rather than the stage value `x`.
+fn first_positional(args: &[String]) -> Option<String> {
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a.starts_with('-') {
+            // `--stage=x` carries its own value; bare `--stage x` consumes the next token.
+            let bare = a.split('=').next().unwrap_or(a);
+            let takes_value = !a.contains('=') && VALUE_FLAGS.contains(&bare);
+            i += if takes_value { 2 } else { 1 };
+            continue;
+        }
+        return Some(a.clone());
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // resume — the controller
 // ---------------------------------------------------------------------------
@@ -557,8 +582,10 @@ fn cmd_agent<R: CommandRunner>(env: Env, runner: &R, args: &[String]) -> Result<
             "no deployed stage found in state. Run `migration-assistant` first or pass --stage <name>.",
         ));
     }
-    // Positional (non-flag) arg picks the agent.
-    let picked = args.iter().find(|a| !a.starts_with('-')).cloned();
+    // Positional (non-flag) arg picks the agent. Skip the values of
+    // value-taking flags (e.g. `--stage NAME`) so a stage name isn't mistaken
+    // for the agent.
+    let picked = first_positional(args);
     let picked = match picked {
         Some(p) => p,
         None => {
@@ -1027,5 +1054,33 @@ mod tests {
         );
         assert_eq!(stage_from_args(&args(&["--stage=stg"])), Some("stg".into()));
         assert_eq!(stage_from_args(&args(&["--region", "x"])), None);
+    }
+
+    #[test]
+    fn agent_positional_skips_stage_value() {
+        // Documented form: `agent --stage NAME <agent>`.
+        assert_eq!(
+            first_positional(&args(&["--stage", "x", "kiro-cli"])),
+            Some("kiro-cli".into())
+        );
+        // Positional before the flag.
+        assert_eq!(
+            first_positional(&args(&["kiro-cli", "--stage", "x"])),
+            Some("kiro-cli".into())
+        );
+        // `=` form carries its own value, so the next token is the agent.
+        assert_eq!(
+            first_positional(&args(&["--stage=x", "kiro-cli"])),
+            Some("kiro-cli".into())
+        );
+        // No positional at all → fall back (None) so the caller uses saved AGENT.
+        assert_eq!(first_positional(&args(&["--stage", "x"])), None);
+        assert_eq!(first_positional(&args(&["--stage=x"])), None);
+        // Bare (valueless) flags consume a single token.
+        assert_eq!(
+            first_positional(&args(&["--verbose", "kiro-cli"])),
+            Some("kiro-cli".into())
+        );
+        assert_eq!(first_positional(&args(&[])), None);
     }
 }
