@@ -89,18 +89,38 @@ def verify_configured_secrets_exist(secret_store: SecretStore, raw_yaml: str) ->
     process_secrets(secret_store, result, interactive=False)
 
 
+AZURE_CREDENTIAL_KEYS = frozenset({"accountKey", "sasToken"})
+
+
+def find_unusable_azure_secrets(secret_store: SecretStore, names):
+    """Return (missing, both): names that are absent or have neither key, and names that have both."""
+    missing, both = [], []
+    for name in sorted(set(names)):
+        present = AZURE_CREDENTIAL_KEYS & set(secret_store.get_secret_keys(name) or [])
+        if not present:
+            missing.append(name)
+        elif present == AZURE_CREDENTIAL_KEYS:
+            both.append(name)
+    return missing, both
+
+
 def _verify_azure_secrets(secret_store: SecretStore, names) -> None:
-    unusable = [n for n in sorted(set(names))
-                if not {"accountKey", "sasToken"} & set(secret_store.get_secret_keys(n) or [])]
-    if not unusable:
-        return
-    raise click.ClickException(
-        f"Found {len(unusable)} Azure storage credential secret{'s' if len(unusable) > 1 else ''} "
-        f"that {'do' if len(unusable) > 1 else 'does'} not exist or {'have' if len(unusable) > 1 else 'has'} "
-        f"neither an 'accountKey' nor a 'sasToken' key:\n  " + "\n  ".join(unusable) +
-        "\n\nCreate each one with `kubectl create secret generic <name> --from-literal=accountKey=<key>` "
-        "(or `--from-literal=sasToken=<token>`)."
-    )
+    missing, both = find_unusable_azure_secrets(secret_store, names)
+    if missing:
+        raise click.ClickException(
+            f"Found {len(missing)} Azure storage credential secret{'s' if len(missing) > 1 else ''} "
+            f"that {'do' if len(missing) > 1 else 'does'} not exist or {'have' if len(missing) > 1 else 'has'} "
+            f"neither an 'accountKey' nor a 'sasToken' key:\n  " + "\n  ".join(missing) +
+            "\n\nCreate each one with `workflow configure credentials create --azure <name> --account-key` "
+            "(or `--sas-token`), or with `kubectl create secret generic <name> --from-literal=accountKey=<key>`."
+        )
+    if both:
+        # The migration tools accept one credential and fail at startup when given both.
+        raise click.ClickException(
+            f"Found {len(both)} Azure storage credential secret{'s' if len(both) > 1 else ''} "
+            f"with both an 'accountKey' and a 'sasToken' key:\n  " + "\n  ".join(both) +
+            "\n\nKeep only one of the two keys in each."
+        )
 
 
 def _notify_existing_secrets(existing, interactive: bool) -> None:

@@ -55,8 +55,8 @@ def workflow_cli(ctx, verbose):
     # Only set defaults if not already provided (e.g., in tests)
     if 'config_store' not in ctx.obj:
         ctx.obj['config_store'] = None
-    if 'secret_store' not in ctx.obj:
-        ctx.obj['secret_store'] = None
+    if 'secret_stores' not in ctx.obj:
+        ctx.obj['secret_stores'] = {}
     if 'namespace' not in ctx.obj:
         ctx.obj['namespace'] = get_current_namespace()  # Detect from pod, fallback to 'ma'
 
