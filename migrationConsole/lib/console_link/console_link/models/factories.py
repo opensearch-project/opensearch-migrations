@@ -10,7 +10,7 @@ from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, 
 from console_link.models.cluster import Cluster
 from console_link.models.kafka import MSK, StandardKafka, ScramKafka
 from console_link.models.replayer_ecs import ECSReplayer
-from console_link.models.snapshot import FileSystemSnapshot, GcsSnapshot, S3Snapshot
+from console_link.models.snapshot import AzureSnapshot, FileSystemSnapshot, GcsSnapshot, S3Snapshot
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,8 @@ def get_snapshot(config: Dict, source_cluster: Optional[Cluster]):
         return S3Snapshot(config, source_cluster)
     elif 'gcs' in config:
         return GcsSnapshot(config, source_cluster)
+    elif 'azure' in config:
+        return AzureSnapshot(config, source_cluster)
     logger.error(f"An unsupported snapshot type was provided: {config.keys()}")
     raise UnsupportedSnapshotError(', '.join(config.keys()) if config else '<empty>')
 

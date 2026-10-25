@@ -15,6 +15,14 @@ export function getSourceHttpAuthCreds(configMapNameOrEmpty: AllowLiteralOrExpre
     } as const;
 }
 
+export function getAzureStorageCreds(secretNameOrEmpty: AllowLiteralOrExpression<string>) {
+    const secretName = resolveSecretName(secretNameOrEmpty);
+    return {
+        AZURE_STORAGE_ACCOUNT_KEY: {secretKeyRef: configMapKey(secretName, "accountKey", true), type: typeToken<string>()},
+        AZURE_STORAGE_SAS_TOKEN: {secretKeyRef: configMapKey(secretName, "sasToken", true), type: typeToken<string>()}
+    } as const;
+}
+
 export function getTargetHttpAuthCreds(configMapNameOrEmpty: AllowLiteralOrExpression<string>) {
     const configMapName = resolveSecretName(configMapNameOrEmpty);
     return {
@@ -46,6 +54,13 @@ export function getTargetHttpAuthCredsEnvVars(configMapNameOrEmpty: AllowLiteral
     return [
         makeK8sSecretEnvVar("TARGET_USERNAME", configMapNameOrEmpty, "username"),
         makeK8sSecretEnvVar("TARGET_PASSWORD", configMapNameOrEmpty, "password"),
+    ];
+}
+
+export function getAzureStorageCredsEnvVars(secretNameOrEmpty: AllowLiteralOrExpression<string>) {
+    return [
+        makeK8sSecretEnvVar("AZURE_STORAGE_ACCOUNT_KEY", secretNameOrEmpty, "accountKey"),
+        makeK8sSecretEnvVar("AZURE_STORAGE_SAS_TOKEN", secretNameOrEmpty, "sasToken"),
     ];
 }
 

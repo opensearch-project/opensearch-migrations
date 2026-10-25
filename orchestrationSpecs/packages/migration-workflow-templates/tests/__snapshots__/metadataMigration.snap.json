@@ -121,6 +121,26 @@
                   "optional": true
                 }
               }
+            },
+            {
+              "name": "AZURE_STORAGE_ACCOUNT_KEY",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('repoConfig', 'azureCredentialsSecretName', '', fromJSON(inputs.parameters.snapshotConfig)))) ? ('empty') : (sprig.dig('repoConfig', 'azureCredentialsSecretName', '', fromJSON(inputs.parameters.snapshotConfig))))}}",
+                  "key": "accountKey",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "AZURE_STORAGE_SAS_TOKEN",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('repoConfig', 'azureCredentialsSecretName', '', fromJSON(inputs.parameters.snapshotConfig)))) ? ('empty') : (sprig.dig('repoConfig', 'azureCredentialsSecretName', '', fromJSON(inputs.parameters.snapshotConfig))))}}",
+                  "key": "sasToken",
+                  "optional": true
+                }
+              }
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",

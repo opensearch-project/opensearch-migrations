@@ -11,6 +11,7 @@ import java.util.Optional;
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.AzureRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
 import org.opensearch.migrations.bulkload.common.GcsUri;
@@ -53,6 +54,14 @@ public class ClusterReaderExtractor {
                     throw new ParameterException("If a GCS repo is being used, --local-dir must be set");
                 }
             }
+            case RepoUri.AzureRepoUri a -> {
+                if (arguments.localDir == null) {
+                    throw new ParameterException("If an Azure repo is being used, --local-dir must be set");
+                }
+                if (arguments.azureStorageAccountKey != null && arguments.azureStorageSasToken != null) {
+                    throw new ParameterException("Supply either --azure-storage-account-key or --azure-storage-sas-token, not both.");
+                }
+            }
             case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
             // A null repoUri is valid here: the remote-source path is checked below.
             // Required because a switch over a null selector throws NPE without it.
@@ -86,6 +95,14 @@ public class ClusterReaderExtractor {
                 Path.of(arguments.localDir),
                 new GcsUri(g.rawUri()),
                 arguments.endpoint,
+                fileFinder
+            );
+            case RepoUri.AzureRepoUri a -> AzureRepo.create(
+                Path.of(arguments.localDir),
+                a.azureUri(),
+                arguments.endpoint,
+                arguments.azureStorageAccountKey,
+                arguments.azureStorageSasToken,
                 fileFinder
             );
             case RepoUri.S3RepoUri s -> S3Repo.create(

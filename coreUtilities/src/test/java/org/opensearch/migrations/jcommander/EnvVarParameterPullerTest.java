@@ -4,6 +4,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.opensearch.migrations.arguments.ArgNameConstants;
+
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import org.junit.jupiter.api.Assertions;
@@ -41,6 +43,16 @@ class EnvVarParameterPullerTest {
 
         @Parameter(names = {"--nested-count"})
         int nestedCount = 0;
+    }
+
+    static class AzureStorageParams {
+        @Parameter(names = {ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE,
+            ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE})
+        String accountKey;
+
+        @Parameter(names = {ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE,
+            ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE})
+        String sasToken;
     }
 
     /**
@@ -309,5 +321,18 @@ class EnvVarParameterPullerTest {
 
         Assertions.assertEquals("lambda_user", params.targetUsername);
         Assertions.assertEquals(777, params.maxRequests);
+    }
+
+    @Test
+    void testAzureStorageCredentialsInjectedFromUnprefixedEnvVars() {
+        AzureStorageParams params = new AzureStorageParams();
+        Map<String, String> env = new HashMap<>();
+        env.put("AZURE_STORAGE_ACCOUNT_KEY", "account-key");
+        env.put("AZURE_STORAGE_SAS_TOKEN", "sas-token");
+
+        EnvVarParameterPuller.injectFromEnv(params, createMockEnvGetter(env), "RFS_", "");
+
+        Assertions.assertEquals("account-key", params.accountKey);
+        Assertions.assertEquals("sas-token", params.sasToken);
     }
 }
