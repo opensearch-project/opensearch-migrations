@@ -307,6 +307,7 @@ def test_source_proxy_config_is_sanitized_for_source_cluster_schema():
                     "allow_insecure": True,
                     "version": "ES 7.10.2",
                     "basic_auth": {"k8s_secret_name": "source-basic"},
+                    "client_cert": {"k8s_secret_name": "proxy-client-cert"},
                 },
             },
         }],
@@ -319,6 +320,7 @@ def test_source_proxy_config_is_sanitized_for_source_cluster_schema():
     assert source_entry.proxy_config == {
         "endpoint": "https://source-proxy:9201",
         "allow_insecure": True,
+        "client_cert": {"k8s_secret_name": "proxy-client-cert"},
     }
     proxy_entry = catalog.resolve(ResourceRole.PROXY, "source-proxy")
     assert proxy_entry.client_config["basic_auth"] == {"k8s_secret_name": "source-basic"}
@@ -326,6 +328,7 @@ def test_source_proxy_config_is_sanitized_for_source_cluster_schema():
     source_cluster = catalog.resolve_cluster(ResourceRole.SOURCE, "source")
     assert source_cluster.proxy.endpoint == "https://source-proxy:9201"
     assert source_cluster.proxy.auth_details == {"k8s_secret_name": "source-basic"}
+    assert source_cluster.proxy.client_cert_details == {"k8s_secret_name": "proxy-client-cert"}
 
 
 def test_k8s_selector_values_hide_k8s_aliases_but_still_accept_legacy_names():

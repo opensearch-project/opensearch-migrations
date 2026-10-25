@@ -137,7 +137,7 @@ The protocol uses two independent timestamp domains:
   the deterministic source-response boundary used by retry policy (§10).
 
 Target scheduling uses `TrafficObservation.ts`, while the capture and retry rules named above use
-`LogAppendTime`. When replaying traffic, Kafka reads (and pauses) are driven by the downstream 
+`LogAppendTime`. When replaying traffic, Kafka reads (and pauses) are driven by the downstream
 consumer, which considers how much has been consumed by the target and other lifecycle activities.
 
 The proxy also flushes each connection's captured observations at least periodically. A nonempty

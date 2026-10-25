@@ -148,11 +148,12 @@ selects the command:
 | Subcategory | When | Operator action | CLI |
 |---|---|---|---|
 | `change` | denial does **not** contain "Impossible" — a **Gated** field changed | Approve to let the workflow annotate the resource and retry the apply | `workflow approve change <resource>` |
-| `retry` | denial contains "Impossible" — an **Impossible** field changed | Manually reset the resource (e.g. delete & recreate), then approve to retry | `workflow approve retry <resource>` |
+| `retry` | denial contains "Impossible" — an **Impossible** field changed | Reset the resource and submit a replacement workflow. The current workflow cannot recreate initializer-owned resources. | `workflow reset <resource> --resubmit` |
 
-`workflow approve change --list` / `--list` for retry enumerate the waiting runtime gates; the
-resource name is accepted with or without the `.vapretry` suffix. Approving a `change` gate
-drives the `patchApproval → resetGate → retryLoop` path above: the approval annotation
+`workflow approve change --list` and `workflow approve retry --list` enumerate
+waiting runtime gates. Retry list output points to the reset-and-resubmit
+command; retry gates themselves cannot be safely approved. Approving a `change`
+gate drives the `patchApproval → resetGate → retryLoop` path above: the approval annotation
 (`migrations.opensearch.org/approved-during-run`) is written onto the resource, the gate is reset
 to `Pending`, and the apply is retried — this time accepted by the VAP. Step gates (the
 non-`.vapretry` milestone checkpoints) are described in
@@ -164,7 +165,7 @@ non-`.vapretry` milestone checkpoints) are described in
 
 Changes to resources fall into three categories.
 
-1. **Impossible:** Cannot be done — the user must explicitly delete & recreate the resource. This branch of the workflow cannot be advanced without .
+1. **Impossible:** Cannot be done in place. The user must reset the resource and submit a replacement workflow because this branch cannot recreate initializer-owned roots.
 2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed.
 3. **Safe:** Low-risk, allowed dynamically without approval. Safe fields require no VAP expressions — they are included in the classification tables for coverage tracking only.
 

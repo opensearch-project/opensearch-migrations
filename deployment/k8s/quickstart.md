@@ -161,6 +161,23 @@ Open a shell to the Migration Console pod
 kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash
 ```
 
+## Access the Workflow Web UI
+
+The migration-console image includes the FastAPI server and compiled frontend. Start
+the server in the pod and keep its port-forward open:
+
+```shell
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh start
+```
+
+Open `http://127.0.0.1:8000`. Only this port is required on the host. To diagnose the
+server from another terminal:
+
+```shell
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh status
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh logs
+```
+
 ## Cleanup
 
 Remove the migration resources from inside the console:

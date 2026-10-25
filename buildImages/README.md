@@ -1,7 +1,7 @@
 # Building Images Locally
 This guide walks through the local image-build options for this repo. Image-build orchestration lives under [backends](backends), with two supported modes:
 
-- `dockerHostedBuildkit.sh`: BuildKit and the registry run as Docker containers on the host. Used by `deployment/k8s/kindTesting.sh` (kind). The flow shares the same `docker-registry` container on `local-migrations-network` at `localhost:5001` for host-side pushes; pods reference images by the in-cluster name `docker-registry:5000`. The buildkit cache and image layers are reused across kind clusters.
+- `dockerHostedBuildkit.sh`: BuildKit and the registry run as Docker containers on the host. Used by `deployment/k8s/kindTesting.sh` (kind). The flow shares the same `docker-registry` container on `local-migrations-network` at `localhost:5001` for host-side pushes; pods use `docker-registry:5001`, which containerd maps to the host gateway. The buildkit cache and image layers are reused across kind clusters.
 - `eksKubernetesBuildkit.sh`: cloud-Kubernetes path (EKS / GKE / AKS), used by `deployment/k8s/aws/aws-bootstrap.sh`. Spins up amd64 + arm64 buildkit Pods directly via `docker buildx --driver=kubernetes` on the cluster's build-nodepool.
 
 The deployment scripts source the backend they need directly. This README describes the Docker-hosted path; for the cloud-Kubernetes path, see [README-K8s.md](README-K8s.md).
@@ -66,7 +66,13 @@ Or customized to use a specific registry endpoint
 
 ### How multiple kind clusters reach the same registry
 
-Each cluster's nodes are joined to `local-migrations-network` (`docker network connect`) so containers in the cluster can resolve `docker-registry:5000` via Docker's bridge DNS. Pods reference images by that in-cluster name. On kind (containerd), `connect_cluster_to_registry_network` writes a `hosts.toml` so the plain-HTTP endpoint is accepted. Host-side `docker buildx` push goes to `localhost:5001` (the bind-mounted host port), so the pushed image and the pulled image refer to the same registry by two URLs.
+Pods reference images as `docker-registry:5001`. On each kind node,
+`connect_cluster_to_registry_network` writes a containerd `hosts.toml` that
+maps that registry name directly to the node's Docker host-gateway IP on port
+5001 and allows plain HTTP. The nodes do not need to join the registry's Docker
+network, and the mapping survives Docker restarts because it does not depend on
+an appended `/etc/hosts` entry. Host-side `docker buildx` also pushes to
+`localhost:5001`, so builds and cluster pulls reach the same registry data.
 
 ## Using EKS (using the cloud-Kubernetes BuildKit backend)
 

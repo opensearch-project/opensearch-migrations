@@ -15,27 +15,40 @@
   },
   "snapshotMigrationConfigs": [],
   "traffic": {
+    "kafkaClusters": {
+      "default": {
+        "autoCreate": {},
+        "topics": {
+          "live-capture": {},
+          "loaded-dump": {}
+        }
+      }
+    },
     "proxies": {
       "live-capture": {
         "source": "source",
+        "kafka": "default",
         "proxyConfig": {
           "listenPort": 9201
-        }
+        },
+        "kafkaTopic": "live-capture"
       }
     },
     "s3Sources": {
       "loaded-dump": {
         "s3Uri": "s3://byo-traffic/kafka_export_slice_10k.proto.gz",
         "awsRegion": "us-east-2",
-        "sourceLabel": "source"
+        "kafka": "default",
+        "sourceLabel": "source",
+        "kafkaTopic": "loaded-dump"
       }
     },
     "replayers": {
-      "replayLive": {
+      "replay-live": {
         "fromCapturedTraffic": "live-capture",
         "toTarget": "target"
       },
-      "replayDump": {
+      "replay-dump": {
         "fromCapturedTraffic": "loaded-dump",
         "toTarget": "target2"
       }

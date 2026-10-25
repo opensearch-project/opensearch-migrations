@@ -24,7 +24,7 @@ targetClusters:
 snapshotMigrationConfigs:
   - fromSource: solr-source
     toTarget: target
-    perSnapshotConfig:
-      customerBackup:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
+    fromSnapshot: customerBackup
+    slice: default
+    metadataMigrationConfig: {}
+    documentBackfillConfig: {}

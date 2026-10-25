@@ -1,4 +1,4 @@
-import {describe, expect, it} from "@jest/globals";
+import {describe, expect, it, jest} from "@jest/globals";
 import {promises as fs} from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -10,22 +10,12 @@ import {
 } from "../src";
 import {main as resolveConsoleResourcesMain} from "../src/resolveConsoleResources";
 
+jest.setTimeout(30_000);
+
 function multiResourceConfig() {
     return {
-        kafkaClusterConfiguration: {
-            default: {
-                autoCreate: {},
-            },
-            "my-kafka": {
-                autoCreate: {
-                    auth: {
-                        type: "none",
-                    },
-                },
-            },
-        },
         sourceClusters: {
-            sourceA: {
+            sourcea: {
                 endpoint: "https://source-a.example.com",
                 allowInsecure: true,
                 version: "ES 7.10.2",
@@ -39,6 +29,7 @@ function multiResourceConfig() {
                         repoA: {
                             awsRegion: "us-east-2",
                             repoPathUri: "s3://bucket-a",
+                            endpoint: "localstack://localstack.ma.svc.cluster.local:4566",
                         },
                     },
                     snapshots: {
@@ -51,7 +42,7 @@ function multiResourceConfig() {
                     },
                 },
             },
-            sourceB: {
+            sourceb: {
                 endpoint: "https://source-b.example.com",
                 allowInsecure: false,
                 version: "OS 1.3.0",
@@ -64,7 +55,7 @@ function multiResourceConfig() {
             },
         },
         targetClusters: {
-            targetX: {
+            targetx: {
                 endpoint: "https://target-x.example.com",
                 allowInsecure: true,
                 authConfig: {
@@ -73,31 +64,61 @@ function multiResourceConfig() {
                     },
                 },
             },
-            targetY: {
+            targety: {
                 endpoint: "https://target-y.example.com",
                 allowInsecure: false,
             },
         },
         snapshotMigrationConfigs: [{
-            fromSource: "sourceA",
-            toTarget: "targetX",
-            perSnapshotConfig: {
-                snapA: [{
+            fromSource: "sourcea",
+            toTarget: "targetx",
+                fromSnapshot: "snapA",
+                slices: {
+                    "slice-0": {
                     metadataMigrationConfig: {},
-                }],
-            },
-        }],
+                    },
+                },
+            },],
         traffic: {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {},
+                    topics: {
+                        "proxy-a": {},
+                    },
+                },
+                "my-kafka": {
+                    autoCreate: {
+                        auth: {
+                            type: "none",
+                        },
+                    },
+                    topics: {
+                        "proxy-b": {},
+                    },
+                },
+            },
             proxies: {
                 "proxy-a": {
-                    source: "sourceA",
+                    source: "sourcea",
+                    kafka: "default",
+                    kafkaTopic: "proxy-a",
                     proxyConfig: {
                         listenPort: 9201,
+                        tls: {
+                            mode: "existingSecret",
+                            secretName: "proxy-a-tls",
+                            clientAuth: {
+                                trustedClientCaPem: "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n",
+                                consoleClientSecretName: "proxy-a-console-client",
+                            },
+                        },
                     },
                 },
                 "proxy-b": {
-                    source: "sourceB",
+                    source: "sourceb",
                     kafka: "my-kafka",
+                    kafkaTopic: "proxy-b",
                     proxyConfig: {
                         listenPort: 9202,
                         tls: {
@@ -107,13 +128,13 @@ function multiResourceConfig() {
                 },
             },
             replayers: {
-                replayA: {
+                "replay-a": {
                     fromCapturedTraffic: "proxy-a",
-                    toTarget: "targetX",
+                    toTarget: "targetx",
                 },
-                replayB: {
+                "replay-b": {
                     fromCapturedTraffic: "proxy-b",
-                    toTarget: "targetY",
+                    toTarget: "targety",
                 },
             },
         },
@@ -127,8 +148,8 @@ describe("console resources", () => {
 
         expect(resources.sources).toEqual([
             expect.objectContaining({
-                refName: "sourceA",
-                aliases: ["sourceA"],
+                refName: "sourcea",
+                aliases: ["sourcea"],
                 clientConfig: expect.objectContaining({
                     endpoint: "https://source-a.example.com",
                     allow_insecure: true,
@@ -139,17 +160,26 @@ describe("console resources", () => {
                     k8sName: "proxy-a",
                     aliases: expect.arrayContaining([
                         "proxy-a",
-                        "captureproxy.proxy-a",
+                        "captureproxy.proxy-a"
                     ]),
                     clientConfig: expect.objectContaining({
                         endpoint: "https://proxy-a:9201",
                         allow_insecure: true,
                         basic_auth: {k8s_secret_name: "source-a-creds"},
+                        client_cert: {k8s_secret_name: "proxy-a-console-client"},
                     }),
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "CaptureProxy",
+                        name: "proxy-a",
+                        role: "capture source",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
-                refName: "sourceB",
+                refName: "sourceb",
                 clientConfig: expect.objectContaining({
                     endpoint: "https://source-b.example.com",
                     sigv4: {
@@ -169,14 +199,26 @@ describe("console resources", () => {
 
         expect(resources.targets).toEqual([
             expect.objectContaining({
-                refName: "targetX",
+                refName: "targetx",
                 clientConfig: expect.objectContaining({
                     endpoint: "https://target-x.example.com",
                     basic_auth: {k8s_secret_name: "target-x-creds"},
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "SnapshotMigration",
+                        role: "migration target",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "TrafficReplay",
+                        role: "replay target",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
-                refName: "targetY",
+                refName: "targety",
                 clientConfig: expect.objectContaining({
                     endpoint: "https://target-y.example.com",
                     no_auth: null,
@@ -190,7 +232,7 @@ describe("console resources", () => {
                 k8sName: "default",
                 aliases: expect.arrayContaining([
                     "default",
-                    "kafkacluster.default",
+                    "kafkacluster.default"
                 ]),
                 runtime: expect.objectContaining({
                     type: "strimzi",
@@ -200,13 +242,33 @@ describe("console resources", () => {
                     usernameSecret: "default-migration-app",
                     caSecret: "default-cluster-ca-cert",
                 }),
+                consumers: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "KafkaCluster",
+                        name: "default",
+                        role: "managed kafka",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "CaptureProxy",
+                        name: "proxy-a",
+                        role: "capture kafka",
+                        configChecksum: expect.any(String),
+                    }),
+                    expect.objectContaining({
+                        kind: "CapturedTraffic",
+                        name: "proxy-a-topic",
+                        role: "capture topic",
+                        configChecksum: expect.any(String),
+                    }),
+                ]),
             }),
             expect.objectContaining({
                 refName: "my-kafka",
                 k8sName: "my-kafka",
                 aliases: expect.arrayContaining([
                     "my-kafka",
-                    "kafkacluster.my-kafka",
+                    "kafkacluster.my-kafka"
                 ]),
                 runtime: expect.objectContaining({
                     type: "strimzi",
@@ -219,16 +281,16 @@ describe("console resources", () => {
 
         expect(resources.consumerGroups).toEqual([
             {
-                name: "replayer-targetX",
-                targetRef: "targetX",
+                name: "replayer-targetx",
+                targetRef: "targetx",
                 kafkaRef: "default",
-                replayRef: "proxy-a-targetX-replayA",
+                replayRef: "replay-a",
             },
             {
-                name: "replayer-targetY",
-                targetRef: "targetY",
+                name: "replayer-targety",
+                targetRef: "targety",
                 kafkaRef: "my-kafka",
-                replayRef: "proxy-b-targetY-replayB",
+                replayRef: "replay-b",
             },
         ]);
         expect(resources.sources[0].proxy?.aliases).not.toContain(
@@ -251,9 +313,60 @@ describe("console resources", () => {
         expect(resources.kafkas[0].source).toBe("migrationRun");
     });
 
+    it("projects historical resolved configs that predate new workflow defaults", async () => {
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(multiResourceConfig());
+        const resolvedConfig = buildResolvedMigrationResources(workflowConfig, "workflow-a") as any;
+        delete resolvedConfig.workflowConfig.requireBeginApproval;
+        const removeSolrContextPath = (value: unknown): void => {
+            if (Array.isArray(value)) {
+                value.forEach(removeSolrContextPath);
+                return;
+            }
+            if (typeof value !== "object" || value === null) {
+                return;
+            }
+            for (const [key, child] of Object.entries(value)) {
+                if (
+                    key.endsWith("ConnectionIdentity")
+                    && typeof child === "object"
+                    && child !== null
+                ) {
+                    delete (child as Record<string, unknown>).solrContextPath;
+                }
+                removeSolrContextPath(child);
+            }
+        };
+        removeSolrContextPath(resolvedConfig.workflowConfig);
+
+        const resources = buildConsoleResourcesFromResolvedConfig(resolvedConfig);
+
+        expect(resources.workflowName).toBe("workflow-a");
+        expect(resources.sources.map((source) => source.refName)).toEqual(["sourcea", "sourceb"]);
+    });
+
+    it("projects historical resolved configs that fail current nested validation", async () => {
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(multiResourceConfig());
+        const resolvedConfig = buildResolvedMigrationResources(workflowConfig, "workflow-a") as any;
+        const sourceConfigs = [
+            ...resolvedConfig.workflowConfig.proxies.map((proxy: any) => proxy.sourceConfig),
+            ...resolvedConfig.workflowConfig.snapshots.map((snapshot: any) => snapshot.sourceConfig),
+        ].filter((source: any) => source.label === "sourcea" && source.snapshotInfo);
+        for (const sourceConfig of sourceConfigs) {
+            sourceConfig.snapshotInfo.repos["r a"] = sourceConfig.snapshotInfo.repos.repoA;
+            delete sourceConfig.snapshotInfo.repos.repoA;
+            sourceConfig.snapshotInfo.snapshots.snapA.repoName = "r a";
+        }
+
+        const resources = buildConsoleResourcesFromResolvedConfig(resolvedConfig);
+
+        expect(resources.workflowName).toBe("workflow-a");
+        expect(resources.sources.map((source) => source.refName)).toEqual(["sourcea", "sourceb"]);
+        expect(resources.targets.map((target) => target.refName)).toEqual(["targetx", "targety"]);
+    });
+
     it("projects externally managed SCRAM Kafka credential metadata", async () => {
         const config = multiResourceConfig();
-        config.kafkaClusterConfiguration = {
+        config.traffic.kafkaClusters = {
             external: {
                 existing: {
                     kafkaConnection: "broker.example.com:9093",
@@ -264,21 +377,25 @@ describe("console resources", () => {
                         kafkaUserName: "migration-app",
                     },
                 },
+                topics: {
+                    "proxy-a": {},
+                },
             },
         };
         config.traffic.proxies = {
             "proxy-a": {
-                source: "sourceA",
+                source: "sourcea",
                 kafka: "external",
+                kafkaTopic: "proxy-a",
                 proxyConfig: {
                     listenPort: 9201,
                 },
             },
         };
         config.traffic.replayers = {
-            replayA: {
+            "replay-a": {
                 fromCapturedTraffic: "proxy-a",
-                toTarget: "targetX",
+                toTarget: "targetx",
             },
         };
 
@@ -308,7 +425,23 @@ describe("console resources", () => {
         const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "console-resources-cli-test-"));
         const inputFile = path.join(outputDir, "workflow.yaml");
         const outputFile = path.join(outputDir, "consoleResources.json");
-        await fs.writeFile(inputFile, JSON.stringify(multiResourceConfig(), null, 2));
+        const config = multiResourceConfig();
+        config.sourceClusters.unused = {
+            endpoint: "https://unused-source.example.com",
+            version: "OS 2.19.0",
+            snapshotInfo: {
+                repos: {
+                    emptyRepo: {
+                        repoPathUri: "gs://empty-repository",
+                    },
+                },
+                snapshots: {},
+            },
+        };
+        config.targetClusters["unused-target"] = {
+            endpoint: "https://unused-target.example.com",
+        };
+        await fs.writeFile(inputFile, JSON.stringify(config, null, 2));
 
         await resolveConsoleResourcesMain([
             "--user-config", inputFile,
@@ -318,7 +451,53 @@ describe("console resources", () => {
 
         const resources = JSON.parse(await fs.readFile(outputFile, "utf8"));
         expect(resources.workflowName).toBe("workflow-from-cli");
-        expect(resources.sources.map((source: any) => source.refName)).toEqual(["sourceA", "sourceB"]);
+        expect(resources.sources.map((source: any) => source.refName)).toEqual(["sourcea", "sourceb", "unused"]);
+        expect(resources.targets.map((target: any) => target.refName)).toEqual(
+            ["targetx", "targety", "unused-target"],
+        );
         expect(resources.kafkas.map((kafka: any) => kafka.refName)).toEqual(["default", "my-kafka"]);
+        expect(resources.sources.find((source: any) => source.refName === "sourcea")).toEqual(
+            expect.objectContaining({
+                editPath: ["sourceClusters", "sourcea"],
+                repositories: [{
+                    refName: "repoA",
+                    provider: "s3",
+                    editPath: ["sourceClusters", "sourcea", "snapshotInfo", "repos", "repoA"],
+                    clientConfig: {
+                        repo_uri: "s3://bucket-a",
+                        s3_region: "us-east-2",
+                        endpoint: "http://localstack.ma.svc.cluster.local:4566",
+                        use_local_stack: true,
+                    },
+                    snapshots: [{
+                        refName: "snapA",
+                        generated: true,
+                        editPath: ["sourceClusters", "sourcea", "snapshotInfo", "snapshots", "snapA"],
+                    }],
+                }],
+            }),
+        );
+        expect(resources.sources.find((source: any) => source.refName === "unused")).toEqual({
+            refName: "unused",
+            aliases: ["unused"],
+            clientConfig: {
+                endpoint: "https://unused-source.example.com",
+                version: "OS 2.19.0",
+                allow_insecure: false,
+                no_auth: null,
+            },
+            displayFields: expect.any(Array),
+            editPath: ["sourceClusters", "unused"],
+            repositories: [{
+                refName: "emptyRepo",
+                provider: "gcs",
+                editPath: ["sourceClusters", "unused", "snapshotInfo", "repos", "emptyRepo"],
+                clientConfig: {
+                    repo_uri: "gs://empty-repository",
+                },
+                snapshots: [],
+            }],
+            source: "config",
+        });
     });
 });

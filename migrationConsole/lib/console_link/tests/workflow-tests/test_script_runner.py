@@ -1,5 +1,7 @@
 """Tests for script runner service."""
 
+import subprocess
+import json
 import pytest
 import tempfile
 from pathlib import Path
@@ -11,6 +13,37 @@ from console_link.workflow.models.config import WorkflowConfig
 
 class TestScriptRunner:
     """Test script runner service."""
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_config_processor_accepts_supported_nodejs(self, mock_run):
+        mock_run.return_value = Mock(stdout="v22.14.0\n")
+        runner = ScriptRunner(env={
+            "NODEJS": "/gradle/node-v22.14.0/bin/node",
+        })
+
+        assert runner.require_supported_nodejs() == (
+            "/gradle/node-v22.14.0/bin/node"
+        )
+        mock_run.assert_called_once_with(
+            ["/gradle/node-v22.14.0/bin/node", "--version"],
+            capture_output=True,
+            check=True,
+            env=runner.env,
+            text=True,
+        )
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_config_processor_rejects_unsupported_nodejs(self, mock_run):
+        mock_run.return_value = Mock(stdout="v18.20.2\n")
+        runner = ScriptRunner(env={"NODEJS": "/mise/node-18/bin/node"})
+
+        with pytest.raises(RuntimeError) as error:
+            runner.require_supported_nodejs()
+
+        message = str(error.value)
+        assert "requires Node.js 22.14.0 or newer" in message
+        assert "/mise/node-18/bin/node resolved to v18.20.2" in message
+        assert "Set NODEJS" in message
 
     def test_script_runner_initialization(self):
         """Test script runner finds test scripts."""
@@ -55,6 +88,7 @@ class TestScriptRunner:
         assert "workflow_name" in result
         assert result["workflow_name"].startswith("test-workflow-")
         assert "workflow_uid" in result
+        assert "--quiet" in mock_run.call_args[0][0]
 
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     def test_submit_workflow_custom_namespace(self, mock_run):
@@ -78,6 +112,104 @@ class TestScriptRunner:
 
         assert result["namespace"] == namespace
         assert "workflow_name" in result
+        assert "--quiet" in mock_run.call_args[0][0]
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_submit_workflow_uses_pinned_environment(self, mock_run):
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow"}',
+        )
+        runner = ScriptRunner(env={"KUBECONFIG": "/tmp/pinned-config"})
+
+        runner.submit_workflow(
+            "sourceClusters: {}",
+            ["--workflow-name", "test-workflow"],
+        )
+
+        assert mock_run.call_args.kwargs["env"] == {
+            "KUBECONFIG": "/tmp/pinned-config",
+        }
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_submit_workflow_can_request_verbose_script_output(self, mock_run):
+        """Verbose submit keeps the generated resource handler output visible."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow-xyz", "workflow_uid": "uid-456", "namespace": "ma"}'
+        )
+
+        runner = ScriptRunner()
+
+        runner.submit_workflow("sourceClusters: {}", ["--workflow-name", "migration-workflow"], quiet=False)
+
+        assert "--quiet" not in mock_run.call_args[0][0]
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_submit_workflow_failure_includes_stderr(self, mock_run):
+        """Failed submit scripts should surface stderr instead of a bare CalledProcessError."""
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1,
+            ["createMigrationWorkflowFromUserConfiguration.sh", "/tmp/config.yaml"],
+            output="Running configuration conversion...",
+            stderr="Error: missing required workflow value",
+        )
+
+        runner = ScriptRunner()
+
+        with pytest.raises(RuntimeError) as exc_info:
+            runner.submit_workflow("sourceClusters: {}", ["--workflow-name", "migration-workflow"])
+
+        message = str(exc_info.value)
+        assert "Workflow submit script failed with exit code 1" in message
+        assert "Error: missing required workflow value" in message
+        assert "stdout: Running configuration conversion..." in message
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_prepare_and_commit_reuse_the_exact_submission_bundle(self, mock_run):
+        def run(command, **_kwargs):
+            if "--prepare-only" in command:
+                bundle_dir = Path(command[command.index("--prepare-only") + 1])
+                (bundle_dir / "submissionPreflight.json").write_text(json.dumps({
+                    "formatVersion": 1,
+                    "allowed": True,
+                    "checkedResources": 2,
+                    "issues": [],
+                }))
+                return Mock(returncode=0, stdout="", stderr="")
+            return Mock(
+                returncode=0,
+                stdout="workflow.argoproj.io/migration-workflow created",
+                stderr="",
+            )
+
+        mock_run.side_effect = run
+        runner = ScriptRunner()
+
+        prepared = runner.prepare_workflow(
+            "sourceClusters: {}",
+            ["--workflow-name", "migration-workflow"],
+        )
+        try:
+            result = runner.commit_prepared_workflow(prepared)
+            prepare_command = mock_run.call_args_list[0].args[0]
+            commit_command = mock_run.call_args_list[1].args[0]
+
+            assert prepared.report["checkedResources"] == 2
+            assert "--prepare-only" in prepare_command
+            assert "--commit-prepared" in commit_command
+            assert (
+                prepare_command[prepare_command.index("--prepare-only") + 1]
+                == commit_command[commit_command.index("--commit-prepared") + 1]
+            )
+            assert result["workflow_name"] == "migration-workflow"
+        finally:
+            bundle_dir = prepared.bundle_dir
+            config_path = prepared.config_path
+            prepared.cleanup()
+
+        assert not bundle_dir.exists()
+        assert not config_path.exists()
 
     def test_script_not_found(self):
         """Test error handling when script doesn't exist."""

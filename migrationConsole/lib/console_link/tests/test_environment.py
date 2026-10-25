@@ -124,3 +124,28 @@ def test_source_cluster_sigv4_proxy_signs_with_source_endpoint():
 
     assert env.proxy is not None
     assert env.proxy.config["sigv4_signing_endpoint"] == "https://search-source.us-east-1.es.amazonaws.com"
+
+
+def test_source_proxy_from_workflow_config_maps_console_client_cert_secret():
+    proxy = Environment._get_source_proxy_from_workflow_config({
+        "traffic": {
+            "proxies": {
+                "capture-proxy": {
+                    "source": "source",
+                    "proxyConfig": {
+                        "listenPort": 9201,
+                        "tls": {
+                            "mode": "existingSecret",
+                            "secretName": "proxy-tls",
+                            "clientAuth": {
+                                "trustedClientCaPem": "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n",
+                                "consoleClientSecretName": "proxy-client-cert",
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }, "source")
+
+    assert proxy["client_cert"] == {"k8s_secret_name": "proxy-client-cert"}

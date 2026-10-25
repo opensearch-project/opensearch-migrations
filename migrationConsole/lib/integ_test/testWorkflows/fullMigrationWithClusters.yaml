@@ -345,14 +345,24 @@ spec:
               end
             ')
             
-            SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
-              {"testsnapshot": .[0].migrations}
+            SNAPSHOT_MIGRATIONS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
+              .[0].migrations
+              | to_entries
+              | map(
+                  (.value | del(.label))
+                  + {
+                    "fromSource": "source1",
+                    "toTarget": "target1",
+                    "fromSnapshot": "testsnapshot",
+                    "slice": ("slice-" + (.key | tostring))
+                  }
+                )
             ')
             
             MIGRATION_CONFIG=$(jq -n \
               --argjson source "$SOURCE_WITH_REPO" \
               --argjson target "$TARGET_CONFIG" \
-              --argjson snapshotConfigs "$SNAPSHOT_EXTRACT_CONFIGS" \
+              --argjson snapshotMigrations "$SNAPSHOT_MIGRATIONS" \
               --argjson skipApprovals "$SKIP_APPROVALS" \
               --argjson requireBeginApproval "$REQUIRE_BEGIN_APPROVAL" \
               '{
@@ -364,11 +374,7 @@ spec:
                 "targetClusters": {
                   "target1": $target
                 },
-                "snapshotMigrationConfigs": [{
-                  "fromSource": "source1",
-                  "toTarget": "target1",
-                  "perSnapshotConfig": $snapshotConfigs
-                }]
+                "snapshotMigrationConfigs": $snapshotMigrations
               }')
             
             MIGRATION_CONFIG_BASE64=$(echo "$MIGRATION_CONFIG" | base64 | tr -d '\n')

@@ -5,6 +5,7 @@ import * as path from "path";
 import {OVERALL_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {
+    buildLooseResolvedMigrationResources,
     buildResolvedMigrationResources,
     dryRunResourcePolicy,
     MigrationConfigTransformer,
@@ -48,9 +49,17 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
             },
         },
         traffic: {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {},
+                    topics: {"source-proxy": {}},
+                },
+            },
             proxies: {
                 "source-proxy": {
                     source: "source",
+                    kafka: "default",
+                    kafkaTopic: "source-proxy",
                     proxyConfig: {
                         listenPort: 9200,
                     },
@@ -70,15 +79,16 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
         snapshotMigrationConfigs: [{
             fromSource: "source",
             toTarget: "target",
-            perSnapshotConfig: {
-                snap1: [{
+                fromSnapshot: "snap1",
+                slices: {
+                    "slice-0": {
                     metadataMigrationConfig: {},
                     documentBackfillConfig: {
                         maxConnections: 8,
                     },
-                }],
-            },
-        }],
+                    },
+                },
+            },],
     } as any;
 }
 
@@ -86,20 +96,20 @@ async function transformAndResolve(config: z.infer<typeof OVERALL_MIGRATION_CONF
     const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
     const resolvedMigrationResources = buildResolvedMigrationResources(workflowConfig, "workflow-a");
     const resource = (kind: string, name: string) => {
-        const match = resolvedMigrationResources.resources.find(r => r.kind === kind && r.name === name);
+        const match = resolvedMigrationResources.resources.find((r) => r.kind === kind && r.name === name);
         if (!match) {
             throw new Error(`Resource ${kind}/${name} not found`);
         }
         return match;
     };
     const singleResource = (kind: string) => {
-        const matches = resolvedMigrationResources.resources.filter(r => r.kind === kind);
+        const matches = resolvedMigrationResources.resources.filter((r) => r.kind === kind);
         if (matches.length !== 1) {
             throw new Error(`Expected one ${kind} resource, found ${matches.length}`);
         }
         return matches[0];
     };
-    return {workflowConfig, resolvedMigrationResources, resource, singleResource};
+    return {workflowConfig, resolvedMigrationResources, resource, singleResource,};
 }
 
 describe("resolved migration resources", () => {
@@ -109,9 +119,9 @@ describe("resolved migration resources", () => {
 
         expect(resolvedMigrationResources.workflowName).toBe("workflow-a");
         expect(resolvedMigrationResources.resources).toMatchSnapshot();
-        expect(resolvedMigrationResources.resources.every(resource =>
+        expect(resolvedMigrationResources.resources.every((resource) =>
             resource.parameterPolicies === undefined
-        )).toBe(true);
+        )).toBe(true,);
     });
 
     it("makes source, target, and Kafka identity checksum changes visible in resolved CR specs", async () => {
@@ -121,11 +131,11 @@ describe("resolved migration resources", () => {
         const sourceAfter = await transformAndResolve(sourceConfigAfter);
 
         expect(sourceBefore.workflowConfig.proxies[0].configChecksum)
-            .not.toBe(sourceAfter.workflowConfig.proxies[0].configChecksum);
+            .not.toBe(sourceAfter.workflowConfig.proxies[0].configChecksum,);
         expect(sourceBefore.resource("CaptureProxy", "source-proxy").parameters.sourceEndpoint)
-            .toBe("https://source.example.com");
+            .toBe("https://source.example.com",);
         expect(sourceAfter.resource("CaptureProxy", "source-proxy").parameters.sourceEndpoint)
-            .toBe("https://source-b.example.com");
+            .toBe("https://source-b.example.com",);
 
         const targetBefore = await transformAndResolve(sampleConfig());
         const targetConfigAfter = sampleConfig();
@@ -133,37 +143,67 @@ describe("resolved migration resources", () => {
         const targetAfter = await transformAndResolve(targetConfigAfter);
 
         expect(targetBefore.workflowConfig.snapshotMigrations[0].configChecksum)
-            .not.toBe(targetAfter.workflowConfig.snapshotMigrations[0].configChecksum);
+            .not.toBe(targetAfter.workflowConfig.snapshotMigrations[0].configChecksum,);
         expect(targetBefore.workflowConfig.trafficReplays[0].configChecksum)
-            .not.toBe(targetAfter.workflowConfig.trafficReplays[0].configChecksum);
+            .not.toBe(targetAfter.workflowConfig.trafficReplays[0].configChecksum,);
         expect(targetBefore.singleResource("SnapshotMigration").parameters.targetEndpoint)
-            .toBe("https://target.example.com");
+            .toBe("https://target.example.com",);
         expect(targetAfter.singleResource("SnapshotMigration").parameters.targetEndpoint)
-            .toBe("https://target-b.example.com");
-        expect(targetBefore.resource("TrafficReplay", "source-proxy-target-replay").parameters.targetEndpoint)
-            .toBe("https://target.example.com");
-        expect(targetAfter.resource("TrafficReplay", "source-proxy-target-replay").parameters.targetEndpoint)
-            .toBe("https://target-b.example.com");
+            .toBe("https://target-b.example.com",);
+        expect(targetBefore.resource("TrafficReplay", "replay").parameters.targetEndpoint)
+            .toBe("https://target.example.com",);
+        expect(targetAfter.resource("TrafficReplay", "replay").parameters.targetEndpoint)
+            .toBe("https://target-b.example.com",);
 
         const kafkaConfigBefore = sampleConfig();
-        kafkaConfigBefore.kafkaClusterConfiguration = {
-            default: {existing: {kafkaConnection: "broker-a:9092"}},
+        kafkaConfigBefore.traffic = {
+            ...kafkaConfigBefore.traffic,
+            kafkaClusters: {
+            default: {
+                existing: {kafkaConnection: "broker-a:9092"},
+                topics: {"source-proxy": {}},
+            },
+            },
         } as any;
         const kafkaBefore = await transformAndResolve(kafkaConfigBefore);
         const kafkaConfigAfter = sampleConfig();
-        kafkaConfigAfter.kafkaClusterConfiguration = {
-            default: {existing: {kafkaConnection: "broker-b:9092"}},
+        kafkaConfigAfter.traffic = {
+            ...kafkaConfigAfter.traffic,
+            kafkaClusters: {
+            default: {
+                existing: {kafkaConnection: "broker-b:9092"},
+                topics: {"source-proxy": {}},
+            },
+            },
         } as any;
         const kafkaAfter = await transformAndResolve(kafkaConfigAfter);
 
         expect(kafkaBefore.workflowConfig.proxies[0].topicConfigChecksum)
-            .not.toBe(kafkaAfter.workflowConfig.proxies[0].topicConfigChecksum);
+            .not.toBe(kafkaAfter.workflowConfig.proxies[0].topicConfigChecksum,);
         expect(kafkaBefore.workflowConfig.trafficReplays[0].fromCapturedTrafficConfigChecksum)
-            .not.toBe(kafkaAfter.workflowConfig.trafficReplays[0].fromCapturedTrafficConfigChecksum);
+            .not.toBe(kafkaAfter.workflowConfig.trafficReplays[0].fromCapturedTrafficConfigChecksum,);
         expect(kafkaBefore.resource("CapturedTraffic", "source-proxy-topic").parameters.kafkaBrokers)
-            .toBe("broker-a:9092");
+            .toBe("broker-a:9092",);
         expect(kafkaAfter.resource("CapturedTraffic", "source-proxy-topic").parameters.kafkaBrokers)
-            .toBe("broker-b:9092");
+            .toBe("broker-b:9092",);
+    });
+
+    it("isolates replay speed changes from snapshot resources", async () => {
+        const before = await transformAndResolve(sampleConfig());
+        const afterConfig = sampleConfig();
+        afterConfig.traffic!.replayers!.replay.replayerConfig!.speedupFactor = 12;
+        const after = await transformAndResolve(afterConfig);
+
+        expect(after.workflowConfig.trafficReplays[0].configChecksum)
+            .not.toBe(before.workflowConfig.trafficReplays[0].configChecksum,);
+        expect(after.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum)
+            .toBe(before.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum,);
+        expect(after.workflowConfig.snapshotMigrations[0].configChecksum)
+            .toBe(before.workflowConfig.snapshotMigrations[0].configChecksum,);
+        expect(after.singleResource("DataSnapshot").parameters)
+            .toEqual(before.singleResource("DataSnapshot").parameters,);
+        expect(after.singleResource("SnapshotMigration").parameters)
+            .toEqual(before.singleResource("SnapshotMigration").parameters,);
     });
 
     it("isolates source auth changes to DataSnapshot resources", async () => {
@@ -184,22 +224,22 @@ describe("resolved migration resources", () => {
         expect(after.workflowConfig.proxies[0].configChecksum)
             .toBe(before.workflowConfig.proxies[0].configChecksum);
         expect(after.workflowConfig.proxies[0].checksumForSnapshot)
-            .toBe(before.workflowConfig.proxies[0].checksumForSnapshot);
+            .toBe(before.workflowConfig.proxies[0].checksumForSnapshot,);
         expect(after.workflowConfig.proxies[0].checksumForReplayer)
-            .toBe(before.workflowConfig.proxies[0].checksumForReplayer);
+            .toBe(before.workflowConfig.proxies[0].checksumForReplayer,);
         expect(after.workflowConfig.proxies[0].configChecksum)
-            .toBe(withoutAuth.workflowConfig.proxies[0].configChecksum);
+            .toBe(withoutAuth.workflowConfig.proxies[0].configChecksum,);
         expect(after.workflowConfig.proxies[0].checksumForSnapshot)
-            .toBe(withoutAuth.workflowConfig.proxies[0].checksumForSnapshot);
+            .toBe(withoutAuth.workflowConfig.proxies[0].checksumForSnapshot,);
         expect(after.workflowConfig.proxies[0].checksumForReplayer)
-            .toBe(withoutAuth.workflowConfig.proxies[0].checksumForReplayer);
+            .toBe(withoutAuth.workflowConfig.proxies[0].checksumForReplayer,);
         expect(after.resource("CaptureProxy", "source-proxy").parameters)
-            .not.toHaveProperty("sourceAuthBasicSecretName");
+            .not.toHaveProperty("sourceAuthBasicSecretName",);
 
         expect(after.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum)
-            .not.toBe(before.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum);
+            .not.toBe(before.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum,);
         expect(after.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum)
-            .not.toBe(withoutAuth.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum);
+            .not.toBe(withoutAuth.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum,);
         expect(after.singleResource("DataSnapshot").parameters.sourceAuthBasicSecretName)
             .toBe("source-credentials-b");
         expect(after.singleResource("SnapshotMigration").parameters)
@@ -233,7 +273,7 @@ describe("resolved migration resources", () => {
         const afterMigration = after.workflowConfig.snapshotMigrations[0];
 
         expect(before.resolvedMigrationResources.resources)
-            .not.toContainEqual(expect.objectContaining({kind: "DataSnapshot"}));
+            .not.toContainEqual(expect.objectContaining({kind: "DataSnapshot"}),);
         expect(afterMigration.configChecksum).toBe(beforeMigration.configChecksum);
         expect(afterMigration.workloadIdentityChecksum).toBe(beforeMigration.workloadIdentityChecksum);
         expect(after.singleResource("SnapshotMigration").parameters)
@@ -248,6 +288,7 @@ describe("resolved migration resources", () => {
 
         const dataSnapshot = singleResource("DataSnapshot");
         expect(dataSnapshot.parameters.otelTraceCollectorEndpoint).toBe("");
+        expect(dataSnapshot.parameters.solrTopology).toBe("");
 
         const snapshotMigration = singleResource("SnapshotMigration");
         expect(snapshotMigration.parameters.metadataMigrationOtelTraceCollectorEndpoint).toBe("");
@@ -265,18 +306,25 @@ describe("resolved migration resources", () => {
                     configMap: "trusted-client-roots",
                     path: "ca.crt",
                 },
+                consoleClientSecretName: "proxy-client-cert",
             },
         };
 
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
         const transformedProxyConfig = workflowConfig.proxies![0].proxyConfig;
+        expect(transformedProxyConfig.tls).toEqual(expect.objectContaining({
+            clientAuth: expect.objectContaining({
+                consoleClientSecretName: "proxy-client-cert",
+            }),
+        }),);
         expect(transformedProxyConfig.fileSourceVolumes).toHaveLength(1);
         expect(transformedProxyConfig.fileSourceVolumeMounts).toHaveLength(1);
         expect(transformedProxyConfig.sslTrustCertFile).toMatch(/\/ca\.crt$/);
 
         const resolvedMigrationResources = buildResolvedMigrationResources(workflowConfig, "workflow-a");
-        const proxyResource = resolvedMigrationResources.resources.find(resource =>
-            resource.kind === "CaptureProxy" && resource.name === "source-proxy");
+        const proxyResource = resolvedMigrationResources.resources.find(
+            (resource) =>
+            resource.kind === "CaptureProxy" && resource.name === "source-proxy",);
 
         expect(proxyResource?.annotations).toEqual(expect.objectContaining({
             "migrations.opensearch.org/workflow-only-fields":
@@ -285,24 +333,24 @@ describe("resolved migration resources", () => {
             "migrations.opensearch.org/file-source-refs": JSON.stringify([{
                 configMap: {name: "trusted-client-roots"},
                 paths: ["ca.crt"],
-            }]),
-        }));
-        // clientAuth stays inside spec.tls (gated subtree); only the flat resolved
-        // bridge fields are stripped from the custom resource.
+            },]),
+        }),);
+        // clientAuth stays inside spec.tls (gated subtree); flat resolved bridge
+        // fields and console-only client material are stripped from the custom resource.
         expect(proxyResource?.parameters).toEqual(expect.objectContaining({
             dependsOn: ["source-proxy-topic"],
             tls: {
                 mode: "existingSecret",
                 secretName: "proxy-tls",
                 clientAuth: {
-                    required: true,
                     trustedClientCaFile: {
                         configMap: "trusted-client-roots",
                         path: "ca.crt",
                     },
                 },
             },
-        }));
+        }),);
+        expect((proxyResource?.parameters.tls as any).clientAuth.consoleClientSecretName).toBeUndefined();
         expect(proxyResource?.parameters).not.toHaveProperty("fileSourceVolumes");
         expect(proxyResource?.parameters).not.toHaveProperty("fileSourceVolumeMounts");
         expect(proxyResource?.parameters).not.toHaveProperty("sslTrustCertFile");
@@ -313,10 +361,10 @@ describe("resolved migration resources", () => {
         const bundle = await new MigrationInitializer().generateMigrationBundle(
             config,
             "workflow-a",
-            {runNumber: 1700000000000}
+            {runNumber: 1700000000000,}
         );
         const proxyCr = bundle.customMigrationResources.items.find((resource: any) =>
-            resource.kind === "CaptureProxy" && resource.metadata.name === "source-proxy");
+            resource.kind === "CaptureProxy" && resource.metadata.name === "source-proxy",);
         expect(proxyCr.metadata.annotations).toEqual(proxyResource?.annotations);
         expect(proxyCr.spec).toEqual(proxyResource?.parameters);
     });
@@ -326,11 +374,12 @@ describe("resolved migration resources", () => {
         const resolvedMigrationResources = buildResolvedMigrationResources(
             workflowConfig,
             "workflow-a",
-            {includeParameterPolicies: true}
+            {includeParameterPolicies: true,}
         );
 
-        const replay = resolvedMigrationResources.resources.find(resource =>
-            resource.kind === "TrafficReplay" && resource.name === "source-proxy-target-replay");
+        const replay = resolvedMigrationResources.resources.find(
+            (resource) =>
+            resource.kind === "TrafficReplay" && resource.name === "replay",);
         expect(replay?.parameterPolicies).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 specPath: ["speedupFactor"],
@@ -339,6 +388,83 @@ describe("resolved migration resources", () => {
             expect.objectContaining({
                 specPath: ["tupleMaxFileSizeMb"],
                 changeRestriction: "gated",
+            }),
+        ]),);
+    });
+
+    it("includes parameter provenance when resolving from user config", async () => {
+        const config = sampleConfig();
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
+        const resolvedMigrationResources = buildResolvedMigrationResources(
+            workflowConfig,
+            "workflow-a",
+            {includeParameterProvenance: true, sourceConfig: config,}
+        );
+
+        const proxy = resolvedMigrationResources.resources.find(
+            (resource) =>
+            resource.kind === "CaptureProxy" && resource.name === "source-proxy",);
+        expect(proxy?.parameterProvenance?.listenPort).toEqual(expect.objectContaining({
+            presence: "authored",
+            sourcePath: ["traffic", "proxies", "source-proxy", "proxyConfig", "listenPort"],
+            value: 9200,
+        }),);
+        expect(proxy?.parameterProvenance?.dependsOn).toEqual(expect.objectContaining({
+            presence: "generated",
+            value: ["source-proxy-topic"],
+        }),);
+
+        const topic = resolvedMigrationResources.resources.find(
+            (resource) =>
+            resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic",);
+        expect(topic?.displayFields).toEqual(expect.arrayContaining([
+            "topicName",
+            "partitions",
+            "replicas"
+        ]));
+        expect(topic?.parameterProvenance?.topicName).toEqual(expect.objectContaining({
+            presence: "authored",
+            sourcePath: ["traffic", "proxies", "source-proxy", "kafkaTopic"],
+            value: "source-proxy",
+        }),);
+        expect(topic?.parameterProvenance?.kafkaClusterName).toEqual(expect.objectContaining({
+            presence: "authored",
+            sourcePath: ["traffic", "proxies", "source-proxy", "kafka"],
+            value: "default",
+        }),);
+
+        const replay = resolvedMigrationResources.resources.find(
+            (resource) =>
+            resource.kind === "TrafficReplay" && resource.name === "replay",);
+        expect(replay?.parameterProvenance?.speedupFactor).toEqual(expect.objectContaining({
+            presence: "authored",
+            sourcePath: ["traffic", "replayers", "replay", "replayerConfig", "speedupFactor"],
+            value: 5,
+        }),);
+        expect(replay?.parameterProvenance?.dependsOn).toEqual(expect.objectContaining({
+            presence: "generated",
+        }),);
+    });
+
+    it("does not synthesize a Kafka cluster for a missing reference", async () => {
+        const config = sampleConfig();
+        (config as any).traffic.kafkaClusters = {
+            kafka: {autoCreate: {}},
+        };
+        delete (config as any).traffic.proxies["source-proxy"].kafka;
+
+        const resolved = await buildLooseResolvedMigrationResources(config, "workflow-a");
+        const kafkaClusters = resolved.resources.filter((resource) => resource.kind === "KafkaCluster");
+        const topic = resolved.resources.find(
+            (resource) =>
+            resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic",);
+
+        expect(resolved.projectionComplete).toBe(false);
+        expect(kafkaClusters.map((resource) => resource.name)).toEqual(["kafka"]);
+        expect(topic?.parameters.kafkaClusterName).toBe("");
+        expect(topic?.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: ["traffic", "proxies", "source-proxy", "kafka"],
             }),
         ]));
     });
@@ -361,11 +487,11 @@ describe("resolved migration resources", () => {
         expect(unapprovedReplay.changes).toContainEqual(expect.objectContaining({
             path: "speedupFactor",
             result: "allowed",
-        }));
+        }),);
         expect(unapprovedReplay.changes).toContainEqual(expect.objectContaining({
             path: "tupleMaxFileSizeMb",
             result: "approval-required",
-        }));
+        }),);
 
         expect(dryRunResourcePolicy(replayBefore, replayAfter, {approved: true}).allowed).toBe(true);
 
@@ -383,7 +509,7 @@ describe("resolved migration resources", () => {
         expect(dryRunResourcePolicy(kafkaBefore, kafkaAfter).changes).toContainEqual(expect.objectContaining({
             path: "auth.type",
             result: "blocked",
-        }));
+        }),);
 
         const trafficBefore: ResolvedMigrationResource = {
             apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -400,7 +526,42 @@ describe("resolved migration resources", () => {
             path: "partitions",
             result: "blocked",
             message: "partitions cannot decrease.",
-        }));
+        }),);
+    });
+
+    it("treats projected objects as equal regardless of key order", () => {
+        const proxyBefore: ResolvedMigrationResource = {
+            apiVersion: "migrations.opensearch.org/v1alpha1",
+            kind: "CaptureProxy",
+            name: "p2",
+            parameters: {
+                tls: {
+                    dnsNames: ["p2", "p2.ma"],
+                    issuerRef: {
+                        group: "cert-manager.io",
+                        kind: "ClusterIssuer",
+                        name: "migrations-ca",
+                    },
+                    mode: "certManager",
+                },
+            },
+        };
+        const proxyAfter: ResolvedMigrationResource = {
+            ...proxyBefore,
+            parameters: {
+                tls: {
+                    mode: "certManager",
+                    issuerRef: {
+                        name: "migrations-ca",
+                        kind: "ClusterIssuer",
+                        group: "cert-manager.io",
+                    },
+                    dnsNames: ["p2", "p2.ma"],
+                },
+            },
+        };
+
+        expect(dryRunResourcePolicy(proxyBefore, proxyAfter).changes).toEqual([]);
     });
 
     it("does not report legacy source auth fields as CaptureProxy or SnapshotMigration blockers", () => {
@@ -409,11 +570,11 @@ describe("resolved migration resources", () => {
                 apiVersion: "migrations.opensearch.org/v1alpha1",
                 kind,
                 name: "resource",
-                parameters: {sourceAuthType: "basic", sourceAuthBasicSecretName: "credentials-a"},
+                parameters: {sourceAuthType: "basic", sourceAuthBasicSecretName: "credentials-a",},
             };
             const after: ResolvedMigrationResource = {
                 ...before,
-                parameters: {sourceAuthType: "basic", sourceAuthBasicSecretName: "credentials-b"},
+                parameters: {sourceAuthType: "basic", sourceAuthBasicSecretName: "credentials-b",},
             };
 
             expect(dryRunResourcePolicy(before, after)).toEqual({
@@ -430,22 +591,37 @@ describe("resolved migration resources", () => {
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(sampleConfig());
         const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "resolved-migration-resources-test-"));
 
-        await initializer.generateOutputFiles(workflowConfig, outputDir, sampleConfig(), "workflow-a", {runNumber: 1700000000000});
+        await initializer.generateOutputFiles(workflowConfig, outputDir, sampleConfig(), "workflow-a", {runNumber: 1700000000000,});
 
         const resolvedMigrationResources = JSON.parse(
-            await fs.readFile(path.join(outputDir, "resolvedMigrationResources.json"), "utf8")
+            await fs.readFile(path.join(outputDir, "resolvedMigrationResources.json"), "utf8"),
         );
         expect(resolvedMigrationResources.workflowName).toBe("workflow-a");
         expect(resolvedMigrationResources.resources).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 kind: "TrafficReplay",
-                name: "source-proxy-target-replay",
+                name: "replay",
                 parameters: expect.objectContaining({speedupFactor: 5}),
             }),
-        ]));
+        ]),);
         expect(resolvedMigrationResources.resources.every((resource: any) =>
             resource.parameterPolicies === undefined
-        )).toBe(true);
+        ),).toBe(true);
+
+        const preflightResources = JSON.parse(
+            await fs.readFile(
+                path.join(outputDir, "submissionPreflightResources.json"),
+                "utf8"),
+        );
+        const policyCandidates = preflightResources.filter(
+            (candidate: any) => candidate.policyResource
+        );
+        expect(policyCandidates.length).toBeGreaterThan(0);
+        for (const candidate of policyCandidates) {
+            expect(candidate.manifest.spec).toEqual(
+                candidate.policyResource.parameters
+            );
+        }
     });
 
     it("builds resolved migration resources from a transformed workflow config file", async () => {
@@ -465,12 +641,12 @@ describe("resolved migration resources", () => {
         expect(resolvedMigrationResources.workflowName).toBe("workflow-from-cli");
         expect(resolvedMigrationResources.resources).toContainEqual(expect.objectContaining({
             kind: "TrafficReplay",
-            name: "source-proxy-target-replay",
+            name: "replay",
             parameters: expect.objectContaining({speedupFactor: 5}),
-        }));
+        }),);
         expect(resolvedMigrationResources.resources.every((resource: any) =>
             resource.parameterPolicies === undefined
-        )).toBe(true);
+        ),).toBe(true);
     });
 
     it("can include parameter policies from the command line for debugging", async () => {
@@ -489,12 +665,157 @@ describe("resolved migration resources", () => {
 
         const resolvedMigrationResources = JSON.parse(await fs.readFile(outputFile, "utf8"));
         const replay = resolvedMigrationResources.resources.find((resource: any) =>
-            resource.kind === "TrafficReplay" && resource.name === "source-proxy-target-replay");
+            resource.kind === "TrafficReplay" && resource.name === "replay",);
         expect(replay.parameterPolicies).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 specPath: ["tupleMaxFileSizeMb"],
                 changeRestriction: "gated",
             }),
-        ]));
+        ]),);
+    });
+
+    it("loosely projects incomplete user config for the manage resource view", async () => {
+        const config = sampleConfig();
+        delete (config.sourceClusters.source as any).endpoint;
+        delete (config.traffic!.proxies!["source-proxy"] as any).proxyConfig;
+
+        const resolved = await buildLooseResolvedMigrationResources(config, "workflow-a");
+
+        expect(resolved.projectionMode).toBe("loose");
+        expect(resolved.projectionComplete).toBe(false);
+        expect(resolved.validation?.valid).toBe(false);
+        expect(resolved.resources).toContainEqual(expect.objectContaining({
+            kind: "CaptureProxy",
+            name: "source-proxy",
+            parameters: {dependsOn: ["source-proxy-topic"]},
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    path: ["traffic", "proxies", "source-proxy", "proxyConfig"],
+                }),
+            ]),
+        }),);
+        expect(resolved.resources).toContainEqual(expect.objectContaining({
+            kind: "CapturedTraffic",
+            name: "source-proxy-topic",
+            parameters: expect.objectContaining({
+                kafkaClusterName: "default",
+                topicName: "source-proxy",
+            }),
+        }),);
+        expect(resolved.consoleResources?.sources).toContainEqual(expect.objectContaining({
+            refName: "source",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    path: ["sourceClusters", "source", "endpoint"],
+                }),
+            ]),
+        }),);
+    });
+
+    it("loosely projects valid user config with virtual resource provenance", async () => {
+        const resolved = await buildLooseResolvedMigrationResources(sampleConfig(), "workflow-a");
+
+        expect(resolved.projectionMode).toBe("loose");
+        expect(resolved.projectionComplete).toBe(true);
+        expect(resolved.resources.find(
+                (resource) =>
+            resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic",
+        )?.parameterProvenance?.topicName,).toEqual(expect.objectContaining({
+            presence: "authored",
+            value: "source-proxy",
+        }),);
+        expect(resolved.consoleResources?.sources).toContainEqual(expect.objectContaining({
+            refName: "source",
+            parameterProvenance: expect.objectContaining({
+                endpoint: expect.objectContaining({
+                    presence: "authored",
+                    sourcePath: ["sourceClusters", "source", "endpoint"],
+                    value: "https://source.example.com",
+                }),
+                no_auth: expect.objectContaining({
+                    presence: "defaulted",
+                }),
+            }),
+        }),);
+    });
+
+    it("loosely projects config-only snapshot migrations for the manage resource view", async () => {
+        const config = sampleConfig();
+        ((config.sourceClusters.source.snapshotInfo as any).snapshots as any) = {};
+
+        const resolved = await buildLooseResolvedMigrationResources(config, "workflow-a");
+
+        expect(resolved.resources).toContainEqual(expect.objectContaining({
+            kind: "SnapshotMigration",
+            name: "source-target-snap1-slice-0",
+            parameters: expect.objectContaining({
+                sourceLabel: "source",
+                targetLabel: "target",
+                snapshotLabel: "snap1",
+                migrationLabel: "slice-0",
+            }),
+            parameterProvenance: expect.objectContaining({
+                migrationLabel: expect.objectContaining({
+                    sourcePath: ["snapshotMigrationConfigs", "0", "slice"],
+                }),
+            }),
+        }),);
+    });
+
+    it("names a partially authored snapshot migration with the same labels it carries", async () => {
+        const config = sampleConfig();
+        (config.snapshotMigrationConfigs as any) = [{
+            fromSnapshot: "",
+            fromSource: "",
+            metadataMigrationConfig: {},
+            slice: "s1",
+            toTarget: "",
+        }];
+
+        const resolved = await buildLooseResolvedMigrationResources(config, "workflow-a");
+
+        // Manage identifies snapshot migrations by the full four-part tuple, so
+        // substituted labels have to reach the parameters, not just the name.
+        const migration = resolved.resources.find(resource => resource.kind === "SnapshotMigration");
+        expect(migration?.name).toBe("source-0-target-0-snapshot-0-s1");
+        expect(migration?.parameters).toEqual(expect.objectContaining({
+            migrationLabel: "s1",
+            snapshotLabel: "snapshot-0",
+            sourceLabel: "source-0",
+            targetLabel: "target-0",
+        }));
+        expect(migration?.parameters.dependsOn).toEqual([]);
+    });
+
+    it("returns best-effort resources from the loose CLI without exiting on validation errors", async () => {
+        const config = sampleConfig();
+        delete (config.traffic!.proxies!["source-proxy"] as any).proxyConfig;
+        const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "resolved-migration-resources-loose-cli-test-"));
+        const inputFile = path.join(outputDir, "workflowMigration.config.yaml");
+        const outputFile = path.join(outputDir, "resolvedMigrationResources.json");
+        await fs.writeFile(inputFile, JSON.stringify(config, null, 2));
+
+        await resolveMigrationResourcesMain([
+            "--user-config", inputFile,
+            "--workflow-name", "workflow-from-cli",
+            "--validation-mode", "loose",
+            "--output", outputFile,
+        ]);
+
+        const resolved = JSON.parse(await fs.readFile(outputFile, "utf8"));
+        expect(resolved.validation.valid).toBe(false);
+        expect(resolved.resources).toContainEqual(expect.objectContaining({
+            kind: "CaptureProxy",
+            name: "source-proxy",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({path: ["traffic", "proxies", "source-proxy", "proxyConfig"],}),
+            ]),
+        }),);
+        expect(resolved.resources.find((resource: any) =>
+            resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic",
+        ).parameterProvenance.topicName,).toEqual(expect.objectContaining({
+            presence: "authored",
+            value: "source-proxy",
+        }),);
     });
 });

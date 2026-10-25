@@ -431,6 +431,14 @@ export class TaskDataExpression<T extends PlainObject> extends BaseExpression<T,
     }
 }
 
+export type ScopeRootName = "inputs" | "steps" | "tasks" | "workflow";
+
+export class ScopeRootExpression<T extends Record<string, any>> extends BaseExpression<T, "govaluate"> {
+    constructor(public readonly name: ScopeRootName) {
+        super("scope_root");
+    }
+}
+
 export class WorkflowValueExpression extends BaseExpression<string, "govaluate"> {
     constructor(public readonly variable: WORKFLOW_VALUES) {
         super("workflow_value");
@@ -1054,6 +1062,10 @@ class ExprBuilder {
         key: string
     ): SimpleExpression<T> {
         return new TaskDataExpression<T>(taskType, taskName, key);
+    }
+
+    scopeRoot<T extends Record<string, any> = Record<string, any>>(name: ScopeRootName): SimpleExpression<T> {
+        return new ScopeRootExpression<T>(name);
     }
 
     getWorkflowValue(value: WORKFLOW_VALUES) {
