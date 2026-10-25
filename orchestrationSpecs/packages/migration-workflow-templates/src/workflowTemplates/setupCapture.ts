@@ -18,6 +18,10 @@ import {
     DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
     DENORMALIZED_PROXY_SETUP_CONFIG,
+    KAFKA_AUTH_CONFIG_FILE_PATH,
+    KAFKA_AUTH_CONFIG_MOUNT_PATH,
+    KAFKA_CA_MOUNT_PATH,
+    KAFKA_CLIENT_PROPERTIES_FILE_NAME,
     PROXY_TLS_CONFIG,
     ResourceRequirementsType,
 } from "@opensearch-migrations/schemas";
@@ -55,9 +59,6 @@ import {
     workloadZoneSpreadResolvedInput,
 } from "./commonUtils/workloadNodePool";
 
-const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
-const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
-const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
 const CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR = "CAPTURE_PROXY_SSL_TRUST_CERT_PEM";
 
 function makeOwnerReferences(
@@ -190,7 +191,10 @@ function makeProxyParamsDict(
     );
     const effectiveKafkaSecretName = expr.getLoose(kafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(kafkaConfig, "kafkaUserName");
-    const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
+    const shouldUseClientProperties = expr.not(expr.equals(
+        expr.getLoose(kafkaConfig, "producerClientProperties"),
+        expr.literal("")
+    ));
     const processConfig = expr.omit(
         expr.get(config, "proxyConfig"),
         ...ARGO_PROXY_WORKFLOW_OPTION_KEYS
@@ -223,7 +227,7 @@ function makeProxyParamsDict(
                     kafkaUserName: effectiveKafkaUserName,
                 }),
                 expr.ternary(
-                    shouldUseScram,
+                    shouldUseClientProperties,
                     expr.makeDict({
                         kafkaPropertyFile: expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
                     }),
@@ -234,16 +238,16 @@ function makeProxyParamsDict(
     );
 }
 
-function makeKafkaClientPropertiesConfigMap(name: BaseExpression<string>) {
+function makeKafkaClientPropertiesConfigMap(
+    name: BaseExpression<string>,
+    clientProperties: BaseExpression<string>,
+) {
     return {
         apiVersion: "v1",
         kind: "ConfigMap",
         metadata: {name},
         data: {
-            "client.properties": [
-                "ssl.truststore.type=PEM",
-                `ssl.truststore.location=${KAFKA_CA_MOUNT_PATH}/ca.crt`,
-            ].join("\n")
+            [KAFKA_CLIENT_PROPERTIES_FILE_NAME]: makeStringTypeProxy(clientProperties),
         }
     };
 }
@@ -264,6 +268,7 @@ function makeProxyDeploymentManifest(args: {
     resources: BaseExpression<ResourceRequirementsType>,
     jsonConfig: BaseExpression<string>,
     kafkaAuthConfigMapName: BaseExpression<string>,
+    configChecksum: BaseExpression<string>,
     kafkaAuthType: BaseExpression<string>,
     kafkaSecretName: BaseExpression<string>,
     kafkaCaSecretName: BaseExpression<string>,
@@ -280,6 +285,10 @@ function makeProxyDeploymentManifest(args: {
     workloadZoneSpreadExtras: BaseExpression<string>,
 }) {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
+    const usesKafkaTls = expr.or(
+        isScramAuth,
+        expr.equals(args.kafkaAuthType, expr.literal("ssl"))
+    );
     const container: Record<string, any> = {
         name: CONTAINER_NAMES.PROXY,
         image: args.image,
@@ -341,7 +350,7 @@ function makeProxyDeploymentManifest(args: {
                 name: "kafka-ca",
                 secret: {
                     secretName: makeStringTypeProxy(args.kafkaCaSecretName),
-                    optional: makeDirectTypeProxy(expr.not(isScramAuth))
+                    optional: makeDirectTypeProxy(expr.not(usesKafkaTls))
                 }
             }
         ];
@@ -380,13 +389,18 @@ function makeProxyDeploymentManifest(args: {
             },
             selector: {matchLabels: workloadSelectorLabels(COMPONENTS.CAPTURE_PROXY, args.ownerUid)},
             template: {
-                metadata: {labels: {
-                    [COMPONENT_LABEL]: COMPONENTS.CAPTURE_PROXY,
-                    "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
-                    "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
-                    "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
-                    [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
-                }},
+                metadata: {
+                    annotations: {
+                        "migrations.opensearch.org/config-checksum": makeStringTypeProxy(args.configChecksum),
+                    },
+                    labels: {
+                        [COMPONENT_LABEL]: COMPONENTS.CAPTURE_PROXY,
+                        "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
+                        "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
+                        "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                        [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
+                    },
+                },
                 spec: {
                     nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
                     tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
@@ -510,6 +524,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("jsonConfig", typeToken<string>())
         .addRequiredInput("kafkaAuthConfigMapName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("kafkaAuthType", typeToken<string>())
         .addRequiredInput("kafkaSecretName", typeToken<string>())
         .addRequiredInput("kafkaCaSecretName", typeToken<string>())
@@ -541,6 +556,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     resources: expr.deserializeRecord(b.inputs.resources),
                     jsonConfig: expr.toBase64YamlSafe(b.inputs.jsonConfig),
                     kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
+                    configChecksum: b.inputs.configChecksum,
                     kafkaAuthType: b.inputs.kafkaAuthType,
                     kafkaSecretName: b.inputs.kafkaSecretName,
                     kafkaCaSecretName: b.inputs.kafkaCaSecretName,
@@ -564,6 +580,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("jsonConfig", typeToken<string>())
         .addRequiredInput("kafkaAuthConfigMapName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("kafkaAuthType", typeToken<string>())
         .addRequiredInput("kafkaSecretName", typeToken<string>())
         .addRequiredInput("kafkaCaSecretName", typeToken<string>())
@@ -595,6 +612,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     resources: expr.deserializeRecord(b.inputs.resources),
                     jsonConfig: expr.toBase64YamlSafe(b.inputs.jsonConfig),
                     kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
+                    configChecksum: b.inputs.configChecksum,
                     kafkaAuthType: b.inputs.kafkaAuthType,
                     kafkaSecretName: b.inputs.kafkaSecretName,
                     kafkaCaSecretName: b.inputs.kafkaCaSecretName,
@@ -617,11 +635,15 @@ export const SetupCapture = WorkflowBuilder.create({
 
     .addTemplate("createKafkaClientPropertiesConfigMap", t => t
         .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("clientProperties", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name)
+                manifest: makeKafkaClientPropertiesConfigMap(
+                    b.inputs.name,
+                    b.inputs.clientProperties,
+                )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -738,6 +760,10 @@ export const SetupCapture = WorkflowBuilder.create({
                 expr.getLoose(kafkaConfig, "authType")
             );
             const shouldUseScramAuth = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
+            const shouldUseKafkaTls = expr.or(
+                shouldUseScramAuth,
+                expr.equals(effectiveKafkaAuthType, expr.literal("ssl"))
+            );
             const kafkaAuthConfigMapName = expr.concat(b.inputs.proxyName, expr.literal("-kafka-auth"));
             const issuerName = expr.dig(proxyOpts, ["tls", "issuerRef", "name"], expr.literal(""));
             const issuerKind = expr.dig(proxyOpts, ["tls", "issuerRef", "kind"], expr.literal("ClusterIssuer"));
@@ -750,7 +776,8 @@ export const SetupCapture = WorkflowBuilder.create({
             return b
                 .addStep("createKafkaClientConfig", INTERNAL, "createKafkaClientPropertiesConfigMap", c =>
                     c.register({
-                        name: kafkaAuthConfigMapName
+                        name: kafkaAuthConfigMapName,
+                        clientProperties: expr.getLoose(kafkaConfig, "producerClientProperties"),
                     })
                 )
                 .addStepGroup(g => g
@@ -817,7 +844,7 @@ export const SetupCapture = WorkflowBuilder.create({
                                     expr.literal("empty")
                                 ),
                                 kafkaCaSecretName: expr.ternary(
-                                    shouldUseScramAuth,
+                                    shouldUseKafkaTls,
                                     expr.getLoose(kafkaConfig, "caSecretName"),
                                     expr.literal("empty")
                                 ),
@@ -851,7 +878,7 @@ export const SetupCapture = WorkflowBuilder.create({
                                     expr.literal("empty")
                                 ),
                                 kafkaCaSecretName: expr.ternary(
-                                    shouldUseScramAuth,
+                                    shouldUseKafkaTls,
                                     expr.getLoose(kafkaConfig, "caSecretName"),
                                     expr.literal("empty")
                                 ),

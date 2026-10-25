@@ -9,7 +9,7 @@ import types
 import pytest
 
 from console_link.models import kafka_dump
-from console_link.models.kafka import ScramKafka, StandardKafka, MSK
+from console_link.models.kafka import ScramKafka, StandardKafka, TlsKafka, MSK
 from console_link.models.kafka_dump import (
     build_dump_pod_manifest,
     launch_dump_pod,
@@ -29,6 +29,12 @@ def _scram(monkeypatch, username="default-migration-app",
 
 def _standard(brokers="default-kafka-bootstrap.ma.svc:9092"):
     return StandardKafka({"broker_endpoints": brokers, "standard": None})
+
+
+def _tls(brokers="external.example.com:9093", ca="/tmp/ca.crt"):
+    kafka = TlsKafka({"broker_endpoints": brokers, "tls": {"ca_cert_path": ca}})
+    kafka.ca_secret_name = "external-kafka-ca"
+    return kafka
 
 
 def _msk(brokers="b-1.msk.amazonaws.com:9098"):
@@ -132,6 +138,22 @@ def test_standard_manifest_no_auth_no_volumes():
     assert "--kafkaAuthType" not in container["args"]
     assert "env" not in container
     assert "volumes" not in m["spec"]
+
+
+def test_tls_manifest_uses_ssl_property_file_without_password():
+    k = _tls()
+    m = build_dump_pod_manifest(
+        k, pod_name="p", namespace="ma", image="img", pull_policy="IfNotPresent",
+        cluster_name=None, topic="capture-proxy", mode="dump-both",
+        kafka_auth_configmap="capture-proxy-kafka-auth",
+    )
+    container = m["spec"]["containers"][0]
+    args = container["args"]
+    assert args[args.index("--kafkaAuthType") + 1] == "ssl"
+    assert args[args.index("--kafka-traffic-property-file") + 1] == KAFKA_AUTH_CONFIG_FILE_PATH
+    assert "env" not in container
+    volumes = {v["name"]: v for v in m["spec"]["volumes"]}
+    assert volumes["kafka-ca"]["secret"]["secretName"] == "external-kafka-ca"
 
 
 def test_msk_manifest_iam_auth():

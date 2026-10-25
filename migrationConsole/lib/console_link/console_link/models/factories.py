@@ -8,7 +8,7 @@ from console_link.models.metrics_source import CloudwatchMetricsSource, Promethe
 from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, K8sRFSBackfill
 from console_link.models.cluster import Cluster
-from console_link.models.kafka import MSK, StandardKafka, ScramKafka
+from console_link.models.kafka import MSK, StandardKafka, ScramKafka, TlsKafka
 from console_link.models.replayer_ecs import ECSReplayer
 from console_link.models.snapshot import FileSystemSnapshot, GcsSnapshot, S3Snapshot
 import logging
@@ -72,6 +72,8 @@ def get_kafka(config: Dict, scram_password: Optional[str] = None):
         return MSK(config)
     if 'standard' in config:
         return StandardKafka(config)
+    if 'tls' in config:
+        return TlsKafka(config)
     if 'scram' in config:
         return ScramKafka(config, password=scram_password)
     config.pop("broker_endpoints", None)

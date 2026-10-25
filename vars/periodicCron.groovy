@@ -24,6 +24,7 @@ def call(String jobName) {
         case 'main-k8s-local-elasticsearch6x-test':   return '@hourly'
         case 'main-k8s-local-elasticsearch7x-test':   return '@hourly'
         case 'main-k8s-local-elasticsearch8x-test':   return '@hourly'
+        case 'main-k8s-local-external-kafka-test':    return 'H H(0-23)/6 * * *'
         case 'main-k8s-local-opensearch1x-test':      return '@hourly'
         case 'main-k8s-local-solr8x-test':            return 'H H(0-23)/6 * * *'
         case 'main-k8s-local-solr-other-test':        return 'H H(0-23)/6 * * *'

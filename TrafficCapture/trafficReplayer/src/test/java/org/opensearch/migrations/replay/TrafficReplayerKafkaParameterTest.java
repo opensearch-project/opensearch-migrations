@@ -60,6 +60,16 @@ public class TrafficReplayerKafkaParameterTest {
     }
 
     @Test
+    public void testSslKafkaAuthTypeIsSupported() {
+        var parameters = new TrafficReplayer.Parameters();
+        parameters.kafkaTrafficAuthType = "ssl";
+
+        Assertions.assertDoesNotThrow(parameters::validateKafkaAuthFlags);
+        Assertions.assertEquals("ssl", parameters.getEffectiveKafkaAuthType());
+        Assertions.assertFalse(parameters.isKafkaTrafficEnableMSKAuth());
+    }
+
+    @Test
     void removedShortPacketTimeoutAliasFailsAsUnknown() {
         Assertions.assertThrows(
             com.beust.jcommander.ParameterException.class,

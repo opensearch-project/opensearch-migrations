@@ -208,6 +208,140 @@ describe('MigrationConfigTransformer validation', () => {
         expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
     });
 
+    it('renders external Kafka producer and consumer client properties', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092,broker2:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {
+                            "max.request.size": 8388608,
+                            "compression.type": "lz4",
+                        },
+                        consumer: {
+                            "fetch.min.bytes": 1024,
+                            "client.rack": "us-east-1a",
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies?.[0]?.kafkaConfig.producerClientProperties).toBe([
+            "compression.type=lz4",
+            "max.request.size=8388608",
+            "",
+        ].join("\n"));
+        expect(result.trafficReplays?.[0]?.kafkaConfig.consumerClientProperties).toBe([
+            "client.rack=us-east-1a",
+            "fetch.min.bytes=1024",
+            "",
+        ].join("\n"));
+    });
+
+    it('supports TLS without SASL for an existing Kafka cluster', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9093",
+                    kafkaTopic: "",
+                    auth: {
+                        type: "ssl",
+                        caSecretName: "external-kafka-ca",
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+        const expectedProperties = [
+            "ssl.truststore.location=/config/kafka-ca/ca.crt",
+            "ssl.truststore.type=PEM",
+            "",
+        ].join("\n");
+
+        expect(result.proxies?.[0]?.kafkaConfig).toMatchObject({
+            authType: "ssl",
+            caSecretName: "external-kafka-ca",
+            producerClientProperties: expectedProperties,
+        });
+        expect(result.trafficReplays?.[0]?.kafkaConfig).toMatchObject({
+            authType: "ssl",
+            caSecretName: "external-kafka-ca",
+            consumerClientProperties: expectedProperties,
+        });
+    });
+
+    it('rejects auth implementation properties even when external Kafka auth is none', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {
+                            "sasl.jaas.config": "com.example.UntrustedLoginModule required;",
+                        },
+                    },
+                },
+            },
+        };
+
+        await expect(transformer.processFromObject(config)).rejects.toThrow(
+            /clientProperties\.producer\.sasl\.jaas\.config.*workflow-owned/
+        );
+    });
+
+    it('changes workload checksums when Kafka client properties change', async () => {
+        const baselineConfig = cloneBaseConfig();
+        baselineConfig.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {"compression.type": "lz4"},
+                        consumer: {"fetch.min.bytes": 1},
+                    },
+                },
+            },
+        };
+        const changedConfig = cloneBaseConfig();
+        changedConfig.kafkaClusterConfiguration = {
+            default: {
+                existing: {
+                    kafkaConnection: "broker1:9092",
+                    kafkaTopic: "",
+                    auth: {type: "none"},
+                    clientProperties: {
+                        producer: {"compression.type": "zstd"},
+                        consumer: {"fetch.min.bytes": 1024},
+                    },
+                },
+            },
+        };
+
+        const baseline = await transformer.processFromObject(baselineConfig);
+        const changed = await transformer.processFromObject(changedConfig);
+
+        expect(changed.proxies?.[0]?.configChecksum).not.toEqual(baseline.proxies?.[0]?.configChecksum);
+        expect(changed.proxies?.[0]?.checksumForReplayer).not.toEqual(
+            baseline.proxies?.[0]?.checksumForReplayer
+        );
+        expect(changed.trafficReplays?.[0]?.configChecksum).not.toEqual(
+            baseline.trafficReplays?.[0]?.configChecksum
+        );
+    });
+
     it('should carry metadata memory overrides from user input into populated workflow resources', async () => {
         const config = cloneBaseConfig();
         const inputResources = {

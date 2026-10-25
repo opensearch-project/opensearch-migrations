@@ -3,7 +3,7 @@ import pytest
 from console_link.models import kafka as kafka_module
 from console_link.models.command_result import CommandResult
 from console_link.models.factories import UnsupportedKafkaError, get_kafka
-from console_link.models.kafka import Kafka, MSK, StandardKafka, ScramKafka
+from console_link.models.kafka import Kafka, MSK, StandardKafka, ScramKafka, TlsKafka
 
 
 @pytest.fixture(autouse=True)
@@ -373,6 +373,25 @@ def test_scram_kafka_properties_file_content():
     assert 'password="my-pass"' in content
     assert "ssl.truststore.type=PEM" in content
     assert "ssl.truststore.location=/certs/ca.crt" in content
+
+
+def test_tls_kafka_properties_file_content():
+    config = {
+        "broker_endpoints": "kafka:9093",
+        "tls": {
+            "ca_cert_path": "/certs/ca.crt",
+        },
+    }
+
+    kafka = get_kafka(config)
+
+    assert isinstance(kafka, TlsKafka)
+    with open(kafka._props_file) as f:
+        content = f.read()
+    assert "security.protocol=SSL" in content
+    assert "ssl.truststore.type=PEM" in content
+    assert "ssl.truststore.location=/certs/ca.crt" in content
+    assert "sasl." not in content
 
 
 def test_scram_kafka_create_topic(mocker):

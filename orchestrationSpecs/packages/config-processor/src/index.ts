@@ -6,3 +6,4 @@ export * from './consoleResources';
 export * from './resolvedMigrationResources';
 export * from './streamSchemaTransformer';
 export * from './fileSourceUtils';
+export * from './kafkaClientProperties';

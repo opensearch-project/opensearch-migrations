@@ -2012,6 +2012,10 @@
                     "value": "{{inputs.parameters.useLocalStack}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "imageTrafficReplayerLocation",
                     "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
                   },
