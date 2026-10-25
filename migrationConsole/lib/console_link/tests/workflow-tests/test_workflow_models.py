@@ -1,7 +1,14 @@
 """Unit tests for workflow models."""
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from console_link.workflow.models.config import WorkflowConfig
-from console_link.workflow.models.utils import ExitCode
+from console_link.workflow.models.utils import (
+    ExitCode,
+    get_azure_credentials_secret_store,
+    get_credentials_secret_store,
+)
 from console_link.models.command_result import CommandResult
 import yaml
 
@@ -140,3 +147,19 @@ targets:
         assert ExitCode.NOT_FOUND.value == 3
         assert ExitCode.ALREADY_EXISTS.value == 4
         assert ExitCode.PERMISSION_DENIED.value == 5
+
+    @patch('console_link.workflow.models.secret_store.SecretStore')
+    def test_secret_store_cache_is_per_use_case(self, mock_secret_store_cls):
+        mock_secret_store_cls.side_effect = lambda namespace, default_labels: SimpleNamespace(
+            namespace=namespace, default_labels=default_labels)
+        ctx = SimpleNamespace(obj={'namespace': 'ma'})
+
+        basic = get_credentials_secret_store(ctx)
+        azure = get_azure_credentials_secret_store(ctx)
+
+        assert basic is not azure
+        assert basic.default_labels == {'use-case': 'http-basic-credentials'}
+        assert azure.default_labels == {'use-case': 'azure-storage-credentials'}
+        assert get_credentials_secret_store(ctx) is basic
+        assert get_azure_credentials_secret_store(ctx) is azure
+        assert mock_secret_store_cls.call_count == 2

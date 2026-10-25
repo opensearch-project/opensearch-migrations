@@ -49,3 +49,22 @@ def test_azure_secrets_are_not_treated_as_basic_auth():
 
     store.secret_exists.assert_not_called()
     store.save_secret.assert_not_called()
+
+
+def test_azure_secret_with_both_keys_fails():
+    store = make_store({"azure-creds": ["accountKey", "sasToken"]})
+
+    with pytest.raises(click.ClickException) as excinfo:
+        process_secrets(store, {"valid": True, "azureSecrets": ["azure-creds"]})
+
+    assert "azure-creds" in excinfo.value.message
+    assert "both" in excinfo.value.message
+
+
+def test_missing_azure_secret_hint_names_the_create_command():
+    store = make_store({})
+
+    with pytest.raises(click.ClickException) as excinfo:
+        process_secrets(store, {"valid": True, "azureSecrets": ["azure-creds"]})
+
+    assert "workflow configure credentials create --azure" in excinfo.value.message

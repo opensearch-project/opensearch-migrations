@@ -68,15 +68,22 @@ def get_workflow_config_store(ctx):
 
 
 def get_secret_store(ctx, use_case: str):
-    """Lazy initialization of SecretStore"""
+    """Lazy initialization of SecretStore, cached per use-case label"""
     from ..models.secret_store import SecretStore
-    if ctx.obj['secret_store'] is None:
-        ctx.obj['secret_store'] = SecretStore(
+    stores = ctx.obj.get('secret_stores')
+    if stores is None:
+        stores = ctx.obj['secret_stores'] = {}
+    if use_case not in stores:
+        stores[use_case] = SecretStore(
             namespace=ctx.obj['namespace'],
             default_labels={"use-case": use_case}
         )
-    return ctx.obj['secret_store']
+    return stores[use_case]
 
 
 def get_credentials_secret_store(ctx):
     return get_secret_store(ctx, "http-basic-credentials")
+
+
+def get_azure_credentials_secret_store(ctx):
+    return get_secret_store(ctx, "azure-storage-credentials")
