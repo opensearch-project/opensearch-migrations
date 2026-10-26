@@ -104,6 +104,30 @@ class OpenSearchClientTest {
     }
 
     @Test
+    void repeatedSubscriptionsStartWithFreshBatches() {
+        openSearchClient = new OpenSearchClient_OS_2_11(restClient, failedRequestLogger,
+            Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, 2, 1024);
+        var docs = List.of(
+            new Document("a", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("b", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("c", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()));
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+        var request = openSearchClient.sendBulkRequestRaw("idx", docs, null, false, DocumentExceptionAllowlist.empty());
+
+        var first = request.block();
+        var second = request.block();
+
+        assertEquals(2, first.requests.total());
+        assertEquals(first.target, second.target);
+        assertEquals(first.requests.bytes(), second.requests.bytes());
+        var bodies = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(4)).postAsyncBytes(any(), bodies.capture(), any(), any());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(bodies.getAllValues().get(0), bodies.getAllValues().get(2));
+        org.junit.jupiter.api.Assertions.assertArrayEquals(bodies.getAllValues().get(1), bodies.getAllValues().get(3));
+    }
+
+    @Test
     void testCreateIndex() {
         // Setup
         var checkIfExistsResponse = new HttpResponse(404, "", null, "does not exist");
@@ -235,6 +259,59 @@ class OpenSearchClientTest {
         org.junit.jupiter.api.Assertions.assertArrayEquals(
             allRequests.getAllValues().get(0), allRequests.getAllValues().get(4));
         verifyNoInteractions(failedRequestLogger);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void byteLimitUsesTheActualMetadataAfterIdRemoval(boolean raw) {
+        var docs = List.of(
+            new Document("long-original-document-id-1", "{\"v\":1}".getBytes(StandardCharsets.UTF_8),
+                Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("long-original-document-id-2", "{\"v\":1}".getBytes(StandardCharsets.UTF_8),
+                Document.Operation.UPSERT, Map.of(), Map.of()));
+        long exactSize = org.opensearch.migrations.bulkload.common.bulk.BulkNdjson
+            .serializeRaw(docs, "idx", true, OBJECT_MAPPER).bytes().length;
+        openSearchClient = new OpenSearchClient_OS_2_11(restClient, failedRequestLogger,
+            Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, 10, exactSize);
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("generated-1"), itemEntry("generated-2")))));
+
+        if (raw) {
+            openSearchClient.sendBulkRequestRaw("idx", docs, null, true, DocumentExceptionAllowlist.empty()).block();
+        } else {
+            openSearchClient.sendBulkRequest("idx",
+                docs.stream().map(doc -> BulkOperationConverter.fromRawDocument(doc, "idx")).toList(),
+                null, true, DocumentExceptionAllowlist.empty()).block();
+        }
+
+        var request = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient).postAsyncBytes(any(), request.capture(), any(), any());
+        assertEquals(exactSize, request.getValue().length, "Both operations fit after their IDs are removed");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rawRetriesPreserveTheSizedDocumentBytes(boolean generateIds) {
+        var body = "{\r\n\"value\":1e2,\n\"text\":\"é\\n\\r\"\r\n}".getBytes(StandardCharsets.UTF_8);
+        var documents = List.of(
+            new Document("d1", body, Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("d2", body, Document.Operation.UPSERT, Map.of(), Map.of()));
+        doReturn(Retry.fixedDelay(1, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(true,
+                List.of(itemEntryRetryableFailure("d1"), itemEntryRetryableFailure("d2")))))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("d1"), itemEntry("d2")))));
+
+        openSearchClient.sendBulkRequestRaw("idx", documents, null, generateIds, DocumentExceptionAllowlist.empty())
+            .block(Duration.ofSeconds(10));
+
+        var requests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(requests.getAllValues().get(0), requests.getAllValues().get(1));
+        var lines = new String(requests.getAllValues().get(0), StandardCharsets.UTF_8).split("\n");
+        assertEquals(4, lines.length, "Two operations must have exactly four NDJSON lines");
+        assertEquals("{  \"value\":1e2, \"text\":\"é\\n\\r\"  }", lines[1]);
+        assertEquals(lines[1], lines[3]);
     }
 
     @ParameterizedTest
