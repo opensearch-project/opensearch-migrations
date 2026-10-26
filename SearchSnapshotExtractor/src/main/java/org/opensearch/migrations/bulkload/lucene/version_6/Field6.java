@@ -22,7 +22,7 @@ public class Field6 implements LuceneField {
     public String asUid() {
         var binaryValue = wrapped.binaryValue();
         if (binaryValue != null && binaryValue.bytes != null) {
-            return Uid.decodeId(binaryValue.bytes);
+            return Uid.decodeId(binaryValue.bytes, binaryValue.offset, binaryValue.length);
         }
         // ES 5.x indices with index.mapping.single_type=true
         // In this configuration, _id is stored as a string instead of using _uid
