@@ -2,18 +2,18 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Flavor;
@@ -25,8 +25,8 @@ import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
-import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.pipeline.BatchSizePredicate;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -42,6 +42,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -74,6 +75,8 @@ public abstract class OpenSearchClient {
     protected final FailedRequestsLogger failedRequestsLogger;
     private final Version version;
     private final CompressionMode compressionMode;
+    private final int maxDocsPerBulkRequest;
+    private final long maxBytesPerBulkRequest;
 
     // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
     // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
@@ -87,15 +90,17 @@ public abstract class OpenSearchClient {
     // processed. Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
     private volatile String failedDocumentStreamWorkItemId;
 
-    protected OpenSearchClient(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
-        this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
-    }
-
-    protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version, CompressionMode compressionMode) {
+    protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
+                               CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
+        if (maxDocsPerBulkRequest < 1 || maxBytesPerBulkRequest < 1) {
+            throw new IllegalArgumentException("Bulk request count and byte limits must be positive");
+        }
         this.client = client;
         this.failedRequestsLogger = failedRequestsLogger;
         this.version = version;
         this.compressionMode = compressionMode;
+        this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
+        this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
     }
 
     /**
@@ -610,29 +615,11 @@ public abstract class OpenSearchClient {
                                               DocumentExceptionAllowlist allowlist,
                                               String serverlessCollection)
     {
-        return Mono.defer(() -> {
-            final var pendingDocs = new ArrayList<BulkOperationSpec>(docs);
-            return executeBulkWithRetry(
-                indexName,
-                serverlessCollection,
-                () -> {
-                    List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
-                        ? pendingDocs.stream().map(this::stripDocumentId).collect(Collectors.toList())
-                        : pendingDocs;
-                    return BulkNdjson.serialize(operationsToSend, OBJECT_MAPPER);
-                },
-                pendingDocs,
-                () -> {},
-                context,
-                allowlist
-            );
-        });
+        return sendBulkRequests(indexName, serverlessCollection, docs, op -> new PreparedOperation(() -> op,
+            BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER)), context, allowlist);
     }
 
-    /**
-     * Send a bulk request using raw document bytes, skipping the BulkOperationSpec deserialization.
-     * Builds NDJSON directly from Document raw source bytes — avoids byte[]→Map→byte[] round-trip.
-     */
+    /** Send raw source bytes without a byte[]→Map→byte[] round-trip. */
     public Mono<BulkResponse> sendBulkRequestRaw(String indexName, List<Document> docs,
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
@@ -645,38 +632,34 @@ public abstract class OpenSearchClient {
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist,
                                                   String serverlessCollection) {
-        return Mono.defer(() -> {
-            final var pendingRawDocs = new ArrayList<>(docs);
-            final var pendingOps = new ArrayList<BulkOperationSpec>();
+        return sendBulkRequests(indexName, serverlessCollection, docs, doc -> new PreparedOperation(
+            () -> BulkOperationConverter.fromRawDocument(doc, indexName),
+            BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER)), context, allowlist);
+    }
 
-            // On first error, convert raw docs to ops for compaction tracking
-            Runnable lazyConvert = () -> {
-                if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
-                    for (var doc : pendingRawDocs) {
-                        pendingOps.add(docToBulkOp(doc, indexName));
-                    }
-                    pendingRawDocs.clear();
-                }
-            };
+    // Build diagnostic operations only on failure; successful raw requests need only the encoded bytes.
+    // Sonar misidentifies the generated record constructor as a method with unused parameters.
+    @SuppressWarnings({"java:S100", "java:S1172"})
+    private record PreparedOperation(Supplier<BulkOperationSpec> operation, BulkNdjson.EncodedOperation encoded) {}
 
-            return executeBulkWithRetry(
-                indexName,
-                serverlessCollection,
-                () -> {
-                    if (pendingOps.isEmpty() && !pendingRawDocs.isEmpty()) {
-                        return BulkNdjson.serializeRaw(pendingRawDocs, indexName, allowServerGeneratedIds, OBJECT_MAPPER);
-                    }
-                    List<BulkOperationSpec> operationsToSend = allowServerGeneratedIds
-                        ? pendingOps.stream().map(this::stripDocumentId).collect(Collectors.toList())
-                        : pendingOps;
-                    return BulkNdjson.serialize(operationsToSend, OBJECT_MAPPER);
-                },
-                pendingOps,
-                lazyConvert,
-                context,
-                allowlist
-            );
-        });
+    private <T> Mono<BulkResponse> sendBulkRequests(
+        String indexName, String serverlessCollection, List<T> docs, Function<T, PreparedOperation> prepare,
+        IRfsContexts.IRequestContext context, DocumentExceptionAllowlist allowlist
+    ) {
+        // The batching predicate and retry state must be fresh for every subscription.
+        return Mono.defer(() -> Flux.fromIterable(docs)
+            .map(prepare)
+            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
+                (PreparedOperation op) -> op.encoded().size()), true)
+            // A split batch completes in source order, before its source checkpoint can advance.
+            .concatMap(batch -> executeBulkWithRetry(indexName, serverlessCollection, batch, context, allowlist), 1)
+            .reduce((previous, next) -> new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
+                previous.target.plus(next.target), previous.requests.plus(next.requests)))
+            .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+    }
+
+    private static BulkNdjson.SerializedBulk assemble(List<PreparedOperation> pending) {
+        return BulkNdjson.assemble(pending, PreparedOperation::encoded);
     }
 
     /**
@@ -684,31 +667,24 @@ public abstract class OpenSearchClient {
      *
      * @param indexName         target index
      * @param serverlessCollection collection header for per-account serverless endpoints, or null
-     * @param bodyBuilder       builds the NDJSON body bytes for each attempt
      * @param pendingOps        mutable list of pending operations (compacted on partial success)
-     * @param preCompactHook    called before compaction to allow lazy initialization of pendingOps
      * @param context           request context for metrics
      * @param allowlist         exception types to treat as success
      */
     private Mono<BulkResponse> executeBulkWithRetry(
         String indexName,
         String serverlessCollection,
-        java.util.function.Supplier<BulkNdjson.SerializedBulk> bodyBuilder,
-        ArrayList<BulkOperationSpec> pendingOps,
-        Runnable preCompactHook,
+        List<PreparedOperation> pendingOps,
         IRfsContexts.IRequestContext context,
         DocumentExceptionAllowlist allowlist
     ) {
         final AtomicInteger attemptCounter = new AtomicInteger(0);
         var totals = new RequestTotals();
         return Mono.defer(() -> {
-            var request = bodyBuilder.get();
+            var request = assemble(pendingOps);
             var bodyBytes = request.bytes();
             if (totals.attempts == 0) {
                 totals.target = request.operations();
-            }
-            if (bodyBytes.length == 0) {
-                return Mono.just(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"));
             }
             totals.attempts++;
             totals.bytes += bodyBytes.length;
@@ -727,9 +703,6 @@ public abstract class OpenSearchClient {
                         .addArgument(indexName)
                         .addArgument(() -> truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
                         .log();
-
-                    // Allow lazy initialization of pendingOps (e.g., raw→ops conversion)
-                    preCompactHook.run();
 
                     int successCount = compactPendingDocs(indexName, pendingOps, resp, allowlist);
 
@@ -754,7 +727,7 @@ public abstract class OpenSearchClient {
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     pendingOps::size,
-                    () -> BulkNdjson.toBulkNdjson(pendingOps, OBJECT_MAPPER),
+                    () -> new String(assemble(pendingOps).bytes(), StandardCharsets.UTF_8),
                     error
                 );
             } else {
@@ -792,10 +765,6 @@ public abstract class OpenSearchClient {
         return client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context);
     }
 
-    private static BulkOperationSpec docToBulkOp(Document doc, String indexName) {
-        return BulkOperationConverter.fromDocument(doc, indexName);
-    }
-
     /**
      * Partitions the bulk response into success / non-retryable / retryable buckets,
      * emits one failed document stream record per non-retryable failure, and compacts {@code pendingDocs}
@@ -810,7 +779,7 @@ public abstract class OpenSearchClient {
      */
     private int compactPendingDocs(
         String indexName,
-        ArrayList<BulkOperationSpec> pendingDocs,
+        List<PreparedOperation> pendingDocs,
         BulkResponse resp,
         DocumentExceptionAllowlist allowlist
     ) {
@@ -823,7 +792,7 @@ public abstract class OpenSearchClient {
         // Snapshot the ops we're about to drop so we can emit failed document stream records before mutating.
         for (ItemFailure failure : partition.getNonRetryableFailures()) {
             BulkOperationSpec op = failure.getPosition() < pendingDocs.size()
-                ? pendingDocs.get(failure.getPosition())
+                ? pendingDocs.get(failure.getPosition()).operation().get()
                 : null;
             emitFailedDocumentStreamRecord(indexName, op, failure, FailureClass.NON_RETRYABLE);
         }
@@ -870,7 +839,7 @@ public abstract class OpenSearchClient {
      */
     private void emitRetryExhaustedToFailedDocumentStream(
         String indexName,
-        ArrayList<BulkOperationSpec> pendingOps,
+        List<PreparedOperation> pendingOps,
         Throwable error,
         DocumentExceptionAllowlist allowlist
     ) {
@@ -909,7 +878,7 @@ public abstract class OpenSearchClient {
         }
         for (int i = 0; i < pendingOps.size(); i++) {
             ItemFailure failure = aligned ? retryableFailures.get(i) : null;
-            emitFailedDocumentStreamRecord(indexName, pendingOps.get(i), failure, FailureClass.RETRYABLE_EXHAUSTED);
+            emitFailedDocumentStreamRecord(indexName, pendingOps.get(i).operation().get(), failure, FailureClass.RETRYABLE_EXHAUSTED);
         }
     }
 
@@ -988,6 +957,7 @@ public abstract class OpenSearchClient {
     }
 
     public static class BulkResponse extends HttpResponse {
+        private static final Pattern FAILED_OPERATIONS = Pattern.compile("\"errors\"\\s*:\\s*true");
         public final MigrationMetrics.Operations target;
         public final MigrationMetrics.Requests requests;
 
@@ -1012,10 +982,7 @@ public abstract class OpenSearchClient {
             // whether any of the individual operations in the bulk request failed. Rather than marshalling the entire
             // response as JSON, just check for the string value.
 
-            String regexPattern = "\"errors\"\\s*:\\s*true";
-            Pattern pattern = Pattern.compile(regexPattern);
-            Matcher matcher = pattern.matcher(body);
-            return matcher.find();
+            return FAILED_OPERATIONS.matcher(body).find();
         }
 
         public List<String> getSuccessfulDocs() {

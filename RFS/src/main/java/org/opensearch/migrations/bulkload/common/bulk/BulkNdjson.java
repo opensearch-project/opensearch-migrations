@@ -1,16 +1,16 @@
 package org.opensearch.migrations.bulkload.common.bulk;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
+import java.util.function.Function;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -19,231 +19,170 @@ import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.experimental.UtilityClass;
 
-/**
- * Utility class for converting bulk operations to NDJSON format.
- */
+/** Encoding and assembly of bulk API requests. */
 @UtilityClass
 public final class BulkNdjson {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final JsonFactory JSON_FACTORY = new JsonFactory();
-    private static final byte[] NEWLINE_BYTES = "\n".getBytes(StandardCharsets.UTF_8);
-    private static final int ESTIMATED_ACTION_BYTES = 256;
-    private static final int MAX_INITIAL_BUFFER_BYTES = 16 * 1024 * 1024;
 
     /**
-     * Write a single operation to an output stream in NDJSON format.
-     * @param op The operation to write
-     * @param out The output stream to write to
-     * @param mapper The ObjectMapper to use for serialization
+     * The exact bytes of an operation, retained for batching, sending, and retries.
+     * Single-line raw bodies reference the original source array; transformed bodies are serialized once.
      */
-    public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
-        writeOperationAndCountBody(op, out, mapper);
+    public record EncodedOperation(byte[] action, byte[] body, boolean upsert) {
+        /** Includes the final newline and, when present, the separator before the body. */
+        public long size() {
+            return action.length + 1L + (body == null ? 0 : body.length + 1L);
+        }
+
+        @SneakyThrows(IOException.class)
+        private void writeWithoutFinalNewline(OutputStream out) {
+            out.write(action);
+            if (body != null) {
+                out.write('\n');
+                out.write(body);
+            }
+        }
     }
 
-    @SneakyThrows
-    private static long writeOperationAndCountBody(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
+    @SneakyThrows(IOException.class)
+    public static EncodedOperation encode(BulkOperationSpec op, ObjectMapper mapper) {
         if (op.getRawDocument() != null) {
-            return writeRawOperationAndCountBody(op.getOperationType().getValue(), op.getOperation(),
-                op.isIncludeDocument() ? op.getRawDocument() : null, out, mapper);
+            return encodeRaw(op.getOperationType(), op.getOperation(),
+                op.isIncludeDocument() ? op.getRawDocument() : null, mapper);
         }
-        // action line: {"<op>": {...meta...}}
-        Map<String, Object> actionLine = Map.of(op.getOperationType().getValue(), op.getOperation());
-
-        out.write(mapper.writeValueAsBytes(actionLine));
-
-        // optional source/payload
-        if (op.isIncludeDocument() && op.getDocument() != null) {
-            out.write(NEWLINE_BYTES);
-            var body = mapper.writeValueAsBytes(op.getDocument());
-            out.write(body);
-            return body.length;
-        }
-        return 0;
+        byte[] body = op.isIncludeDocument() && op.getDocument() != null
+            ? mapper.writeValueAsBytes(op.getDocument()) : null;
+        return new EncodedOperation(
+            mapper.writeValueAsBytes(Map.of(op.getOperationType().getValue(), op.getOperation())),
+            body, op.getOperationType() == OperationType.INDEX);
     }
 
-    /**
-     * Write an action line + raw source bytes to an output stream in NDJSON format.
-     * Skips Jackson deserialization/reserialization of the document body.
-     */
-    public static void writeRawOperation(String operationType, BaseOperationMeta meta,
-                                         byte[] rawSource, OutputStream out, ObjectMapper mapper) {
-        writeRawOperationAndCountBody(operationType, meta, rawSource, out, mapper);
+    public static EncodedOperation encodeRaw(Document doc, String indexName, boolean stripIds, ObjectMapper mapper) {
+        boolean isDelete = doc.operation() == Document.Operation.DELETE;
+        var meta = isDelete
+            ? DeleteOperationMeta.builder().id(stripIds ? null : doc.id()).index(indexName)
+                .routing(doc.hints().get(Document.HINT_ROUTING)).build()
+            : BulkOperationConverter.indexMetadata(doc, indexName, stripIds);
+        // Delta deletions retain the old source for diagnostics, but bulk deletes have no payload.
+        return encodeRaw(isDelete ? OperationType.DELETE : OperationType.INDEX,
+            meta, isDelete ? null : doc.source(), mapper);
     }
 
-    @SneakyThrows
-    private static long writeRawOperationAndCountBody(String operationType, BaseOperationMeta meta,
-                                                       byte[] rawSource, OutputStream out, ObjectMapper mapper) {
-        // Jackson already serializes the metadata's unwrapped fields. Avoid a
-        // metadata -> Map -> JSON round trip on every document, including raw writes.
-        Map<String, Object> actionLine = Map.of(operationType, meta);
-        out.write(mapper.writeValueAsBytes(actionLine));
-
-        if (rawSource != null && rawSource.length > 0) {
-            validateJsonBytes(rawSource);
-            out.write(NEWLINE_BYTES);
-            out.write(rawSource);
-            return rawSource.length;
+    @SneakyThrows(IOException.class)
+    private static EncodedOperation encodeRaw(
+        OperationType operationType, BaseOperationMeta meta, byte[] rawSource, ObjectMapper mapper
+    ) {
+        byte[] body = rawSource != null && rawSource.length > 0 ? rawSource : null;
+        if (body != null) {
+            body = singleLineJson(body);
         }
-        return 0;
+        return new EncodedOperation(mapper.writeValueAsBytes(Map.of(operationType.getValue(), meta)), body,
+            operationType == OperationType.INDEX);
     }
 
-    /**
-     * Validate that raw bytes are structurally valid JSON.
-     * Uses Jackson's streaming parser to verify without deserializing.
-     * Prevents malformed JSON or embedded newlines from corrupting NDJSON output.
-     */
-    static void validateJsonBytes(byte[] bytes) throws IOException {
+    /** Validate before normalizing whitespace, preserving escapes and numeric spelling. */
+    private static byte[] singleLineJson(byte[] bytes) throws IOException {
         try (JsonParser parser = JSON_FACTORY.createParser(bytes)) {
             while (parser.nextToken() != null) {
-                // consume all tokens to verify structural validity
+                // Consume all tokens to verify structural validity without materializing the body.
             }
+            if (parser.currentLocation().getLineNr() == 1) {
+                return bytes;
+            }
+            // After validation, bytes below space can only be JSON whitespace (tab, CR, LF).
+            // Copy them as spaces; unsigned conversion preserves multibyte UTF-8 unchanged.
+            var singleLine = new byte[bytes.length];
+            for (int i = 0; i < bytes.length; i++) {
+                singleLine[i] = (byte) Math.max(' ', Byte.toUnsignedInt(bytes[i]));
+            }
+            return singleLine;
         } catch (IOException e) {
             throw new IOException("Raw source bytes are not valid JSON", e);
         }
     }
 
-    /**
-     * Write a list of {@link Document} records as raw NDJSON bytes, skipping the
-     * byte[]→Map→byte[] round-trip for document bodies.
-     *
-     * @param docs       the documents to write
-     * @param indexName  the target index name
-     * @param stripIds   whether to strip document IDs (for server-generated IDs)
-     * @param mapper     the ObjectMapper to use for action-line serialization
-     * @return the raw NDJSON bytes
-     */
-    public static byte[] toRawNdjsonBytes(
-        List<? extends Document> docs,
-        String indexName, boolean stripIds, ObjectMapper mapper
-    ) {
-        return serializeRaw(docs, indexName, stripIds, mapper).bytes();
+    @SuppressWarnings({"java:S100", "java:S1186"})
+    public record SerializedBulk(byte[] bytes, MigrationMetrics.Operations operations) {}
+
+    /** Assemble exactly the bytes that were measured, with one allocation and no growing-buffer copy. */
+    public static SerializedBulk assemble(List<EncodedOperation> operations) {
+        return assemble(operations, Function.identity());
+    }
+
+    /** Assemble prepared operations directly, without copying their encoded references into another list. */
+    public static <T> SerializedBulk assemble(List<T> operations, Function<T, EncodedOperation> encoded) {
+        long size = 0;
+        for (var operation : operations) {
+            size += encoded.apply(operation).size();
+        }
+        var buffer = ByteBuffer.allocate(Math.toIntExact(size));
+        long upserts = 0;
+        long bodyBytes = 0;
+        for (var item : operations) {
+            var operation = encoded.apply(item);
+            buffer.put(operation.action());
+            if (operation.body() != null) {
+                buffer.put((byte) '\n').put(operation.body());
+                bodyBytes += operation.body().length;
+            }
+            buffer.put((byte) '\n');
+            if (operation.upsert()) {
+                upserts++;
+            }
+        }
+        return new SerializedBulk(buffer.array(),
+            new MigrationMetrics.Operations(upserts, operations.size() - upserts, bodyBytes));
+    }
+
+    public static SerializedBulk serialize(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
+        return assemble(ops.stream().map(op -> encode(op, mapper)).toList());
     }
 
     public static SerializedBulk serializeRaw(
         List<? extends Document> docs, String indexName, boolean stripIds, ObjectMapper mapper
     ) {
-        long sourceBytes = docs.stream()
-            .mapToLong(doc -> doc.operation() == Document.Operation.DELETE ? 0 : doc.sourceLength())
-            .sum();
-        try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, docs.size()))) {
-            long upserts = 0;
-            for (var doc : docs) {
-                boolean isDelete = doc.operation() == Document.Operation.DELETE;
-                if (!isDelete) {
-                    upserts++;
-                }
-                String opType = isDelete ? "delete" : "index";
-                String docId = stripIds ? null : doc.id();
-                String routing = doc.hints().get(Document.HINT_ROUTING);
-                var meta = isDelete
-                    ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(routing).build()
-                    : BulkOperationConverter.indexMetadata(doc, indexName, stripIds);
-                // Delta deletions retain the old source for diagnostics, but bulk deletes have no payload.
-                writeRawOperation(opType, meta, isDelete ? null : doc.source(), baos, mapper);
-                baos.write(NEWLINE_BYTES);
-            }
-            return new SerializedBulk(baos.toByteArray(),
-                new MigrationMetrics.Operations(upserts, docs.size() - upserts, sourceBytes));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return assemble(docs.stream().map(doc -> encodeRaw(doc, indexName, stripIds, mapper)).toList());
     }
 
-    /**
-     * Write a single operation to an output stream in NDJSON format.
-     * @param ops The operation to write
-     * @param out The output stream to write to
-     * @param mapper The ObjectMapper to use for serialization
-     */
-    public static void writeAll(Collection<? extends BulkOperationSpec> ops,
-                                OutputStream out, ObjectMapper mapper) throws IOException {
-        for (BulkOperationSpec op : ops) {
-            writeOperation(op, out, mapper);
-            out.write(NEWLINE_BYTES);
-        }
-    }
-
-    /**
-     * Convert a list of bulk operations to NDJSON bytes, using raw source bytes when available.
-     * Avoids the byte[]→Map→byte[] round-trip for document bodies.
-     */
     public static byte[] toBulkNdjsonBytes(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
         return serialize(ops, mapper).bytes();
     }
 
-    @SuppressWarnings({"java:S100", "java:S1186"})
-    public record SerializedBulk(byte[] bytes, MigrationMetrics.Operations operations) {}
-
-    public static SerializedBulk serialize(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
-        long sourceBytes = ops.stream()
-            .mapToLong(op -> op.isIncludeDocument() && op.getRawDocument() != null ? op.getRawDocument().length : 0)
-            .sum();
-        try (var baos = new ByteArrayOutputStream(initialBufferSize(sourceBytes, ops.size()))) {
-            long upserts = 0;
-            long bodyBytes = 0;
-            for (var op : ops) {
-                if (op instanceof IndexOp) {
-                    upserts++;
-                }
-                bodyBytes += writeOperationAndCountBody(op, baos, mapper);
-                baos.write(NEWLINE_BYTES);
-            }
-            return new SerializedBulk(baos.toByteArray(),
-                new MigrationMetrics.Operations(upserts, ops.size() - upserts, bodyBytes));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+    public static byte[] toRawNdjsonBytes(
+        List<? extends Document> docs, String indexName, boolean stripIds, ObjectMapper mapper
+    ) {
+        return serializeRaw(docs, indexName, stripIds, mapper).bytes();
     }
 
-    private static int initialBufferSize(long sourceBytes, int operationCount) {
-        // Source lengths are already known on the raw path. Reserve room for them
-        // and typical action lines to avoid repeatedly copying multi-megabyte bodies
-        // as the buffer grows. This is an allocation estimate, not a request-size limit.
-        return (int) Math.min(MAX_INITIAL_BUFFER_BYTES, sourceBytes + (long) ESTIMATED_ACTION_BYTES * operationCount);
-    }
-
-    /**
-     * Convert a list of bulk operations to NDJSON string.
-     * @param ops The list of operations to convert
-     * @param mapper The ObjectMapper to use for serialization
-     * @return The NDJSON string representation
-     */
     public static String toBulkNdjson(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
         return new String(toBulkNdjsonBytes(ops, mapper), StandardCharsets.UTF_8);
     }
 
-    /**
-     * Calculate the serialized length of a bulk operation in NDJSON format.
-     * @return The length in bytes of the serialized operation
-     */
-    @SneakyThrows(IOException.class)
-    public long getSerializedLength(BulkOperationSpec op) {
-        try (var stream = new CountingOutputStream()) {
-            BulkNdjson.writeOperation(op, stream, OBJECT_MAPPER);
-            return stream.getBytesWritten();
+    /** Write an operation without its final newline, for callers assembling their own streams. */
+    public static void writeOperation(BulkOperationSpec op, OutputStream out, ObjectMapper mapper) {
+        encode(op, mapper).writeWithoutFinalNewline(out);
+    }
+
+    public static void writeRawOperation(
+        OperationType operationType, BaseOperationMeta meta, byte[] rawSource, OutputStream out, ObjectMapper mapper
+    ) {
+        encodeRaw(operationType, meta, rawSource, mapper).writeWithoutFinalNewline(out);
+    }
+
+    public static void writeAll(Collection<? extends BulkOperationSpec> ops, OutputStream out, ObjectMapper mapper)
+        throws IOException {
+        for (var op : ops) {
+            writeOperation(op, out, mapper);
+            out.write('\n');
         }
     }
 
-    /**
-     * Helper class for counting output stream bytes.
-     */
-    @Getter
-    private static class CountingOutputStream extends OutputStream {
-        private long bytesWritten = 0;
-
-        @Override
-        public void write(int b) {
-            bytesWritten++;
-        }
-
-        @Override
-        public void write(byte[] b, int off, int len) {
-            Objects.checkFromIndexSize(off, len, b.length);
-            bytesWritten += len;
-        }
+    /** Serialized length excluding the final newline. Prefer retaining {@link EncodedOperation} when sending. */
+    public long getSerializedLength(BulkOperationSpec op) {
+        return encode(op, OBJECT_MAPPER).size() - 1;
     }
 }

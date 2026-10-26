@@ -92,7 +92,7 @@ To see the default shard size, use the `--help` CLI option:
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
 | --target-collection-routed        | Optional. The target is an OpenSearch Serverless per-account endpoint that selects the collection from a request header. Requires SigV4 with 'aoss' and --collection-routing. See [Routing Indices to OpenSearch Serverless Collections](../docs/serverlessCollectionRouting.md) |
 | --collection-routing              | Optional. JSON object mapping source indices to Serverless collections, e.g. '{"staticCollectionRouting": [{"sourceIndex": "shared-config", "collection": "common"}], "regexCollectionRouting": [{"sourceIndex": "(.+)-\\d{4}", "collection": "$1"}]}'. Required with --target-collection-routed |
-| --documents-size-per-bulk-request | Optional. The maximum aggregate document size to be used in bulk requests in bytes. Default: 10 MiB                                                      |
+| --documents-size-per-bulk-request | Optional. Maximum bulk request body size in bytes, including action metadata and newlines. A document exceeding the limit by itself is sent alone. Default: 10 MiB |
 | --allowed-doc-exception-types     | Optional. Comma-separated list of document-level exception types to treat as successful operations. Enables idempotent migrations by allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success. Default: none |
 
 ## Advanced Arguments
