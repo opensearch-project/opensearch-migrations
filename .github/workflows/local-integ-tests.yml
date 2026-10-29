@@ -50,6 +50,8 @@ jobs:
             source: ES_7.10
             target: OS_3.1
             test-ids: '0001,0002,0003,0006,0008,0020'
+            # The one entry that saves the shared registry cache.
+            save-registry-cache: true
           - name: elasticsearch8x
             source: ES_8.19
             target: OS_3.1
@@ -71,6 +73,7 @@ jobs:
       source-version: ${{ matrix.source }}
       target-version: ${{ matrix.target }}
       test-ids: ${{ matrix.test-ids }}
+      save-registry-cache: ${{ matrix.save-registry-cache == true }}
 
   docker-compose-e2e-test:
     # Ported from vars/dockerComposeE2ETest.groovy
@@ -84,9 +87,24 @@ jobs:
           gradle-cache-enabled: true
           gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
+      - name: Get registry cache key
+        id: registry-cache-key
+        # Must match k8s-local-test.yml, which saves the cache.
+        run: echo "key=local-integ-registry-cache-v1-$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Restore registry cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ${{ runner.temp }}/registry-cache
+          key: ${{ steps.registry-cache-key.outputs.key }}
+      - name: Start registry cache
+        run: ./.github/scripts/registry-cache.sh start
+
       - name: Build Docker images
         timeout-minutes: 30
         run: ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh
+        env:
+          # docker-compose.yml doesn't use otel_collector; skipping it avoids an extra public.ecr.aws pull.
+          BUILD_OTEL_COLLECTOR: 'false'
 
       - name: Docker compose up
         timeout-minutes: 10
@@ -117,6 +135,9 @@ jobs:
           name: docker-compose-e2e-logs
           if-no-files-found: warn
           path: logs/docker/
+      - name: Stop registry cache
+        if: always()
+        run: ./.github/scripts/registry-cache.sh stop
 
   all-local-integ-checks-pass:
     needs:

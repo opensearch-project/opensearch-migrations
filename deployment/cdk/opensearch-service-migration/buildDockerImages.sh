@@ -72,6 +72,9 @@ for image in capture_proxy migration_console traffic_replayer elasticsearch_sear
   docker tag "localhost:${EXTERNAL_REGISTRY_PORT}/migrations/${image}:latest" "migrations/${image}:latest" || true
 done
 
-# otel_collector is not in buildImages — only needed for ECS/CDK path
-run_with_retries "$DOCKER_BUILD_RETRIES" docker build -t "migrations/otel_collector:latest" \
-  "$MIGRATIONS_REPO_ROOT_DIR/TrafficCapture/dockerSolution/src/main/docker/otelCollector"
+# otel_collector is not in buildImages — only needed for ECS/CDK path.
+# Set BUILD_OTEL_COLLECTOR=false to skip it (e.g. the docker compose E2E test doesn't use it).
+if [[ "${BUILD_OTEL_COLLECTOR:-true}" != "false" ]]; then
+  run_with_retries "$DOCKER_BUILD_RETRIES" docker build -t "migrations/otel_collector:latest" \
+    "$MIGRATIONS_REPO_ROOT_DIR/TrafficCapture/dockerSolution/src/main/docker/otelCollector"
+fi

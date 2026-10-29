@@ -84,6 +84,11 @@ write_buildkit_config() {
   # buildkitd.toml marks docker-registry:5000 as plain HTTP; point that at this run's registry.
   sed "s/docker-registry:5000/${BUILD_CONTAINER_REGISTRY_ENDPOINT}/" "${source_config}" > "${target_config}"
 
+  # Optional extra BuildKit config, e.g. registry mirrors set up by CI (.github/scripts/registry-cache.sh).
+  if [[ -n "${BUILDKIT_EXTRA_CONFIG:-}" ]]; then
+    cat "${BUILDKIT_EXTRA_CONFIG}" >> "${target_config}"
+  fi
+
   local docker_dns_servers=()
   local server
   while IFS= read -r server; do

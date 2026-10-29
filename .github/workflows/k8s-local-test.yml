@@ -22,6 +22,11 @@ on:
         required: false
         type: number
         default: 180
+      save-registry-cache:
+        description: 'Save the pull-through registry cache (set on one matrix entry only)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,6 +53,17 @@ jobs:
           gradle-cache-enabled: true
           gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
+      - name: Get registry cache key
+        id: registry-cache-key
+        # Rotates monthly so stale image layers don't accumulate in one cache entry.
+        run: echo "key=local-integ-registry-cache-v1-$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Restore registry cache
+        id: registry-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ${{ runner.temp }}/registry-cache
+          key: ${{ steps.registry-cache-key.outputs.key }}
+
       - name: Configure kind host
         # Kubernetes 1.35 requires cgroup v2; also raises inotify limits for Fluent Bit.
         run: ./jenkins/configureKindHost.sh
@@ -70,6 +86,12 @@ jobs:
             echo "::warning::kind create cluster failed (attempt ${attempt})"
           done
           exit 1
+
+      - name: Start registry cache
+        # Docker Hub pulls from BuildKit and the kind node go through this proxy.
+        run: |
+          ./.github/scripts/registry-cache.sh start
+          ./.github/scripts/registry-cache.sh configure-kind "$KIND_CLUSTER_NAME"
 
       - name: Build Docker images (BuildKit)
         timeout-minutes: 45
@@ -127,6 +149,20 @@ jobs:
           path: |
             libraries/testAutomation/logs/
             libraries/testAutomation/reports/
+
+      - name: Stop registry cache
+        if: always()
+        run: ./.github/scripts/registry-cache.sh stop
+      - name: Save registry cache
+        # Only one matrix entry saves, and never from PRs or the merge queue.
+        if: >-
+          !cancelled() && inputs.save-registry-cache &&
+          steps.registry-cache.outputs.cache-hit != 'true' &&
+          contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ${{ runner.temp }}/registry-cache
+          key: ${{ steps.registry-cache-key.outputs.key }}
 
       - name: Show disk usage
         if: always()
