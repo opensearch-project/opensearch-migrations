@@ -20,7 +20,8 @@ public class Field10 implements LuceneField {
 
     @Override
     public String asUid() {
-        return Uid.decodeId(wrapped.binaryValue().bytes);
+        var binaryValue = wrapped.binaryValue();
+        return Uid.decodeId(binaryValue.bytes, binaryValue.offset, binaryValue.length);
     }
 
     @Override
