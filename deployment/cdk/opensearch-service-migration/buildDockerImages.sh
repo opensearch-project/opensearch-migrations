@@ -17,11 +17,12 @@ run_with_retries() {
 
   while true; do
     echo "Running Docker image build attempt ${attempt}/${attempts}: $*"
-    if "$@"; then
+    local status=0
+    "$@" || status=$?
+    if (( status == 0 )); then
       return 0
     fi
 
-    local status=$?
     if (( attempt >= attempts )); then
       echo "Docker image build failed after ${attempts} attempts." >&2
       return "$status"

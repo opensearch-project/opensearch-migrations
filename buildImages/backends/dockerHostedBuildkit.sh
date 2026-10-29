@@ -53,7 +53,27 @@ get_docker_network_dns_servers() {
     return 0
   fi
 
-  printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
+  # Newer Docker lists resolvers in the host namespace as host(IP). A loopback resolver such as
+  # systemd-resolved's 127.0.0.53 (e.g. GitHub Actions Ubuntu runners) is unreachable from
+  # BuildKit RUN steps, so use the upstream servers systemd-resolved forwards to instead.
+  local server found_loopback=false servers=()
+  while IFS= read -r server; do
+    if [[ "${server}" == 127.* ]]; then
+      found_loopback=true
+    else
+      servers+=("${server}")
+    fi
+  done < <(printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
+
+  if [[ "${found_loopback}" == true && -r /run/systemd/resolve/resolv.conf ]]; then
+    while IFS= read -r server; do
+      servers+=("${server}")
+    done < <(sed -n 's/^nameserver[[:space:]]\{1,\}\([0-9.]\{1,\}\)[[:space:]]*$/\1/p' /run/systemd/resolve/resolv.conf | grep -v '^127\.')
+  fi
+
+  if [[ "${#servers[@]}" -gt 0 ]]; then
+    printf '%s\n' "${servers[@]}"
+  fi
 }
 
 write_buildkit_config() {
@@ -71,6 +91,7 @@ write_buildkit_config() {
   done < <(get_docker_network_dns_servers)
 
   if [[ "${#docker_dns_servers[@]}" -gt 0 ]]; then
+    echo "BuildKit DNS servers: ${docker_dns_servers[*]}" >&2
     {
       printf '\n[dns]\n'
       printf '  nameservers = ['
