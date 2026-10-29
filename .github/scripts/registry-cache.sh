@@ -31,6 +31,7 @@ readonly UPSTREAMS=(
 )
 
 start() {
+  mkdir -p "${REGISTRY_CACHE_DIR}"
   docker network inspect "${REGISTRY_CACHE_NETWORK}" >/dev/null 2>&1 ||
     docker network create "${REGISTRY_CACHE_NETWORK}" >/dev/null
 
@@ -70,7 +71,7 @@ EOF
   if [[ -n "${GITHUB_ENV:-}" ]]; then
     echo "BUILDKIT_EXTRA_CONFIG=${BUILDKIT_MIRROR_CONFIG}" >> "${GITHUB_ENV}"
   fi
-  echo "Registry cache started: $(du -sh "${REGISTRY_CACHE_DIR}" | cut -f1) restored"
+  echo "Registry cache started: $(du -sh "${REGISTRY_CACHE_DIR}" 2>/dev/null | cut -f1 || true) restored"
 }
 
 wait_until_serving() {
@@ -128,7 +129,7 @@ report() {
   echo "Registry cache size:"
   for entry in "${UPSTREAMS[@]}"; do
     IFS='|' read -r name _ _ <<<"${entry}"
-    size="$(du -sh "${REGISTRY_CACHE_DIR}/${name}" 2>/dev/null | cut -f1)"
+    size="$(du -sh "${REGISTRY_CACHE_DIR}/${name}" 2>/dev/null | cut -f1 || true)"
     echo "  ${name}: ${size:-0}"
     if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
       echo "- Registry cache \`${name}\`: ${size:-0}" >> "${GITHUB_STEP_SUMMARY}"
