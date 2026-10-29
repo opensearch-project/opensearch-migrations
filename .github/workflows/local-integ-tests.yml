@@ -1,0 +1,132 @@
+name: Local Integ Tests
+
+# Integration tests that run entirely on the runner (kind or docker compose) and need no AWS access.
+# These replace the Jenkins k8s-local-* and docker-compose-e2e-test jobs.
+# Uses pull_request (not pull_request_target): PR code runs with a read-only token and no secrets.
+on:
+  push:
+    branches:
+      - main
+      - gha-local-tests*
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  k8s-local-test:
+    # Scheduled runs only on the main repo, not on forks.
+    if: github.event_name != 'schedule' || github.repository == 'opensearch-project/opensearch-migrations'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mirrors vars/k8sLocal*Test.groovy
+        include:
+          - name: elasticsearch1x
+            source: ES_1.5
+            target: OS_3.1
+            test-ids: '0001,0002,0003'
+          - name: elasticsearch2x
+            source: ES_2.4
+            target: OS_3.1
+            test-ids: '0001,0002,0003'
+          - name: elasticsearch5x
+            source: ES_5.6
+            target: OS_3.1
+            test-ids: '0001,0002,0003,0004,0005'
+          - name: elasticsearch6x
+            source: ES_6.8
+            target: OS_3.1
+            test-ids: '0001,0002,0003,0006'
+          - name: elasticsearch7x
+            source: ES_7.10
+            target: OS_3.1
+            test-ids: '0001,0002,0003,0006,0008,0020'
+          - name: elasticsearch8x
+            source: ES_8.19
+            target: OS_3.1
+            test-ids: '0001,0002,0003,0020,0035,0040'
+          - name: opensearch1x
+            source: OS_1.3
+            target: OS_3.1
+            test-ids: '0001,0002,0003'
+          - name: solr8x
+            source: SOLR_8.11
+            target: OS_2.19
+            test-ids: '0071,0070'
+          - name: solr-other
+            source: SOLR_9.8
+            target: OS_2.19
+            test-ids: '0071,0070'
+    uses: ./.github/workflows/k8s-local-test.yml
+    with:
+      source-version: ${{ matrix.source }}
+      target-version: ${{ matrix.target }}
+      test-ids: ${{ matrix.test-ids }}
+
+  docker-compose-e2e-test:
+    # Ported from vars/dockerComposeE2ETest.groovy
+    if: github.event_name != 'schedule' || github.repository == 'opensearch-project/opensearch-migrations'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
+          gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+      - name: Build Docker images
+        timeout-minutes: 30
+        run: ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh
+
+      - name: Docker compose up
+        timeout-minutes: 10
+        run: |
+          KAFKA_TRAFFIC_TOPIC="logging-traffic-topic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+          KAFKA_TRAFFIC_GROUP_ID="logging-group-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            ./gradlew -p TrafficCapture dockerSolution:composeUp -x test -x spotlessCheck --stacktrace
+          docker ps
+
+      - name: Run E2E tests
+        timeout-minutes: 15
+        run: |
+          docker exec "$(docker ps --filter "name=migration-console" -q)" \
+            pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
+
+      - name: Collect container logs
+        if: always()
+        run: |
+          mkdir -p logs/docker
+          for container in $(docker ps -aq); do
+            container_name="$(docker inspect --format '{{.Name}}' "$container" | sed 's/\///')"
+            docker logs "$container" > "logs/docker/${container_name}_logs.txt" 2>&1 || true
+          done
+      - name: Upload container logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: docker-compose-e2e-logs
+          if-no-files-found: warn
+          path: logs/docker/
+
+  all-local-integ-checks-pass:
+    needs:
+      - k8s-local-test
+      - docker-compose-e2e-test
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - if: ${{ contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'failure') }}
+        run: |
+          echo "One or more job cancelled or failed" && exit 1
+      - run: |
+          echo '## :heavy_check_mark: All local integ checks pass' >> "$GITHUB_STEP_SUMMARY"
