@@ -1,11 +1,14 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
@@ -13,6 +16,7 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -94,7 +98,7 @@ public class DocumentMigrationPipeline {
         this.maxDocsPerBatch = maxDocsPerBatch;
         this.maxBytesPerBatch = maxBytesPerBatch;
         this.partitionConcurrency = partitionConcurrency;
-        this.batchConcurrency = batchConcurrency;
+        this.batchConcurrency = source.requiresOrderedWrites() ? 1 : batchConcurrency;
     }
 
     /** Snapshot of pipeline progress, safe to read from any thread. */
@@ -120,38 +124,53 @@ public class DocumentMigrationPipeline {
     /**
      * Migrate all documents for a single partition from source to sink.
      *
-     * @param partition         the partition to migrate
-     * @param collectionName    the target collection name
-     * @param startingDocOffset the document offset to resume from (0 for start)
+     * @param partition        the partition to migrate
+     * @param collectionName   the target collection name
+     * @param startingPosition the source position to resume from (0 for start)
      * @return a Flux of progress cursors, one per batch written
      */
-    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingDocOffset) {
-        final long[] cumulativeOffset = { startingDocOffset };
+    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
-            return source.readDocuments(partition, startingDocOffset)
+            return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
-                .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
+                .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
-                    return sink.writeBatch(collectionName, batch)
-                        .map(result -> {
-                            cumulativeOffset[0] += result.docsInBatch();
-                            totalDocs.addAndGet(result.docsInBatch());
-                            totalBytes.addAndGet(result.bytesInBatch());
-                            return new ProgressCursor(
-                                partition,
-                                cumulativeOffset[0],
-                                result.docsInBatch(),
-                                result.bytesInBatch()
-                            );
-                        })
+                    // Preserve the source position before handing the batch to the sink.
+                    var lastPosition = batch.get(batch.size() - 1).position();
+                    var sourceMetrics = MigrationMetrics.Operations.fromDocuments(batch);
+                    return Mono.defer(() -> sink.writeBatch(collectionName, batch))
+                        .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
                         .doFinally(s -> activeBatches.decrementAndGet());
                 }, batchConcurrency)
+                // Advance checkpoints in emission order; writes may complete out of order.
+                .scan(new ProgressCursor(partition, startingPosition, 0, 0, MigrationMetrics.ZERO), (previous, batch) -> {
+                    var result = batch.result();
+                    var sourceMetrics = batch.sourceMetrics();
+                    totalDocs.addAndGet(result.docsInBatch());
+                    totalBytes.addAndGet(result.bytesInBatch());
+                    return new ProgressCursor(
+                        partition,
+                        batch.lastPosition().isPresent()
+                            ? Math.addExact(batch.lastPosition().getAsLong(), 1)
+                            : Math.addExact(previous.nextPosition(), Math.addExact(sourceMetrics.upserts(), sourceMetrics.deletes())),
+                        result.docsInBatch(),
+                        result.bytesInBatch(),
+                        previous.metrics().plus(new MigrationMetrics(sourceMetrics, result.target(), result.requests()))
+                    );
+                })
+                .skip(1)
                 .onErrorMap(e -> !(e instanceof PipelineException),
                     e -> new PipelineException("Failed migrating partition " + partition, e));
         });
     }
+
+    // Sonar flags the compiler-generated record constructor parameters as unused.
+    @SuppressWarnings("java:S1172")
+    private record CompletedBatch(
+        OptionalLong lastPosition, MigrationMetrics.Operations sourceMetrics, BatchResult result
+    ) {}
 
     /**
      * Migrate all partitions for a collection. Creates the collection first, then migrates
@@ -184,31 +203,4 @@ public class DocumentMigrationPipeline {
             .concatMap(this::migrateCollection);
     }
 
-    /**
-     * Batching predicate that groups documents by count and byte size.
-     */
-    static class BatchPredicate implements java.util.function.Predicate<Document> {
-        private final int maxDocs;
-        private final long maxBytes;
-        private int currentCount;
-        private long currentBytes;
-
-        BatchPredicate(int maxDocs, long maxBytes) {
-            this.maxDocs = maxDocs;
-            this.maxBytes = maxBytes;
-        }
-
-        @Override
-        public boolean test(Document doc) {
-            currentCount++;
-            currentBytes += doc.sourceLength();
-
-            if (currentCount >= maxDocs || currentBytes >= maxBytes) {
-                currentCount = 0;
-                currentBytes = 0;
-                return true;
-            }
-            return false;
-        }
-    }
 }

@@ -490,6 +490,20 @@ that the preceding incomplete read sequence was intentionally abandoned, not los
 It advances the request sequence while leaving the connection open, so later captured requests on
 the same connection remain distinguishable and reconstruct normally.
 
+`ProxyFinishesForwardingRequestObservation` (`requestForwarded`) records when the proxy finished
+forwarding a captured request to the source: its `ts` is when the write of the request's last bytes to
+the source completed, that is, when those bytes were handed to the source socket. It carries no other
+data. The proxy emits exactly one for each captured end-of-message indicator, in end-of-message order,
+after that indicator and before the next request's read observations. A request whose capture was
+suppressed has no end-of-message indicator and gets none. The connection's single event loop runs the
+write-completion callback, the reads of the source's response, and the capture of that response, so the
+observation also precedes every response observation that the source sent after receiving the
+request's last bytes; only an early response, sent before the source received the whole request, can
+precede it. Like every observation, its order is guaranteed within the connection but its existence is
+not: a failed forward closes the connection without one. Because a mutating request's end-of-message
+indicator is acknowledged by Kafka before the request's final bytes are forwarded (§1.3), its
+`requestForwarded` is in a later record.
+
 `CloseObservation` is the final sequence value for a connection. `DisconnectObservation` and
 `ConnectionExceptionObservation` are non-terminal. Once the replayer consumes `CloseObservation`,
 any later `TrafficObservation` for that connection is a protocol violation, including a contiguous
@@ -922,7 +936,10 @@ remain timely. No application-idle timeout is inferred from that silence.
 
 The protocol intentionally contains independent values with different meanings:
 
-- `TrafficObservation.ts` is source event time for replay pacing;
+- `TrafficObservation.ts` is source event time for replay pacing. The `ts` of `requestForwarded`
+  (§4.1) is the source-side counterpart of the replayer's own "request sent to the target" time: the
+  replayer measures source response spans from it and target response spans from its own send time,
+  each on its own host's clock, so neither span depends on the two clocks agreeing;
 - `F` is a proxy-local monotonic deadline for detaching the current nonempty connection record; it
   is not serialized and is not an event timestamp;
 - `WriterPartitionHeartbeat.heartbeatIntervalMillis` reports configured publication cadence for

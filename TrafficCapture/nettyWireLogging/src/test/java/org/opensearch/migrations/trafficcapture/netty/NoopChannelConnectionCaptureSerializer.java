@@ -51,6 +51,9 @@ abstract class NoopChannelConnectionCaptureSerializer<T>
     public void commitEndOfHttpMessageIndicator(Instant timestamp) throws IOException {}
 
     @Override
+    public void addRequestForwardedEvent(Instant timestamp) throws IOException {}
+
+    @Override
     public CompletableFuture<T> flushCommitAndResetStream(boolean isFinal) throws IOException {
         return CompletableFuture.completedFuture(null);
     }

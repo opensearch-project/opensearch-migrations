@@ -17,6 +17,7 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.InterimResponseObservation;
 import org.opensearch.migrations.trafficcapture.protos.InterimResponseSegmentObservation;
+import org.opensearch.migrations.trafficcapture.protos.ProxyFinishesForwardingRequestObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
@@ -549,6 +550,15 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         ++this.eomsSoFar;
         this.firstLineByteLength = -1;
         this.headersByteLength = -1;
+    }
+
+    @Override
+    public void addRequestForwardedEvent(Instant timestamp) throws IOException {
+        beginSubstreamObservation(timestamp, TrafficObservation.REQUESTFORWARDED_FIELD_NUMBER, 1);
+        getOrCreateCodedOutputStream().writeMessage(
+            TrafficObservation.REQUESTFORWARDED_FIELD_NUMBER,
+            ProxyFinishesForwardingRequestObservation.getDefaultInstance()
+        );
     }
 
     @Override

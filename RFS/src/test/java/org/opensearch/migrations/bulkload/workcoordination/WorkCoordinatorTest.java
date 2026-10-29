@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -73,6 +74,71 @@ public class WorkCoordinatorTest {
     }
 
     private Supplier<AbstractedHttpClient> httpClientSupplier;
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    void committedMetricsSurviveSuccessorRecoveryAndRejectStaleWriters(
+        SearchClusterContainer.ContainerVersion version
+    ) throws Exception {
+        setupOpenSearchContainer(version);
+        var context = WorkCoordinationTestContext.factory().noOtelTracking();
+        var parent = workId("index", 0, 0);
+        var successor = workId("index", 0, 1);
+        var parentMetrics = Map.<String, Object>of(
+            "schemaVersion", 1, "fromPosition", 0, "nextPosition", 1,
+            "metrics", Map.of("source", Map.of("upserts", 1, "deletes", 0, "bytes", 10)));
+        var successorMetrics = Map.<String, Object>of(
+            "schemaVersion", 1, "fromPosition", 1, "nextPosition", 4,
+            "metrics", Map.of("source", Map.of("upserts", 3, "deletes", 0, "bytes", 30)));
+        var client = httpClientSupplier.get();
+        AbstractedHttpClient crashingClient = (method, path, headers, body) -> {
+            if (path.contains("/_bulk")) {
+                throw new AssertionError("Worker stopped after committing the successor checkpoint");
+            }
+            return client.makeRequest(method, path, headers, body);
+        };
+        var mapper = new ObjectMapper();
+        try (var first = factory.get(crashingClient, 3600, "first");
+             var second = factory.get(client, 3600, "second")) {
+            first.setCompletionRetryConfig(new OpenSearchWorkCoordinator.CompletionRetryConfig(1, 1, 1));
+            second.setCompletionRetryConfig(new OpenSearchWorkCoordinator.CompletionRetryConfig(1, 1, 1));
+            first.createUnassignedWorkItem(parent, context::createUnassignedWorkContext);
+            first.acquireNextWorkItem(Duration.ofMinutes(5), context::createAcquireNextItemContext);
+            Assertions.assertThrows(AssertionError.class, () ->
+                first.createSuccessorWorkItemsAndMarkComplete(parent, List.of(successor), 0, null,
+                    parentMetrics, context::createSuccessorWorkItemsContext));
+            var frozenDocument = mapper.readTree(client.makeJsonRequest(
+                "GET", first.getPathForGets(parent), null, null).getPayloadBytes());
+            Assertions.assertEquals(parent, frozenDocument.path("_id").asText());
+            var frozen = frozenDocument.path("_source");
+            Assertions.assertEquals(mapper.valueToTree(parentMetrics), frozen.get("committed_metrics"));
+            Assertions.assertEquals(successor, frozen.get("successor_items").asText());
+            Assertions.assertFalse(frozen.has("completedAt"));
+
+            client.makeJsonRequest("POST", first.getPathForUpdates(parent), null, "{\"doc\":{\"expiration\":0}}");
+            var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class,
+                second.acquireNextWorkItem(Duration.ofMinutes(5), context::createAcquireNextItemContext));
+            Assertions.assertEquals(successor, acquired.getWorkItem().toString());
+            second.completeWorkItem(successor, successorMetrics, context::createCompleteWorkContext);
+            second.completeWorkItem(successor, successorMetrics, context::createCompleteWorkContext);
+            Assertions.assertThrows(Exception.class, () ->
+                first.completeWorkItem(parent, parentMetrics, context::createCompleteWorkContext));
+            Assertions.assertThrows(Exception.class, () ->
+                second.completeWorkItem(successor, parentMetrics, context::createCompleteWorkContext));
+
+            long total = 0;
+            for (var entry : Map.of(parent, parentMetrics, successor, successorMetrics).entrySet()) {
+                var completedDocument = mapper.readTree(client.makeJsonRequest(
+                    "GET", second.getPathForGets(entry.getKey()), null, null).getPayloadBytes());
+                Assertions.assertEquals(entry.getKey(), completedDocument.path("_id").asText());
+                var completed = completedDocument.path("_source");
+                Assertions.assertTrue(completed.has("completedAt"));
+                Assertions.assertEquals(mapper.valueToTree(entry.getValue()), completed.get("committed_metrics"));
+                total += completed.path("committed_metrics").path("metrics").path("source").path("upserts").asLong();
+            }
+            Assertions.assertEquals(4, total);
+        }
+    }
 
     @BeforeEach
     void setupHttpClientSupplier() {

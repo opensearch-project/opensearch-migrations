@@ -1,18 +1,23 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
@@ -222,6 +227,24 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+
+            var sourceVersion = sourceCluster.getContainerVersion().getVersion();
+            var extractor = SnapshotExtractor.create(sourceVersion,
+                SnapshotReaderRegistry.getSnapshotReader(sourceVersion, sourceRepo, false), sourceRepo);
+            var countsContext = DocumentMigrationTestContext.factory().noOtelTracking();
+            try (var source = LuceneSnapshotSource.builder(extractor, snapshot2Name,
+                    Files.createTempDirectory(localDirectory.toPath(), "delta-counts"))
+                .delta(snapshot1Name, DeltaMode.UPDATES_AND_DELETES,
+                    () -> new RfsContexts.DeltaStreamContext(countsContext, null)).build()) {
+                var partition = source.listPartitions(indexName).get(0);
+                var changes = source.readDocuments(partition, 0).collectList().block();
+                var metrics = MigrationMetrics.Operations.fromDocuments(changes);
+                Assertions.assertEquals(1, metrics.upserts());
+                Assertions.assertEquals(1, metrics.deletes());
+                Assertions.assertEquals(2, source.snapshotDocumentCounts(partition).orElseThrow().liveDocuments());
+                Assertions.assertEquals(0, source.snapshotDocumentCounts(partition).orElseThrow().nestedDocuments());
+                Assertions.assertTrue(source.requiresOrderedWrites());
+            }
 
             // === ACTION: Migrate state change between snapshot1 and snapshot2
             var targetClusterOperations = new ClusterOperations(targetCluster);

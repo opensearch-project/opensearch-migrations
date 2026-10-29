@@ -346,7 +346,7 @@ process-local identity. The captured identity remains part of every diagnostic a
 but it is not by itself the key for mutable process-local state. Consequently, an expired target
 connection owner may finish previously admitted requests while a later observation for the same
 captured identity creates a separate reconstruction and, if needed, a separate target connection
-owner. The two lifetimes cannot route messages to one another.
+owner. The two reconstructions cannot route messages to one another.
 
 Fresh reconstruction after restart or broker-time expiration does not parse arbitrary bytes as a
 new request. It uses `TrafficStream.priorRequestsReceived` and
@@ -732,12 +732,17 @@ expiration, request, target, tuple, or record-completion state.
 `RequestIntentionallyDropped` is the proxy's explicit statement that capture suppression became
 known only after some bytes of the request had already been recorded. Replay intake discards that
 incomplete request assembly, releases its associations, advances the captured request ordinal, and
-keeps the source connection lifetime open. It creates no replay request, target admission, source
+keeps the source assembly window open. It creates no replay request, target admission, source
 response, or tuple. While replay intake is discarding an inherited incomplete request, the marker
 ends that discard without another ordinal advance because fresh reconstruction already reserved the
 inherited request's ordinal and created no process-local associations for it. Receiving the marker
 without either an incomplete request under assembly or an inherited tail under discard is a
 capture-protocol violation.
+
+`requestForwarded` gives the time the proxy finished writing a captured request to the source, and starts
+that request's source response spans. It follows the request's end-of-message indicator and precedes the
+next request's first read; one out of that order is a capture-protocol violation unless the assembly
+window began after that indicator, and a request without one has no source spans.
 
 For a bring-your-own archive declared `finalized`, the import workflow sends one partition-end
 input after replay intake has processed that partition's declared final Kafka record. The input is
