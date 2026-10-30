@@ -145,7 +145,7 @@ jobs:
 
       - name: Dump cluster diagnostics
         # The test runner copies pod logs only after its last test, so keep the cluster's state
-        # when a step fails, times out or the run is cancelled. Saved with the logs artifact below.
+        # when a step fails, times out or the run is cancelled. Uploaded with the logs artifact below.
         if: failure() || cancelled()
         timeout-minutes: 15
         run: >-
@@ -153,10 +153,11 @@ jobs:
           libraries/testAutomation/logs/diagnostics "$KIND_CLUSTER_NAME"
 
       - name: Sanitize artifact name
-        if: always()
+        if: failure() || cancelled()
         run: echo "ARTIFACT_SUFFIX=${SOURCE_VERSION//[^A-Za-z0-9._-]/-}-to-${TARGET_VERSION//[^A-Za-z0-9._-]/-}" >> "$GITHUB_ENV"
       - name: Upload logs and reports
-        if: always()
+        # Only when a test fails or times out (a job timeout shows up as cancelled).
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: k8s-local-${{ env.ARTIFACT_SUFFIX }}

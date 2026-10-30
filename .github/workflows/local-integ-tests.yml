@@ -121,7 +121,7 @@ jobs:
             pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
 
       - name: Collect container logs
-        if: always()
+        if: failure() || cancelled()
         run: |
           mkdir -p logs/docker
           for container in $(docker ps -aq); do
@@ -129,7 +129,7 @@ jobs:
             docker logs "$container" > "logs/docker/${container_name}_logs.txt" 2>&1 || true
           done
       - name: Upload container logs
-        if: always()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: docker-compose-e2e-logs
