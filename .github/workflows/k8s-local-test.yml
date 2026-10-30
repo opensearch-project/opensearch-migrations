@@ -22,6 +22,11 @@ on:
         required: false
         type: number
         default: 180
+      test-timeout-minutes:
+        description: 'Timeout for the E2E test step; keep it below timeout-minutes so diagnostics still run'
+        required: false
+        type: number
+        default: 150
       save-registry-cache:
         description: 'Save the pull-through registry cache (set on one matrix entry only)'
         required: false
@@ -119,6 +124,7 @@ jobs:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run E2E tests
+        timeout-minutes: ${{ inputs.test-timeout-minutes }}
         working-directory: libraries/testAutomation
         run: |
           pipenv install --deploy
@@ -136,6 +142,15 @@ jobs:
             --registry-prefix='docker-registry:5001/' \
             --kube-context="kind-${KIND_CLUSTER_NAME}" \
             --capture-proxy-service-type=ClusterIP
+
+      - name: Dump cluster diagnostics
+        # The test runner copies pod logs only after its last test, so keep the cluster's state
+        # when a step fails, times out or the run is cancelled. Saved with the logs artifact below.
+        if: failure() || cancelled()
+        timeout-minutes: 15
+        run: >-
+          ./.github/scripts/dump-k8s-diagnostics.sh "kind-${KIND_CLUSTER_NAME}"
+          libraries/testAutomation/logs/diagnostics "$KIND_CLUSTER_NAME"
 
       - name: Sanitize artifact name
         if: always()
