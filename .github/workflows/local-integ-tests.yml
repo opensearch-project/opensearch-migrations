@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - main
-      - gha-local-tests*
   pull_request:
   merge_group:
   schedule:
