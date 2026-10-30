@@ -122,6 +122,13 @@ export const ARGO_FILE_SOURCE_VOLUME_MOUNT = z.object({
     readOnly: z.literal(true).default(true).optional()
 }).strict();
 
+// The routing table travels to the Java tools as a JSON string; the arg parser drops arrays of objects
+const COLLECTION_ROUTING_RESOLVED_FIELDS = {
+    collectionRouting: z.string().optional()
+        .describe("JSON object holding the staticCollectionRouting and regexCollectionRouting lists for a collection-routed OpenSearch Serverless target.")
+        .changeRestriction('impossible'),
+} as const;
+
 const FILE_SOURCE_RESOLVED_FIELDS = {
     fileSourceVolumes: z.array(ARGO_FILE_SOURCE_VOLUME).default([]).optional(),
     fileSourceVolumeMounts: z.array(ARGO_FILE_SOURCE_VOLUME_MOUNT).default([]).optional(),
@@ -225,6 +232,7 @@ export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
         ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend({
         ...FILE_SOURCE_RESOLVED_FIELDS,
+        ...COLLECTION_ROUTING_RESOLVED_FIELDS,
         skipEvaluateApproval: z.boolean(),
         skipMigrateApproval: z.boolean(),
     })
@@ -246,6 +254,7 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
         ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend({
         ...FILE_SOURCE_RESOLVED_FIELDS,
+        ...COLLECTION_ROUTING_RESOLVED_FIELDS,
         skipApproval: z.boolean(),
     })
 );

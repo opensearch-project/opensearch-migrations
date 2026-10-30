@@ -328,12 +328,12 @@ class NativeBulkTransformationTest {
     @SuppressWarnings("unchecked")
     private static List<BulkOperationSpec> sendBatch(IJsonTransformer transformer, List<Document> documents) {
         var client = mock(OpenSearchClient.class);
-        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any()))
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), any()))
             .thenReturn(Mono.just(new OpenSearchClient.BulkResponse(200, "", null, "{}")));
         var sink = new OpenSearchDocumentSink(client, () -> transformer, false, DocumentExceptionAllowlist.empty(), null);
         sink.writeBatch("products", documents).block();
         ArgumentCaptor<List<BulkOperationSpec>> captured = ArgumentCaptor.forClass(List.class);
-        verify(client).sendBulkRequest(anyString(), captured.capture(), any(), anyBoolean(), any());
+        verify(client).sendBulkRequest(anyString(), captured.capture(), any(), anyBoolean(), any(), any());
         return captured.getValue();
     }
 }
