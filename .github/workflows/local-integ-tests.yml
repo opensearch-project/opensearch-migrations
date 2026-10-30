@@ -22,6 +22,7 @@ concurrency:
 
 jobs:
   k8s-local-test:
+    name: ${{ matrix.name }}
     # Scheduled runs only on the main repo, not on forks.
     if: github.event_name != 'schedule' || github.repository == 'opensearch-project/opensearch-migrations'
     strategy:
