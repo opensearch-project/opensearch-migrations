@@ -1,0 +1,172 @@
+name: K8s Local Test
+
+# Reusable workflow: one source → target migration on a single-node kind cluster.
+# Ported from vars/k8sLocalDeployment.groovy. It needs no secrets, so it runs the same for fork PRs.
+on:
+  workflow_call:
+    inputs:
+      source-version:
+        description: 'Source version, e.g. ES_7.10'
+        required: true
+        type: string
+      target-version:
+        description: 'Target version, e.g. OS_3.1'
+        required: true
+        type: string
+      test-ids:
+        description: 'Comma-separated test IDs, or "all"'
+        required: false
+        type: string
+        default: 'all'
+      timeout-minutes:
+        required: false
+        type: number
+        default: 180
+      save-registry-cache:
+        description: 'Save the pull-through registry cache (set on one matrix entry only)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with vars/k8sLocalDeployment.groovy
+  KIND_VERSION: 'v0.31.0'
+  KIND_NODE_IMAGE: 'kindest/node:v1.35.1@sha256:05d7bcdefbda08b4e038f644c4df690cdac3fba8b06f8289f30e10026720a1ab'
+  KIND_CLUSTER_NAME: 'ma'
+
+jobs:
+  k8s-local-test:
+    name: ${{ inputs.source-version }} → ${{ inputs.target-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      SOURCE_VERSION: ${{ inputs.source-version }}
+      TARGET_VERSION: ${{ inputs.target-version }}
+      TEST_IDS: ${{ inputs.test-ids }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: true
+          gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+      - name: Get registry cache key
+        id: registry-cache-key
+        # Rotates monthly so stale image layers don't accumulate in one cache entry.
+        run: echo "key=local-integ-registry-cache-v1-$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Restore registry cache
+        id: registry-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ${{ runner.temp }}/registry-cache
+          key: ${{ steps.registry-cache-key.outputs.key }}
+
+      - name: Configure kind host
+        # Kubernetes 1.35 requires cgroup v2; also raises inotify limits for Fluent Bit.
+        run: ./jenkins/configureKindHost.sh
+
+      - name: Install kind
+        run: |
+          KIND_INSTALL_DIR="${RUNNER_TEMP}/kind-bin" ./jenkins/installKind.sh
+          echo "${RUNNER_TEMP}/kind-bin" >> "$GITHUB_PATH"
+
+      - name: Create kind cluster
+        # Recreate the ephemeral cluster once for transient startup failures.
+        run: |
+          for attempt in 1 2; do
+            kind delete cluster --name "$KIND_CLUSTER_NAME" || true
+            if kind create cluster --name "$KIND_CLUSTER_NAME" \
+                --config ./deployment/k8s/kindClusterConfigSingleNode.yaml \
+                --image "$KIND_NODE_IMAGE"; then
+              exit 0
+            fi
+            echo "::warning::kind create cluster failed (attempt ${attempt})"
+          done
+          exit 1
+
+      - name: Start registry cache
+        # Docker Hub pulls from BuildKit and the kind node go through this proxy.
+        run: |
+          ./.github/scripts/registry-cache.sh start
+          ./.github/scripts/registry-cache.sh configure-kind "$KIND_CLUSTER_NAME"
+
+      - name: Build Docker images (BuildKit)
+        timeout-minutes: 45
+        run: |
+          set -eu
+          kubectl config unset current-context || true
+          . ./buildImages/backends/dockerHostedBuildkit.sh
+          KUBE_CONTEXT="kind-${KIND_CLUSTER_NAME}" setup_build_backend
+          kind_nodes=()
+          while IFS= read -r node; do
+            [ -n "$node" ] && kind_nodes+=("$node")
+          done < <(kind get nodes --name "$KIND_CLUSTER_NAME")
+          connect_cluster_to_registry_network kind "${kind_nodes[@]}"
+
+          # Load-test images are their own aggregate; only 008x cases need them.
+          # "008" must stay equal to LOAD_TEST_ID_PREFIX in test_runner.py.
+          load_test_target=""
+          if [[ ",${TEST_IDS// /}," == *",008"* ]]; then
+            load_test_target=":buildImages:buildKitLoadTestAll_amd64"
+          fi
+          ./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 ${load_test_target} \
+            -Pbuilder="builder-kind-${KIND_CLUSTER_NAME}" -PregistryEndpoint=localhost:5001 \
+            -x test --stacktrace
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
+      - name: Run E2E tests
+        working-directory: libraries/testAutomation
+        run: |
+          pipenv install --deploy
+          mkdir -p ./reports
+          kubectl config unset current-context || true
+          test_ids_arg=()
+          if [[ -n "$TEST_IDS" && "$TEST_IDS" != "all" ]]; then
+            test_ids_arg=(--test-ids="$TEST_IDS")
+          fi
+          # --source-version accepts space-separated values for multi-source runs.
+          # shellcheck disable=SC2086
+          pipenv run app --source-version ${SOURCE_VERSION//,/ } --target-version="$TARGET_VERSION" \
+            "${test_ids_arg[@]}" \
+            --test-reports-dir=./reports --copy-logs \
+            --registry-prefix='docker-registry:5001/' \
+            --kube-context="kind-${KIND_CLUSTER_NAME}" \
+            --capture-proxy-service-type=ClusterIP
+
+      - name: Sanitize artifact name
+        if: failure() || cancelled()
+        run: echo "ARTIFACT_SUFFIX=${SOURCE_VERSION//[^A-Za-z0-9._-]/-}-to-${TARGET_VERSION//[^A-Za-z0-9._-]/-}" >> "$GITHUB_ENV"
+      - name: Upload logs and reports
+        # Only when a test fails or times out (a job timeout shows up as cancelled).
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: k8s-local-${{ env.ARTIFACT_SUFFIX }}
+          if-no-files-found: warn
+          path: |
+            libraries/testAutomation/logs/
+            libraries/testAutomation/reports/
+
+      - name: Stop registry cache
+        if: always()
+        run: ./.github/scripts/registry-cache.sh stop
+      - name: Save registry cache
+        # Only one matrix entry saves, and never from PRs or the merge queue.
+        if: >-
+          !cancelled() && inputs.save-registry-cache &&
+          steps.registry-cache.outputs.cache-hit != 'true' &&
+          contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ${{ runner.temp }}/registry-cache
+          key: ${{ steps.registry-cache-key.outputs.key }}
+
+      - name: Show disk usage
+        if: always()
+        run: |
+          df -h
+          docker system df
