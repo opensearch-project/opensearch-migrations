@@ -12,17 +12,19 @@ package org.opensearch.migrations.bulkload.pipeline.model;
  *
  * <p>The pipeline core uses this interface for progress tracking and work coordination
  * without knowing the source-specific partitioning strategy.
+ *
+ * <p>Deliberately not {@link Comparable}: partitions are addressed by name, so enumeration order
+ * never matters and an accidental sort should be a compile error rather than a silent reordering.
  */
-public interface Partition extends Comparable<Partition> {
+public interface Partition {
 
-    /** Human-readable name for logging and progress tracking. */
+    /**
+     * Identifies this partition within its collection. Unique among the partitions a source
+     * returns for one collection, and stable enough to be recorded in a work item and resolved
+     * later by {@code PartitionEnumerator.findPartition}.
+     */
     String name();
 
     /** The collection this partition belongs to. */
     String collectionName();
-
-    @Override
-    default int compareTo(Partition other) {
-        return name().compareTo(other.name());
-    }
 }

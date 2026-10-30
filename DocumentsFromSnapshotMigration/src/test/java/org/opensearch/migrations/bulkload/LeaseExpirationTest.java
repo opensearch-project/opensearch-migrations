@@ -348,8 +348,11 @@ public class LeaseExpirationTest extends SourceTestBase {
                     "Target should have 42-46 docs (early checkpoint at ~t=45s); got " + finalDocCount);
 
                 // ASSERT: parent work item contains successor handoff metadata
+                // Partitions are named by the source; LuceneSnapshotSource names an ES shard
+                // "<snapshot>/<index>/<shard>".
+                var partitionName = SNAPSHOT_NAME + "/geonames/0";
                 var parentWorkItemId = new IWorkCoordinator.WorkItemAndDuration
-                    .WorkItem("geonames", 0, 0L).toString();
+                    .WorkItem("geonames", partitionName, null).toString();
                 coordinatorOps.refresh(coordinatorIndexName);
                 var parentQuery = "{\"query\":{\"ids\":{\"values\":[\"" + parentWorkItemId + "\"]}}}";
                 var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", parentQuery);
@@ -361,16 +364,17 @@ public class LeaseExpirationTest extends SourceTestBase {
                 var successorItems = parentHits.get(0).path("_source")
                     .path(OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME).asText();
 
-                // ASSERT: successor checkpoint doc is in early-trigger range.  The work-item id is a
-                // base64url(indexName) + "__" + shard + "__" + docId string (see #2880), so decode it
-                // via the canonical parser rather than string-matching a plaintext prefix.
+                // ASSERT: successor cursor is in early-trigger range. Every segment of the id is
+                // base64url-encoded, so decode it rather than string-matching a plaintext prefix.
                 var successor = IWorkCoordinator.WorkItemAndDuration.WorkItem
                     .valueFromWorkItemString(successorItems);
                 Assertions.assertEquals("geonames", successor.getIndexName(),
                     "Successor should be for index geonames, got: " + successorItems);
-                Assertions.assertEquals(0, (int) successor.getShardNumber(),
+                Assertions.assertEquals(partitionName, successor.getPartitionName(),
                     "Successor should be for shard 0, got: " + successorItems);
-                var checkpointDoc = successor.getStartingDocId();
+                Assertions.assertTrue(successor.getCursor().startsWith("lucene:"),
+                    "Successor cursor should come from the snapshot reader, got: " + successor.getCursor());
+                var checkpointDoc = Long.parseLong(successor.getCursor().substring("lucene:".length()));
                 Assertions.assertTrue(checkpointDoc >= 40 && checkpointDoc <= 44,
                     "Checkpoint doc should be 40-44 (early trigger at ~t=45s); got " + checkpointDoc);
             } finally {
@@ -482,7 +486,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                 "lease should expire before the nested shard completes, producing a successor");
 
             var parentWorkItemId = new IWorkCoordinator.WorkItemAndDuration
-                .WorkItem(nestedIndex, 0, 0L).toString();
+                .WorkItem(nestedIndex, SNAPSHOT_NAME + "/" + nestedIndex + "/0", null).toString();
             coordinatorOps.refresh(coordinatorIndexName);
             var parentQuery = "{\"query\":{\"ids\":{\"values\":[\"" + parentWorkItemId + "\"]}}}";
             var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", parentQuery);
@@ -497,7 +501,9 @@ public class LeaseExpirationTest extends SourceTestBase {
 
             var successor = IWorkCoordinator.WorkItemAndDuration.WorkItem
                 .valueFromWorkItemString(successorItems);
-            long checkpoint = successor.getStartingDocId();
+            Assertions.assertTrue(successor.getCursor().startsWith("lucene:"),
+                "Successor cursor should come from the snapshot reader, got: " + successor.getCursor());
+            long checkpoint = Long.parseLong(successor.getCursor().substring("lucene:".length()));
             log.atInfo().setMessage("successor checkpoint={}").addArgument(checkpoint).log();
 
             // Each root is followed by CHILDREN_PER_ROOT children, so after N roots the Lucene position

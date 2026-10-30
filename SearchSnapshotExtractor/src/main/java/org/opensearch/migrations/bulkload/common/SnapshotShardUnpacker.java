@@ -58,16 +58,32 @@ public class SnapshotShardUnpacker {
     }
 
     /**
-     * Unpacks a single file from the shard.
+     * Unpacks a single file from the shard. A file already present at its full length is skipped, so
+     * unpacking a shard twice is a no-op rather than a failure; a short one is left over from an
+     * interrupted attempt and is rewritten.
      */
     private Mono<Void> unpackFile(FSDirectory primaryDirectory, ShardFileInfo fileMetadata) {
         return Mono.fromRunnable(() -> {
             try {
+                var existing = targetDirectory.resolve(fileMetadata.getPhysicalName());
+                if (Files.exists(existing)) {
+                    if (Files.size(existing) == expectedLengthOf(fileMetadata)) {
+                        log.atDebug().setMessage("Already unpacked, skipping: {}")
+                            .addArgument(fileMetadata::getPhysicalName)
+                            .log();
+                        return;
+                    }
+                    log.atWarn().setMessage("Re-unpacking truncated file from an earlier attempt: {}")
+                        .addArgument(fileMetadata::getPhysicalName)
+                        .log();
+                    Files.delete(existing);
+                }
+
                 log.atInfo().setMessage("Unpacking - Blob Name: {}, Lucene Name: {}")
                     .addArgument(fileMetadata::getName)
                     .addArgument(fileMetadata::getPhysicalName)
                     .log();
-                
+
                 try (
                     IndexOutput indexOutput = primaryDirectory.createOutput(
                         fileMetadata.getPhysicalName(),
@@ -101,6 +117,15 @@ public class SnapshotShardUnpacker {
                 throw new CouldNotUnpackShard(message, e);
             }
         });
+    }
+
+    /** Metadata-hash files ("v__") carry the hash inline; everything else is the blob's length. */
+    private static long expectedLengthOf(ShardFileInfo fileMetadata) {
+        if (fileMetadata.getName().startsWith("v__")) {
+            var hash = fileMetadata.getMetaHash();
+            return hash == null ? -1 : hash.length;
+        }
+        return fileMetadata.getLength();
     }
 
     public Path unpack() {
