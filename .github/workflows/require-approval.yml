@@ -18,9 +18,11 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
       - name: Get CodeOwner List
         id: step-is-require-approval
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           github_event=${{ github.event_name }}
-          author=${{ github.event.pull_request.user.login }}
+          author="$PR_AUTHOR"
 
           if [[ "$github_event" == "push" ]]; then
             echo "Push event does not need approval."
@@ -33,9 +35,11 @@ jobs:
               echo "PR triggered by known helper bot. No approval needed."
               echo "is-require-approval=migrations-cicd" >> $GITHUB_OUTPUT
             else
-              # Check if the author is in the approvers list
-              approvers=$(cat .github/CODEOWNERS | grep @ | tr -d '* ' | sed 's/@/,/g' | sed 's/,//1')
-              if [[ "$approvers" =~ "$author" ]]; then
+              # Check if the author is in the approvers list, one login per line.
+              # Match the whole login (case-insensitive, as GitHub logins are) so that
+              # an author whose login is a substring of an approver's does not pass.
+              approvers=$(grep -v '^[[:space:]]*#' .github/CODEOWNERS | grep -oE '@[A-Za-z0-9_./-]+' | sed 's/^@//' || true)
+              if [[ -n "$author" ]] && grep -Fxiq -- "$author" <<< "$approvers"; then
                 echo "$author is in the approval list."
                 echo "is-require-approval=migrations-cicd" >> $GITHUB_OUTPUT
               else
