@@ -1,10 +1,13 @@
 package org.opensearch.migrations.bulkload.common.bulk;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
+import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 import org.junit.jupiter.params.ParameterizedTest;
@@ -13,6 +16,24 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class BulkNdjsonTest {
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{\"delete\":{\"_index\":\"target\",\"_id\":\"target-only\"}}",
+        "not a JSON body"
+    })
+    void rawDeleteWriterIgnoresRetainedSourceBodies(String oldSource) throws Exception {
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var output = new ByteArrayOutputStream();
+        BulkNdjson.writeRawOperation(OperationType.DELETE,
+            DeleteOperationMeta.builder().index("target").id("deleted").routing("route").build(),
+            oldSource.getBytes(StandardCharsets.UTF_8), output, mapper);
+
+        var lines = output.toString(StandardCharsets.UTF_8).lines().toList();
+        assertEquals(1, lines.size(), "A raw delete must contain only its action line");
+        assertEquals("deleted", mapper.readTree(lines.get(0)).path("delete").path("_id").asText());
+        assertEquals("route", mapper.readTree(lines.get(0)).path("delete").path("routing").asText());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
         "{\"delete\":{\"_index\":\"target\",\"_id\":\"target-only\"}}",

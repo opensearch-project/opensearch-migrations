@@ -134,7 +134,8 @@ public class DocumentMigrationPipeline {
             currentPartition.set(partition);
             return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
-                .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch, collectionName))
+                .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch,
+                    (Document doc) -> estimatedDocumentBytes(doc, collectionName)), true)
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
                     // Preserve the source position before handing the batch to the sink.
@@ -204,40 +205,17 @@ public class DocumentMigrationPipeline {
     }
 
     /**
-     * Batching predicate that groups documents by count and byte size.
+     * Bound pre-sink batches even for deletes with no source; the sink enforces exact request sizes.
      */
-    static class BatchPredicate implements java.util.function.Predicate<Document> {
-        private final int maxDocs;
-        private final long maxBytes;
-        private final String collectionName;
-        private int currentCount;
-        private long currentBytes;
-
-        BatchPredicate(int maxDocs, long maxBytes, String collectionName) {
-            this.maxDocs = maxDocs;
-            this.maxBytes = maxBytes;
-            this.collectionName = collectionName;
-        }
-
-        @Override
-        public boolean test(Document doc) {
-            currentCount++;
-            currentBytes += doc.sourceLength();
-            if (doc.operation() == Document.Operation.DELETE) {
-                // Deletes may have no source bytes. Bound their batches by conservatively
-                // estimating metadata size, including up to six JSON bytes per UTF-16 unit.
-                currentBytes += 64L + 6L * (collectionName.length() + doc.id().length());
-                for (var hint : doc.hints().entrySet()) {
-                    currentBytes += 6L * (hint.getKey().length() + hint.getValue().length()) + 6;
-                }
+    private static long estimatedDocumentBytes(Document doc, String collectionName) {
+        long bytes = doc.sourceLength();
+        if (doc.operation() == Document.Operation.DELETE) {
+            // Conservatively include up to six JSON bytes per UTF-16 unit of metadata.
+            bytes += 64L + 6L * (collectionName.length() + doc.id().length());
+            for (var hint : doc.hints().entrySet()) {
+                bytes += 6L * (hint.getKey().length() + hint.getValue().length()) + 6;
             }
-
-            if (currentCount >= maxDocs || currentBytes >= maxBytes) {
-                currentCount = 0;
-                currentBytes = 0;
-                return true;
-            }
-            return false;
         }
+        return bytes;
     }
 }
