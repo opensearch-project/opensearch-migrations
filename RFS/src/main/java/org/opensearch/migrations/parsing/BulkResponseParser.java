@@ -248,22 +248,6 @@ public class BulkResponseParser {
     }
 
     /**
-     * Partition per-document results only when the HTTP response acknowledges bulk processing.
-     * Request-level failures may contain plain text or HTML and must not acknowledge individual
-     * documents, even if their body resembles a bulk result.
-     *
-     * @return parsed partition, or {@code null} for a request-level failure, missing body, or
-     *         unparseable result; callers should retain all pending documents for retry.
-     */
-    public static ItemPartition partitionItems(int statusCode, String bulkResponse, DocumentExceptionAllowlist allowlist) {
-        if ((statusCode != HttpURLConnection.HTTP_OK && statusCode != HttpURLConnection.HTTP_CREATED)
-            || bulkResponse == null) {
-            return null;
-        }
-        return partitionItems(bulkResponse, allowlist);
-    }
-
-    /**
      * Partition a bulk response into three buckets keyed by the item's position in
      * the original bulk request:
      * <ul>
@@ -279,10 +263,18 @@ public class BulkResponseParser {
      * <p>Each failure carries the raw per-item response JSON so the failed document stream record can
      * include the cluster's full error object verbatim.
      *
-     * @return parsed partition, or {@code null} if the response could not be parsed
-     *         (caller should fall back to retrying all docs).
+     * <p>Only HTTP 200/201 responses acknowledge individual operations. Request-level failures
+     * may contain plain text or HTML and must not acknowledge individual documents, even if
+     * their body resembles a bulk result.
+     *
+     * @return parsed partition, or {@code null} for a request-level failure, missing body, or
+     *         unparseable result; callers should retain all pending documents for retry.
      */
-    public static ItemPartition partitionItems(String bulkResponse, DocumentExceptionAllowlist allowlist) {
+    public static ItemPartition partitionItems(int statusCode, String bulkResponse, DocumentExceptionAllowlist allowlist) {
+        if ((statusCode != HttpURLConnection.HTTP_OK && statusCode != HttpURLConnection.HTTP_CREATED)
+            || bulkResponse == null) {
+            return null;
+        }
         var partition = ItemPartition.builder();
         boolean foundItems = false;
         try (var parser = jsonFactory.createParser(bulkResponse)) {
