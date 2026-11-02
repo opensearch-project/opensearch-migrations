@@ -246,8 +246,8 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 var partition = source.listPartitions(indexName).get(0);
                 var changes = source.readDocuments(partition, 0).collectList().block();
                 var metrics = MigrationMetrics.Operations.fromDocuments(changes);
-                Assertions.assertEquals(1, metrics.upserts());
-                Assertions.assertEquals(1, metrics.deletes());
+                Assertions.assertEquals(expectedDeltaDocumentCount, metrics.upserts());
+                Assertions.assertEquals(expectedDeltaDocumentCount, metrics.deletes());
                 Assertions.assertEquals(2, source.snapshotDocumentCounts(partition).orElseThrow().liveDocuments());
                 Assertions.assertEquals(0, source.snapshotDocumentCounts(partition).orElseThrow().nestedDocuments());
                 Assertions.assertTrue(source.requiresOrderedWrites());
