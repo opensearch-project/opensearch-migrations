@@ -1,6 +1,7 @@
 package org.opensearch.migrations.parsing;
 
 import java.io.IOException;
+import java.net.HttpURLConnection;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -244,6 +245,22 @@ public class BulkResponseParser {
         private String result;
         private String errorType;
         private Integer status;
+    }
+
+    /**
+     * Partition per-document results only when the HTTP response acknowledges bulk processing.
+     * Request-level failures may contain plain text or HTML and must not acknowledge individual
+     * documents, even if their body resembles a bulk result.
+     *
+     * @return parsed partition, or {@code null} for a request-level failure, missing body, or
+     *         unparseable result; callers should retain all pending documents for retry.
+     */
+    public static ItemPartition partitionItems(int statusCode, String bulkResponse, DocumentExceptionAllowlist allowlist) {
+        if ((statusCode != HttpURLConnection.HTTP_OK && statusCode != HttpURLConnection.HTTP_CREATED)
+            || bulkResponse == null) {
+            return null;
+        }
+        return partitionItems(bulkResponse, allowlist);
     }
 
     /**

@@ -5,6 +5,8 @@ import java.util.Set;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
@@ -39,8 +41,9 @@ class BulkResponseParserPartitionTest {
         return "{\"took\":1,\"errors\":true,\"items\":[" + String.join(",", itemJsons) + "]}";
     }
 
-    @Test
-    void partitionsAllThreeBuckets() {
+    @ParameterizedTest
+    @ValueSource(ints = {200, 201})
+    void partitionsAllThreeBuckets(int statusCode) {
         var body = response(
             String.format(SUCCESS_ITEM, "a"),
             String.format(NON_RETRYABLE_ITEM, "b"),
@@ -48,7 +51,7 @@ class BulkResponseParserPartitionTest {
             String.format(NON_RETRYABLE_ITEM, "d")
         );
 
-        var partition = BulkResponseParser.partitionItems(body, DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(statusCode, body, DocumentExceptionAllowlist.empty());
 
         assertThat(partition.getSuccessPositions(), contains(0));
         assertThat(partition.getNonRetryableFailures(), hasSize(2));
@@ -85,6 +88,12 @@ class BulkResponseParserPartitionTest {
         assertThat(item.getResponseItemJson(), containsString("\"_id\":\"doc-1\""));
         assertThat(item.getResponseItemJson(), containsString("\"type\":\"mapper_parsing_exception\""));
         assertThat(item.getResponseItemJson(), containsString("\"reason\":\"bad doc\""));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {200, 201, 429})
+    void missingBodyReturnsNull(int statusCode) {
+        assertThat(BulkResponseParser.partitionItems(statusCode, null, DocumentExceptionAllowlist.empty()), equalTo(null));
     }
 
     @Test
