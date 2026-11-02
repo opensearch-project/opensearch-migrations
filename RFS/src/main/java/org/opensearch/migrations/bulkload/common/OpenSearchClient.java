@@ -686,9 +686,9 @@ public abstract class OpenSearchClient {
         BulkResponse resp,
         DocumentExceptionAllowlist allowlist
     ) {
-        ItemPartition partition = BulkResponseParser.partitionItems(resp.body, allowlist);
+        ItemPartition partition = partitionBulkResponseItems(resp, allowlist);
         if (partition == null) {
-            // Can't parse response - assume all failed, retry all
+            // No per-item result: retry all pending documents.
             return 0;
         }
 
@@ -713,6 +713,16 @@ public abstract class OpenSearchClient {
         pendingDocs.subList(writeIdx, pendingDocs.size()).clear();
         // removed = successes + non-retryable; return only the success count for the existing log line.
         return removed - partition.getNonRetryableFailures().size();
+    }
+
+    private static ItemPartition partitionBulkResponseItems(HttpResponse response, DocumentExceptionAllowlist allowlist) {
+        // Request-level failures do not acknowledge individual operations. Their bodies may be
+        // plain text or HTML, so retain all pending documents without invoking the item parser.
+        if ((response.statusCode != HttpURLConnection.HTTP_OK && response.statusCode != HttpURLConnection.HTTP_CREATED)
+            || response.body == null) {
+            return null;
+        }
+        return BulkResponseParser.partitionItems(response.body, allowlist);
     }
 
     /**
@@ -761,7 +771,7 @@ public abstract class OpenSearchClient {
         HttpResponse lastResponse = opFailed != null ? opFailed.response : null;
         List<ItemFailure> retryableFailures = List.of();
         if (lastResponse != null && lastResponse.body != null) {
-            ItemPartition partition = BulkResponseParser.partitionItems(lastResponse.body, allowlist);
+            ItemPartition partition = partitionBulkResponseItems(lastResponse, allowlist);
             if (partition != null) {
                 retryableFailures = partition.getRetryableFailures();
             }
