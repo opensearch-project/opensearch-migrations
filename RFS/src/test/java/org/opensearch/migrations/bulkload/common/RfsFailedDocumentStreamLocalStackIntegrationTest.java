@@ -144,7 +144,7 @@ class RfsFailedDocumentStreamLocalStackIntegrationTest {
             restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
         client.setFailedDocumentStreamContext(sink, "sess-e2e", "worker-1");
         client.setFailedDocumentStreamWorkItem("movies__0__0");
-        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(client).getBulkRetryStrategy();
+        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(client).getBulkRetryStrategy(any());
 
         assertDoesNotThrow(() -> client.sendBulkRequest(
             "movies",

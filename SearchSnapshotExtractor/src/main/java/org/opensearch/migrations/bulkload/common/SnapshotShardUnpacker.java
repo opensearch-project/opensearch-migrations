@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.util.Set;
 
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
+import org.opensearch.migrations.bulkload.tracing.WorkerPhase;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -112,6 +113,8 @@ public class SnapshotShardUnpacker {
             Files.createDirectories(targetDirectory);
 
             try (FSDirectory primaryDirectory = FSDirectory.open(targetDirectory, lockFactory)) {
+                WorkerPhase.enter(WorkerPhase.Phase.DOWNLOADING_SHARD);
+                long startNanos = System.nanoTime();
                 long totalBytes = filesToUnpack.stream().mapToLong(ShardFileInfo::getLength).sum();
                 log.atInfo()
                     .setMessage("Starting parallel unpacking of {} files ({} MB) for shard {} with concurrency {}")
@@ -130,10 +133,13 @@ public class SnapshotShardUnpacker {
                 unpackFilesInParallel(primaryDirectory, completedFiles, totalFiles);
 
                 log.atInfo()
-                    .setMessage("Successfully unpacked {} files for shard {}")
+                    .setMessage("Successfully downloaded and unpacked {} files ({} MB) for shard {} in {} ms")
                     .addArgument(filesToUnpack.size())
+                    .addArgument(totalBytes / (1024 * 1024))
                     .addArgument(shardId)
+                    .addArgument(() -> (System.nanoTime() - startNanos) / 1_000_000)
                     .log();
+                WorkerPhase.enter(WorkerPhase.Phase.MIGRATING);
             }
             return targetDirectory;
         } catch (Exception e) {

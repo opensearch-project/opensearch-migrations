@@ -409,4 +409,35 @@ class OpenSearchClientFactoryTest {
                 "log events: " + logs.getLogEvents());
         }
     }
+
+    @Test
+    void clientsFromOneFactoryShareOneRetryBudget() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, SETTINGS_PATH, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+
+        var first = openSearchClientFactory.determineVersionAndCreate();
+        var second = openSearchClientFactory.determineVersionAndCreate();
+
+        org.junit.jupiter.api.Assertions.assertSame(first.getBulkRetryBudget(), second.getBulkRetryBudget());
+        // The test factory has no connection limit, so it installs no in-flight limit.
+        org.junit.jupiter.api.Assertions.assertNull(first.getBulkInFlightLimit());
+        var otherFactory = new OpenSearchClientFactory(connectionContext);
+        otherFactory.client = restClient;
+        org.junit.jupiter.api.Assertions.assertNotSame(first.getBulkRetryBudget(),
+            otherFactory.determineVersionAndCreate().getBulkRetryBudget());
+    }
+
+    @Test
+    void clientsFromOneFactoryShareAnInFlightLimitBoundedByMaxConnections() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, SETTINGS_PATH, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+        var factory = new OpenSearchClientFactory(connectionContext, 7);
+        factory.client = restClient;
+
+        var first = factory.determineVersionAndCreate();
+        var second = factory.determineVersionAndCreate();
+
+        org.junit.jupiter.api.Assertions.assertSame(first.getBulkInFlightLimit(), second.getBulkInFlightLimit());
+        assertEquals(7, first.getBulkInFlightLimit().max());
+    }
 }

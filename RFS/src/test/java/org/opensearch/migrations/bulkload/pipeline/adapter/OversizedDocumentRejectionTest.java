@@ -17,8 +17,10 @@ import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.BulkRetryPolicy;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
@@ -72,7 +74,7 @@ class OversizedDocumentRejectionTest {
         client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
             Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, 100, 10_000) {
             @Override
-            protected Retry getBulkRetryStrategy() {
+            protected Retry getBulkRetryStrategy(BulkRetryPolicy.Batch batch) {
                 return Retry.max(0);
             }
         };
@@ -121,6 +123,7 @@ class OversizedDocumentRejectionTest {
         assertEquals(OpenSearchClient.MEASURED_REQUEST_BODY, rec.getResponseItem().path("measured").asText());
         verify(context).addDocumentsRejectedForSize(1);
         verify(context).addBulkDocumentsFailed(FailureClass.NON_RETRYABLE.name(), 1);
+        assertEquals(new MigrationMetrics.Failures(1, 0), result.failures());
     }
 
     @Test
@@ -130,6 +133,7 @@ class OversizedDocumentRejectionTest {
         assertThat(requests, empty());
         assertEquals(2, result.docsInBatch());
         assertEquals(2, stream.getRecords().size());
+        assertEquals(new MigrationMetrics.Failures(2, 0), result.failures());
     }
 
     @Test
@@ -146,6 +150,7 @@ class OversizedDocumentRejectionTest {
 
         assertEquals(List.of("big"), sentIds());
         assertThat(stream.getRecords(), empty());
+        assertEquals(new MigrationMetrics.Failures(0, 0), result.failures());
     }
 
     @Test
@@ -173,6 +178,7 @@ class OversizedDocumentRejectionTest {
         assertThat(stream.getRecords(), empty());
         assertEquals(1, result.docsInBatch());
         assertEquals(2, result.target().upserts());
+        assertEquals(new MigrationMetrics.Failures(0, 0), result.failures());
     }
 
     @Test
@@ -185,10 +191,11 @@ class OversizedDocumentRejectionTest {
             return input;
         };
 
-        sink(enlarge).writeBatch("idx", List.of(doc("small", 20), doc("grows", 20))).block();
+        var result = sink(enlarge).writeBatch("idx", List.of(doc("small", 20), doc("grows", 20))).block();
 
         assertThat(requests, empty());
         assertEquals(2, stream.getRecords().size());
+        assertEquals(new MigrationMetrics.Failures(2, 0), result.failures());
         assertEquals(OpenSearchClient.MEASURED_REQUEST_BODY,
             stream.getRecords().get(0).getResponseItem().path("measured").asText());
     }
@@ -205,6 +212,7 @@ class OversizedDocumentRejectionTest {
 
         assertEquals(4, cursors.get(cursors.size() - 1).nextPosition());
         assertEquals(2, stream.getRecords().size());
+        assertEquals(new MigrationMetrics.Failures(2, 0), cursors.get(cursors.size() - 1).metrics().failures());
     }
 
     @Test

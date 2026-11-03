@@ -364,6 +364,65 @@ public class WorkCoordinatorTest {
         }
     }
 
+    @SneakyThrows
+    private JsonNode workItemSource(String workItemId) {
+        var response = httpClientSupplier.get().makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD,
+            OpenSearchWorkCoordinator.INDEX_BASENAME + "/_search",
+            null,
+            "{\"query\":{\"ids\":{\"values\":[\"" + workItemId + "\"]}}}");
+        return new ObjectMapper().readTree(response.getPayloadBytes()).path("hits").path("hits").path(0).path("_source");
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testMaxLeaseDurationCapsRepeatedReacquisition(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // The crash-loop shape: each worker acquires the item, makes no progress, and releases it. Every
+        // acquisition doubles the next lease, so without a cap the lease grows without bound.
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var capped = workId("capped", 0, 0L);
+        var uncapped = workId("uncapped", 0, 0L);
+        var initialLease = Duration.ofSeconds(2);
+        var cappedFactory = new WorkCoordinatorFactory(container.getContainerVersion().getVersion(), "",
+            OpenSearchWorkCoordinator.CompletionRetryConfig.DEFAULT, Duration.ofSeconds(5));
+
+        for (var item : List.of(capped, uncapped)) {
+            try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+                creator.createUnassignedWorkItem(item, testContext::createUnassignedWorkContext);
+            }
+            var itemFactory = item.equals(capped) ? cappedFactory : factory;
+            var leases = new ArrayList<Long>();
+            for (int attempt = 0; attempt < 5; attempt++) {
+                try (var worker = itemFactory.get(httpClientSupplier.get(), 3600, "worker-" + attempt)) {
+                    var outcome = worker.acquireNextWorkItem(initialLease, testContext::createAcquireNextItemContext);
+                    var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+                    Assertions.assertEquals(item, acquired.getWorkItem().toString());
+                    var source = workItemSource(item);
+                    leases.add(source.path("expiration").asLong() - Instant.now().getEpochSecond());
+                    if (attempt < 4) {
+                        worker.releaseWorkItem(item, testContext::createReleaseWorkItemContext);
+                    } else {
+                        // Complete it so the next item's workers can't pick this one up.
+                        worker.completeWorkItem(item, testContext::createCompleteWorkContext);
+                    }
+                }
+            }
+            var exponent = workItemSource(item).path("nextAcquisitionLeaseExponent").asInt();
+            if (item.equals(capped)) {
+                // 2, 4, then capped at 5 from the third acquisition on; the exponent stops at 2.
+                for (int i = 2; i < leases.size(); i++) {
+                    Assertions.assertTrue(leases.get(i) <= 5, "lease " + i + " was " + leases.get(i) + "s");
+                }
+                Assertions.assertEquals(2, exponent);
+            } else {
+                // 2, 4, 8, 16, 32: the fifth lease is far past the cap the other item honors.
+                Assertions.assertTrue(leases.get(4) > 20, "uncapped fifth lease was " + leases.get(4) + "s");
+                Assertions.assertEquals(5, exponent);
+            }
+        }
+    }
+
     @ParameterizedTest
     @MethodSource("containerVersions")
     public void testReleaseWorkItemIsNoopIfLeaseRolledOver(SearchClusterContainer.ContainerVersion version) throws Exception {

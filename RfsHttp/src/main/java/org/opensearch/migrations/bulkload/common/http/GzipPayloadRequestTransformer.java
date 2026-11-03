@@ -73,8 +73,16 @@ public class GzipPayloadRequestTransformer implements RequestTransformer {
         ));
     }
 
+    /**
+     * Gzip {@code body} the way this transformer would. A caller that compresses first knows the size it sends;
+     * the transformer passes an already gzipped body through unchanged.
+     */
+    public static byte[] gzip(byte[] body) {
+        return gzipByteBufferSimple(ByteBuffer.wrap(body)).array();
+    }
+
     @SneakyThrows
-    private ByteBuffer gzipByteBufferSimple(final ByteBuffer inputBuffer) {
+    private static ByteBuffer gzipByteBufferSimple(final ByteBuffer inputBuffer) {
         var readbuffer = inputBuffer.duplicate();
         var baos = new ByteArrayOutputStream();
         try (GZIPOutputStream gzipOutputStream = new FastGzipOutputStream(baos, READ_BUFFER_SIZE, false)) {

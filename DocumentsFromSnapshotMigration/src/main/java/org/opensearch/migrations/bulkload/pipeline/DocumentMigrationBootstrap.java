@@ -18,6 +18,7 @@ import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
+import org.opensearch.migrations.bulkload.tracing.WorkerPhase;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration.WorkItem;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
@@ -146,11 +147,11 @@ public class DocumentMigrationBootstrap {
         var wi = workItem.getWorkItem();
         latestProgress.set(null);
         log.info("Pipeline acquired work item: {}", wi);
+        WorkerPhase.enter(WorkerPhase.Phase.DOWNLOADING_SHARD);
 
         // Stamp failed document stream records emitted while processing this shard with its canonical work-item id
         // (index + shard + checkpoint) so each terminal failure traces back to the work item.
         targetClient.setFailedDocumentStreamWorkItem(wi.toString());
-
         if (workItemTimeProvider != null) {
             workItemTimeProvider.recordLeaseAcquisition();
         }
@@ -189,9 +190,14 @@ public class DocumentMigrationBootstrap {
             .doFinally(s -> finishScheduler.dispose())
             .subscribe(
                 cursor -> {
+                    WorkerPhase.enter(WorkerPhase.Phase.MIGRATING);
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
+                    // Per batch rather than once per shard, so the counters rise as documents are written: a
+                    // series that first appears at a shard's total has no rate.
+                    context.recordDocsMigrated(cursor.docsInBatch());
+                    context.recordBytesMigrated(cursor.bytesInBatch());
                     publishProgress(new WorkItemCursor(cursor.nextPosition(), cursor.metrics(), false, null));
                 },
                 error -> {
@@ -243,8 +249,6 @@ public class DocumentMigrationBootstrap {
                 snapshotCounts.orElse(null)));
 
             context.recordShardDuration(durationMs);
-            context.recordDocsMigrated(totalDocsMigrated.get());
-            context.recordBytesMigrated(totalBytesMigrated.get());
             return CompletionStatus.WORK_COMPLETED;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

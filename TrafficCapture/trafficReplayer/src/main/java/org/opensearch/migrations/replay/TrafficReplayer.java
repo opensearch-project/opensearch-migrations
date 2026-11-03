@@ -495,7 +495,8 @@ public class TrafficReplayer {
                 + "retried during bulk replay. These errors still count as failures but won't be retried since "
                 + "they are client/logic errors that will produce the same result on every attempt. "
                 + "Defaults to a built-in set including version_conflict_engine_exception, "
-                + "mapper_parsing_exception, etc. "
+                + "mapper_parsing_exception, etc. An item is not retried if its error type or any of its "
+                + "caused_by types is in the list. "
                 + "Example: --non-retryable-doc-exception-types version_conflict_engine_exception")
         List<String> nonRetryableDocExceptionTypes;
 

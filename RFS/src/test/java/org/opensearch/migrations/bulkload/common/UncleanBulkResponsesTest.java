@@ -9,6 +9,7 @@ import java.util.function.BiFunction;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
+import org.opensearch.migrations.bulkload.common.retry.BulkRetryPolicy;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
@@ -48,7 +49,7 @@ import static org.mockito.Mockito.when;
 class UncleanBulkResponsesTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Duration RESPONSE_TIMEOUT = Duration.ofMillis(500);
-    private static final int RETRIES = 6;
+    private static final int RETRIES = 8;
     private static final String HTML_413 =
         "<html><head><title>413 Request Entity Too Large</title></head><body><center>nginx</center></body></html>";
 
@@ -90,7 +91,7 @@ class UncleanBulkResponsesTest {
             var client = new OpenSearchClient_OS_2_11(restClient, new FailedRequestsLogger(),
                 Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, docsPerRequest, 10_000_000) {
                 @Override
-                protected Retry getBulkRetryStrategy() {
+                protected Retry getBulkRetryStrategy(BulkRetryPolicy.Batch batch) {
                     return Retry.fixedDelay(RETRIES, Duration.ofMillis(10));
                 }
             };
@@ -128,22 +129,22 @@ class UncleanBulkResponsesTest {
         assertEquals(FailureClass.RETRYABLE_EXHAUSTED, rec.getFailureClass());
         assertEquals("no_response", rec.getFailureType());
         var slowAlone = outcome.requestBodies().stream().filter(b -> idsIn(b).equals(List.of("slow"))).count();
-        assertEquals(OpenSearchClient.NO_RESPONSE_ATTEMPTS_BEFORE_EXHAUSTION, slowAlone);
+        assertEquals((OpenSearchClient.MAX_NO_RESPONSE_RETRIES + 1), slowAlone);
     }
 
     @Test
-    void aConnectionResetMidRequestIsRetriedThenRecordedAndThePartitionCompletes() throws Exception {
-        // One document per request: the first is accepted, every later request is reset before its body is read.
-        var outcome = migrate(1, (n, body) -> n == 1
+    void aConnectionResetMidRequestIsRetriedUntilTheTargetAnswersAndNeverRecorded() throws Exception {
+        // One document per request: the first is accepted, then more resets than any give-up allows, then the target
+        // recovers. A reset says the target, not the document, is in trouble, so none of them counts.
+        int resets = RETRIES - 1;   // more than MAX_NO_RESPONSE_RETRIES, within this test's retry schedule
+        var outcome = migrate(1, (n, body) -> n == 1 || n > 1 + resets
             ? (body == null ? new ScriptedHttpServer.ReadBody() : created(body))
             : new ScriptedHttpServer.ResetMidRequest(),
             "a", "reset");
 
         assertEquals(2, outcome.finalPosition());
-        assertThat(outcome.recordIds(), contains("reset"));
-        assertEquals("no_response", outcome.records().get(0).getFailureType());
-        assertThat(outcome.requestBodies().size(),
-            greaterThanOrEqualTo(1 + OpenSearchClient.NO_RESPONSE_ATTEMPTS_BEFORE_EXHAUSTION));
+        assertThat(outcome.recordIds(), empty());
+        assertThat(outcome.requestBodies().size(), greaterThanOrEqualTo(2));
     }
 
     @Test

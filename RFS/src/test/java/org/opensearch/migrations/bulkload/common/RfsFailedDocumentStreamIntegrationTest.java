@@ -68,11 +68,11 @@ import static org.mockito.Mockito.withSettings;
  *   <li><b>Successful documents still migrate.</b> Per-attempt bulk-request bodies
  *       are captured via {@link ArgumentCaptor}: the first attempt contains
  *       {@code ok-1} (and {@code ok-2}), and subsequent retry attempts contain
- *       <i>only</i> {@code throttled} — positive proof that ok-1's success ack
+ *       <i>only</i> {@code stuck} — positive proof that ok-1's success ack
  *       was honored and the doc was not re-sent.</li>
  *   <li><b>Failed documents are persisted to the failed document stream.</b> The captured S3 bytes
  *       are decoded and asserted to contain {@code bad-map} (NON_RETRYABLE) and
- *       {@code throttled} (RETRYABLE_EXHAUSTED) with the correct
+ *       {@code stuck} (RETRYABLE_EXHAUSTED) with the correct
  *       {@code failureClass} / {@code failureType}.</li>
  *   <li><b>Reported failure count matches failed document stream contents.</b>
  *       {@code assertThat(sessionARecords, hasSize(reportedTerminalFailures))}
@@ -107,19 +107,19 @@ class RfsFailedDocumentStreamIntegrationTest {
         //   "ok-1"      → success (server result=created)
         //   "ok-2"      → allowed exception (version_conflict_engine_exception, in allowlist)
         //   "bad-map"   → non-retryable (mapper_parsing_exception)
-        //   "throttled" → retryable (es_rejected_execution_exception), fails on every retry
+        //   "stuck" → retryable (illegal_state_exception), fails on every retry
         //
         // First response: ok-1 succeeds, ok-2 is allowlisted-success, bad-map non-retry,
-        //                 throttled is the lone retryable failure remaining.
-        // Second response onward: only "throttled" remains in pendingOps, and it keeps
-        //                 failing with the same retryable type until retries are exhausted.
+        //                 stuck is the lone retryable failure remaining.
+        // Second response onward: only "stuck" remains in pendingOps, and it keeps
+        //                 failing with the same retryable type until it is given up.
         var firstResponse = buildBulkResponse(List.of(
             successItem("ok-1"),
             allowlistedItem("ok-2"),
             nonRetryableItem("bad-map"),
-            retryableItem("throttled")
+            retryableItem("stuck")
         ));
-        var subsequentResponse = buildBulkResponse(List.of(retryableItem("throttled")));
+        var subsequentResponse = buildBulkResponse(List.of(retryableItem("stuck")));
 
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(new HttpResponse(200, "", null, firstResponse)))
@@ -142,17 +142,17 @@ class RfsFailedDocumentStreamIntegrationTest {
         var openSearchClient = spy(new OpenSearchClient_OS_2_11(
             restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
         openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSinkA, "session-A", "worker-1");
-        // Speed up the test: 2 retries, 1 ms backoff — enough to exhaust retries on "throttled".
-        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+        // Speed up the test: 1 ms backoff, and just enough retries to give "stuck" up.
+        doReturn(retriesToGiveUp()).when(openSearchClient).getBulkRetryStrategy(any());
 
         var bulkDocs = List.of(
             createBulkDoc("ok-1"),
             createBulkDoc("ok-2"),
             createBulkDoc("bad-map"),
-            createBulkDoc("throttled")
+            createBulkDoc("stuck")
         );
 
-        // "throttled" never recovers; with a failed document stream configured, the batch still completes
+        // "stuck" never recovers; with a failed document stream configured, the batch still completes
         // once its terminal failures are recorded, so the migration moves past them.
         assertDoesNotThrow(() -> openSearchClient.sendBulkRequest(
             "movies",
@@ -168,8 +168,8 @@ class RfsFailedDocumentStreamIntegrationTest {
 
         // ─── Sub-criterion 1: successful documents still migrate ────────────────────
         // Positive proof: capture every bulk request body and verify that
-        //   - the first attempt sent all four docs (ok-1, ok-2, bad-map, throttled), and
-        //   - subsequent retry attempts sent only "throttled".
+        //   - the first attempt sent all four docs (ok-1, ok-2, bad-map, stuck), and
+        //   - subsequent retry attempts sent only "stuck".
         // i.e., the cluster's success ack for ok-1 was honored and the doc was NOT
         // re-sent on retry — together with the negative assertion below that ok-1
         // never lands in the failed document stream, that's end-to-end "successful docs migrate".
@@ -178,12 +178,12 @@ class RfsFailedDocumentStreamIntegrationTest {
         var capturedBodies = bodyCaptor.getAllValues();
         var firstAttemptIds = extractDocIds(capturedBodies.get(0));
         assertThat("first attempt should send all four docs", firstAttemptIds,
-            containsInAnyOrder("ok-1", "ok-2", "bad-map", "throttled"));
+            containsInAnyOrder("ok-1", "ok-2", "bad-map", "stuck"));
         for (int i = 1; i < capturedBodies.size(); i++) {
             var retryIds = extractDocIds(capturedBodies.get(i));
-            assertThat("retry attempt " + i + " must contain only 'throttled' "
+            assertThat("retry attempt " + i + " must contain only 'stuck' "
                 + "(ok-1 + ok-2 + bad-map dropped from the retry loop)",
-                retryIds, contains("throttled"));
+                retryIds, contains("stuck"));
         }
 
         // ─── Assertions for session A ───────────────────────────────────────────────
@@ -201,14 +201,14 @@ class RfsFailedDocumentStreamIntegrationTest {
         assertThat(failedDocumentStreamDocIds, not(contains("ok-2")));
 
         // Terminal failures ARE in the failed document stream, exactly once each.
-        assertThat(failedDocumentStreamDocIds, containsInAnyOrder("bad-map", "throttled"));
+        assertThat(failedDocumentStreamDocIds, containsInAnyOrder("bad-map", "stuck"));
 
         // Each failure carries the right classification.
         var byId = recordsById(sessionARecords);
         assertThat(byId.get("bad-map").path("failureClass").asText(), equalTo("NON_RETRYABLE"));
         assertThat(byId.get("bad-map").path("failureType").asText(), equalTo("mapper_parsing_exception"));
-        assertThat(byId.get("throttled").path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
-        assertThat(byId.get("throttled").path("failureType").asText(), equalTo("es_rejected_execution_exception"));
+        assertThat(byId.get("stuck").path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
+        assertThat(byId.get("stuck").path("failureType").asText(), equalTo("illegal_state_exception"));
 
         // Every record carries the session/worker context.
         for (var rec : sessionARecords) {
@@ -261,7 +261,7 @@ class RfsFailedDocumentStreamIntegrationTest {
             .toList();
         assertThat(sessionAAfter, hasSize(reportedTerminalFailures));
         assertThat(sessionAAfter.stream().map(r -> r.path("documentId").asText()).toList(),
-            containsInAnyOrder("bad-map", "throttled"));
+            containsInAnyOrder("bad-map", "stuck"));
 
         // Session B's prefix has exactly its one new failure.
         var sessionBRecords = s3Captured.objectsUnder("rfs-failed-document-stream/session=session-B/").stream()
@@ -275,40 +275,38 @@ class RfsFailedDocumentStreamIntegrationTest {
         for (var rec : sessionBRecords) {
             String id = rec.path("documentId").asText();
             assertThat(id, not(equalTo("bad-map")));
-            assertThat(id, not(equalTo("throttled")));
+            assertThat(id, not(equalTo("stuck")));
         }
     }
 
     /**
      * Regression test for the acceptance criterion that allowlisted exception
-     * types are excluded from failed document stream records and failure counts, specifically in
-     * the retry-exhaust path.
+     * types are excluded from failed document stream records and failure counts, specifically when a
+     * document is given up after its retries.
      *
-     * <p>Constructs a worst-case position-misalignment scenario: a single
-     * attempt (0 retries) whose response interleaves an allowlisted item at
-     * position 0 with a retryable failure at position 1. The position 0 entry
-     * is dropped by {@code compactPendingDocs}, so the post-compaction
-     * {@code pendingOps} has one item at index 0 — which corresponds to
-     * response position 1, not 0. A naive position lookup in
-     * {@code emitRetryExhaustedToFailedDocumentStream} would mis-attribute the allowlisted
-     * item's {@code failureType} to the surviving retryable doc; this test
-     * asserts that doesn't happen.
+     * <p>Constructs a worst-case position-misalignment scenario: the response that gives a document up
+     * interleaves an allowlisted item at position 0 with the retryable failure at position 1 (the
+     * earlier responses fail both, which keeps the allowlisted document in the request; a throttle would
+     * instead keep the other's failures from counting). A lookup that confused the two positions would attribute the allowlisted
+     * item's {@code failureType} to the document given up; this test asserts that doesn't happen.
      */
     @Test
     void allowlistedExceptionsAreNeverWrittenToFailedDocumentStream_evenOnRetryExhaust() throws Exception {
         when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
         when(restClient.getConnectionContext()).thenReturn(connectionContext);
 
-        // One response containing both an allowlisted item and a retryable failure.
-        // The allowlisted item is at position 0 (before the retryable failure)
-        // so the post-compaction pendingOps will have a different size than the
-        // response — exactly the position-shift case we care about.
-        var response = buildBulkResponse(List.of(
-            allowlistedItem("dup-1"),
-            retryableItem("throttled-1")
+        // The last response holds both an allowlisted item and the retryable failure. The allowlisted
+        // item is at position 0 (before the retryable failure), so the request's pending documents will
+        // shrink to a different size than the response — exactly the position-shift case we care about.
+        var earlierResponse = buildBulkResponse(List.of(
+            retryableItem("dup-1"),
+            retryableItem("stuck-1")
         ));
-        when(restClient.postAsyncBytes(any(), any(), any(), any()))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null, response)));
+        var lastResponse = buildBulkResponse(List.of(
+            allowlistedItem("dup-1"),
+            retryableItem("stuck-1")
+        ));
+        stubResponses(earlierResponse, lastResponse);
 
         var s3Captured = new S3Capture();
         var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
@@ -325,14 +323,11 @@ class RfsFailedDocumentStreamIntegrationTest {
         var openSearchClient = spy(new OpenSearchClient_OS_2_11(
             restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
         openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSink, "session-exhaust", "worker-1");
-        // 0 retries: any error from attempt 1 exhausts immediately, taking the
-        // doOnError → emitRetryExhaustedToFailedDocumentStream path with the original response
-        // (which still contains the allowlisted item at position 0).
-        doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(retriesToGiveUp()).when(openSearchClient).getBulkRetryStrategy(any());
 
         assertDoesNotThrow(() -> openSearchClient.sendBulkRequest(
             "movies",
-            List.of(createBulkDoc("dup-1"), createBulkDoc("throttled-1")),
+            List.of(createBulkDoc("dup-1"), createBulkDoc("stuck-1")),
             mock(IRfsContexts.IRequestContext.class),
             false,
             allowlist
@@ -349,7 +344,7 @@ class RfsFailedDocumentStreamIntegrationTest {
         assertThat("Only the retryable doc should be in the failed document stream", records, hasSize(1));
 
         var rec = records.get(0);
-        assertThat(rec.path("documentId").asText(), equalTo("throttled-1"));
+        assertThat(rec.path("documentId").asText(), equalTo("stuck-1"));
         assertThat(rec.path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
 
         // Critical assertion: no allowlisted exception type appears anywhere in
@@ -363,15 +358,14 @@ class RfsFailedDocumentStreamIntegrationTest {
     }
 
     /**
-     * Regression test for the retry-exhaust position-misalignment bug: the surviving retryable doc
-     * must receive its <b>correct</b> {@code failureType}, not null and not a neighbor's.
+     * Regression test for the position-misalignment bug: the document given up must receive its
+     * <b>correct</b> {@code failureType}, not null and not a neighbor's.
      *
-     * <p>The final (exhausting) response interleaves a non-retryable failure at position 0 with a
-     * retryable failure at position 1. {@code compactPendingDocs} emits + drops the non-retryable, so
-     * post-compaction {@code pendingOps} holds one op at index 0 that corresponds to response
-     * <em>position 1</em>. The old code keyed the last response's failures by position and looked up
-     * {@code pendingOps} index 0 → it would read position 0 (the already-removed non-retryable) and
-     * attach the wrong type, or miss entirely and attach null. Correlating by document id fixes it.
+     * <p>The response that gives the document up interleaves a non-retryable failure at position 0
+     * with the retryable failure at position 1 (the earlier responses fail both, so the non-retryable
+     * document stays in the request). Both are dropped from the request by
+     * {@code compactPendingDocs} in the same pass, so a lookup by the compacted index would read
+     * position 0 and attach the wrong type.
      *
      * <p>Note {@code mapper_parsing_exception} is non-retryable, so it's also written on the last
      * attempt as its own NON_RETRYABLE record — the assertion below targets only the retryable doc's
@@ -383,12 +377,15 @@ class RfsFailedDocumentStreamIntegrationTest {
         when(restClient.getConnectionContext()).thenReturn(connectionContext);
 
         // Non-retryable at position 0, retryable at position 1 — position 0 is dropped by compaction.
-        var response = buildBulkResponse(List.of(
-            nonRetryableItem("bad-map-1"),
-            retryableItem("throttled-1")
+        var earlierResponse = buildBulkResponse(List.of(
+            retryableItem("bad-map-1"),
+            retryableItem("stuck-1")
         ));
-        when(restClient.postAsyncBytes(any(), any(), any(), any()))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null, response)));
+        var lastResponse = buildBulkResponse(List.of(
+            nonRetryableItem("bad-map-1"),
+            retryableItem("stuck-1")
+        ));
+        stubResponses(earlierResponse, lastResponse);
 
         var s3Captured = new S3Capture();
         var failedDocumentStreamSink = S3FailedDocumentStreamSink.builder()
@@ -404,13 +401,11 @@ class RfsFailedDocumentStreamIntegrationTest {
         var openSearchClient = spy(new OpenSearchClient_OS_2_11(
             restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
         openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSink, "session-shift", "worker-1");
-        // 0 retries: attempt 1 exhausts immediately, so the last response still holds both items
-        // and pendingOps has been compacted to just "throttled-1".
-        doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(retriesToGiveUp()).when(openSearchClient).getBulkRetryStrategy(any());
 
         assertDoesNotThrow(() -> openSearchClient.sendBulkRequest(
             "movies",
-            List.of(createBulkDoc("bad-map-1"), createBulkDoc("throttled-1")),
+            List.of(createBulkDoc("bad-map-1"), createBulkDoc("stuck-1")),
             mock(IRfsContexts.IRequestContext.class),
             false,
             DocumentExceptionAllowlist.empty()
@@ -423,9 +418,9 @@ class RfsFailedDocumentStreamIntegrationTest {
             .toList());
 
         // The retryable doc must carry ITS OWN error type despite the position shift — the crux of the fix.
-        var throttled = byId.get("throttled-1");
-        assertThat(throttled.path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
-        assertThat(throttled.path("failureType").asText(), equalTo("es_rejected_execution_exception"));
+        var stuck = byId.get("stuck-1");
+        assertThat(stuck.path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
+        assertThat(stuck.path("failureType").asText(), equalTo("illegal_state_exception"));
         // And the non-retryable doc keeps its own type (written on the same attempt).
         assertThat(byId.get("bad-map-1").path("failureType").asText(), equalTo("mapper_parsing_exception"));
     }
@@ -437,8 +432,8 @@ class RfsFailedDocumentStreamIntegrationTest {
      * last response's retryable failures instead recovers both the error type AND the cluster-assigned
      * id from the response item — this test pins that.
      *
-     * <p>Two id-less retryable docs both throttle; the last response assigns them ids gen-1 and gen-2.
-     * Each record must get es_rejected_execution_exception and its assigned id.
+     * <p>Two id-less retryable docs keep failing; the last response assigns them ids gen-1 and gen-2.
+     * Each record must get illegal_state_exception and its assigned id.
      */
     @Test
     void retryExhaustedServerGeneratedIdDocsRecoverTypeAndAssignedId() throws Exception {
@@ -467,7 +462,7 @@ class RfsFailedDocumentStreamIntegrationTest {
         var openSearchClient = spy(new OpenSearchClient_OS_2_11(
             restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
         openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSink, "session-genid", "worker-1");
-        doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(retriesToGiveUp()).when(openSearchClient).getBulkRetryStrategy(any());
 
         assertDoesNotThrow(() -> openSearchClient.sendBulkRequest(
             "movies",
@@ -485,12 +480,21 @@ class RfsFailedDocumentStreamIntegrationTest {
 
         // Both server-assigned ids present, each with the correct type — impossible under by-id lookup.
         assertThat(byId.keySet(), containsInAnyOrder("gen-1", "gen-2"));
-        assertThat(byId.get("gen-1").path("failureType").asText(), equalTo("es_rejected_execution_exception"));
-        assertThat(byId.get("gen-2").path("failureType").asText(), equalTo("es_rejected_execution_exception"));
+        assertThat(byId.get("gen-1").path("failureType").asText(), equalTo("illegal_state_exception"));
+        assertThat(byId.get("gen-2").path("failureType").asText(), equalTo("illegal_state_exception"));
     }
 
 
     // ─── Helpers ────────────────────────────────────────────────────────────────────
+
+    /** {@code earlier} for every attempt before the one that gives a document up, then {@code last}. */
+    private void stubResponses(String earlier, String last) {
+        var stub = when(restClient.postAsyncBytes(any(), any(), any(), any()));
+        for (int i = 0; i < OpenSearchClient.MAX_ITEM_FAILURE_RETRIES; i++) {
+            stub = stub.thenReturn(Mono.just(new HttpResponse(200, "", null, earlier)));
+        }
+        stub.thenReturn(Mono.just(new HttpResponse(200, "", null, last)));
+    }
 
     private static String buildBulkResponse(List<String> items) {
         return "{\"took\":1,\"errors\":true,\"items\":[" + String.join(",", items) + "]}";
@@ -511,9 +515,15 @@ class RfsFailedDocumentStreamIntegrationTest {
             + "\"error\":{\"type\":\"mapper_parsing_exception\",\"reason\":\"bad\"}}}";
     }
 
+    /** An error neither about the document nor about the target, so the document is given up after its retries. */
     private static String retryableItem(String id) {
-        return "{\"index\":{\"_index\":\"movies\",\"_id\":\"" + id + "\",\"status\":429,"
-            + "\"error\":{\"type\":\"es_rejected_execution_exception\",\"reason\":\"queue full\"}}}";
+        return "{\"index\":{\"_index\":\"movies\",\"_id\":\"" + id + "\",\"status\":500,"
+            + "\"error\":{\"type\":\"illegal_state_exception\",\"reason\":\"unexpected\"}}}";
+    }
+
+    /** Enough retries for a document whose item keeps failing to be given up. */
+    private static Retry retriesToGiveUp() {
+        return Retry.fixedDelay(OpenSearchClient.MAX_ITEM_FAILURE_RETRIES, Duration.ofMillis(1));
     }
 
     private static BulkOperationSpec createBulkDoc(String docId) {
