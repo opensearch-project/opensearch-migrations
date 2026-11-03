@@ -61,6 +61,10 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     public static final String BULK_REQUEST_DOCUMENTS = "bulkRequestDocuments";
     public static final String BULK_REQUEST_BYTES = "bulkRequestBytes";
     public static final String BULK_REQUEST_SENT_BYTES = "bulkRequestSentBytes";
+    public static final String BULK_BATCH_PREPARATION_DURATION = "bulkBatchPreparationDuration";
+    public static final String BULK_REQUEST_ASSEMBLY_DURATION = "bulkRequestAssemblyDuration";
+    public static final String BULK_REQUEST_COMPRESSION_DURATION = "bulkRequestCompressionDuration";
+    public static final String BULK_REQUEST_START_GAP = "bulkRequestStartGap";
 
     public static final AttributeKey<String> OUTCOME = AttributeKey.stringKey("outcome");
     public static final AttributeKey<String> ATTEMPT = AttributeKey.stringKey("attempt");
@@ -71,6 +75,7 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     public static final AttributeKey<String> SIGNAL = AttributeKey.stringKey("signal");
     public static final AttributeKey<String> RESULT = AttributeKey.stringKey("result");
     public static final AttributeKey<String> RANGE = AttributeKey.stringKey("range");
+    public static final AttributeKey<String> PATH = AttributeKey.stringKey("path");
 
     /** Reasons reported for unavailable documents as themselves; any other is reported as {@code other}. */
     static final java.util.Set<String> TARGET_UNAVAILABLE_REASONS = Stream.concat(
@@ -92,6 +97,10 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     /** Powers of four from 1 KiB to 256 MiB. */
     static final List<Long> REQUEST_BYTES_BUCKETS = Stream.iterate(1024L, b -> b <= 256L * 1024 * 1024, b -> b * 4)
         .toList();
+    static final List<Double> REQUEST_PREPARATION_BUCKETS_MS = Stream.concat(
+            Stream.of(0.0, 0.1, 0.25, 0.5, 1.0, 2.5),
+            CommonScopedMetricInstruments.DURATION_BUCKETS_MS.stream())
+        .distinct().sorted().toList();
 
     private static final String COUNT = "count";
     private static final String MS = "ms";
@@ -129,6 +138,10 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     private final LongHistogram requestDocuments;
     private final LongHistogram requestBytes;
     private final LongHistogram requestSentBytes;
+    private final DoubleHistogram batchPreparationDuration;
+    private final DoubleHistogram requestAssemblyDuration;
+    private final DoubleHistogram requestCompressionDuration;
+    private final DoubleHistogram requestStartGap;
     // The SDK holds the callbacks; the references keep them reachable alongside this object.
     @SuppressWarnings("unused")
     private final List<AutoCloseable> gauges;
@@ -187,6 +200,14 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
             .setExplicitBucketBoundariesAdvice(REQUEST_BYTES_BUCKETS).build();
         requestSentBytes = meter.histogramBuilder(BULK_REQUEST_SENT_BYTES).setUnit(BYTES).ofLongs()
             .setExplicitBucketBoundariesAdvice(REQUEST_BYTES_BUCKETS).build();
+        batchPreparationDuration = meter.histogramBuilder(BULK_BATCH_PREPARATION_DURATION).setUnit(MS)
+            .setExplicitBucketBoundariesAdvice(REQUEST_PREPARATION_BUCKETS_MS).build();
+        requestAssemblyDuration = meter.histogramBuilder(BULK_REQUEST_ASSEMBLY_DURATION).setUnit(MS)
+            .setExplicitBucketBoundariesAdvice(REQUEST_PREPARATION_BUCKETS_MS).build();
+        requestCompressionDuration = meter.histogramBuilder(BULK_REQUEST_COMPRESSION_DURATION).setUnit(MS)
+            .setExplicitBucketBoundariesAdvice(REQUEST_PREPARATION_BUCKETS_MS).build();
+        requestStartGap = meter.histogramBuilder(BULK_REQUEST_START_GAP).setUnit(MS)
+            .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS).build();
 
         var registered = new ArrayList<AutoCloseable>();
         registered.add(meter.gaugeBuilder(BULK_OLDEST_OPEN_BATCH_AGE).setUnit(MS).ofLongs()
@@ -258,6 +279,23 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
         requestDocuments.record(documents);
         requestBytes.record(bytes);
         requestSentBytes.record(sentBytes);
+    }
+
+    @Override
+    public void onBatchPrepared(String path, int documents, double durationMillis) {
+        batchPreparationDuration.record(durationMillis, Attributes.of(PATH, path));
+    }
+
+    @Override
+    public void onRequestPrepared(boolean retry, double assemblyMillis, double compressionMillis) {
+        var attributes = Attributes.of(ATTEMPT, attemptLabel(retry));
+        requestAssemblyDuration.record(assemblyMillis, attributes);
+        requestCompressionDuration.record(compressionMillis, attributes);
+    }
+
+    @Override
+    public void onRequestStartGap(boolean retry, double millis) {
+        requestStartGap.record(millis, Attributes.of(ATTEMPT, attemptLabel(retry)));
     }
 
     @Override
