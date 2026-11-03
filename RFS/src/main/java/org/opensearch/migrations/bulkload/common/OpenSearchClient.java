@@ -1422,9 +1422,14 @@ public abstract class OpenSearchClient {
         }
     }
 
-    public static class UnexpectedStatusCode extends OperationFailed {
+    public static class UnexpectedStatusCode extends OperationFailed implements HttpRetryClassifier.StatusCodeFailure {
         public UnexpectedStatusCode(HttpResponse response) {
             super("Unexpected status code " + response.statusCode, response);
+        }
+
+        @Override
+        public int statusCode() {
+            return response.statusCode;
         }
     }
 }

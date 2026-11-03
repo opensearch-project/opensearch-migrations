@@ -51,6 +51,7 @@ import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration.WorkItem;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.RetryJitter;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
@@ -961,7 +962,8 @@ public class RfsMigrateDocuments {
      * Calculates the approximate total retry window in seconds based on exponential backoff with a max delay cap.
      * This sums the backoff delays (initial * 2^n, capped at maxDelay) across all retry attempts.
      * Does not include request execution time or network latency.
-     * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff()
+     * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff(),
+     * which jitters each wait down by up to half ({@link RetryJitter}), so this is an upper bound.
      */
     static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
         long totalMs = 0;
@@ -1566,12 +1568,13 @@ public class RfsMigrateDocuments {
                 );
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
+                long sleepMillis = RetryJitter.equalJitterMillis(lockRenegotiationMillis);
                 log.atInfo().setMessage("After {} another process holds the lock for setting up the shard work items." +
                         "  Waiting {} ms before trying again.")
                     .addArgument(shardSetupAttemptNumber)
-                    .addArgument(lockRenegotiationMillis)
+                    .addArgument(sleepMillis)
                     .log();
-                Thread.sleep(lockRenegotiationMillis);
+                Thread.sleep(sleepMillis);
                 lockRenegotiationMillis *= 2;
             }
         }

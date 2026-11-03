@@ -173,6 +173,33 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
         }
     }
 
+    @Test
+    public void assignedWorkLookupRetriesJitterEachWait() throws Exception {
+        var pathToCounts = new PathCounts();
+        try (SimpleNettyHttpServer testServer = SimpleNettyHttpServer.makeServer(false, null,
+            getCountingResponseMakerWithSearchBody(GET_NO_RESULTS_ASSIGNED_WORK_BODY).apply(pathToCounts)))
+        {
+            var client = new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
+                .host("http://localhost:" + testServer.port)
+                .build()
+                .toConnectionContext());
+            var rootContext = WorkCoordinationTestContext.factory().withAllTracking();
+            try (var wc = factory.get(client, 2, TEST_WORKER_ID);
+                 var logs = new org.opensearch.migrations.testutils.CloseableLogSetup(wc.getLoggerName())) {
+                Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
+                    () -> wc.acquireNextWorkItem(Duration.ofSeconds(1), rootContext::createAcquireNextItemContext));
+                var waits = CoordinatorRetryJitterTest.waits(logs,
+                    java.util.regex.Pattern.compile("Backing off (PT[0-9.]+S) and trying again"));
+                var nominal = new java.util.ArrayList<Long>();
+                for (int i = 0; i < waits.size(); i++) {
+                    nominal.add(OpenSearchWorkCoordinator.ACQUIRE_WORK_RETRY_BASE_MS << i);
+                }
+                Assertions.assertTrue(waits.size() >= 3, "waits: " + waits);
+                CoordinatorRetryJitterTest.assertJittered(nominal, waits);
+            }
+        }
+    }
+
     public static class PathCounts {
         int updates;
         int searches;
