@@ -734,12 +734,12 @@ public abstract class OpenSearchClient {
     }
 
     /**
-     * A raw document whose exact bulk encoding was prepared while the source pipeline sized its batch.
+     * A raw document whose exact-size action was prepared while the source pipeline sized its batch.
      */
-    public record PreparedRawDocument(Document document, BulkNdjson.EncodedOperation encoded) {
+    public record PreparedRawDocument(Document document, BulkNdjson.PreparedRawOperation prepared) {
         public PreparedRawDocument {
             Objects.requireNonNull(document);
-            Objects.requireNonNull(encoded);
+            Objects.requireNonNull(prepared);
         }
     }
 
@@ -754,7 +754,8 @@ public abstract class OpenSearchClient {
         int splitRequestConcurrency
     ) {
         return sendBulkRequests(indexName, docs, prepared -> new PreparedOperation(
-            () -> BulkOperationConverter.fromRawDocument(prepared.document(), indexName), prepared.encoded()),
+            () -> BulkOperationConverter.fromRawDocument(prepared.document(), indexName),
+            BulkNdjson.encodePreparedRaw(prepared.prepared())),
             RAW_PATH, context, allowlist, splitRequestConcurrency);
     }
 
