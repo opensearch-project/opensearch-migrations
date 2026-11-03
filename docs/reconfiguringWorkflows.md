@@ -372,6 +372,7 @@ Every field of `documentBackfillConfig` is listed here; a test in `orchestration
 | `spec.documentBackfillConfig.minPodReplicas` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.jvmArgs` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.logLevels` | Safe | Rolls the pods | ❌ |
 | `spec.documentBackfillConfig.skipApproval` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.resources` | Safe |  | ❌ |

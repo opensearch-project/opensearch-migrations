@@ -239,6 +239,9 @@ function buildMetadataContainer<
         .addEnvVar("JDK_JAVA_OPTIONS",
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
+        .addEnvVar("MIGRATIONS_ROOT_LOG_LEVEL",
+            expr.getLoose(expr.getLoose(expr.deserializeRecord(inputs.metadataMigrationConfig), "logLevels"), "root")
+        )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
         .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
         .addArgs([

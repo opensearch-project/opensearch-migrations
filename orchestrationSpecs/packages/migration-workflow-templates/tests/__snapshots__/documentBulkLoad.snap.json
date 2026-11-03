@@ -443,6 +443,15 @@
               "name": "loggingConfigurationOverrideConfigMap"
             },
             {
+              "name": "rootLogLevel"
+            },
+            {
+              "name": "bulkRequestTraceLogLevel"
+            },
+            {
+              "name": "failedRequestsLogLevel"
+            },
+            {
               "name": "fileSourceVolumes"
             },
             {
@@ -532,6 +541,15 @@
               "name": "loggingConfigurationOverrideConfigMap"
             },
             {
+              "name": "rootLogLevel"
+            },
+            {
+              "name": "bulkRequestTraceLogLevel"
+            },
+            {
+              "name": "failedRequestsLogLevel"
+            },
+            {
               "name": "fileSourceVolumes"
             },
             {
@@ -575,7 +593,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{=toJSON(inputs.parameters.sessionName+'-rfs')}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: SnapshotMigration\n      name: {{=toJSON(inputs.parameters.crdName)}}\n      uid: {{=toJSON(inputs.parameters.crdUid)}}\n      controller: false\n      blockOwnerDeletion: true\n  labels:\n    migrations.opensearch.org/component: rfs-worker\n    workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n    migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n    migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n    migrations.opensearch.org/snapshot: {{=toJSON(inputs.parameters.snapshotK8sLabel)}}\n    migrations.opensearch.org/from-snapshot-migration: {{=toJSON(inputs.parameters.fromSnapshotMigrationK8sLabel)}}\n    migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\n    migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.crdUid)}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 5%\n      maxSurge: 10%\n  selector:\n    matchLabels:\n      migrations.opensearch.org/component: rfs-worker\n      migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.crdUid)}}\n  template:\n    metadata:\n      labels:\n        migrations.opensearch.org/component: rfs-worker\n        workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n        migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n        migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n        migrations.opensearch.org/snapshot: {{=toJSON(inputs.parameters.snapshotK8sLabel)}}\n        migrations.opensearch.org/from-snapshot-migration: {{=toJSON(inputs.parameters.fromSnapshotMigrationK8sLabel)}}\n        migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\n        migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.crdUid)}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: bulk-loader\n          image: {{=toJSON(inputs.parameters.imageReindexFromSnapshotLocation)}}\n          imagePullPolicy: {{=toJSON(inputs.parameters.imageReindexFromSnapshotPullPolicy)}}\n          command:\n            - /rfs-app/runJavaWithClasspathWithRepeat.sh\n          args:\n            - org.opensearch.migrations.RfsMigrateDocuments\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.rfsJsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty)))}}\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty)))}}\n                  key: password\n                  optional: true\n            - name: COORDINATOR_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)))}}\n                  key: username\n                  optional: true\n            - name: COORDINATOR_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)))}}\n                  key: password\n                  optional: true\n            - name: FAILED_REQUESTS_LOGGER_LEVEL\n              value: WARN\n            - name: CONSOLE_LOG_FORMAT\n              value: json\n            - name: JDK_JAVA_OPTIONS\n              value: {{=toJSON(inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration/configuration') : ('')))}}\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: {{=toJSON(((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : ('')))}}\n          volumeMounts: {{=sprig.concat([sprig.dict(\"name\", 'log4j-configuration', \"mountPath\", '/config/logConfiguration', \"readOnly\", true), sprig.dict(\"name\", 'localstack-test-creds', \"mountPath\", '/config/credentials', \"readOnly\", true)], fromJSON(inputs.parameters.fileSourceVolumeMounts))}}\n      volumes: {{=sprig.concat([sprig.dict(\"name\", 'log4j-configuration', \"configMap\", sprig.dict(\"name\", sprig.default('default-log4j-config', inputs.parameters.loggingConfigurationOverrideConfigMap), \"optional\", !(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))))), sprig.dict(\"name\", 'localstack-test-creds', \"configMap\", sprig.dict(\"name\", 'localstack-test-creds', \"optional\", !(fromJSON(inputs.parameters.useLocalStack))))], fromJSON(inputs.parameters.fileSourceVolumes))}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{=toJSON(inputs.parameters.sessionName+'-rfs')}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: SnapshotMigration\n      name: {{=toJSON(inputs.parameters.crdName)}}\n      uid: {{=toJSON(inputs.parameters.crdUid)}}\n      controller: false\n      blockOwnerDeletion: true\n  labels:\n    migrations.opensearch.org/component: rfs-worker\n    workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n    migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n    migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n    migrations.opensearch.org/snapshot: {{=toJSON(inputs.parameters.snapshotK8sLabel)}}\n    migrations.opensearch.org/from-snapshot-migration: {{=toJSON(inputs.parameters.fromSnapshotMigrationK8sLabel)}}\n    migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\n    migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.crdUid)}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 5%\n      maxSurge: 10%\n  selector:\n    matchLabels:\n      migrations.opensearch.org/component: rfs-worker\n      migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.crdUid)}}\n  template:\n    metadata:\n      labels:\n        migrations.opensearch.org/component: rfs-worker\n        workflows.argoproj.io/workflow: {{=toJSON(workflow.name)}}\n        migrations.opensearch.org/source: {{=toJSON(inputs.parameters.sourceK8sLabel)}}\n        migrations.opensearch.org/target: {{=toJSON(inputs.parameters.targetK8sLabel)}}\n        migrations.opensearch.org/snapshot: {{=toJSON(inputs.parameters.snapshotK8sLabel)}}\n        migrations.opensearch.org/from-snapshot-migration: {{=toJSON(inputs.parameters.fromSnapshotMigrationK8sLabel)}}\n        migrations.opensearch.org/task: {{=toJSON(inputs.parameters.taskK8sLabel)}}\n        migrations.opensearch.org/migration-resource-uid: {{=toJSON(inputs.parameters.crdUid)}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: bulk-loader\n          image: {{=toJSON(inputs.parameters.imageReindexFromSnapshotLocation)}}\n          imagePullPolicy: {{=toJSON(inputs.parameters.imageReindexFromSnapshotPullPolicy)}}\n          command:\n            - /rfs-app/runJavaWithClasspathWithRepeat.sh\n          args:\n            - org.opensearch.migrations.RfsMigrateDocuments\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.rfsJsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty)))}}\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty)))}}\n                  key: password\n                  optional: true\n            - name: COORDINATOR_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)))}}\n                  key: username\n                  optional: true\n            - name: COORDINATOR_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: {{=toJSON(((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)))}}\n                  key: password\n                  optional: true\n            - name: MIGRATIONS_ROOT_LOG_LEVEL\n              value: {{=toJSON(inputs.parameters.rootLogLevel)}}\n            - name: BULK_REQUEST_TRACE_LOG_LEVEL\n              value: {{=toJSON(inputs.parameters.bulkRequestTraceLogLevel)}}\n            - name: FAILED_REQUESTS_LOGGER_LEVEL\n              value: {{=toJSON(inputs.parameters.failedRequestsLogLevel)}}\n            - name: CONSOLE_LOG_FORMAT\n              value: json\n            - name: JDK_JAVA_OPTIONS\n              value: {{=toJSON(inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration/configuration') : ('')))}}\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: {{=toJSON(((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : ('')))}}\n          volumeMounts: {{=sprig.concat([sprig.dict(\"name\", 'log4j-configuration', \"mountPath\", '/config/logConfiguration', \"readOnly\", true), sprig.dict(\"name\", 'localstack-test-creds', \"mountPath\", '/config/credentials', \"readOnly\", true)], fromJSON(inputs.parameters.fileSourceVolumeMounts))}}\n      volumes: {{=sprig.concat([sprig.dict(\"name\", 'log4j-configuration', \"configMap\", sprig.dict(\"name\", sprig.default('default-log4j-config', inputs.parameters.loggingConfigurationOverrideConfigMap), \"optional\", !(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))))), sprig.dict(\"name\", 'localstack-test-creds', \"configMap\", sprig.dict(\"name\", 'localstack-test-creds', \"optional\", !(fromJSON(inputs.parameters.useLocalStack))))], fromJSON(inputs.parameters.fileSourceVolumes))}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -619,6 +637,15 @@
             },
             {
               "name": "loggingConfigurationOverrideConfigMap"
+            },
+            {
+              "name": "rootLogLevel"
+            },
+            {
+              "name": "bulkRequestTraceLogLevel"
+            },
+            {
+              "name": "failedRequestsLogLevel"
             },
             {
               "name": "fileSourceVolumes"
@@ -700,6 +727,18 @@
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
                     "value": "{{inputs.parameters.loggingConfigurationOverrideConfigMap}}"
+                  },
+                  {
+                    "name": "rootLogLevel",
+                    "value": "{{inputs.parameters.rootLogLevel}}"
+                  },
+                  {
+                    "name": "bulkRequestTraceLogLevel",
+                    "value": "{{inputs.parameters.bulkRequestTraceLogLevel}}"
+                  },
+                  {
+                    "name": "failedRequestsLogLevel",
+                    "value": "{{inputs.parameters.failedRequestsLogLevel}}"
                   },
                   {
                     "name": "fileSourceVolumes",
@@ -794,6 +833,18 @@
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
                     "value": "{{inputs.parameters.loggingConfigurationOverrideConfigMap}}"
+                  },
+                  {
+                    "name": "rootLogLevel",
+                    "value": "{{inputs.parameters.rootLogLevel}}"
+                  },
+                  {
+                    "name": "bulkRequestTraceLogLevel",
+                    "value": "{{inputs.parameters.bulkRequestTraceLogLevel}}"
+                  },
+                  {
+                    "name": "failedRequestsLogLevel",
+                    "value": "{{inputs.parameters.failedRequestsLogLevel}}"
                   },
                   {
                     "name": "fileSourceVolumes",
@@ -954,6 +1005,18 @@
                     "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.documentBackfillConfig))}}"
                   },
                   {
+                    "name": "rootLogLevel",
+                    "value": "{{=fromJSON(inputs.parameters.documentBackfillConfig)['logLevels']['root']}}"
+                  },
+                  {
+                    "name": "bulkRequestTraceLogLevel",
+                    "value": "{{=fromJSON(inputs.parameters.documentBackfillConfig)['logLevels']['bulkRequestTrace']}}"
+                  },
+                  {
+                    "name": "failedRequestsLogLevel",
+                    "value": "{{=fromJSON(inputs.parameters.documentBackfillConfig)['logLevels']['failedRequests']}}"
+                  },
+                  {
                     "name": "fileSourceVolumes",
                     "value": "{{=toJSON(sprig.dig('fileSourceVolumes', [], fromJSON(inputs.parameters.documentBackfillConfig)))}}"
                   },
@@ -967,7 +1030,7 @@
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorAwsServiceSigningName\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], \"coordinatorAwsRegion\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorCaCert\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict(\"coordinatorHost\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"coordinatorInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'podReplicas', 'minPodReplicas', 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'skipApproval', 'useTargetClusterForWorkCoordination', 'resources', 'fileSourceVolumes', 'fileSourceVolumeMounts')), sprig.merge(sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion, \"sessionName\", inputs.parameters.sessionName, \"luceneDir\", '/tmp', \"cleanLocalDirs\", true), sprig.dict(\"failedDocumentStreamSessionId\", inputs.parameters.crdUid)), sprig.merge(sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), ((0 == len(sprig.dig('awsRegion', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'])))), sprig.dict(\"repoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['repoPathUri'], \"localDir\", '/tmp')))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorAwsServiceSigningName\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], \"coordinatorAwsRegion\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorCaCert\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict(\"coordinatorHost\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"coordinatorInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'podReplicas', 'minPodReplicas', 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'logLevels', 'skipApproval', 'useTargetClusterForWorkCoordination', 'resources', 'fileSourceVolumes', 'fileSourceVolumeMounts')), sprig.merge(sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion, \"sessionName\", inputs.parameters.sessionName, \"luceneDir\", '/tmp', \"cleanLocalDirs\", true), sprig.dict(\"failedDocumentStreamSessionId\", inputs.parameters.crdUid)), sprig.merge(sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), ((0 == len(sprig.dig('awsRegion', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'])))), sprig.dict(\"repoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['repoPathUri'], \"localDir\", '/tmp')))))}}"
                   },
                   {
                     "name": "resources",

@@ -188,6 +188,55 @@ describe('MigrationConfigTransformer validation', () => {
         expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
     });
 
+    it('should materialize component log-level defaults before building workflows', async () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {disableFailedDocumentStream: true}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations[0];
+
+        expect(result.proxies[0].proxyConfig.logLevels).toEqual({root: "info"});
+        expect(result.trafficReplays[0].replayerConfig.logLevels).toEqual({root: "info"});
+        expect(migration.metadataMigrationConfig?.logLevels).toEqual({root: "info"});
+        expect(migration.documentBackfillConfig?.logLevels).toEqual({
+            root: "info",
+            bulkRequestTrace: "off",
+            failedRequests: "warn",
+        });
+    });
+
+    it('should preserve configured log levels while materializing missing defaults', async () => {
+        const config = cloneBaseConfig();
+        config.traffic.proxies.proxy1.proxyConfig.logLevels = {root: "debug"};
+        config.traffic.replayers.replay1.replayerConfig = {
+            logLevels: {root: "trace"},
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {
+                logLevels: {root: "warn"},
+            },
+            documentBackfillConfig: {
+                disableFailedDocumentStream: true,
+                logLevels: {root: "error"},
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations[0];
+
+        expect(result.proxies[0].proxyConfig.logLevels).toEqual({root: "debug"});
+        expect(result.trafficReplays[0].replayerConfig.logLevels).toEqual({root: "trace"});
+        expect(migration.metadataMigrationConfig?.logLevels).toEqual({root: "warn"});
+        expect(migration.documentBackfillConfig?.logLevels).toEqual({
+            root: "error",
+            bulkRequestTrace: "off",
+            failedRequests: "warn",
+        });
+    });
+
     it('should let per-gate skip flags override broader skipApprovals', async () => {
         const config = cloneBaseConfig();
         config.skipApprovals = true;

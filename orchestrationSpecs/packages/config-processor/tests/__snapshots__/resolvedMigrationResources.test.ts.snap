@@ -104,6 +104,9 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "internetFacing": false,
       "kafkaClientId": "HttpCaptureProxyProducer",
       "listenPort": 9200,
+      "logLevels": {
+        "root": "info",
+      },
       "loggingConfigurationOverrideConfigMap": "",
       "maxTrafficBufferSize": 1048576,
       "minPodReplicas": 0,
@@ -216,6 +219,11 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "documentBackfillIndexAllowlist": [],
       "documentBackfillInitialLeaseDuration": "PT1H",
       "documentBackfillJvmArgs": "",
+      "documentBackfillLogLevels": {
+        "bulkRequestTrace": "off",
+        "failedRequests": "warn",
+        "root": "info",
+      },
       "documentBackfillLoggingConfigurationOverrideConfigMap": "",
       "documentBackfillMaxConnections": 8,
       "documentBackfillMaxShardSizeBytes": 85899345920,
@@ -250,6 +258,9 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "metadataMigrationIndexAllowlist": [],
       "metadataMigrationIndexTemplateAllowlist": [],
       "metadataMigrationJvmArgs": "",
+      "metadataMigrationLogLevels": {
+        "root": "info",
+      },
       "metadataMigrationLoggingConfigurationOverrideConfigMap": "",
       "metadataMigrationOtelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "metadataMigrationOtelTraceCollectorEndpoint": "",
@@ -312,6 +323,9 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "jvmArgs": "",
       "kafkaQuietWindowMs": 60000,
       "kafkaTrafficEnableMSKAuth": false,
+      "logLevels": {
+        "root": "info",
+      },
       "loggingConfigurationOverrideConfigMap": "",
       "maximumBackwardSkewSeconds": 5,
       "minPodReplicas": 0,

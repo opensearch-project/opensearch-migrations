@@ -72,6 +72,21 @@ function validateMinPodReplicas(
     }
 }
 
+export const LOG_LEVEL = z.enum(["off", "fatal", "error", "warn", "info", "debug", "trace", "all"]);
+
+const ROOT_LOG_LEVEL_DESC = "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without " +
+    "its own setting below, including Netty and the AWS SDK. Defaults to 'info'.";
+
+const LOG_LEVELS_DESC_SUFFIX = " Changing these rolls the pods. For per-logger control beyond these, use " +
+    "loggingConfigurationOverrideConfigMap.";
+
+function rootLogLevelOption(component: string) {
+    return z.object({
+        root: LOG_LEVEL.optional().describe(ROOT_LOG_LEVEL_DESC),
+    }).optional()
+        .describe(`Log levels for the ${component}.` + LOG_LEVELS_DESC_SUFFIX);
+}
+
 export const FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE =
     "Set failedDocumentStreamS3Bucket to record documents that can't be written, or set " +
     "disableFailedDocumentStream: true to run without a failed document stream.";
@@ -659,6 +674,7 @@ export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.objec
     ).shape,
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("capture proxy"),
     serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
         .describe("Expert setting controlling how the capture proxy Kubernetes Service is exposed. " +
             "'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. " +
@@ -747,6 +763,7 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.ob
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("traffic replayer"),
     useLocalStack: z.boolean().default(false).optional()
         .describe("[Internal] Mount local test AWS credentials for LocalStack-backed tuple S3 output. Workflow-only testing hook; not passed to the replayer process and not intended for production use."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -975,6 +992,7 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("metadata migration"),
     resources: z.preprocess(
         (v) => deepmerge(
             DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI,
@@ -1070,6 +1088,15 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: z.object({
+        root: LOG_LEVEL.optional().describe(ROOT_LOG_LEVEL_DESC),
+        bulkRequestTrace: LOG_LEVEL.optional()
+            .describe("Level for the BulkRequestTrace logger (BULK_REQUEST_TRACE_LOG_LEVEL). 'trace' logs every bulk " +
+                "request and response, including document contents. Defaults to 'off'."),
+        failedRequests: LOG_LEVEL.optional()
+            .describe("Level for the pod-local FailedRequestsLogger file (FAILED_REQUESTS_LOGGER_LEVEL). Defaults to 'warn'."),
+    }).optional()
+        .describe("Log levels for the RFS workers." + LOG_LEVELS_DESC_SUFFIX),
     skipApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."),
     useTargetClusterForWorkCoordination: z.boolean().default(false)

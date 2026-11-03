@@ -345,6 +345,29 @@ Common exception types that can be allowlisted:
 
 **Note:** Use this feature carefully. Allowlisting exceptions means those errors will be silently treated as success, which may mask legitimate issues if used incorrectly.
 
+## Logging
+
+Log levels come from environment variables read by `log4j2.properties`. In a workflow, set them with
+`documentBackfillConfig.logLevels`; see [Turning up logging](../docs/turningUpLogging.md).
+
+| Variable                          | Default | Controls                                                                 |
+|-----------------------------------|---------|--------------------------------------------------------------------------|
+| `MIGRATIONS_ROOT_LOG_LEVEL`       | `info`  | Everything not listed below, including Netty and the AWS SDK.            |
+| `FAILED_REQUESTS_LOGGER_LEVEL`    | `info`  | The `FailedRequestsLogger` file of bulk requests that ran out of retries. |
+| `BULK_REQUEST_TRACE_LOG_LEVEL`    | `off`   | The `BulkRequestTrace` logger (below).                                   |
+| `BULK_REQUEST_TRACE_MAX_BYTES`    | 1048576 | Bodies in the bulk trace are cut to this many bytes; `0` logs them whole. |
+
+### Tracing bulk requests
+
+`BULK_REQUEST_TRACE_LOG_LEVEL=trace` logs every bulk attempt as JSON on the console: attempt number, index,
+operation count, request size, and the NDJSON request body (before gzip); then the status, latency, and response
+body, or the exception when no response came back. It's off by default and costs nothing while off. It has its
+own logger so that it can be turned on without tracing the root logger, which would also trace Netty and the
+AWS SDK.
+
+**The trace contains document contents.** Turn it on only where the logs may hold the migrated data, and turn
+it off again when you're done.
+
 ## Committed metrics
 
 Document Backfill commits source/target operations, request costs, and work-item
