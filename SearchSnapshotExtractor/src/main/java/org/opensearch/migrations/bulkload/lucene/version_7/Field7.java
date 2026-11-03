@@ -24,7 +24,7 @@ public class Field7 implements LuceneField {
         
         // For ES 6.x / ES 7.x case: _id stored as binary
         if (binaryValue != null && binaryValue.bytes != null) {
-            return Uid.decodeId(binaryValue.bytes);
+            return Uid.decodeId(binaryValue.bytes, binaryValue.offset, binaryValue.length);
         }
 
         // Fallback for the ES 5.x + single_type case where _id was stored as a string.
