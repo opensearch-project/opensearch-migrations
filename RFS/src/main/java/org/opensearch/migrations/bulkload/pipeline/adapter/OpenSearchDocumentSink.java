@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,7 +15,7 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
-import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.sink.GroupedDocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -25,7 +26,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * Real {@link DocumentSink} adapter that writes documents to an OpenSearch cluster
+ * Real {@link GroupedDocumentSink} adapter that writes documents to an OpenSearch cluster
  * via the existing {@link OpenSearchClient}.
  *
  * <p>Converts clean pipeline IR ({@link Document}) to bulk API operations
@@ -35,9 +36,10 @@ import reactor.core.scheduler.Schedulers;
  * configurable exception allowlisting for idempotent migrations.
  */
 @Slf4j
-public class OpenSearchDocumentSink implements DocumentSink {
+public class OpenSearchDocumentSink implements GroupedDocumentSink {
 
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+    private static final int SOURCE_BATCHES_PER_REQUEST_GROUP = 8;
 
     private final OpenSearchClient client;
     private final IJsonTransformer transformer;
@@ -94,35 +96,93 @@ public class OpenSearchDocumentSink implements DocumentSink {
 
     @Override
     public Mono<BatchResult> writeBatch(String collectionName, List<Document> sourceBatch) {
-        long bytesInBatch = sourceBatch.stream()
+        return writeBatchGroup(collectionName, List.of(sourceBatch), 1);
+    }
+
+    @Override
+    public int preferredSourceBatchGroupSize() {
+        return SOURCE_BATCHES_PER_REQUEST_GROUP;
+    }
+
+    @Override
+    public Mono<BatchResult> writeBatchGroup(
+        String collectionName,
+        List<List<Document>> sourceBatches,
+        int requestConcurrency
+    ) {
+        long docsInBatch = sourceBatches.stream().mapToLong(List::size).sum();
+        long bytesInBatch = sourceBatches.stream()
+            .flatMap(List::stream)
             .mapToLong(Document::sourceLength)
             .sum();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
+        int splitRequestConcurrency = Math.max(1, Math.min(requestConcurrency, sourceBatches.size()));
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (nativeTransformers != null && nativeTransformers.isEmpty()) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
-            bulkMono = client.sendBulkRequestRaw(collectionName, sourceBatch,
-                requestContext, allowServerGeneratedIds, allowlist);
+            var documents = sourceBatches.stream().flatMap(List::stream).toList();
+            bulkMono = sendRaw(collectionName, documents, requestContext, splitRequestConcurrency);
         } else if (nativeTransformers != null) {
-            var operations = sourceBatch.stream()
-                .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
-                .collect(Collectors.toList());
-            for (var nativeTransformer : nativeTransformers) {
-                operations = nativeTransformer.transformOperations(operations);
+            var operations = new ArrayList<BulkOperationSpec>();
+            for (var batch : sourceBatches) {
+                List<BulkOperationSpec> transformed = batch.stream()
+                    .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
+                    .collect(Collectors.toList());
+                for (var nativeTransformer : nativeTransformers) {
+                    transformed = nativeTransformer.transformOperations(transformed);
+                }
+                operations.addAll(transformed);
             }
-            bulkMono = client.sendBulkRequest(collectionName, operations,
-                requestContext, allowServerGeneratedIds, allowlist);
+            bulkMono = sendTransformed(collectionName, operations, requestContext, splitRequestConcurrency);
         } else {
-            var bulkOps = sourceBatch.stream()
-                .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
-                .collect(Collectors.toList());
-            List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
-            bulkMono = client.sendBulkRequest(collectionName, opsToSend,
-                requestContext, allowServerGeneratedIds, allowlist);
+            var opsToSend = new ArrayList<BulkOperationSpec>();
+            for (var batch : sourceBatches) {
+                var bulkOps = batch.stream()
+                    .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
+                    .collect(Collectors.toList());
+                opsToSend.addAll(applyTransformation(bulkOps));
+            }
+            bulkMono = sendTransformed(collectionName, opsToSend, requestContext, splitRequestConcurrency);
         }
 
-        return bulkMono.map(response -> new BatchResult(sourceBatch.size(), bytesInBatch, response.target,
+        return bulkMono.map(response -> new BatchResult(docsInBatch, bytesInBatch, response.target,
             response.requests, response.failures));
+    }
+
+    private Mono<OpenSearchClient.BulkResponse> sendRaw(
+        String collectionName,
+        List<Document> documents,
+        IRfsContexts.IRequestContext requestContext,
+        int splitRequestConcurrency
+    ) {
+        return splitRequestConcurrency == 1
+            ? client.sendBulkRequestRaw(collectionName, documents, requestContext, allowServerGeneratedIds, allowlist)
+            : client.sendBulkRequestRaw(
+                collectionName,
+                documents,
+                requestContext,
+                allowServerGeneratedIds,
+                allowlist,
+                splitRequestConcurrency
+            );
+    }
+
+    private Mono<OpenSearchClient.BulkResponse> sendTransformed(
+        String collectionName,
+        List<? extends BulkOperationSpec> operations,
+        IRfsContexts.IRequestContext requestContext,
+        int splitRequestConcurrency
+    ) {
+        return splitRequestConcurrency == 1
+            ? client.sendBulkRequest(collectionName, operations, requestContext, allowServerGeneratedIds, allowlist)
+            : client.sendBulkRequest(
+                collectionName,
+                operations,
+                requestContext,
+                allowServerGeneratedIds,
+                allowlist,
+                splitRequestConcurrency
+            );
     }
 
     @SuppressWarnings("unchecked")
