@@ -22,15 +22,6 @@
         },
         {
             "type": "pattern",
-            "pattern": "MA_STAGE",
-            "inputType": "input",
-            "id": "MA_STAGE",
-            "label": "Migration Stage",
-            "defaultValue": "placeholder-stage",
-            "visible": false
-        },
-        {
-            "type": "pattern",
             "pattern": "ACCOUNT_ID",
             "inputType": "input",
             "id": "ACCOUNT_ID",
@@ -50,273 +41,2206 @@
     ],
     "widgets": [
         {
-            "height": 1,
-            "width": 24,
+            "type": "text",
+            "x": 0,
             "y": 0,
-            "x": 0,
-            "type": "text",
-            "properties": {
-                "markdown": "# Target Cluster\n",
-                "background": "transparent"
-            }
-        },
-        {
-            "height": 8,
-            "width": 12,
-            "y": 1,
-            "x": 0,
-            "type": "metric",
-            "properties": {
-                "view": "timeSeries",
-                "stacked": false,
-                "metrics": [
-                    [ { "expression": "METRICS()/1000/PERIOD(m1)*60", "id": "e1", "region": "REGION" } ],
-                    [ "AWS/ES", "IndexingRate", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "REGION", "label": "Document Ingested (included replicas) - MIN: ${MIN}, MAX: ${MAX}, AVG: ${AVG}", "id": "m1", "visible": false } ]
-                ],
-                "region": "REGION",
-                "title": "Target Cluster Document Index Rate",
-                "yAxis": {
-                    "left": {
-                        "label": "Thousands",
-                        "showUnits": false
-                    }
-                },
-                "period": 60,
-                "stat": "Sum"
-            }
-        },
-        {
-            "height": 8,
-            "width": 12,
-            "y": 1,
-            "x": 12,
-            "type": "metric",
-            "properties": {
-                "metrics": [
-                    [ { "expression": "METRICS()/1000", "id": "e1", "region": "REGION" } ],
-                    [ "AWS/ES", "SearchableDocuments", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "REGION", "label": "SearchableDocuments - MIN: ${MIN}, MAX ${MAX}", "id": "m1", "visible": false } ]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "title": "Target Cluster SearchableDocuments",
-                "period": 60,
-                "stat": "Average",
-                "yAxis": {
-                    "left": {
-                        "label": "Thousands",
-                        "showUnits": false
-                    }
-                }
-            }
-        },
-        {
-            "height": 8,
-            "width": 12,
-            "y": 9,
-            "x": 0,
-            "type": "metric",
-            "properties": {
-                "metrics": [
-                    [ "AWS/ES", "4xx", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "REGION", "label": "4xx - ${SUM}" } ],
-                    [ ".", "3xx", ".", ".", ".", ".", { "region": "REGION", "label": "3xx - ${SUM}" } ],
-                    [ ".", "2xx", ".", ".", ".", ".", { "region": "REGION", "label": "2xx - ${SUM}" } ],
-                    [ ".", "5xx", ".", ".", ".", ".", { "region": "REGION", "label": "5xx - ${SUM}" } ]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "stat": "Sum",
-                "period": 300,
-                "title": "Target Cluster Status Codes (per 5 minutes)"
-            }
-        },
-        {
-            "height": 8,
-            "width": 12,
-            "y": 9,
-            "x": 12,
-            "type": "metric",
-            "properties": {
-                "metrics": [
-                    [ "AWS/ES", "CPUUtilization", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "stat": "Minimum", "label": "Min Data Node CPU Utilization", "color": "#2ca02c", "region": "REGION" } ],
-                    [ "...", { "stat": "Maximum", "label": "Max Data Node CPU Utilization", "color": "#d62728", "region": "REGION" } ],
-                    [ "...", { "stat": "Average", "label": "Avg Data Node CPU Utilization", "color": "#1f77b4", "region": "REGION" } ],
-                    [ "AWS/ES", "MasterCPUUtilization", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "stat": "Minimum", "label": "Min Master Node CPU Utilization", "color": "#98df8a", "region": "REGION" } ],
-                    [ "...", { "stat": "Maximum", "label": "Max Master Node CPU Utilization", "color": "#ff9896", "region": "REGION" } ],
-                    [ "...", { "stat": "Average", "label": "Avg Master Node CPU Utilization", "color": "#ff7f0e", "region": "REGION" } ]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "title": "Target Cluster CPU Utilization by Node",
-                "period": 60,
-                "yAxis": {
-                    "left": {
-                        "label": "CPU Utilization (%)",
-                        "min": 0,
-                        "max": 100,
-                        "showUnits": false
-                    }
-                },
-                "legend": {
-                    "position": "bottom"
-                }
-            }
-        },
-        {
-            "height": 8,
-            "width": 12,
-            "y": 17,
-            "x": 0,
-            "type": "metric",
-            "properties": {
-                "metrics": [
-                    [ { "expression": "METRICS()/1000", "label": "", "id": "e1", "region": "REGION" } ],
-                    [ "AWS/ES", "ClusterUsedSpace", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "id": "m1", "visible": false, "period": 60, "region": "REGION" } ]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "title": "Target Cluster Used Space",
-                "period": 60,
-                "stat": "Average",
-                "yAxis": {
-                    "left": {
-                        "label": "GB",
-                        "showUnits": false
-                    }
-                }
-            }
-        },
-        {
-            "height": 8,
-            "width": 12,
-            "y": 17,
-            "x": 12,
-            "type": "metric",
-            "properties": {
-                "metrics": [
-                    [ "AWS/ES", "ThroughputThrottle", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "id": "m1", "period": 60, "region": "REGION" } ],
-                    [ ".", "IopsThrottle", ".", ".", ".", ".", { "period": 60, "region": "REGION", "id": "m2" } ]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "title": "Target Cluster EBS Throttling",
-                "period": 60,
-                "stat": "Average"
-            }
-        },
-        {
-            "height": 1,
             "width": 24,
-            "y": 25,
-            "x": 0,
-            "type": "text",
+            "height": 2,
             "properties": {
-                "markdown": "# Reindex-From-Snapshot Workers",
+                "markdown": "**How to read this dashboard.** The first section is aligned into three vertical stories: migration results, worker capacity, and target feedback. Read across a row to explain a rate change, then down a column for detail. The second section shows throughput and request shape; later sections are diagnosis and controller internals. Rates are fleet totals unless marked otherwise. CloudWatch fleet gauges are one-minute averages, so worker counts can be fractional during transitions. The controls are specified in RFS/docs/BULK_TRAFFIC_CONTROL.md.",
                 "background": "transparent"
             }
         },
         {
-            "height": 8,
-            "width": 12,
-            "y": 26,
+            "type": "text",
             "x": 0,
-            "type": "metric",
+            "y": 2,
+            "width": 24,
+            "height": 1,
             "properties": {
-                "metrics": [
-                    [ "OpenSearchMigrations", "bytesSent", "qualifier", "MA_QUALIFIER", "OTelLib", "documentMigration", { "region": "REGION", "label": "Bytes Sent - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}" } ]
-                ],
-                "period": 60,
-                "region": "REGION",
-                "stacked": false,
-                "title": "RFS Reindexing Traffic",
+                "markdown": "## Operator overview",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 3,
+            "width": 8,
+            "height": 1,
+            "properties": {
+                "markdown": "### Migration results",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 8,
+            "y": 3,
+            "width": 8,
+            "height": 1,
+            "properties": {
+                "markdown": "### Worker capacity",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 16,
+            "y": 3,
+            "width": 8,
+            "height": 1,
+            "properties": {
+                "markdown": "### Target feedback",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 4,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Documents migrated per second",
                 "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
                 "stat": "Sum",
-                "yAxis": {
-                    "left": {
-                        "label": "Bytes",
-                        "showUnits": false
-                    }
-                }
-            }
-        },
-        {
-            "height": 8,
-            "width": 12,
-            "y": 26,
-            "x": 12,
-            "type": "metric",
-            "properties": {
                 "metrics": [
-                    [ { "expression": "FLOOR(m1 / (PERIOD(m1) / 5) + 0.5)", "id": "e1", "region": "REGION", "label": "Workers", "period": 60 } ],
-                    [ "OpenSearchMigrations", "container_cpu_usage_seconds_total", "container", "bulk-loader", "namespace", "ma", { "region": "REGION", "id": "m1", "visible": false, "period": 60 } ]
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineDocsMigrated",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m1, 0) / PERIOD(m1)",
+                            "label": "Documents/s",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
                 ],
-                "period": 60,
-                "region": "REGION",
-                "stacked": false,
-                "title": "RFS Workers Reporting In",
-                "view": "timeSeries",
-                "stat": "SampleCount",
                 "yAxis": {
                     "left": {
-                        "label": "Workers",
-                        "min": 0,
-                        "showUnits": false
+                        "label": "docs/s",
+                        "showUnits": false,
+                        "min": 0
                     }
                 }
             }
         },
         {
-            "height": 8,
-            "width": 12,
-            "y": 34,
+            "type": "metric",
+            "x": 8,
+            "y": 4,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Workers by phase",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"starting\"', 'Sum', 60)) / 60",
+                            "label": "Starting",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"acquiring_work\"', 'Sum', 60)) / 60",
+                            "label": "Acquiring work",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"downloading_shard\"', 'Sum', 60)) / 60",
+                            "label": "Downloading shard",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"migrating\"', 'Sum', 60)) / 60",
+                            "label": "Migrating",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"completing\"', 'Sum', 60)) / 60",
+                            "label": "Completing",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 4,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target request outcomes (attempts/s)",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"ok\" attempt=\"first\"', 'Sum', 60))) / 60",
+                            "label": "Accepted first try",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"ok\" attempt=\"retry\"', 'Sum', 60))) / 60",
+                            "label": "Accepted after retry",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"item_errors\"', 'Sum', 60))) / 60",
+                            "label": "Response had item errors",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"throttled_429\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"admission_rejected\"', 'Sum', 60))) / 60",
+                            "label": "Target throttled",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"timeout\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"connection_reset\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"connect_failed\"', 'Sum', 60))) / 60",
+                            "label": "No response",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"payload_413\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"other_4xx\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"5xx\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"other_status\"', 'Sum', 60))) / 60",
+                            "label": "Other errors",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "attempts/s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
             "x": 0,
-            "type": "metric",
+            "y": 10,
+            "width": 8,
+            "height": 6,
             "properties": {
-                "metrics": [
-                    [ "OpenSearchMigrations", "container_cpu_usage_seconds_total", "container", "bulk-loader", "namespace", "ma", { "stat": "Sum", "region": "REGION", "id": "m1", "visible": false } ],
-                    [ { "expression": "m1 / PERIOD(m1)", "label": "CPU (cores)", "id": "e1", "region": "REGION", "color": "#1f77b4" } ]
-                ],
-                "period": 60,
-                "region": "REGION",
-                "stacked": false,
-                "title": "RFS CPU utilization",
+                "title": "Documents requiring manual action (per minute)",
                 "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,failureClass,qualifier} MetricName=\"bulkDocumentsFailed\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" failureClass=\"NON_RETRYABLE\"', 'Sum', 60)) / 60 * 60",
+                            "label": "Cannot be retried",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,failureClass,qualifier} MetricName=\"bulkDocumentsFailed\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" failureClass=\"RETRYABLE_EXHAUSTED\"', 'Sum', 60)) / 60 * 60",
+                            "label": "Retries exhausted",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
                 "yAxis": {
                     "left": {
-                        "label": "CPU (cores)",
-                        "min": 0,
-                        "showUnits": false
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
                     }
                 }
             }
         },
         {
-            "height": 8,
-            "width": 12,
-            "y": 34,
-            "x": 12,
             "type": "metric",
+            "x": 8,
+            "y": 10,
+            "width": 8,
+            "height": 6,
             "properties": {
-                "metrics": [
-                    [ { "expression": "METRICS()/1048576", "id": "e1", "region": "REGION" } ],
-                    [ "OpenSearchMigrations", "container_memory_working_set_bytes", "container", "bulk-loader", "namespace", "ma", { "stat": "Minimum", "region": "REGION", "color": "#2ca02c", "label": "Min", "id": "m1", "visible": false } ],
-                    [ "...", { "stat": "Average", "region": "REGION", "color": "#1f77b4", "label": "Avg", "id": "m2", "visible": false } ],
-                    [ "...", { "stat": "Maximum", "region": "REGION", "color": "#d62728", "label": "Max", "id": "m3", "visible": false } ]
-                ],
-                "period": 60,
-                "region": "REGION",
-                "stacked": false,
-                "title": "RFS Memory utilization",
+                "title": "Workers by connection-limit utilization",
                 "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,range,qualifier} MetricName=\"bulkWorkersByLimitUtilization\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" range=\"0-24%\"', 'Sum', 60)) / 60",
+                            "label": "0–24%",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,range,qualifier} MetricName=\"bulkWorkersByLimitUtilization\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" range=\"25-49%\"', 'Sum', 60)) / 60",
+                            "label": "25–49%",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,range,qualifier} MetricName=\"bulkWorkersByLimitUtilization\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" range=\"50-74%\"', 'Sum', 60)) / 60",
+                            "label": "50–74%",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,range,qualifier} MetricName=\"bulkWorkersByLimitUtilization\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" range=\"75-99%\"', 'Sum', 60)) / 60",
+                            "label": "75–99%",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,range,qualifier} MetricName=\"bulkWorkersByLimitUtilization\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" range=\"100%\"', 'Sum', 60)) / 60",
+                            "label": "100%",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
                 "yAxis": {
                     "left": {
-                        "label": "MB",
-                        "min": 0,
-                        "showUnits": false
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 10,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Adaptive-limit cuts per minute (fleet total)",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,signal,qualifier} MetricName=\"bulkLimitCuts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" signal=\"throttled_429\"', 'Sum', 60)) / 60 * 60",
+                            "label": "HTTP 429 / request rejected",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,signal,qualifier} MetricName=\"bulkLimitCuts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" signal=\"admission_rejected\"', 'Sum', 60)) / 60 * 60",
+                            "label": "Item-level admission rejection",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,signal,qualifier} MetricName=\"bulkLimitCuts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" signal=\"timeout\"', 'Sum', 60)) / 60 * 60",
+                            "label": "Response timeout",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 16,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Documents sent vs migrated per second",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m1, 0) / PERIOD(m1)",
+                            "label": "Sent",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineDocsMigrated",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m3, 0) / PERIOD(m3)",
+                            "label": "Migrated",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkDocsResent",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m5, 0) / PERIOD(m5)",
+                            "label": "Re-sent",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "docs/s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 16,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Requests in flight vs adaptive allowance",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "bulkInFlight",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / PERIOD(m1)",
+                            "label": "Requests in flight",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkLimit",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3 / PERIOD(m3)",
+                            "label": "Current adaptive limit",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkLimitMax",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m5 / PERIOD(m5)",
+                            "label": "Configured maximum",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkSlotWaiters",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m7",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m7 / PERIOD(m7)",
+                            "label": "Waiting for a limit slot",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 16,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Documents paused for target recovery",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "bulkDocsWaitingOnTarget",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / PERIOD(m1)",
+                            "label": "Paused documents",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "docs",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 22,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Throughput and request shape",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 23,
+            "width": 8,
+            "height": 1,
+            "properties": {
+                "markdown": "### Migration volume",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 8,
+            "y": 23,
+            "width": 8,
+            "height": 1,
+            "properties": {
+                "markdown": "### Worker resources",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 16,
+            "y": 23,
+            "width": 8,
+            "height": 1,
+            "properties": {
+                "markdown": "### Request shape",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 24,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Document and bulk request bytes (MiB/s)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineBytesMigrated",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m1, 0) / PERIOD(m1) * 9.53674e-07",
+                            "label": "Migrated document source",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m3, 0) / PERIOD(m3) / 1048576",
+                            "label": "Uncompressed bulk NDJSON",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestSentBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m5, 0) / PERIOD(m5) / 1048576",
+                            "label": "Bulk request body sent",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "MiB/s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 24,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "RFS CPU utilization (%)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "container_cpu_usage_seconds_total",
+                        "container",
+                        "bulk-loader",
+                        "namespace",
+                        "ma",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "100 * (m1 / PERIOD(m1)) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_cpu_quota\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)) / AVG(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_cpu_period\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)))",
+                            "label": "% (fleet capacity)",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "percent",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 24,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Bulk request size",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / m2",
+                            "label": "Documents per request",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m4",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m4 / m5 / 1024",
+                            "label": "KiB per request (NDJSON)",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestSentBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m7",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkRequestSentBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m8",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m7 / m8 / 1024",
+                            "label": "KiB per request (sent)",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "docs / KiB",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 30,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Shards completed (cumulative)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineShardDuration",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "RUNNING_SUM(FILL(m1, 0))",
+                            "label": "Shards completed",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 30,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "RFS memory utilization (%)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "container_memory_working_set_bytes",
+                        "container",
+                        "bulk-loader",
+                        "namespace",
+                        "ma",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "100 * (m1 / (PERIOD(m1) / 5)) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_memory_limit_bytes\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)))",
+                            "label": "% (fleet capacity)",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "container_memory_working_set_bytes",
+                        "container",
+                        "bulk-loader",
+                        "namespace",
+                        "ma",
+                        {
+                            "id": "m3",
+                            "stat": "Maximum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "100 * (m3) / (MAX(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_memory_limit_bytes\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)))",
+                            "label": "% (hottest pod)",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "percent",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 36,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Target domain",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 37,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target indexing rate and write queue",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "IndexingRate",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Indexing rate (fleet ops/min)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "ThreadpoolWriteQueue",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m2",
+                            "stat": "Maximum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Write queue (max)",
+                            "period": 60,
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "ThreadpoolWriteRejected",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Write rejected",
+                            "period": 60,
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ops/min",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 37,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target CPU and JVM pressure (%)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "CPUUtilization",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Maximum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "CPU (max node)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "JVMMemoryPressure",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m2",
+                            "stat": "Maximum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "JVM pressure (max node)",
+                            "period": 60
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "percent",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 37,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target latency and HTTP status codes (all clients)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "IndexingLatency",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Average",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Indexing latency (ms)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "4xx",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m2",
+                            "stat": "Sum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "4xx",
+                            "period": 60,
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "5xx",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "5xx",
+                            "period": 60,
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ms",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 43,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target searchable documents (thousands) and used space (GB)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "SearchableDocuments",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Maximum",
+                            "visible": false,
+                            "region": "REGION",
+                            "label": "Searchable docs (k)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / 1000",
+                            "label": "Searchable docs (k)",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "ClusterUsedSpace",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m3",
+                            "stat": "Maximum",
+                            "visible": false,
+                            "region": "REGION",
+                            "label": "Used space (GB)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3 / 1024",
+                            "label": "Used space (GB)",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "thousands of docs",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "GB",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 49,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Retry and recovery",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 50,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Delay between retries for each batch (s)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "bulkAttemptGap",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkAttemptGap",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / m2 / 1000",
+                            "label": "Mean",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 50,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target-unavailable document attempts per minute",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsTargetUnavailable\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60 * 60",
+                            "label": "${PROP('Dim.reason')}",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 50,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Bulk attempt duration (s)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"bulkAttemptDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"bulkAttemptDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60)) / 1000",
+                            "label": "Mean",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 56,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Batch completion time and oldest unfinished batch (s)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "bulkBatchAge",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkBatchAge",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / m2 / 1000",
+                            "label": "Mean completion time",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkOldestOpenBatchAge",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m4",
+                            "stat": "Maximum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m4 / 1000",
+                            "label": "Oldest unfinished (highest worker)",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 56,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Retry budget tokens and exhaustion",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "retryBudgetTokens",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Minimum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1",
+                            "label": "Lowest worker",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "retryBudgetTokens",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Maximum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3",
+                            "label": "Highest worker",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "retryBudgetEmpty",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m5, 0) / PERIOD(m5) * 60",
+                            "label": "Ran out per minute",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "tokens",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 62,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Failure diagnosis",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 63,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Documents given up after retries (per minute)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsGaveUp\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60 * 60",
+                            "label": "${PROP('Dim.reason')}",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 63,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Item errors per second",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" retryable=\"true\"', 'Sum', 60) / 60",
+                            "label": "${PROP('Dim.errorType')} (retried)",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" retryable=\"false\"', 'Sum', 60) / 60",
+                            "label": "${PROP('Dim.errorType')} (terminal)",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "errors/s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 69,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Flow-control internals (expert)",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 70,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target request detail: first vs retry by outcome",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
+                            "label": "${PROP('Dim.attempt')} ${PROP('Dim.outcome')}",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "attempts/s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 70,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Adaptive limit state",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "bulkLimit",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Average",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1",
+                            "label": "Mean worker",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkLimit",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Maximum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3",
+                            "label": "Highest worker",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkLimitThreshold",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Average",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m5",
+                            "label": "Growth threshold (mean)",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "connections",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 70,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Limit growth and source bottlenecks",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "bulkLimitQuietResets",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m1, 0) / PERIOD(m1) * 60",
+                            "label": "Quiet resets/min",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkLimitGrowthSkipped",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(m3, 0) / PERIOD(m3)",
+                            "label": "Growth skipped/s",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkTimeToFullLimit",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkTimeToFullLimit",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m6",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m5 / m6 / 1000",
+                            "label": "Time to full limit (s)",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "events (see legend)",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 76,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Retry delay breakdown (expert)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,errorClass,qualifier} MetricName=\"bulkRetryDelay\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,errorClass,qualifier} MetricName=\"bulkRetryDelay\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60)) / 1000",
+                            "label": "Planned backoff",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "retryBudgetWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "retryBudgetWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m2 / m3 / 1000",
+                            "label": "Retry-budget wait",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkSlotWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "bulkSlotWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m6",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m5 / m6 / 1000",
+                            "label": "Target-slot wait",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 76,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Batches split per minute (expert)",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkBatchSplits\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60 * 60",
+                            "label": "${PROP('Dim.reason')}",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
                     }
                 }
             }
