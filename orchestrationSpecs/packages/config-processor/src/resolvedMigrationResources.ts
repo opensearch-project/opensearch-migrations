@@ -585,7 +585,11 @@ export function dryRunResourcePolicy(
             // "gated" fields use the same equality-or-approval shape as the VAP:
             // unchanged values pass, changed values require an ApprovalGate for
             // the workflow run. The caller supplies that approval state here.
-            if (field.changeRestriction === "gated" && !options.approved) {
+            // A field gated only on increase applies without approval when it goes down.
+            const gatedDecrease = field.gatedOnIncreaseOnly === true && previousHasValue && pendingHasValue &&
+                typeof previousValue === "number" && typeof pendingValue === "number" &&
+                pendingValue <= previousValue;
+            if (field.changeRestriction === "gated" && !gatedDecrease && !options.approved) {
                 changes.push({
                     path,
                     previousValue,

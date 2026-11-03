@@ -2064,11 +2064,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfig": {
                       "type": "string",
-                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration.",
+                      "checksumFor": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
                     },
                     "transformerConfigFile": {
                       "type": "string",
-                      "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "checksumFor": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
                     },
                     "enableSourcelessMigrations": {
                       "type": "boolean",
@@ -4448,15 +4458,30 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "transformerConfigBase64": {
                         "type": "string",
                         "default": "",
-                        "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration."
+                        "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration.",
+                        "checksumFor": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "transformerConfig": {
                         "type": "string",
-                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration.",
+                        "checksumFor": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "transformerConfigFile": {
                         "type": "string",
-                        "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                        "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                        "checksumFor": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "metadataTransforms": {
                         "type": "array",
@@ -5297,14 +5322,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                         "default": "PT1H",
-                        "description": "[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.",
-                        "changeRestriction": "gated"
+                        "description": "[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration. Safe to change on a running migration: it only affects leases granted after the change."
                       },
                       "maxConnections": {
                         "type": "number",
                         "default": 10,
-                        "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.",
-                        "changeRestriction": "gated"
+                        "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing. On a running migration, lowering it applies immediately; raising it adds load to the target and needs approval.",
+                        "changeRestriction": "gated",
+                        "gatedOnIncreaseOnly": true
                       },
                       "maxShardSizeBytes": {
                         "type": "number",
