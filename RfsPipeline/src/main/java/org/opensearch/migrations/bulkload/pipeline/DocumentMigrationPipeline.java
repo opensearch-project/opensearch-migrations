@@ -12,6 +12,7 @@ import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.sink.GroupedDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import lombok.extern.slf4j.Slf4j;
@@ -49,6 +50,10 @@ public class DocumentMigrationPipeline {
     private final long maxBytesPerBatch;
     private final int partitionConcurrency;
     private final int batchConcurrency;
+    private final GroupedDocumentSink groupedSink;
+    private final int sourceBatchGroupSize;
+    private final int requestConcurrencyPerGroup;
+    private final int batchGroupConcurrency;
 
     // Observable state — polled by PipelineProgressMonitor
     private final AtomicLong totalDocs = new AtomicLong();
@@ -99,6 +104,16 @@ public class DocumentMigrationPipeline {
         this.maxBytesPerBatch = maxBytesPerBatch;
         this.partitionConcurrency = partitionConcurrency;
         this.batchConcurrency = source.requiresOrderedWrites() ? 1 : batchConcurrency;
+        this.groupedSink = sink instanceof GroupedDocumentSink grouped ? grouped : null;
+        this.sourceBatchGroupSize = groupedSink != null ? groupedSink.preferredSourceBatchGroupSize() : 1;
+        if (sourceBatchGroupSize < 1) {
+            throw new IllegalArgumentException(
+                "GroupedDocumentSink.preferredSourceBatchGroupSize() must be >= 1, got " + sourceBatchGroupSize
+            );
+        }
+        this.requestConcurrencyPerGroup = Math.min(this.batchConcurrency, sourceBatchGroupSize);
+        this.batchGroupConcurrency =
+            (this.batchConcurrency + requestConcurrencyPerGroup - 1) / requestConcurrencyPerGroup;
     }
 
     /** Snapshot of pipeline progress, safe to read from any thread. */
@@ -135,15 +150,26 @@ public class DocumentMigrationPipeline {
             return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
-                .flatMapSequential(batch -> {
+                .buffer(sourceBatchGroupSize)
+                .flatMapSequential(sourceBatches -> {
                     activeBatches.incrementAndGet();
-                    // Preserve the source position before handing the batch to the sink.
-                    var lastPosition = batch.get(batch.size() - 1).position();
-                    var sourceMetrics = MigrationMetrics.Operations.fromDocuments(batch);
-                    return Mono.defer(() -> sink.writeBatch(collectionName, batch))
+                    // Preserve source positions and transform-batch boundaries while allowing the sink to repack
+                    // transformed output into exact target requests across this bounded checkpoint window.
+                    var lastBatch = sourceBatches.get(sourceBatches.size() - 1);
+                    var lastPosition = lastBatch.get(lastBatch.size() - 1).position();
+                    var sourceMetrics = sourceBatches.stream()
+                        .map(MigrationMetrics.Operations::fromDocuments)
+                        .reduce(MigrationMetrics.Operations.ZERO, MigrationMetrics.Operations::plus);
+                    return Mono.defer(() -> groupedSink != null
+                            ? groupedSink.writeBatchGroup(
+                                collectionName,
+                                sourceBatches,
+                                Math.min(requestConcurrencyPerGroup, sourceBatches.size())
+                            )
+                            : sink.writeBatch(collectionName, sourceBatches.get(0)))
                         .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
                         .doFinally(s -> activeBatches.decrementAndGet());
-                }, batchConcurrency)
+                }, batchGroupConcurrency, 1)
                 // Advance checkpoints in emission order; writes may complete out of order.
                 .scan(new ProgressCursor(partition, startingPosition, 0, 0, MigrationMetrics.ZERO), (previous, batch) -> {
                     var result = batch.result();

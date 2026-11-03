@@ -248,6 +248,31 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void repacksTransformedOutputAcrossSourceBatchesWithoutChangingTransformBatchSize() throws Exception {
+        var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":1}"),
+            doc("d3", "{\"x\":1}"), doc("d4", "{\"x\":1}"));
+        var transformedBatchSizes = new CopyOnWriteArrayList<Integer>();
+        IJsonTransformer transform = input -> {
+            transformedBatchSizes.add(((List<Map<String, Object>>) input).size());
+            return input;
+        };
+        var sink = sink(transform, Integer.MAX_VALUE, serialized(docs.subList(0, 2)).length);
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+
+        var cursors = new DocumentMigrationPipeline(source, sink, 1, 1000)
+            .migratePartition(partition, "idx", 0).collectList().block(Duration.ofSeconds(10));
+
+        assertEquals(List.of(1, 1, 1, 1), transformedBatchSizes);
+        assertEquals(List.of(2, 2), requestCounts());
+        assertNotNull(cursors);
+        assertEquals(1, cursors.size());
+        assertEquals(4, cursors.get(0).nextPosition());
+    }
+
+    @Test
     void splitRequestsCompleteInOrderBeforeTheSourceCheckpointAdvances() throws Exception {
         var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":1}"));
         var sink = sink(null, Integer.MAX_VALUE, serialized(docs).length - 1L);

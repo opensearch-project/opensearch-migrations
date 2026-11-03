@@ -699,9 +699,18 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
+        return sendBulkRequest(indexName, docs, context, allowServerGeneratedIds, allowlist, 1);
+    }
+
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
+                                              IRfsContexts.IRequestContext context,
+                                              boolean allowServerGeneratedIds,
+                                              DocumentExceptionAllowlist allowlist,
+                                              int splitRequestConcurrency)
+    {
         return sendBulkRequests(indexName, docs, op -> new PreparedOperation(() -> op,
             BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER)),
-            TRANSFORMED_PATH, context, allowlist);
+            TRANSFORMED_PATH, context, allowlist, splitRequestConcurrency);
     }
 
     /** Send raw source bytes without a byte[]→Map→byte[] round-trip. */
@@ -709,10 +718,18 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
+        return sendBulkRequestRaw(indexName, docs, context, allowServerGeneratedIds, allowlist, 1);
+    }
+
+    public Mono<BulkResponse> sendBulkRequestRaw(String indexName, List<Document> docs,
+                                                  IRfsContexts.IRequestContext context,
+                                                  boolean allowServerGeneratedIds,
+                                                  DocumentExceptionAllowlist allowlist,
+                                                  int splitRequestConcurrency) {
         return sendBulkRequests(indexName, docs, doc -> new PreparedOperation(
             () -> BulkOperationConverter.fromRawDocument(doc, indexName),
             BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER)),
-            RAW_PATH, context, allowlist);
+            RAW_PATH, context, allowlist, splitRequestConcurrency);
     }
 
     /** Request path labels for oversized-operation reporting: source bytes as-is, or serialized operations. */
@@ -726,8 +743,13 @@ public abstract class OpenSearchClient {
 
     private <T> Mono<BulkResponse> sendBulkRequests(
         String indexName, List<T> docs, Function<T, PreparedOperation> prepare, String path,
-        IRfsContexts.IRequestContext context, DocumentExceptionAllowlist allowlist
+        IRfsContexts.IRequestContext context, DocumentExceptionAllowlist allowlist, int splitRequestConcurrency
     ) {
+        if (splitRequestConcurrency < 1) {
+            throw new IllegalArgumentException(
+                "splitRequestConcurrency must be >= 1, got " + splitRequestConcurrency
+            );
+        }
         // The batching predicate and retry state must be fresh for every subscription.
         return Mono.defer(() -> {
             var tooLarge = new long[1];
@@ -741,8 +763,12 @@ public abstract class OpenSearchClient {
                 .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
                     (PreparedOperation op) -> op.encoded().size()), true)
                 .doOnNext(batch -> noteOversizedOperation(indexName, batch, path, context))
-                // A split batch completes in source order, before its source checkpoint can advance.
-                .concatMap(batch -> executeBulkWithRetry(indexName, batch, context, allowlist), 1)
+                // Results remain in source order, and all requests complete before the source checkpoint advances.
+                .flatMapSequential(
+                    batch -> executeBulkWithRetry(indexName, batch, context, allowlist),
+                    splitRequestConcurrency,
+                    1
+                )
                 .reduce(OpenSearchClient::combine)
                 .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"))
                 .map(response -> response.plusFailures(failuresOf(FailureClass.NON_RETRYABLE, tooLarge[0])));
