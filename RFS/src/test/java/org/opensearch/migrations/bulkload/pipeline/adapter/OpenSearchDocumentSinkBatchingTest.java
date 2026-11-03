@@ -45,6 +45,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.util.retry.Retry;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -153,6 +154,19 @@ class OpenSearchDocumentSinkBatchingTest {
     @ValueSource(strings = {"{\n\"text\":\"invalid\nstring\"}", "{\"text\":\"invalid\rstring\"}", "{\n\"value\":}"})
     void rejectsInvalidJsonBeforeNormalizingLineBreaks(String source) {
         assertThrows(IOException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER));
+    }
+
+    @Test
+    void rawSourceSizingDefersJsonValidationUntilTheConcurrentSendPath() {
+        var invalid = doc("d1", "{\"value\":}");
+        var valid = doc("d1", "{\"value\":1}");
+        var sink = sink(null, Integer.MAX_VALUE, 1024);
+
+        long measured = assertDoesNotThrow(() -> sink.sourceBatchBytes("idx", invalid));
+
+        assertEquals(serialized(List.of(valid)).length - valid.sourceLength() + invalid.sourceLength(), measured);
+        assertThrows(RuntimeException.class,
+            () -> sink.writeBatch("idx", List.of(invalid)).block(Duration.ofSeconds(10)));
     }
 
     @Test
