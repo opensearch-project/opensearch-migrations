@@ -230,7 +230,7 @@ class OpenSearchClientTest {
             .thenReturn(Mono.just(finalDocSuccess));
 
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
-        doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy(any());
 
         // Action
         var responseMono = openSearchClient.sendBulkRequest(
@@ -295,7 +295,7 @@ class OpenSearchClientTest {
         var documents = List.of(
             new Document("d1", body, Document.Operation.UPSERT, Map.of(), Map.of()),
             new Document("d2", body, Document.Operation.UPSERT, Map.of(), Map.of()));
-        doReturn(Retry.fixedDelay(1, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(Retry.fixedDelay(1, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy(any());
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(bulkItemResponse(true,
                 List.of(itemEntryRetryableFailure("d1"), itemEntryRetryableFailure("d2")))))
@@ -376,7 +376,7 @@ class OpenSearchClientTest {
         when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
         var maxRetries = 6;
-        doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy(any());
 
         var bulkDoc = createBulkDoc(docId1);
         var indexName = "alwaysFailingIndexName";
@@ -431,7 +431,7 @@ class OpenSearchClientTest {
     @ParameterizedTest
     @CsvSource({"raw,false", "raw,true", "map,false", "map,true", "native,false", "native,true"})
     void retriesPreserveOnlyExplicitVersioningAndRespectIdPolicy(String path, boolean generateIds) throws Exception {
-        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy(any());
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntry("done"), itemEntryRetryableFailure("retry")))))
             .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("retry")))));
@@ -579,7 +579,7 @@ class OpenSearchClientTest {
             when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
             var maxRetries = 1;
-            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy(any());
 
             var bulkDoc = createBulkDoc(docId1);
             var indexName = "alwaysFailingIndexName";
@@ -624,7 +624,7 @@ class OpenSearchClientTest {
             when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
             var maxRetries = 1;
-            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy(any());
 
             var bulkDoc = createBulkDoc(docId1);
             var indexName = "alwaysFailingIndexName";

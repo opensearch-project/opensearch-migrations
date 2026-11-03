@@ -25,6 +25,7 @@ import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationM
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.BulkRetryPolicy;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
@@ -78,7 +79,7 @@ class OpenSearchDocumentSinkBatchingTest {
         var client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
             Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, maxDocs, maxBytes) {
             @Override
-            protected Retry getBulkRetryStrategy() {
+            protected Retry getBulkRetryStrategy(BulkRetryPolicy.Batch batch) {
                 return retry;
             }
         };

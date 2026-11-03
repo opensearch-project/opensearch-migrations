@@ -85,7 +85,7 @@ class S3FailedDocumentStreamSinkTest {
             .failureType("mapper_parsing_exception")
             .failureClass(FailureClass.NON_RETRYABLE)
             .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
-            .requestItem(req1)
+            .target(req1)
             .responseItem(resp1)
             .build()).subscribe();
 
@@ -105,7 +105,7 @@ class S3FailedDocumentStreamSinkTest {
         assertThat(lines.length, equalTo(1));
         JsonNode parsed = mapper.readTree(lines[0]);
         assertThat(parsed.path("targetIndex").asText(), equalTo("movies"));
-        assertThat(parsed.path("requestItem").path("op").asText(), equalTo("index"));
+        assertThat(parsed.path("target").path("op").asText(), equalTo("index"));
         assertThat(parsed.path("responseItem").path("index").path("status").asInt(), equalTo(400));
         assertThat(sink.getLocation(), equalTo("s3://my-bucket/rfs-failed-document-stream/session=sess-A/"));
     }
@@ -195,7 +195,7 @@ class S3FailedDocumentStreamSinkTest {
             .sessionId("s").workerId("w").targetIndex(null).documentId("d-1")
             .failureType("err").failureClass(FailureClass.RETRYABLE_EXHAUSTED)
             .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
-            .requestItem(mapper.createObjectNode())
+            .target(mapper.createObjectNode())
             .responseItem(mapper.createObjectNode())
             .build()).subscribe();
         sink.flush().block();
@@ -248,7 +248,7 @@ class S3FailedDocumentStreamSinkTest {
             .sessionId("s").workerId("w").targetIndex("idx").documentId("huge")
             .failureType("document_too_large").failureClass(FailureClass.NON_RETRYABLE)
             .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
-            .requestItem(mapper.createObjectNode().put("document", hugeBody))
+            .target(mapper.createObjectNode().put("body", hugeBody))
             .responseItem(mapper.createObjectNode())
             .build();
 
@@ -261,7 +261,7 @@ class S3FailedDocumentStreamSinkTest {
         assertThat(countLines(captured.get(0).data()), equalTo(1));
         var roundTripped = mapper.readTree(decode(captured.get(0).data()).strip());
         assertThat(roundTripped.path("documentId").asText(), equalTo("huge"));
-        assertThat(roundTripped.path("requestItem").path("document").asText(), equalTo(hugeBody));
+        assertThat(roundTripped.path("target").path("body").asText(), equalTo(hugeBody));
         assertThat(mapper.readTree(decode(captured.get(1).data()).strip()).path("documentId").asText(),
             equalTo("after"));
     }
@@ -548,7 +548,7 @@ class S3FailedDocumentStreamSinkTest {
             .sessionId("s").workerId("w").targetIndex(index).documentId(docId)
             .failureType("err").failureClass(FailureClass.NON_RETRYABLE)
             .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
-            .requestItem(mapper.createObjectNode())
+            .target(mapper.createObjectNode())
             .responseItem(mapper.createObjectNode())
             .build();
     }

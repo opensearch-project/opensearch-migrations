@@ -10,6 +10,8 @@ import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.AdaptiveLimit;
+import org.opensearch.migrations.bulkload.common.retry.RetryBudget;
 import org.opensearch.migrations.bulkload.version_es_5_6.OpenSearchClient_ES_5_6;
 import org.opensearch.migrations.bulkload.version_es_6_8.OpenSearchClient_ES_6_8;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
@@ -45,6 +47,11 @@ public class OpenSearchClientFactory {
     private Version version;
     private CompressionMode compressionMode;
     RestClient client;
+    // One per process per target, shared by every client this factory makes: used only for bulk writes, so a
+    // throttled target can't starve work coordination or metadata requests of retries.
+    private final RetryBudget bulkRetryBudget = new RetryBudget();
+    // Same scope; bounded by maxConnections. Null without a connection limit (metadata migration and tools).
+    private final AdaptiveLimit bulkInFlightLimit;
 
     public OpenSearchClientFactory(ConnectionContext connectionContext) {
         this(connectionContext, 0);
@@ -57,6 +64,7 @@ public class OpenSearchClientFactory {
         this.connectionContext = connectionContext;
         this.maxConnections = maxConnections;
         this.client = new RestClient(connectionContext, maxConnections);
+        this.bulkInFlightLimit = maxConnections > 0 ? new AdaptiveLimit(maxConnections) : null;
     }
 
     public OpenSearchClient determineVersionAndCreate() {
@@ -92,11 +100,14 @@ public class OpenSearchClientFactory {
         }
         var clientClass = getOpenSearchClientClass(version);
         try {
-            return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class,
+            var created = clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class,
                     CompressionMode.class, int.class, long.class)
                 .newInstance(restClient == null ? client : restClient,
                     failedRequestsLogger == null ? new FailedRequestsLogger() : failedRequestsLogger,
                     version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest);
+            created.setBulkRetryBudget(bulkRetryBudget);
+            created.setBulkInFlightLimit(bulkInFlightLimit);
+            return created;
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
             throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
         }

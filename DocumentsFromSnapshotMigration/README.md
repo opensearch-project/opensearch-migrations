@@ -88,6 +88,8 @@ To see the default shard size, use the `--help` CLI option:
 | --index-allowlist                 | Optional. List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02'). Default: all non-system indices (e.g. those not starting with '.')         |
 | --max-shard-size-bytes            | Optional. The maximum shard size, in bytes, to allow when performing the document migration. Default: 80 * 1024 * 1024 * 1024 (80 GB)                    |
 | --initial-lease-duration          | Optional. The time that the first attempt to migrate a shard's documents should take. Default: PT10M                                                     |
+| --max-lease-duration              | Optional. Upper bound on a shard's lease, which otherwise doubles each time the shard is picked up again after its lease expired. Default: P1D  |
+| --bulk-response-timeout           | Optional. How long each bulk request waits for its response once sent before it's retried as unanswered. Just over the 300 s idle timeout common to load balancers in front of a cluster, so behind one a stuck bulk gets a 504 first. Default: PT310S |
 | --max-document-size-bytes         | Optional. Document bodies bigger than this after transformation (or without a transform) are recorded in the failed document stream instead of being sent. Default: 0 (no limit)              |
 | --otel-trace-collector-endpoint   | Optional. Endpoint (host:port or URL) for the OpenTelemetry Collector to which traces should be forwarded. Omit to disable trace export                  |
 | --otel-metrics-collector-endpoint | Optional. Endpoint (host:port or URL) for the OpenTelemetry Collector to which metrics should be forwarded. Omit to disable metric export                |
@@ -96,7 +98,7 @@ To see the default shard size, use the `--help` CLI option:
 | --target-password                 | The password for target cluster authentication                                                                                                           |
 | --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                            |
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
-| --documents-size-per-bulk-request | Optional. Maximum bulk request body size in bytes, including action metadata and newlines. A document exceeding the limit by itself is sent alone. Default: 10 MiB |
+| --documents-size-per-bulk-request | Optional. Maximum bulk request body size in bytes, including action metadata and newlines. A document exceeding the limit by itself is sent alone. 5–15 MB works well; keep it at or under the largest request the target accepts: its `http.max_content_length`, or a smaller limit set in front of it. Default: 10 MiB |
 | --allowed-doc-exception-types     | Optional. Comma-separated list of document-level exception types to treat as successful operations. Enables idempotent migrations by allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success. Default: none |
 
 ## Advanced Arguments
@@ -107,7 +109,8 @@ These arguments should be carefully considered before setting, can include exper
 |-----------------------------|:---------------------------------------------------------------------------------------------------------------------|
 | --disable-compression  | Flag to disable request compression for target cluster. Default: false                                               |
 | --documents-per-bulk-request | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size) |
-| --max-connections           | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                   |
+| --max-connections           | `M`, the most bulk requests in flight to the target at once (and so the most connections used for them). The in-flight limit starts at 1 and stays within [1/32, `M`], pacing requests below 1; see [The in-flight limit](../RFS/docs/BULK_TRAFFIC_CONTROL.md#the-in-flight-limit). Default: 10 |
+| --max-failure-percent-to-fail-documents | `F`, 0-100. A transient failure (an unknown status, a response timeout, or an unknown item error) counts toward giving a document up, or toward splitting a batch, only if at most `F` percent of the worker's other requests (or, for an item error, other documents) failed in the last two minutes; see [Evidence](../RFS/docs/BULK_TRAFFIC_CONTROL.md#evidence-whether-a-failure-counts). Throttles and an unavailable target never count. 100 ignores other requests' failures. Default: 5 |
 | --target-insecure           | Flag to allow untrusted SSL certificates for target cluster. Default: false                                          |
 | --coordinator-host          | The coordinator cluster host and port (e.g. http://localhost:9200). When provided, work coordination uses this cluster instead of the target cluster |
 | --coordinator-username      | Username for coordinator cluster basic authentication                                                                |
@@ -177,6 +180,8 @@ Common RFS worker outcomes:
 | `0` | Worker completed its current unit of work and exited normally. |
 | `2` | Worker exited from lease-timeout/handoff flow (`PROCESS_TIMED_OUT_EXIT_CODE`). This is expected in lease handoff scenarios. |
 | `3` | No work left (`NO_WORK_LEFT_EXIT_CODE`). |
+| `4` | Work exists but every item is leased to another worker (`NO_WORK_AVAILABLE_EXIT_CODE`). Keeps Kubernetes from restarting the pod in a tight loop. |
+| `5` | The snapshot couldn't be read: its repository, index or shard metadata, or a blob (`SNAPSHOT_READ_FAILED_EXIT_CODE`). Not retriable; the reason, path and context are logged at ERROR first. |
 
 In orchestrated runs (Argo/ECS/K8s), treat `2` as a recoverable handoff signal rather than terminal data-loss failure.
 
@@ -360,7 +365,7 @@ Log levels come from environment variables read by `log4j2.properties`. In a wor
 ### Tracing bulk requests
 
 `BULK_REQUEST_TRACE_LOG_LEVEL=trace` logs every bulk attempt as JSON on the console: attempt number, index,
-operation count, request size, and the NDJSON request body (before gzip); then the status, latency, and response
+operation count, request size before and after gzip, and the NDJSON request body (before gzip); then the status, latency, and response
 body, or the exception when no response came back. It's off by default and costs nothing while off. It has its
 own logger so that it can be turned on without tracing the root logger, which would also trace Netty and the
 AWS SDK.
@@ -368,9 +373,23 @@ AWS SDK.
 **The trace contains document contents.** Turn it on only where the logs may hold the migrated data, and turn
 it off again when you're done.
 
+## How bulk writes are paced
+
+A worker writes as fast as the target accepts and backs off when it doesn't: an adaptive limit on requests in
+flight, jittered retry waits, a shared retry budget, and splitting a failing batch to find a document responsible.
+Throttles and failures that many requests see never fail a document; a document that fails on its own is recorded in
+the failed document stream after a few retries, and nothing slows a flood of such failures. Every rule, setting,
+metric and log line, and the contract for failed-document records, are specified in
+[Bulk Traffic Control and Failure Handling in RFS](../RFS/docs/BULK_TRAFFIC_CONTROL.md).
+
+Once a minute, while it has bulk activity, each worker logs a summary of its bulk traffic, at WARN while documents
+are waiting on the target and at INFO otherwise
+([example and metrics](../RFS/docs/BULK_TRAFFIC_CONTROL.md#metrics-and-logs)). Per-work-item totals are in the
+committed metrics (`metrics.flowControl`).
+
 ## Committed metrics
 
-Document Backfill commits source/target operations, request costs, and work-item
+Document Backfill commits source/target operations, request costs, terminal failures, and work-item
 duration with each checkpoint, plus whole-shard snapshot counts on completion. Sum the committed ranges to measure completed
 work, and use snapshot counts to validate the target even while the source keeps
 ingesting. See [committed metrics](../docs/committedMetrics.md) for the published structure, existing coordinator archives, aggregation rules,
