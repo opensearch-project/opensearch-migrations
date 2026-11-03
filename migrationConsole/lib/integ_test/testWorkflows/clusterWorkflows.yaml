@@ -1344,6 +1344,95 @@ spec:
             valueFrom:
               path: /tmp/cluster-config.json
 
+    # OpenSearch 2.19 starved on purpose, so that bulk writers get pushed back (Test0011RfsBackpressure): one CPU,
+    # one write thread and a write queue of 10, so more than about 11 concurrent bulks are rejected.
+    - name: opensearch-2-19-starved-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      container:
+        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        command: [sh, -c]
+        args:
+          - |
+            # Add OpenSearch Helm repository
+            helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+            helm repo update
+            
+            # Create OpenSearch configuration
+            cat > /tmp/opensearch.yml << EOF
+            cluster.name: {{inputs.parameters.cluster-name}}
+            network.host: 0.0.0.0
+            discovery.type: single-node
+            plugins.security.disabled: true
+            thread_pool.write.size: 1
+            thread_pool.write.queue_size: 10
+            EOF
+            
+            # Create OpenSearch values file
+            cat > /tmp/opensearch-values.yaml << 'EOF'
+            fullnameOverride: {{inputs.parameters.cluster-name}}
+            nodeGroup: ""
+            image:
+              repository: "opensearchproject/opensearch"
+              tag: "2.19.1"
+            singleNode: true
+            replicas: 1
+            securityConfig:
+              enabled: false
+            resources:
+              requests:
+                cpu: "1"
+                memory: "2Gi"
+              limits:
+                cpu: "1"
+                memory: "2Gi"
+            persistence:
+              enabled: false
+            opensearchJavaOpts: "-Xms1g -Xmx1g"
+            plugins:
+              enabled: true
+              installList:
+                - "repository-s3"
+            EOF
+            
+            # Install OpenSearch 2.19.1
+            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
+              --namespace {{inputs.parameters.namespace}} \
+              --values /tmp/opensearch-values.yaml \
+              --set-file config."opensearch\.yml"=/tmp/opensearch.yml
+            
+            # Create cluster credentials secret for compatibility with older test helpers.
+            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
+              --from-literal=username=admin \
+              --from-literal=password="myStrongPassword123!" \
+              -n "{{inputs.parameters.namespace}}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} use-case=http-basic-credentials -o yaml | \
+              kubectl apply -f -
+            
+            # Generate cluster configuration output
+            cat > /tmp/cluster-config.json << EOF
+            {
+              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "allowInsecure": true
+            }
+            EOF
+
+            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              --namespace {{inputs.parameters.namespace}}
+            
+            echo "Starved OpenSearch 2.19.1 cluster created successfully"
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
     # OpenSearch 3.1 Single Node Template
     # - Uses Argo "resource" templates (no image / no kubectl container)
     # - Creates: Secret, Service, StatefulSet, ConfigMap
