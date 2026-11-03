@@ -10,6 +10,7 @@ import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -729,6 +730,31 @@ public abstract class OpenSearchClient {
         return sendBulkRequests(indexName, docs, doc -> new PreparedOperation(
             () -> BulkOperationConverter.fromRawDocument(doc, indexName),
             BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER)),
+            RAW_PATH, context, allowlist, splitRequestConcurrency);
+    }
+
+    /**
+     * A raw document whose exact bulk encoding was prepared while the source pipeline sized its batch.
+     */
+    public record PreparedRawDocument(Document document, BulkNdjson.EncodedOperation encoded) {
+        public PreparedRawDocument {
+            Objects.requireNonNull(document);
+            Objects.requireNonNull(encoded);
+        }
+    }
+
+    /**
+     * Send raw documents using encodings retained from exact source-batch sizing.
+     */
+    public Mono<BulkResponse> sendBulkRequestPreparedRaw(
+        String indexName,
+        List<PreparedRawDocument> docs,
+        IRfsContexts.IRequestContext context,
+        DocumentExceptionAllowlist allowlist,
+        int splitRequestConcurrency
+    ) {
+        return sendBulkRequests(indexName, docs, prepared -> new PreparedOperation(
+            () -> BulkOperationConverter.fromRawDocument(prepared.document(), indexName), prepared.encoded()),
             RAW_PATH, context, allowlist, splitRequestConcurrency);
     }
 

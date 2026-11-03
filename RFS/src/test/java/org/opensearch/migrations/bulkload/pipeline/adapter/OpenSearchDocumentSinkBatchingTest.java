@@ -273,6 +273,62 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
+    void rawPipelineCarriesRequestCapacityAcrossSourceBatchBoundaries() {
+        var fixture = rawBatchFixture();
+        int totalDocs = fixture.sourceDocsPerBatch() * 16;
+        var docs = fixture.documents().subList(0, totalDocs);
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+
+        new DocumentMigrationPipeline(source, sink(null, Integer.MAX_VALUE, fixture.requestLimit()),
+            Integer.MAX_VALUE, fixture.requestLimit(), 1, 10)
+            .migratePartition(partition, "idx", 0).blockLast(Duration.ofSeconds(20));
+
+        var counts = requestCounts();
+        assertTrue(counts.subList(0, counts.size() - 1).stream().allMatch(count -> count == 3),
+            "Only the shard's final request may be partially filled: " + counts);
+        assertEquals(totalDocs % 3 == 0 ? 3 : totalDocs % 3, counts.get(counts.size() - 1));
+    }
+
+    @Test
+    void rawPipelineRefillsConcurrencyWithoutWaitingForARequestGroupTail() throws Exception {
+        var docs = IntStream.range(0, 16)
+            .mapToObj(i -> doc("d%03d".formatted(i), "{\"x\":\"" + "x".repeat(200) + "\"}"))
+            .toList();
+        long requestLimit = serialized(docs.subList(0, 1)).length;
+        assertTrue(2L * docs.get(0).sourceLength() > requestLimit,
+            "The source pipeline must make one source batch per document");
+        var completions = IntStream.range(0, docs.size()).mapToObj(i -> Sinks.<HttpResponse>one()).toList();
+        var starts = IntStream.range(0, docs.size()).mapToObj(i -> new CountDownLatch(1)).toList();
+        var requestNumber = new AtomicInteger();
+        var sink = sink(null, Integer.MAX_VALUE, requestLimit);
+        doAnswer(invocation -> {
+            int number = requestNumber.getAndIncrement();
+            requests.add(invocation.getArgument(1));
+            starts.get(number).countDown();
+            return completions.get(number).asMono();
+        }).when(transport).postAsyncBytes(any(), any(), any(), any());
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+        var subscription = new DocumentMigrationPipeline(source, sink, Integer.MAX_VALUE, requestLimit, 1, 3)
+            .migratePartition(partition, "idx", 0).subscribe();
+        try {
+            for (int i = 0; i < 3; i++) {
+                assertTrue(starts.get(i).await(10, TimeUnit.SECONDS));
+            }
+            for (int i = 0; i < 6; i++) {
+                completions.get(i).tryEmitValue(OK);
+                assertTrue(starts.get(i + 3).await(1, TimeUnit.SECONDS),
+                    "Completing request " + (i + 1) + " did not immediately start request " + (i + 4));
+            }
+        } finally {
+            subscription.dispose();
+        }
+    }
+
+    @Test
     void splitRequestsCompleteInOrderBeforeTheSourceCheckpointAdvances() throws Exception {
         var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":1}"));
         var sink = sink(null, Integer.MAX_VALUE, serialized(docs).length - 1L);
@@ -400,6 +456,23 @@ class OpenSearchDocumentSinkBatchingTest {
     private static byte[] serialized(List<Document> docs) {
         return BulkNdjson.toRawNdjsonBytes(docs, "idx", false, MAPPER);
     }
+
+    private static RawBatchFixture rawBatchFixture() {
+        for (int padding = 50; padding <= 500; padding++) {
+            int bodyPadding = padding;
+            var documents = IntStream.range(0, 100)
+                .mapToObj(i -> doc("d%03d".formatted(i), "{\"x\":\"" + "x".repeat(bodyPadding) + "\"}"))
+                .toList();
+            long requestLimit = serialized(documents.subList(0, 3)).length;
+            int sourceDocsPerBatch = Math.toIntExact(requestLimit / documents.get(0).sourceLength());
+            if (sourceDocsPerBatch > 3 && sourceDocsPerBatch * 8 % 3 != 0) {
+                return new RawBatchFixture(documents, requestLimit, sourceDocsPerBatch);
+            }
+        }
+        throw new AssertionError("Unable to construct the source/target batch-size fixture");
+    }
+
+    private record RawBatchFixture(List<Document> documents, long requestLimit, int sourceDocsPerBatch) {}
 
     private List<Integer> requestCounts() {
         return requests.stream().map(bytes -> new String(bytes, StandardCharsets.UTF_8).split("\n").length / 2).toList();

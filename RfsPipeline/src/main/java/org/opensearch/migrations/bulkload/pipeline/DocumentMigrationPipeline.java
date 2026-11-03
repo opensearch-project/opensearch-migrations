@@ -147,9 +147,13 @@ public class DocumentMigrationPipeline {
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
+            var sourceBatchBytes = groupedSink == null
+                ? (java.util.function.ToLongFunction<Document>) Document::sourceLength
+                : (java.util.function.ToLongFunction<Document>) document ->
+                    groupedSink.sourceBatchBytes(collectionName, document);
             return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
-                .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
+                .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, sourceBatchBytes), true)
                 .buffer(sourceBatchGroupSize)
                 .flatMapSequential(sourceBatches -> {
                     activeBatches.incrementAndGet();
