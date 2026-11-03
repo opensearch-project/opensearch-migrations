@@ -9,8 +9,6 @@ on:
       - main
   pull_request:
   merge_group:
-  schedule:
-    - cron: '17 4 * * *'
   workflow_dispatch:
 
 permissions:
@@ -23,8 +21,6 @@ concurrency:
 jobs:
   k8s-local-test:
     name: ${{ matrix.name }}
-    # Scheduled runs only on the main repo, not on forks.
-    if: github.event_name != 'schedule' || github.repository == 'opensearch-project/opensearch-migrations'
     strategy:
       fail-fast: false
       matrix:
@@ -77,7 +73,6 @@ jobs:
 
   docker-compose-e2e-test:
     # Ported from vars/dockerComposeE2ETest.groovy
-    if: github.event_name != 'schedule' || github.repository == 'opensearch-project/opensearch-migrations'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -121,7 +116,7 @@ jobs:
             pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
 
       - name: Collect container logs
-        if: failure() || cancelled()
+        if: always()
         run: |
           mkdir -p logs/docker
           for container in $(docker ps -aq); do
@@ -129,7 +124,7 @@ jobs:
             docker logs "$container" > "logs/docker/${container_name}_logs.txt" 2>&1 || true
           done
       - name: Upload container logs
-        if: failure() || cancelled()
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: docker-compose-e2e-logs

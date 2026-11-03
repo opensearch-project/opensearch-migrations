@@ -138,11 +138,11 @@ jobs:
             --capture-proxy-service-type=ClusterIP
 
       - name: Sanitize artifact name
-        if: failure() || cancelled()
+        if: always()
         run: echo "ARTIFACT_SUFFIX=${SOURCE_VERSION//[^A-Za-z0-9._-]/-}-to-${TARGET_VERSION//[^A-Za-z0-9._-]/-}" >> "$GITHUB_ENV"
       - name: Upload logs and reports
-        # Only when a test fails or times out (a job timeout shows up as cancelled).
-        if: failure() || cancelled()
+        # Always, so passing runs show what the tests actually did.
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: k8s-local-${{ env.ARTIFACT_SUFFIX }}
@@ -159,7 +159,7 @@ jobs:
         if: >-
           !cancelled() && inputs.save-registry-cache &&
           steps.registry-cache.outputs.cache-hit != 'true' &&
-          contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+          contains(fromJSON('["push", "workflow_dispatch"]'), github.event_name)
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:
           path: ${{ runner.temp }}/registry-cache
