@@ -165,6 +165,10 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
 
+// An assumable IAM role ARN in any partition (aws, aws-cn, aws-us-gov, aws-iso-b, ...), with an optional
+// IAM path (role/service-role/Name). Only roles can be assumed, so users, groups, and policies are rejected.
+export const S3_ROLE_ARN_PATTERN = /^(arn:aws(-[a-z]+)*:iam::\d{12}:role(\/[\w+=,.@-]+)*\/[\w+=,.@-]+)?$/;
+
 // Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
 // S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
 export const REPO_CONFIG = z.object({
@@ -178,8 +182,9 @@ export const REPO_CONFIG = z.object({
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
             "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
-    s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
-        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
+    s3RoleArn: z.string().regex(S3_ROLE_ARN_PATTERN).default("").optional()
+        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3 " +
+            "(e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). " +
             "Used for s3:// URIs only; ignored for gs://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
