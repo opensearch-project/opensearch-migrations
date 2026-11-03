@@ -335,4 +335,78 @@ class OpenSearchClientFactoryTest {
         verify(restClient, times(1)).getAsync("", null);
         verifyNoMoreInteractions(restClient);
     }
+
+    private static final String SETTINGS_PATH = "_cluster/settings?include_defaults=true";
+
+    /** Answers the n-th (1-based) request to {@code path} with {@code statusForAttempt(n)}, or 200 with {@code okBody}. */
+    private AtomicInteger answer(String path, java.util.function.IntUnaryOperator statusForAttempt, String okBody) {
+        var attempts = new AtomicInteger();
+        when(restClient.getAsync(path, null)).thenReturn(Mono.defer(() -> {
+            int status = statusForAttempt.applyAsInt(attempts.incrementAndGet());
+            return Mono.just(new HttpResponse(status, "", Map.of(), status == 200 ? okBody : "{}"));
+        }));
+        return attempts;
+    }
+
+    @ParameterizedTest
+    @CsvSource({"408", "429", "503"})
+    void versionDetectionRetriesTransientStatuses(int status) {
+        var attempts = answer("", n -> n == 1 ? status : 200, ROOT_RESPONSE_OS_1_0_0);
+
+        assertThat(openSearchClientFactory.getClusterVersion(), equalTo(Version.fromString("OS 1.0.0")));
+        assertEquals(2, attempts.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"400", "401", "403"})
+    void versionDetectionDoesNotRetryConfigurationErrors(int status) {
+        var attempts = answer("", n -> status, ROOT_RESPONSE_OS_1_0_0);
+        when(restClient.getAsync("solr/admin/info/system?wt=json", null))
+            .thenReturn(Mono.just(new HttpResponse(404, "", Map.of(), "")));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+            () -> openSearchClientFactory.getClusterVersion());
+        assertEquals(1, attempts.get());
+    }
+
+    @Test
+    void versionDetectionStillFailsWhenThrottlingOutlastsItsRetries() {
+        var attempts = answer("", n -> 429, ROOT_RESPONSE_OS_1_0_0);
+        when(restClient.getAsync("solr/admin/info/system?wt=json", null))
+            .thenReturn(Mono.just(new HttpResponse(404, "", Map.of(), "")));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+            () -> openSearchClientFactory.getClusterVersion());
+        assertEquals(3, attempts.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"408", "429", "503"})
+    void compressionCheckRetriesTransientStatuses(int status) {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        var attempts = answer(SETTINGS_PATH, n -> n == 1 ? status : 200, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+
+        openSearchClientFactory.determineVersionAndCreate();
+
+        assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
+        assertEquals(2, attempts.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"401, 1", "403, 1", "404, 1", "429, 3"})
+    void compressionCheckWarnsNamingTheStatusWhenItFallsBackToUncompressed(int status, int expectedAttempts) {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        var attempts = answer(SETTINGS_PATH, n -> status, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+
+        try (var logs = new org.opensearch.migrations.testutils.CloseableLogSetup(
+            OpenSearchClientFactory.class.getName())) {
+            openSearchClientFactory.determineVersionAndCreate();
+
+            assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+            assertEquals(expectedAttempts, attempts.get());
+            assertTrue(logs.getCapturedLogEvents().stream().anyMatch(e -> e.getMessage().contains("uncompressed")
+                    && e.getMessage().contains("status " + status)),
+                "log events: " + logs.getLogEvents());
+        }
+    }
 }
