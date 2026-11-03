@@ -101,6 +101,7 @@ functionName(jobName: jobNameOverride ?: null)
 | k8sLocalElasticsearch7xTestCover.groovy | k8sLocalElasticsearch7xTest | JOB_NAME_OVERRIDE |
 | k8sLocalElasticsearch8xTestCover.groovy | k8sLocalElasticsearch8xTest | JOB_NAME_OVERRIDE |
 | k8sLocalOpensearch1xTestCover.groovy | k8sLocalOpensearch1xTest | JOB_NAME_OVERRIDE |
+| k8sLocalRfsBackpressureTestCover.groovy | k8sLocalRfsBackpressureTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolr8xTestCover.groovy | k8sLocalSolr8xTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolrOtherTestCover.groovy | k8sLocalSolrOtherTest | JOB_NAME_OVERRIDE |
 | k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE |
