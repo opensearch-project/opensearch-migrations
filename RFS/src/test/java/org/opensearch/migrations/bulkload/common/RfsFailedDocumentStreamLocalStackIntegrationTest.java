@@ -51,7 +51,7 @@ import software.amazon.awssdk.services.s3.model.S3Object;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -146,7 +146,7 @@ class RfsFailedDocumentStreamLocalStackIntegrationTest {
         client.setFailedDocumentStreamWorkItem("movies__0__0");
         doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(client).getBulkRetryStrategy();
 
-        assertThrows(Exception.class, () -> client.sendBulkRequest(
+        assertDoesNotThrow(() -> client.sendBulkRequest(
             "movies",
             List.of(createBulkDoc("ok-1"), createBulkDoc("dup-1"), createBulkDoc("bad-map"), createBulkDoc("throttled")),
             mock(IRfsContexts.IRequestContext.class),

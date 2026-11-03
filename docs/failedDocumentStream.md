@@ -93,6 +93,27 @@ Each record includes the target index, document id, the OpenSearch `failureType`
 `mapper_parsing_exception`), and the original document (`requestItem`) — enough to diagnose or re-submit a
 failure without returning to the source cluster.
 
+## When documents can't be written
+
+With the stream configured, documents that can't be written are recorded and the backfill moves on: their
+batch completes and the shard's progress advances past them. Without the stream, there is nowhere to keep
+them, so the work item fails and a successor retries it from the last checkpoint.
+
+| `failureClass`        | `failureType`                       | When                                                                                       |
+|-----------------------|-------------------------------------|--------------------------------------------------------------------------------------------|
+| `NON_RETRYABLE`       | an OpenSearch item error type       | The bulk item failed with an error that can't succeed on retry (e.g. `mapper_parsing_exception`). |
+| `NON_RETRYABLE`       | `http_400`, `http_413`              | The target rejected a one-document bulk request outright. Larger requests rejected this way are split in half, repeatedly, to find the document responsible. |
+| `NON_RETRYABLE`       | `document_too_large`                | The document body after transformation (or the original body when no transform is configured) is bigger than `maxDocumentSizeBytes`, so it was never sent. Action metadata and NDJSON separators are not counted. `responseItem` has its body `size`, the `limit`, and `measured: requestBody`. |
+| `RETRYABLE_EXHAUSTED` | an OpenSearch item error type       | The bulk item failed on every retry.                                                       |
+| `RETRYABLE_EXHAUSTED` | `http_<status>` (e.g. `http_429`)   | The whole request failed with that status on every retry.                                  |
+| `RETRYABLE_EXHAUSTED` | `no_response`                       | No response arrived (timeout, connection reset). A larger request that gets no response twice in a row is split in half, repeatedly; a single document gives up after four. |
+
+For request-level failures, `responseItem` holds the status and the start of the response body, or the
+transport exception. A request-level failure is only recorded when the target accepted some other bulk request
+during the same batch (an earlier part of it, or a concurrent batch). If the target accepted nothing, it is
+treated as unavailable and the work item fails instead, so an outage doesn't send every in-flight document to
+the stream.
+
 ## Deleting records
 
 `backfill reset` archives the working state and, by default, preserves the failed document stream. To
@@ -105,25 +126,43 @@ console backfill reset --include-failed-document-stream
 
 ## Configuration
 
-`failedDocumentStreamS3Bucket` is the stream's on/off switch. Set it and terminal document failures are
-recorded to that bucket; leave it out and nothing is recorded, so a failed migration leaves no inventory
-of which documents did not land. There is no separate enable flag and no default bucket — a migration
-only writes failures to a bucket its own config names.
+Every backfill must choose: set `failedDocumentStreamS3Bucket` to record documents that can't be written, or
+set `disableFailedDocumentStream: true` to run without a stream. A `documentBackfillConfig` with neither (or
+both) fails validation. There is no default bucket — a migration only writes failures to a bucket its own
+config names. Without a stream, a failed migration leaves no inventory of which documents did not land.
 
-The destination is set under a migration's `documentBackfillConfig`, where all fields are optional:
+> **Upgrading:** configs written before this requirement have neither field and are now rejected. Add one of
+> them to every `documentBackfillConfig`. To keep the previous behavior, add
+> `disableFailedDocumentStream: true`.
+
+The destination is set under a migration's `documentBackfillConfig`:
 
 ```yaml
 documentBackfillConfig:
   failedDocumentStreamS3Bucket: my-failed-documents-bucket
 ```
 
+or, to opt out:
+
+```yaml
+documentBackfillConfig:
+  disableFailedDocumentStream: true
+```
+
+Both are gated: changing either on a running migration needs `workflow approve change`, because switching
+the stream mid-run leaves an inconsistent failure record.
+
 | Option                              | Default                        | Description                                                    |
 |-------------------------------------|--------------------------------|----------------------------------------------------------------|
-| `failedDocumentStreamS3Bucket`      | none — stream off              | Bucket for records. Setting it enables the stream.             |
+| `failedDocumentStreamS3Bucket`      | none                           | Bucket for records. This or `disableFailedDocumentStream` is required. |
+| `disableFailedDocumentStream`       | none                           | `true` runs without a stream. This or the bucket is required.  |
 | `failedDocumentStreamS3Prefix`      | `rfs-failed-document-stream/`  | Key prefix. Each run writes under `<prefix>/session=<uid>/`.   |
 | `failedDocumentStreamS3Region`      | resolved by config processor   | Region for the bucket. Ignored without a bucket.               |
 | `failedDocumentStreamS3Endpoint`    | resolved by config processor   | Endpoint override (e.g. LocalStack). Ignored without a bucket. |
 | `failedDocumentStreamMaxBufferBytes`| `67108864` (64 MiB)            | Max in-memory bytes per index before rotating to a new object. |
+
+Running RFS directly, pass `--failed-document-stream-s3-bucket <bucket>` or `--disable-failed-document-stream`;
+it refuses to start with neither or both.
 
 The region and endpoint are still resolved for you when the bucket is set: the config processor takes your
 value if given, else the snapshot repo's, else the deployment default, and records the result in run

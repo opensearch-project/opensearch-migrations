@@ -2333,6 +2333,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 10485760
                     },
+                    "maxDocumentSizeBytes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Documents bigger than this many bytes are not sent to the target. They are recorded in the failed document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies to each document body after transformation, or to the original document body when no transform is configured. It excludes bulk action metadata and NDJSON separators, so leave room for that overhead under the target's request limit. Unset means no limit.",
+                      "checksumFor": [
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
+                    },
                     "initialLeaseDuration": {
                       "type": "string",
                       "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
@@ -2405,7 +2414,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "failedDocumentStreamS3Bucket": {
                       "type": "string",
-                      "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
+                      "description": "S3 bucket for the failed document stream, where documents that can't be written are recorded. Either this or disableFailedDocumentStream is required; there is no default bucket.",
+                      "changeRestriction": "gated"
+                    },
+                    "disableFailedDocumentStream": {
+                      "type": "boolean",
+                      "description": "Set to true to run without a failed document stream. Documents that can't be written are then logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. Either this or failedDocumentStreamS3Bucket is required.",
+                      "changeRestriction": "gated"
                     },
                     "failedDocumentStreamS3Region": {
                       "type": "string",
@@ -5318,6 +5333,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": 10485760,
                         "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."
                       },
+                      "maxDocumentSizeBytes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Documents bigger than this many bytes are not sent to the target. They are recorded in the failed document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies to each document body after transformation, or to the original document body when no transform is configured. It excludes bulk action metadata and NDJSON separators, so leave room for that overhead under the target's request limit. Unset means no limit.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
+                      },
                       "initialLeaseDuration": {
                         "type": "string",
                         "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
@@ -5427,7 +5451,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "failedDocumentStreamS3Bucket": {
                         "type": "string",
-                        "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
+                        "description": "S3 bucket for the failed document stream, where documents that can't be written are recorded. Either this or disableFailedDocumentStream is required; there is no default bucket.",
+                        "changeRestriction": "gated"
+                      },
+                      "disableFailedDocumentStream": {
+                        "type": "boolean",
+                        "description": "Set to true to run without a failed document stream. Documents that can't be written are then logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. Either this or failedDocumentStreamS3Bucket is required.",
+                        "changeRestriction": "gated"
                       },
                       "failedDocumentStreamS3Region": {
                         "type": "string",

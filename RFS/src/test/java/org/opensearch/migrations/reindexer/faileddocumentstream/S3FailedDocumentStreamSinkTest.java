@@ -235,6 +235,38 @@ class S3FailedDocumentStreamSinkTest {
     }
 
     @Test
+    void aRecordBiggerThanTheBufferRotatesIntoItsOwnObjectIntact() throws Exception {
+        var captured = new java.util.ArrayList<CapturedUpload>();
+        var sink = S3FailedDocumentStreamSink.builder()
+            .bucket("b").prefix("rfs-failed-document-stream/").sessionId("s").workerId("w").region("r")
+            .maxBufferBytes(1024)
+            .uploader(capturing(captured))
+            .build();
+        var mapper = new ObjectMapper();
+        var hugeBody = "x".repeat(64 * 1024);
+        var huge = FailedDocumentStreamRecord.builder()
+            .sessionId("s").workerId("w").targetIndex("idx").documentId("huge")
+            .failureType("document_too_large").failureClass(FailureClass.NON_RETRYABLE)
+            .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
+            .requestItem(mapper.createObjectNode().put("document", hugeBody))
+            .responseItem(mapper.createObjectNode())
+            .build();
+
+        sink.write(huge).block();
+        sink.write(buildRecordForIndex("idx", "after")).block();
+        sink.flush().block();
+        sink.close();
+
+        assertThat(captured, hasSize(2));
+        assertThat(countLines(captured.get(0).data()), equalTo(1));
+        var roundTripped = mapper.readTree(decode(captured.get(0).data()).strip());
+        assertThat(roundTripped.path("documentId").asText(), equalTo("huge"));
+        assertThat(roundTripped.path("requestItem").path("document").asText(), equalTo(hugeBody));
+        assertThat(mapper.readTree(decode(captured.get(1).data()).strip()).path("documentId").asText(),
+            equalTo("after"));
+    }
+
+    @Test
     void rotationUploadFailureBlocksGatingFlushThenClears() {
         // A failed rotation upload must make the gating flush() fail too, so the work item
         // is not marked complete and a successor reprocesses. The error is surfaced once.

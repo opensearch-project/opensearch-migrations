@@ -201,6 +201,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "documentBackfillCoordinatorRetryInitialDelayMs": 1000,
       "documentBackfillCoordinatorRetryMaxDelayMs": 64000,
       "documentBackfillCoordinatorRetryMaxRetries": 7,
+      "documentBackfillDisableFailedDocumentStream": true,
       "documentBackfillDocTransformerConfig": "",
       "documentBackfillDocTransformerConfigBase64": "",
       "documentBackfillDocTransformerConfigFile": "",

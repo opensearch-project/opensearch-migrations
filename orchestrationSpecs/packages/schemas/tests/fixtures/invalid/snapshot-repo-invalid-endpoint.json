@@ -34,7 +34,7 @@
       "perSnapshotConfig": {
         "snap1": [
           {
-            "documentBackfillConfig": {}
+            "documentBackfillConfig": { "disableFailedDocumentStream": true }
           }
         ]
       }

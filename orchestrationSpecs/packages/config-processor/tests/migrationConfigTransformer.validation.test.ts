@@ -154,7 +154,8 @@ describe('MigrationConfigTransformer validation', () => {
                     skipEvaluateApproval: innerValue,
                     skipMigrateApproval: innerValue
                 },
-                documentBackfillConfig: innerValue === undefined ? {} : {
+                documentBackfillConfig: innerValue === undefined ? {disableFailedDocumentStream: true} : {
+                    disableFailedDocumentStream: true,
                     skipApproval: innerValue
                 }
             };
@@ -176,7 +177,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].skipApprovals = false;
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {disableFailedDocumentStream: true}
         };
 
         const result = await transformer.processFromObject(config);
@@ -196,6 +197,7 @@ describe('MigrationConfigTransformer validation', () => {
                 skipEvaluateApproval: false
             },
             documentBackfillConfig: {
+                disableFailedDocumentStream: true,
                 skipApproval: false
             }
         };
@@ -435,6 +437,7 @@ describe('MigrationConfigTransformer validation', () => {
                     }
                 },
                 documentBackfillConfig: {
+                    disableFailedDocumentStream: true,
                     documentTransforms: [
                         {
                             transformName: "TypeMappingSanitizationTransformerProvider",
@@ -851,6 +854,7 @@ describe('MigrationConfigTransformer validation', () => {
     it('should keep workload identity stable across gated RFS changes only', async () => {
         const withBackfill = JSON.parse(JSON.stringify(baseConfig));
         withBackfill.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            disableFailedDocumentStream: true,
             maxConnections: 4,
         };
 
@@ -906,11 +910,11 @@ describe('MigrationConfigTransformer validation', () => {
         const withMetadataOnly = cloneBaseConfig(); // baseConfig already has only metadataMigrationConfig
 
         const withBoth = cloneBaseConfig();
-        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {disableFailedDocumentStream: true};
 
         const withBackfillOnly = cloneBaseConfig();
         delete withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig;
-        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {disableFailedDocumentStream: true};
 
         const metadataOnly = (await transformer.processFromObject(withMetadataOnly)).snapshotMigrations[0];
         const both = (await transformer.processFromObject(withBoth)).snapshotMigrations[0];
@@ -1222,6 +1226,7 @@ describe('MigrationConfigTransformer validation', () => {
                                     skipMigrateApproval: true,
                                 },
                                 documentBackfillConfig: {
+                                    disableFailedDocumentStream: true,
                                     podReplicas: 1,
                                 },
                             }

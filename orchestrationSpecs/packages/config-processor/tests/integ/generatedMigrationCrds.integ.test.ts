@@ -98,6 +98,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
                 snap1: [{
                     metadataMigrationConfig: {},
                     documentBackfillConfig: {
+                        disableFailedDocumentStream: true,
                         maxConnections: 8,
                     },
                 }],
@@ -677,8 +678,10 @@ describe("generated migration CRDs live compatibility", () => {
 
         // Control: an explicit bucket does reach the CR, so the assertions above aren't vacuous.
         const configWithBucket = sampleConfig() as any;
-        configWithBucket.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig
-            .failedDocumentStreamS3Bucket = "user-named-bucket";
+        const backfillWithBucket = configWithBucket.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0]
+            .documentBackfillConfig;
+        delete backfillWithBucket.disableFailedDocumentStream;
+        backfillWithBucket.failedDocumentStreamS3Bucket = "user-named-bucket";
         const withBucket = await applyAndReadSpec(
             await generateSnapshotMigrationManifest(configWithBucket), "with-bucket");
 

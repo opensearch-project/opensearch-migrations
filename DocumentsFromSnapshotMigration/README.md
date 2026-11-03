@@ -21,6 +21,7 @@ From the root directory of the repo, run a CLI command like so:
   --s3-repo-uri s3://your-s3-uri \
   --s3-region us-fake-1 \
   --lucene-dir /tmp/lucene_files \
+  --disable-failed-document-stream \
   --target-host http://hostname:9200" \
   || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
@@ -36,6 +37,7 @@ From the root directory of the repo, run a CLI command like so:
   --snapshot-name reindex-from-snapshot \
   --snapshot-local-dir /snapshot \
   --lucene-dir /tmp/lucene_files \
+  --disable-failed-document-stream \
   --target-host http://hostname:9200" \
   || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
@@ -51,6 +53,7 @@ If your target cluster has basic auth enabled on it, you can supply those creden
   --s3-repo-uri s3://your-s3-uri \
   --s3-region us-fake-1 \
   --lucene-dir /tmp/lucene_files \
+  --disable-failed-document-stream \
   --target-host http://hostname:9200 \
   --target-username <user> \
   --target-password <pass>" \
@@ -80,9 +83,12 @@ To see the default shard size, use the `--help` CLI option:
 | --s3-repo-uri                     | The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2                                                                                          |
 | --s3-region                       | The AWS Region the S3 bucket is in, like: us-east-2                                                                                                      |
 | --lucene-dir                      | The absolute path to the directory where we'll put the Lucene docs                                                                                       |
+| --failed-document-stream-s3-bucket | S3 bucket where documents that can't be written are recorded. This or `--disable-failed-document-stream` is required                                  |
+| --disable-failed-document-stream  | Run without a failed document stream. This or `--failed-document-stream-s3-bucket` is required                                                             |
 | --index-allowlist                 | Optional. List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02'). Default: all non-system indices (e.g. those not starting with '.')         |
 | --max-shard-size-bytes            | Optional. The maximum shard size, in bytes, to allow when performing the document migration. Default: 80 * 1024 * 1024 * 1024 (80 GB)                    |
 | --initial-lease-duration          | Optional. The time that the first attempt to migrate a shard's documents should take. Default: PT10M                                                     |
+| --max-document-size-bytes         | Optional. Document bodies bigger than this after transformation (or without a transform) are recorded in the failed document stream instead of being sent. Default: 0 (no limit)              |
 | --otel-trace-collector-endpoint   | Optional. Endpoint (host:port or URL) for the OpenTelemetry Collector to which traces should be forwarded. Omit to disable trace export                  |
 | --otel-metrics-collector-endpoint | Optional. Endpoint (host:port or URL) for the OpenTelemetry Collector to which metrics should be forwarded. Omit to disable metric export                |
 | --target-host                     | The target host and port (e.g. http://localhost:9200)                                                                                                    |
@@ -183,6 +189,7 @@ If a transformation causes exceptions on the target, either from existing docs o
   --snapshot-name reindex-from-snapshot \
   --snapshot-local-dir /snapshot \
   --lucene-dir /tmp/lucene_files \
+  --disable-failed-document-stream \
   --target-host http://hostname:9200 \
   --allowed-doc-exception-types version_conflict_engine_exception"
 ```

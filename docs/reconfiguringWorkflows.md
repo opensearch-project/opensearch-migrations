@@ -383,6 +383,7 @@ Every field of `documentBackfillConfig` is listed here; a test in `orchestration
 | `spec.documentBackfillConfig.documentTransforms` | Impossible |  | ✅ |
 | `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe | Bigger bulks don't add concurrency; the target sees the same parallelism | ❌ |
 | `spec.documentBackfillConfig.documentsSizePerBulkRequest` | Safe | Same as documentsPerBulkRequest | ❌ |
+| `spec.documentBackfillConfig.maxDocumentSizeBytes` | Impossible | Changes which documents migrate | ✅ |
 | `spec.documentBackfillConfig.initialLeaseDuration` | Safe | Only schedules leases granted after the change | ❌ |
 | `spec.documentBackfillConfig.maxConnections` | Gated on increase | Lowering only reduces load on the target; raising adds load, so it needs approval | ❌ |
 | `spec.documentBackfillConfig.maxShardSizeBytes` | Gated | Drives ephemeral-storage sizing for the worker pods | ❌ |
@@ -399,7 +400,8 @@ Every field of `documentBackfillConfig` is listed here; a test in `orchestration
 | `spec.documentBackfillConfig.enableSourcelessMigrations` | Impossible |  | ✅ |
 | `spec.documentBackfillConfig.useRecoverySource` | Impossible |  | ✅ |
 | `spec.documentBackfillConfig.failedDocumentStreamS3Prefix` | Safe |  | ❌ |
-| `spec.documentBackfillConfig.failedDocumentStreamS3Bucket` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Bucket` | Gated | Switching the stream mid-run leaves an inconsistent failure record | ❌ |
+| `spec.documentBackfillConfig.disableFailedDocumentStream` | Gated | Same as failedDocumentStreamS3Bucket | ❌ |
 | `spec.documentBackfillConfig.failedDocumentStreamS3Region` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.failedDocumentStreamS3Endpoint` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.failedDocumentStreamMaxBufferBytes` | Safe |  | ❌ |

@@ -84,6 +84,11 @@ public class RestClient {
     }
 
     protected RestClient(ConnectionContext connectionContext, HttpClient httpClient) {
+        this(connectionContext, httpClient, DEFAULT_REQUEST_TIMEOUT);
+    }
+
+    /** @param responseTimeout how long to wait for a response after the request is sent */
+    protected RestClient(ConnectionContext connectionContext, HttpClient httpClient, Duration responseTimeout) {
         this.connectionContext = connectionContext;
         TlsCredentialsProvider tlsCredentialsProvider = connectionContext.getTlsCredentialsProvider();
 
@@ -102,7 +107,7 @@ public class RestClient {
             .baseUrl(connectionContext.getUri().toString())
             .disableRetry(false) // Enable one retry on connection reset with no delay
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) DEFAULT_CONNECT_TIMEOUT.toMillis())
-            .responseTimeout(DEFAULT_REQUEST_TIMEOUT)
+            .responseTimeout(responseTimeout)
             .keepAlive(true);
     }
 

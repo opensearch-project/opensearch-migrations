@@ -43,7 +43,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doReturn;
@@ -152,8 +152,9 @@ class RfsFailedDocumentStreamIntegrationTest {
             createBulkDoc("throttled")
         );
 
-        // The bulk eventually fails because "throttled" can't recover.
-        assertThrows(Exception.class, () -> openSearchClient.sendBulkRequest(
+        // "throttled" never recovers; with a failed document stream configured, the batch still completes
+        // once its terminal failures are recorded, so the migration moves past them.
+        assertDoesNotThrow(() -> openSearchClient.sendBulkRequest(
             "movies",
             bulkDocs,
             mock(IRfsContexts.IRequestContext.class),
@@ -329,7 +330,7 @@ class RfsFailedDocumentStreamIntegrationTest {
         // (which still contains the allowlisted item at position 0).
         doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
 
-        assertThrows(Exception.class, () -> openSearchClient.sendBulkRequest(
+        assertDoesNotThrow(() -> openSearchClient.sendBulkRequest(
             "movies",
             List.of(createBulkDoc("dup-1"), createBulkDoc("throttled-1")),
             mock(IRfsContexts.IRequestContext.class),
@@ -407,7 +408,7 @@ class RfsFailedDocumentStreamIntegrationTest {
         // and pendingOps has been compacted to just "throttled-1".
         doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
 
-        assertThrows(Exception.class, () -> openSearchClient.sendBulkRequest(
+        assertDoesNotThrow(() -> openSearchClient.sendBulkRequest(
             "movies",
             List.of(createBulkDoc("bad-map-1"), createBulkDoc("throttled-1")),
             mock(IRfsContexts.IRequestContext.class),
@@ -468,7 +469,7 @@ class RfsFailedDocumentStreamIntegrationTest {
         openSearchClient.setFailedDocumentStreamContext(failedDocumentStreamSink, "session-genid", "worker-1");
         doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
 
-        assertThrows(Exception.class, () -> openSearchClient.sendBulkRequest(
+        assertDoesNotThrow(() -> openSearchClient.sendBulkRequest(
             "movies",
             List.of(createBulkDocWithoutId(), createBulkDocWithoutId()),
             mock(IRfsContexts.IRequestContext.class),
