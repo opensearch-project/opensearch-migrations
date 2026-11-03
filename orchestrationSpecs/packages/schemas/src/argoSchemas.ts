@@ -233,6 +233,7 @@ export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "logLevels",
     "resources",
     "skipEvaluateApproval",
     "skipMigrateApproval",
@@ -254,6 +255,7 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "minPodReplicas",
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "logLevels",
     "skipApproval",
     "useTargetClusterForWorkCoordination",
     "resources",
@@ -283,6 +285,7 @@ export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
     "loggingConfigurationOverrideConfigMap",
+    "logLevels",
     "serviceType",
     "internetFacing",
     "podReplicas",
@@ -320,6 +323,7 @@ export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
 export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "logLevels",
     "podReplicas",
     "minPodReplicas",
     "useLocalStack",

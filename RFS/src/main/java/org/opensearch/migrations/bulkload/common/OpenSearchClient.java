@@ -44,6 +44,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
@@ -71,6 +73,18 @@ public abstract class OpenSearchClient {
     private static final Retry BULK_RETRY_STRATEGY = Retry.backoff(BULK_MAX_RETRY_ATTEMPTS, BULK_BACKOFF)
         .maxBackoff(BULK_MAX_BACKOFF);
     public static final int BULK_TRUNCATED_RESPONSE_MAX_LENGTH = 1500;
+
+    /**
+     * Logs every bulk attempt at TRACE: the NDJSON request (before gzip) and the response, or the transport error.
+     * Its output contains document contents. Configured on its own (BULK_REQUEST_TRACE_LOG_LEVEL) so it can be
+     * turned on without the root logger.
+     */
+    public static final String BULK_REQUEST_TRACE_LOGGER = "BulkRequestTrace";
+    private static final Logger BULK_TRACE = LoggerFactory.getLogger(BULK_REQUEST_TRACE_LOGGER);
+    /** Request and response bodies in the trace are cut to this many bytes (0: no cut); BULK_REQUEST_TRACE_MAX_BYTES. */
+    static final int BULK_TRACE_MAX_BYTES = parseTraceMaxBytes(System.getenv("BULK_REQUEST_TRACE_MAX_BYTES"));
+    // Counts bodies formatted for the trace, so tests can show nothing is formatted while tracing is off.
+    static final AtomicLong bulkTraceBodiesFormatted = new AtomicLong();
     public static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
 
     protected final RestClient client;
@@ -740,9 +754,19 @@ public abstract class OpenSearchClient {
             totals.attempts++;
             totals.bytes += bodyBytes.length;
             long start = System.nanoTime();
+            long attempt = totals.attempts;
+            traceRequest(indexName, attempt, pendingOps.size(), bodyBytes);
             return postBulkRequest(indexName, bodyBytes, context)
-                .doOnSuccess(response -> totals.durationNanos += System.nanoTime() - start)
-                .doOnError(error -> totals.durationNanos += System.nanoTime() - start)
+                .doOnSuccess(response -> {
+                    long elapsed = System.nanoTime() - start;
+                    totals.durationNanos += elapsed;
+                    traceResponse(indexName, attempt, response, elapsed);
+                })
+                .doOnError(error -> {
+                    long elapsed = System.nanoTime() - start;
+                    totals.durationNanos += elapsed;
+                    traceTransportError(indexName, attempt, error, elapsed);
+                })
                 .onErrorMap(NoResponseException::new)
                 .flatMap(response -> classifyResponse(indexName, pendingOps, totals, response, context, allowlist))
                 .onErrorResume(NoResponseException.class, error -> classifyNoResponse(indexName, pendingOps, totals, error));
@@ -758,6 +782,71 @@ public abstract class OpenSearchClient {
             case AttemptOutcome.Exhausted exhausted -> finishWithTerminalFailure(indexName, pendingOps, totals, context,
                 allowlist, FailureClass.RETRYABLE_EXHAUSTED, exhausted.error());
         });
+    }
+
+    static int parseTraceMaxBytes(String value) {
+        if (value == null || value.isBlank()) {
+            return 1024 * 1024;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException e) {
+            log.atWarn().setMessage("Ignoring BULK_REQUEST_TRACE_MAX_BYTES={}: not an integer").addArgument(value).log();
+            return 1024 * 1024;
+        }
+    }
+
+    // Each trace method checks the level first, so nothing is converted or copied while tracing is off.
+    private static void traceRequest(String indexName, long attempt, int operations, byte[] body) {
+        if (!BULK_TRACE.isTraceEnabled()) {
+            return;
+        }
+        BULK_TRACE.atTrace()
+            .setMessage("Bulk request attempt {} to index '{}': {} operations, {} bytes\n{}")
+            .addArgument(attempt)
+            .addArgument(indexName)
+            .addArgument(operations)
+            .addArgument(body.length)
+            .addArgument(traceBody(body))
+            .log();
+    }
+
+    private static void traceResponse(String indexName, long attempt, HttpResponse response, long elapsedNanos) {
+        if (!BULK_TRACE.isTraceEnabled()) {
+            return;
+        }
+        BULK_TRACE.atTrace()
+            .setMessage("Bulk response to attempt {} for index '{}': status {} after {} ms\n{}")
+            .addArgument(attempt)
+            .addArgument(indexName)
+            .addArgument(response.statusCode)
+            .addArgument(Duration.ofNanos(elapsedNanos).toMillis())
+            .addArgument(response.body == null ? null : traceBody(response.body.getBytes(StandardCharsets.UTF_8)))
+            .log();
+    }
+
+    private static void traceTransportError(String indexName, long attempt, Throwable error, long elapsedNanos) {
+        if (!BULK_TRACE.isTraceEnabled()) {
+            return;
+        }
+        BULK_TRACE.atTrace()
+            .setMessage("Bulk request attempt {} for index '{}' got no response after {} ms: {}: {}")
+            .addArgument(attempt)
+            .addArgument(indexName)
+            .addArgument(Duration.ofNanos(elapsedNanos).toMillis())
+            .addArgument(error.getClass().getName())
+            .addArgument(error.getMessage())
+            .log();
+    }
+
+    static String traceBody(byte[] body) {
+        bulkTraceBodiesFormatted.incrementAndGet();
+        int limit = BULK_TRACE_MAX_BYTES;
+        if (limit == 0 || body.length <= limit) {
+            return new String(body, StandardCharsets.UTF_8);
+        }
+        return new String(body, 0, limit, StandardCharsets.UTF_8)
+            + "... [" + (body.length - limit) + " more bytes not logged]";
     }
 
     /** Consecutive no-response attempts after which a multi-operation batch is halved. */

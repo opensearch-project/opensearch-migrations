@@ -783,6 +783,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "logLevels": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                        }
+                      },
+                      "description": "Log levels for the capture proxy. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
+                    },
                     "serviceType": {
                       "type": "string",
                       "enum": [
@@ -1936,6 +1956,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "logLevels": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                        }
+                      },
+                      "description": "Log levels for the metadata migration. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
+                    },
                     "resources": {
                       "type": "object",
                       "nullable": true,
@@ -2214,6 +2254,54 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
+                    },
+                    "logLevels": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                        },
+                        "bulkRequestTrace": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the BulkRequestTrace logger (BULK_REQUEST_TRACE_LOG_LEVEL). 'trace' logs every bulk request and response, including document contents. Defaults to 'off'."
+                        },
+                        "failedRequests": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the pod-local FailedRequestsLogger file (FAILED_REQUESTS_LOGGER_LEVEL). Defaults to 'warn'."
+                        }
+                      },
+                      "description": "Log levels for the RFS workers. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                     },
                     "skipApproval": {
                       "type": "boolean"
@@ -3034,6 +3122,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
+                    },
+                    "logLevels": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                        }
+                      },
+                      "description": "Log levels for the traffic replayer. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                     },
                     "useLocalStack": {
                       "type": "boolean",
@@ -4330,6 +4438,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": "",
                         "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                       },
+                      "logLevels": {
+                        "type": "object",
+                        "properties": {
+                          "root": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "fatal",
+                              "error",
+                              "warn",
+                              "info",
+                              "debug",
+                              "trace",
+                              "all"
+                            ],
+                            "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                          }
+                        },
+                        "description": "Log levels for the metadata migration. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
+                      },
                       "resources": {
                         "type": "object",
                         "nullable": true,
@@ -4867,6 +4995,54 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "default": "",
                         "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                      },
+                      "logLevels": {
+                        "type": "object",
+                        "properties": {
+                          "root": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "fatal",
+                              "error",
+                              "warn",
+                              "info",
+                              "debug",
+                              "trace",
+                              "all"
+                            ],
+                            "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                          },
+                          "bulkRequestTrace": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "fatal",
+                              "error",
+                              "warn",
+                              "info",
+                              "debug",
+                              "trace",
+                              "all"
+                            ],
+                            "description": "Level for the BulkRequestTrace logger (BULK_REQUEST_TRACE_LOG_LEVEL). 'trace' logs every bulk request and response, including document contents. Defaults to 'off'."
+                          },
+                          "failedRequests": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "fatal",
+                              "error",
+                              "warn",
+                              "info",
+                              "debug",
+                              "trace",
+                              "all"
+                            ],
+                            "description": "Level for the pod-local FailedRequestsLogger file (FAILED_REQUESTS_LOGGER_LEVEL). Defaults to 'warn'."
+                          }
+                        },
+                        "description": "Log levels for the RFS workers. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                       },
                       "skipApproval": {
                         "type": "boolean",
@@ -5550,6 +5726,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                   },
+                  "logLevels": {
+                    "type": "object",
+                    "properties": {
+                      "root": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "fatal",
+                          "error",
+                          "warn",
+                          "info",
+                          "debug",
+                          "trace",
+                          "all"
+                        ],
+                        "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                      }
+                    },
+                    "description": "Log levels for the capture proxy. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
+                  },
                   "serviceType": {
                     "type": "string",
                     "enum": [
@@ -6141,6 +6337,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                  },
+                  "logLevels": {
+                    "type": "object",
+                    "properties": {
+                      "root": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "fatal",
+                          "error",
+                          "warn",
+                          "info",
+                          "debug",
+                          "trace",
+                          "all"
+                        ],
+                        "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                      }
+                    },
+                    "description": "Log levels for the traffic replayer. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                   },
                   "useLocalStack": {
                     "type": "boolean",
