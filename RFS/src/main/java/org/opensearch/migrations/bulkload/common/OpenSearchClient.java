@@ -129,6 +129,7 @@ public abstract class OpenSearchClient {
     private volatile long maxDocumentSizeBytes;
     private volatile BulkRetryPolicy bulkRetryPolicy = new BulkRetryPolicy(new RetryBudget());
     private final AtomicLong nextBatchId = new AtomicLong();
+    private final AtomicLong lastBulkRequestStartNanos = new AtomicLong();
     private volatile AdaptiveLimit bulkInFlightLimit;
     private final BulkFlowStats bulkFlowStats = new BulkFlowStats();
     private volatile BulkFlowMetrics bulkFlowMetrics = bulkFlowStats;
@@ -780,6 +781,7 @@ public abstract class OpenSearchClient {
         // The batching predicate and retry state must be fresh for every subscription.
         return Mono.defer(() -> {
             var tooLarge = new long[1];
+            var batchPreparationStartedNanos = new long[] {System.nanoTime()};
             return Flux.fromIterable(docs)
                 .map(prepare)
                 .filter(op -> {
@@ -789,7 +791,13 @@ public abstract class OpenSearchClient {
                 })
                 .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
                     (PreparedOperation op) -> op.encoded().size()), true)
-                .doOnNext(batch -> noteOversizedOperation(indexName, batch, path, context))
+                .doOnNext(batch -> {
+                    long preparedNanos = System.nanoTime();
+                    bulkFlowMetrics.onBatchPrepared(path, batch.size(),
+                        (preparedNanos - batchPreparationStartedNanos[0]) / 1_000_000.0);
+                    batchPreparationStartedNanos[0] = preparedNanos;
+                    noteOversizedOperation(indexName, batch, path, context);
+                })
                 // Results remain in source order, and all requests complete before the source checkpoint advances.
                 .flatMapSequential(
                     batch -> executeBulkWithRetry(indexName, batch, context, allowlist),
@@ -886,7 +894,15 @@ public abstract class OpenSearchClient {
             }
             return withBulkSlot(() -> {
                 // Assemble and compress only after taking a slot, so queued batches retain neither request buffer.
+                boolean retry = totals.attempts > 0;
+                long requestStartNanos = System.nanoTime();
+                long previousStartNanos = lastBulkRequestStartNanos.getAndAccumulate(requestStartNanos, Math::max);
+                if (previousStartNanos > 0 && requestStartNanos > previousStartNanos) {
+                    bulkFlowMetrics.onRequestStartGap(retry,
+                        (requestStartNanos - previousStartNanos) / 1_000_000.0);
+                }
                 var request = assemble(pendingOps);
+                long assembledNanos = System.nanoTime();
                 var bodyBytes = request.bytes();
                 if (totals.attempts == 0) {
                     totals.target = request.operations();
@@ -898,6 +914,10 @@ public abstract class OpenSearchClient {
                     bulkFlowMetrics.onDocumentsResent(pendingOps.size());
                 }
                 var sentBytes = gzipBulkBodies() ? GzipPayloadRequestTransformer.gzip(bodyBytes) : bodyBytes;
+                long compressedNanos = System.nanoTime();
+                bulkFlowMetrics.onRequestPrepared(retry,
+                    (assembledNanos - requestStartNanos) / 1_000_000.0,
+                    (compressedNanos - assembledNanos) / 1_000_000.0);
                 bulkFlowMetrics.onRequestBody(pendingOps.size(), bodyBytes.length, sentBytes.length);
                 long start = System.nanoTime();
                 if (attempt > 1 && totals.lastAttemptEndNanos > 0) {

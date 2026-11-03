@@ -50,6 +50,18 @@ public interface BulkFlowMetrics {
      */
     default void onRequestBody(int documents, long bytes, long sentBytes) {}
 
+    /**
+     * Source-side preparation produced one exact-size batch after encoding {@code documents}. {@code path} is
+     * {@code raw} or {@code transformed}.
+     */
+    default void onBatchPrepared(String path, int documents, double durationMillis) {}
+
+    /** Time spent assembling the NDJSON request buffer and, separately, compressing it for one HTTP attempt. */
+    default void onRequestPrepared(boolean retry, double assemblyMillis, double compressionMillis) {}
+
+    /** Time since the preceding request preparation started in this client process. */
+    default void onRequestStartGap(boolean retry, double millis) {}
+
     /** A batch (one request chain, including its retries) finished after this many attempts. */
     default void onBatchFinished(long attempts) {}
 
@@ -115,6 +127,9 @@ public interface BulkFlowMetrics {
         return new BulkFlowMetrics() {
             @Override public void onAttempt(AttemptOutcome o, boolean r, long d) { first.onAttempt(o, r, d); second.onAttempt(o, r, d); }
             @Override public void onRequestBody(int d, long b, long s) { first.onRequestBody(d, b, s); second.onRequestBody(d, b, s); }
+            @Override public void onBatchPrepared(String p, int d, double m) { first.onBatchPrepared(p, d, m); second.onBatchPrepared(p, d, m); }
+            @Override public void onRequestPrepared(boolean r, double a, double c) { first.onRequestPrepared(r, a, c); second.onRequestPrepared(r, a, c); }
+            @Override public void onRequestStartGap(boolean r, double m) { first.onRequestStartGap(r, m); second.onRequestStartGap(r, m); }
             @Override public void onBatchFinished(long a) { first.onBatchFinished(a); second.onBatchFinished(a); }
             @Override public void onDocumentsResent(long d) { first.onDocumentsResent(d); second.onDocumentsResent(d); }
             @Override public void onItemErrors(String t, boolean r, long c) { first.onItemErrors(t, r, c); second.onItemErrors(t, r, c); }
