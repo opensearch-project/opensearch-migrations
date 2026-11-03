@@ -50,7 +50,7 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink {
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
-    private final Map<Document, BulkNdjson.EncodedOperation> preparedRawDocuments =
+    private final Map<Document, BulkNdjson.PreparedRawOperation> preparedRawDocuments =
         Collections.synchronizedMap(new IdentityHashMap<>());
 
     public OpenSearchDocumentSink(
@@ -118,9 +118,9 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink {
         if (documentLimit > 0 && document.sourceLength() > documentLimit) {
             return document.sourceLength();
         }
-        var encoded = BulkNdjson.encodeRaw(document, collectionName, allowServerGeneratedIds, OBJECT_MAPPER);
-        preparedRawDocuments.put(document, encoded);
-        return encoded.size();
+        var prepared = BulkNdjson.prepareRaw(document, collectionName, allowServerGeneratedIds, OBJECT_MAPPER);
+        preparedRawDocuments.put(document, prepared);
+        return prepared.size();
     }
 
     @Override
@@ -204,11 +204,11 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink {
         return nativeTransformers != null && nativeTransformers.isEmpty();
     }
 
-    private BulkNdjson.EncodedOperation takeOrPrepareRawDocument(String collectionName, Document document) {
+    private BulkNdjson.PreparedRawOperation takeOrPrepareRawDocument(String collectionName, Document document) {
         var prepared = preparedRawDocuments.remove(document);
         return prepared != null
             ? prepared
-            : BulkNdjson.encodeRaw(document, collectionName, allowServerGeneratedIds, OBJECT_MAPPER);
+            : BulkNdjson.prepareRaw(document, collectionName, allowServerGeneratedIds, OBJECT_MAPPER);
     }
 
     @SuppressWarnings("unchecked")

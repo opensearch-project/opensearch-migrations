@@ -48,11 +48,23 @@ public final class BulkNdjson {
         }
     }
 
+    /**
+     * Raw operation sized exactly from its action and source bytes, before validating or normalizing the source JSON.
+     *
+     * <p>JSON whitespace normalization preserves the body length, so this can make exact batching decisions on the
+     * ordered source stream while deferring the expensive body scan to the concurrent request-preparation path.
+     */
+    public record PreparedRawOperation(byte[] action, byte[] rawBody, boolean upsert) {
+        public long size() {
+            return action.length + 1L + (rawBody == null ? 0 : rawBody.length + 1L);
+        }
+    }
+
     @SneakyThrows(IOException.class)
     public static EncodedOperation encode(BulkOperationSpec op, ObjectMapper mapper) {
         if (op.getRawDocument() != null) {
-            return encodeRaw(op.getOperationType(), op.getOperation(),
-                op.isIncludeDocument() ? op.getRawDocument() : null, mapper);
+            return encodePreparedRaw(prepareRaw(op.getOperationType(), op.getOperation(),
+                op.isIncludeDocument() ? op.getRawDocument() : null, mapper));
         }
         byte[] body = op.isIncludeDocument() && op.getDocument() != null
             ? mapper.writeValueAsBytes(op.getDocument()) : null;
@@ -62,26 +74,38 @@ public final class BulkNdjson {
     }
 
     public static EncodedOperation encodeRaw(Document doc, String indexName, boolean stripIds, ObjectMapper mapper) {
+        return encodePreparedRaw(prepareRaw(doc, indexName, stripIds, mapper));
+    }
+
+    public static PreparedRawOperation prepareRaw(
+        Document doc, String indexName, boolean stripIds, ObjectMapper mapper
+    ) {
         boolean isDelete = doc.operation() == Document.Operation.DELETE;
         var meta = isDelete
             ? DeleteOperationMeta.builder().id(stripIds ? null : doc.id()).index(indexName)
                 .routing(doc.hints().get(Document.HINT_ROUTING)).build()
             : BulkOperationConverter.indexMetadata(doc, indexName, stripIds);
         // Delta deletions retain the old source for diagnostics, but bulk deletes have no payload.
-        return encodeRaw(isDelete ? OperationType.DELETE : OperationType.INDEX,
+        return prepareRaw(isDelete ? OperationType.DELETE : OperationType.INDEX,
             meta, isDelete ? null : doc.source(), mapper);
     }
 
     @SneakyThrows(IOException.class)
-    private static EncodedOperation encodeRaw(
+    private static PreparedRawOperation prepareRaw(
         OperationType operationType, BaseOperationMeta meta, byte[] rawSource, ObjectMapper mapper
     ) {
         byte[] body = rawSource != null && rawSource.length > 0 ? rawSource : null;
+        return new PreparedRawOperation(mapper.writeValueAsBytes(Map.of(operationType.getValue(), meta)), body,
+            operationType == OperationType.INDEX);
+    }
+
+    @SneakyThrows(IOException.class)
+    public static EncodedOperation encodePreparedRaw(PreparedRawOperation prepared) {
+        byte[] body = prepared.rawBody();
         if (body != null) {
             body = singleLineJson(body);
         }
-        return new EncodedOperation(mapper.writeValueAsBytes(Map.of(operationType.getValue(), meta)), body,
-            operationType == OperationType.INDEX);
+        return new EncodedOperation(prepared.action(), body, prepared.upsert());
     }
 
     /** Validate before normalizing whitespace, preserving escapes and numeric spelling. */
@@ -170,7 +194,7 @@ public final class BulkNdjson {
     public static void writeRawOperation(
         OperationType operationType, BaseOperationMeta meta, byte[] rawSource, OutputStream out, ObjectMapper mapper
     ) {
-        encodeRaw(operationType, meta, rawSource, mapper).writeWithoutFinalNewline(out);
+        encodePreparedRaw(prepareRaw(operationType, meta, rawSource, mapper)).writeWithoutFinalNewline(out);
     }
 
     public static void writeAll(Collection<? extends BulkOperationSpec> ops, OutputStream out, ObjectMapper mapper)
