@@ -264,9 +264,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
-                                    "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                                    "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                                     "default": "",
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
                                   }
                                 },
                                 "required": [
@@ -423,9 +423,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
-                                    "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                                    "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                                     "default": "",
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
                                   }
                                 },
                                 "required": [
@@ -1658,7 +1658,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "s3RoleArn": {
                             "type": "string",
-                            "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                            "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                             "default": ""
                           },
                           "useLocalStack": {
@@ -2752,7 +2752,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "s3RoleArn": {
                           "type": "string",
-                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": ""
                         },
                         "useLocalStack": {
@@ -3828,9 +3828,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         },
                         "s3RoleArn": {
                           "type": "string",
-                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": "",
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
                         }
                       },
                       "required": [
@@ -3987,9 +3987,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         },
                         "s3RoleArn": {
                           "type": "string",
-                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": "",
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
                         }
                       },
                       "required": [
