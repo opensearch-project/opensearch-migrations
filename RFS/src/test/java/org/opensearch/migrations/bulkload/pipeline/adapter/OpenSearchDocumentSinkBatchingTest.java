@@ -64,6 +64,10 @@ class OpenSearchDocumentSinkBatchingTest {
     private final RestClient transport = mock(RestClient.class);
 
     private OpenSearchDocumentSink sink(IJsonTransformer transformer, int maxDocs, long maxBytes) {
+        return sink(transformer, maxDocs, maxBytes, Retry.max(0));
+    }
+
+    private OpenSearchDocumentSink sink(IJsonTransformer transformer, int maxDocs, long maxBytes, Retry retry) {
         var connection = mock(ConnectionContext.class);
         when(connection.getUri()).thenReturn(URI.create("http://localhost/"));
         when(transport.getConnectionContext()).thenReturn(connection);
@@ -75,7 +79,7 @@ class OpenSearchDocumentSinkBatchingTest {
             Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, maxDocs, maxBytes) {
             @Override
             protected Retry getBulkRetryStrategy() {
-                return Retry.max(0);
+                return retry;
             }
         };
         return new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
@@ -275,6 +279,32 @@ class OpenSearchDocumentSinkBatchingTest {
         assertEquals(1, cursors.size());
         assertEquals(2, cursors.get(0).nextPosition());
         assertEquals(2, cursors.get(0).metrics().requests().total());
+    }
+
+    @Test
+    void aPlainText429OnALaterSplitIsRetriedWithIdenticalBytesBeforeTheCheckpointAdvances() throws Exception {
+        var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":1}"));
+        var sink = sink(null, Integer.MAX_VALUE, serialized(docs).length - 1L, Retry.fixedDelay(3, Duration.ofMillis(1)));
+        var throttled = new HttpResponse(429, "Too Many Requests", Map.of("content-type", "text/plain"),
+            "429 Too Many Requests");
+        doAnswer(invocation -> {
+            requests.add(invocation.getArgument(1));
+            return Mono.just(requests.size() == 2 ? throttled : OK);
+        }).when(transport).postAsyncBytes(any(), any(), any(), any());
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+
+        var cursors = new DocumentMigrationPipeline(source, sink, 10, 1000)
+            .migratePartition(partition, "idx", 0).collectList().block(Duration.ofSeconds(10));
+
+        assertEquals(3, requests.size());
+        assertEquals(List.of("d1", "d2", "d2"), sentIds());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(requests.get(1), requests.get(2));
+        assertEquals(1, cursors.size());
+        assertEquals(2, cursors.get(0).nextPosition());
+        assertEquals(3, cursors.get(0).metrics().requests().total());
+        assertEquals(1, cursors.get(0).metrics().requests().retries());
     }
 
     @Test

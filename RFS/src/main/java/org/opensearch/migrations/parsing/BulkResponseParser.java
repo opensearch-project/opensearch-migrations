@@ -376,5 +376,10 @@ public class BulkResponseParser {
         @lombok.Singular("successPosition") List<Integer> successPositions;
         @lombok.Singular("nonRetryableFailure") List<ItemFailure> nonRetryableFailures;
         @lombok.Singular("retryableFailure") List<ItemFailure> retryableFailures;
+
+        /** Number of items in the response, which must equal the number of operations in the request. */
+        public int itemCount() {
+            return successPositions.size() + nonRetryableFailures.size() + retryableFailures.size();
+        }
     }
 }

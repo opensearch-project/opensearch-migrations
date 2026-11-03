@@ -401,6 +401,7 @@ public class SourceTestBase {
         var javaExecutable = Paths.get(javaHome, "bin", "java").toString();
 
         List<String> argsList = new ArrayList<>(Arrays.asList(
+            "--disable-failed-document-stream",
             "--snapshot-name",
             SNAPSHOT_NAME,
             "--snapshot-local-dir",

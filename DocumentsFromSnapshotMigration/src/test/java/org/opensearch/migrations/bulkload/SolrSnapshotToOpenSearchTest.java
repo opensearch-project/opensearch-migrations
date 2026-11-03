@@ -115,6 +115,7 @@ public class SolrSnapshotToOpenSearchTest {
             int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
                 "--source-version", "SOLR_" + solrVersion.tag(),
                 "--snapshot-local-dir", backupDir.toString(),
+                "--disable-failed-document-stream",
                 "--snapshot-name", "solr-migration",
                 "--target-host", target.getUrl(),
                 "--coordinator-host", target.getUrl(),
@@ -490,6 +491,7 @@ public class SolrSnapshotToOpenSearchTest {
             int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
                 "--source-version", "SOLR_" + solrVersion.tag(),
                 "--snapshot-local-dir", backupRoot.toString(),
+                "--disable-failed-document-stream",
                 "--snapshot-name", "solr-dotted",
                 "--target-host", target.getUrl(),
                 "--coordinator-host", target.getUrl(),

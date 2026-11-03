@@ -72,6 +72,27 @@ function validateMinPodReplicas(
     }
 }
 
+export const FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE =
+    "Set failedDocumentStreamS3Bucket to record documents that can't be written, or set " +
+    "disableFailedDocumentStream: true to run without a failed document stream.";
+
+function validateFailedDocumentStreamChoice(
+    ctx: z.RefinementCtx,
+    data: {failedDocumentStreamS3Bucket?: string, disableFailedDocumentStream?: boolean}
+) {
+    const hasBucket = (data.failedDocumentStreamS3Bucket ?? "").trim() !== "";
+    const disabled = data.disableFailedDocumentStream === true;
+    if (hasBucket === disabled) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: hasBucket
+                ? "failedDocumentStreamS3Bucket and disableFailedDocumentStream can't both be set."
+                : FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE,
+            path: [hasBucket ? "disableFailedDocumentStream" : "failedDocumentStreamS3Bucket"]
+        });
+    }
+}
+
 function scalableServiceWorkflowOptions(serviceName: string, podReplicasDescription: string) {
     return z.object({
         podReplicas: z.number().int().nonnegative().default(1).optional()
@@ -1106,6 +1127,14 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
         .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."),
+    maxDocumentSizeBytes: z.number().int().min(1).optional()
+        .describe("Documents bigger than this many bytes are not sent to the target. They are recorded in the failed " +
+            "document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies " +
+            "to each document body after transformation, or to the original document body when no transform is " +
+            "configured. It excludes bulk action metadata and NDJSON separators, so leave room for that overhead " +
+            "under the target's request limit. Unset means no limit.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     initialLeaseDuration: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
         .default("PT1H").optional()
@@ -1164,8 +1193,14 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
             "Defaults to 'rfs-failed-document-stream/'."),
     failedDocumentStreamS3Bucket: z.string().optional()
-        .describe("S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal " +
-            "document failures are not recorded; there is no separate enable flag and no default bucket."),
+        .describe("S3 bucket for the failed document stream, where documents that can't be written are recorded. " +
+            "Either this or disableFailedDocumentStream is required; there is no default bucket.")
+        .changeRestriction('gated'),
+    disableFailedDocumentStream: z.boolean().optional()
+        .describe("Set to true to run without a failed document stream. Documents that can't be written are then " +
+            "logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. " +
+            "Either this or failedDocumentStreamS3Bucket is required.")
+        .changeRestriction('gated'),
     failedDocumentStreamS3Region: z.string().optional()
         .describe("AWS region for the failed document stream S3 bucket. Resolved by the config processor before " +
             "submission (user value, else the snapshot repo's region, else the deployment default). " +
@@ -1218,6 +1253,7 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
 })
     .superRefine((data, ctx) => {
         validateMinPodReplicas(ctx, data);
+        validateFailedDocumentStreamChoice(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",

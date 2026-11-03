@@ -250,6 +250,15 @@ public class RfsMigrateDocuments {
         long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
 
         @Parameter(required = false,
+            names = { "--max-document-size-bytes", "--maxDocumentSizeBytes" },
+            description = "Optional. Documents bigger than this many bytes are not sent to the target; they are " +
+                "recorded in the failed document stream as document_too_large and the migration moves past them. " +
+                "The limit applies to each document body after transformation, or to the original document body " +
+                "when no transform is configured. It excludes bulk action metadata and NDJSON separators, so leave " +
+                "room for that overhead under the target's request limit. Default: 0 (no limit)")
+        long maxDocumentSizeBytes = 0;
+
+        @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
             description = "Optional.  The maximum number of connections to simultaneously " +
                 "used to communicate to the target, default " + DEFAULT_BATCH_CONCURRENCY)
@@ -323,15 +332,23 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * Configuration for the durable failed document stream. The S3 bucket is the on/off switch: no bucket,
-     * no stream. There is no enable flag and no default bucket.
+     * Configuration for the durable failed document stream. Exactly one of the S3 bucket (stream on) or
+     * {@code --disable-failed-document-stream} (stream off) is required, so terminal failures are never dropped
+     * without the operator having chosen that.
      */
     public static class FailedDocumentStreamArgs {
         @Parameter(required = false,
             names = { "--failed-document-stream-s3-bucket" },
-            description = "S3 bucket for durable failed document stream records, and the switch that enables the " +
-                "stream. When unset, terminal failures are not recorded.")
+            description = "S3 bucket for durable failed document stream records. Either this or " +
+                "--disable-failed-document-stream is required.")
         public String failedDocumentStreamS3Bucket = null;
+
+        @Parameter(required = false,
+            names = { "--disable-failed-document-stream" },
+            description = "Run without a failed document stream: documents that can't be written are logged and " +
+                "counted but not recorded, and retry exhaustion fails the work item. Either this or " +
+                "--failed-document-stream-s3-bucket is required.")
+        public boolean disableFailedDocumentStream = false;
 
         @Parameter(required = false,
             names = { "--failed-document-stream-s3-prefix" },
@@ -470,6 +487,14 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
+        validateSourceArgs(args);
+        if (args.maxDocumentSizeBytes < 0) {
+            throw new ParameterException("--max-document-size-bytes must be 0 (no limit) or positive.");
+        }
+        validateFailedDocumentStreamArgs(args.failedDocumentStreamArgs);
+    }
+
+    private static void validateSourceArgs(Args args) {
         // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.repoUri == null) {
@@ -620,6 +645,7 @@ public class RfsMigrateDocuments {
         var resolvedSessionId = resolveSessionId(arguments, workerId);
         var failedDocumentStreamSink = buildFailedDocumentStreamSink(arguments, workerId, resolvedSessionId);
         targetClient.setFailedDocumentStreamContext(failedDocumentStreamSink, resolvedSessionId, workerId);
+        targetClient.setMaxDocumentSizeBytes(arguments.maxDocumentSizeBytes);
         logFailedDocumentStreamStatus(failedDocumentStreamSink, resolvedSessionId);
 
         boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
@@ -988,7 +1014,22 @@ public class RfsMigrateDocuments {
     }
 
     static final String FAILED_DOCUMENT_STREAM_DISABLED_REASON =
-        "failed document stream disabled: no --failed-document-stream-s3-bucket configured";
+        "failed document stream disabled by --disable-failed-document-stream: documents that can't be written "
+            + "will not be recorded";
+
+    static final String FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE =
+        "Configure a failed document stream with --failed-document-stream-s3-bucket, or run without one by "
+            + "passing --disable-failed-document-stream. Without a stream, documents that can't be written are "
+            + "not recorded anywhere.";
+
+    static void validateFailedDocumentStreamArgs(FailedDocumentStreamArgs args) {
+        boolean hasBucket = args.failedDocumentStreamS3Bucket != null && !args.failedDocumentStreamS3Bucket.isBlank();
+        if (hasBucket == args.disableFailedDocumentStream) {
+            throw new ParameterException(hasBucket
+                ? "--failed-document-stream-s3-bucket and --disable-failed-document-stream can't both be set."
+                : FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE);
+        }
+    }
 
     static void logFailedDocumentStreamStatus(FailedDocumentStreamSink sink, String sessionId) {
         if (sink == null) {

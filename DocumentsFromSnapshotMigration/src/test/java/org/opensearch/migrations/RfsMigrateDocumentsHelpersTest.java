@@ -134,9 +134,9 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
-    void failedDocumentStreamDisabledReason_namesTheMissingBucket() {
+    void failedDocumentStreamDisabledReason_namesTheOptOutFlag() {
         assertThat(RfsMigrateDocuments.FAILED_DOCUMENT_STREAM_DISABLED_REASON,
-            equalTo("failed document stream disabled: no --failed-document-stream-s3-bucket configured"));
+            org.hamcrest.Matchers.containsString("--disable-failed-document-stream"));
     }
 
     @Test
@@ -304,7 +304,49 @@ class RfsMigrateDocumentsHelpersTest {
         args.luceneDir = "/tmp/lucene";
         args.sourceVersion = Version.fromString("ES_7.10");
         args.repoUri = "/tmp/snapshot";  // bare absolute path -> file:// repo
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = true;
         return args;
+    }
+
+    @Test
+    void validateArgs_requiresAFailedDocumentStreamOrAnExplicitOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--failed-document-stream-s3-bucket"));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--disable-failed-document-stream"));
+    }
+
+    @Test
+    void validateArgs_rejectsABucketTogetherWithTheOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "bucket";
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("can't both be set"));
+    }
+
+    @Test
+    void validateArgs_acceptsABucketWithoutTheOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "bucket";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void validateArgs_treatsABlankBucketAsMissing() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "  ";
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void disableFailedDocumentStream_isReadFromInlineJson() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"disableFailedDocumentStream\": true}"});
+        assertThat(args.failedDocumentStreamArgs.disableFailedDocumentStream, is(true));
     }
 
     @Test

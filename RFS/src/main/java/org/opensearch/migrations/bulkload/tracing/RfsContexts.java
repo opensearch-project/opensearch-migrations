@@ -23,6 +23,8 @@ public interface RfsContexts extends IRfsContexts {
         public static final AttributeKey<String> HTTP_METHOD_ATTR = AttributeKey.stringKey("httpMethod");
         public static final AttributeKey<Long> BYTES_READ_ATTR = AttributeKey.longKey("bytesRead");
         public static final AttributeKey<Long> BYTES_SENT_ATTR = AttributeKey.longKey("bytesSent");
+        public static final AttributeKey<String> FAILURE_CLASS_ATTR = AttributeKey.stringKey("failureClass");
+        public static final AttributeKey<String> BULK_PATH_ATTR = AttributeKey.stringKey("bulkPath");
 
         @Getter
         public final IScopedInstrumentationAttributes enclosingScope;
@@ -49,11 +51,20 @@ public interface RfsContexts extends IRfsContexts {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public final LongCounter bytesSentCounter;
             public final LongCounter bytesReadCounter;
+            public final LongCounter bulkDocumentsFailedCounter;
+            public final LongCounter bulkOversizedOperationsCounter;
+            public final LongCounter documentsRejectedForSizeCounter;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName, LONG_DURATION_BUCKETS_MS);
                 bytesSentCounter = meter.counterBuilder(MetricNames.BYTES_SENT).setUnit(COUNT_UNITS).build();
                 bytesReadCounter = meter.counterBuilder(MetricNames.BYTES_READ).setUnit(COUNT_UNITS).build();
+                bulkDocumentsFailedCounter = meter.counterBuilder(MetricNames.BULK_DOCUMENTS_FAILED)
+                    .setUnit(COUNT_UNITS).build();
+                bulkOversizedOperationsCounter = meter.counterBuilder(MetricNames.BULK_OVERSIZED_OPERATIONS)
+                    .setUnit(COUNT_UNITS).build();
+                documentsRejectedForSizeCounter = meter.counterBuilder(MetricNames.DOCUMENTS_REJECTED_FOR_SIZE)
+                    .setUnit(COUNT_UNITS).build();
             }
         }
 
@@ -91,6 +102,23 @@ public interface RfsContexts extends IRfsContexts {
             bytesRead += i;
             meterIncrementEvent(getMetrics().bytesReadCounter, i);
             meterIncrementEvent(getMetrics().bytesReadCounter, i, getSharedAttributes(Attributes.builder()));
+        }
+
+        @Override
+        public void addBulkDocumentsFailed(String failureClass, long count) {
+            meterIncrementEvent(getMetrics().bulkDocumentsFailedCounter, count,
+                Attributes.builder().put(FAILURE_CLASS_ATTR, failureClass));
+        }
+
+        @Override
+        public void addDocumentsRejectedForSize(long count) {
+            meterIncrementEvent(getMetrics().documentsRejectedForSizeCounter, count);
+        }
+
+        @Override
+        public void addBulkOversizedOperation(String path) {
+            meterIncrementEvent(getMetrics().bulkOversizedOperationsCounter, 1,
+                Attributes.builder().put(BULK_PATH_ATTR, path));
         }
     }
 

@@ -93,19 +93,18 @@ public class OpenSearchDocumentSink implements DocumentSink {
     }
 
     @Override
-    public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
-        long bytesInBatch = batch.stream()
+    public Mono<BatchResult> writeBatch(String collectionName, List<Document> sourceBatch) {
+        long bytesInBatch = sourceBatch.stream()
             .mapToLong(Document::sourceLength)
             .sum();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
-
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (nativeTransformers != null && nativeTransformers.isEmpty()) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
-            bulkMono = client.sendBulkRequestRaw(collectionName, batch,
+            bulkMono = client.sendBulkRequestRaw(collectionName, sourceBatch,
                 requestContext, allowServerGeneratedIds, allowlist);
         } else if (nativeTransformers != null) {
-            var operations = batch.stream()
+            var operations = sourceBatch.stream()
                 .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
                 .collect(Collectors.toList());
             for (var nativeTransformer : nativeTransformers) {
@@ -114,7 +113,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
             bulkMono = client.sendBulkRequest(collectionName, operations,
                 requestContext, allowServerGeneratedIds, allowlist);
         } else {
-            var bulkOps = batch.stream()
+            var bulkOps = sourceBatch.stream()
                 .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
                 .collect(Collectors.toList());
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
@@ -122,7 +121,8 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 requestContext, allowServerGeneratedIds, allowlist);
         }
 
-        return bulkMono.map(response -> new BatchResult(batch.size(), bytesInBatch, response.target, response.requests));
+        return bulkMono.map(response ->
+            new BatchResult(sourceBatch.size(), bytesInBatch, response.target, response.requests));
     }
 
     @SuppressWarnings("unchecked")
