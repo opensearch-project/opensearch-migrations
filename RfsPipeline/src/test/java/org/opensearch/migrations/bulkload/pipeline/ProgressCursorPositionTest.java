@@ -66,17 +66,20 @@ class ProgressCursorPositionTest {
             Assertions.assertEquals(List.of(1, 3, 1), batchSizes);
             completions.get(2).tryEmitValue(new BatchResult(1, 1,
                 new MigrationMetrics.Operations(10, 0, 10),
-                new MigrationMetrics.Requests(1, 1, 0, 100, 10)));
+                new MigrationMetrics.Requests(1, 1, 0, 100, 10),
+                new MigrationMetrics.Failures(5, 5)));
             Assertions.assertTrue(cursors.isEmpty());
             completions.get(0).tryEmitValue(new BatchResult(1, 10,
                 new MigrationMetrics.Operations(2, 0, 20),
-                new MigrationMetrics.Requests(1, 2, 1, 200, 20)));
+                new MigrationMetrics.Requests(1, 2, 1, 200, 20),
+                new MigrationMetrics.Failures(1, 0)));
             Assertions.assertTrue(firstEmitted.await(10, TimeUnit.SECONDS));
             Assertions.assertEquals(1, cursors.size());
             Assertions.assertEquals(1, cursors.get(0).nextPosition());
+            // The failures of the batch past the gap aren't committed either.
             Assertions.assertEquals(new MigrationMetrics(
                 new MigrationMetrics.Operations(1, 0, 10), new MigrationMetrics.Operations(2, 0, 20),
-                new MigrationMetrics.Requests(1, 2, 1, 200, 20)),
+                new MigrationMetrics.Requests(1, 2, 1, 200, 20), new MigrationMetrics.Failures(1, 0)),
                 cursors.get(0).metrics());
         } finally {
             subscription.dispose();
@@ -153,6 +156,29 @@ class ProgressCursorPositionTest {
         var secondSink = new CountingSink();
         run(source, secondSink, 2, first.nextPosition());
         Assertions.assertEquals(List.of("doc-15", "doc-20"), secondSink.written);
+    }
+
+    @Test
+    void aSuccessorCommitsOnlyTheFailuresAfterItsPredecessorsCheckpoint() {
+        // Every odd position fails. The first worker commits two batches and loses its lease; its successor resumes
+        // at the checkpoint and finishes the shard.
+        var source = new SparseSource(List.of(0, 1, 2, 3, 4, 5, 6, 7, 8, 9), true);
+        var sink = new CountingSink() {
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                long failed = batch.stream().filter(d -> Integer.parseInt(d.id().substring("doc-".length())) % 2 == 1)
+                    .count();
+                return Mono.just(new BatchResult(batch.size(), batch.size(), MigrationMetrics.Operations.ZERO,
+                    MigrationMetrics.Requests.ZERO, new MigrationMetrics.Failures(failed, 0)));
+            }
+        };
+        var first = new DocumentMigrationPipeline(source, sink, 2, 1_000_000L)
+            .migratePartition(partition(), IDX, 0).take(2).blockLast();
+        var second = run(source, sink, 2, first.nextPosition());
+
+        Assertions.assertEquals(4, first.nextPosition());
+        Assertions.assertEquals(new MigrationMetrics.Failures(2, 0), first.metrics().failures());
+        Assertions.assertEquals(new MigrationMetrics.Failures(3, 0), second.get(second.size() - 1).metrics().failures());
     }
 
     private static Partition partition() {

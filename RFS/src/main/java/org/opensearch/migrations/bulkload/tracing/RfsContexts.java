@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.tracing;
 
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
@@ -61,6 +62,12 @@ public interface RfsContexts extends IRfsContexts {
                 bytesReadCounter = meter.counterBuilder(MetricNames.BYTES_READ).setUnit(COUNT_UNITS).build();
                 bulkDocumentsFailedCounter = meter.counterBuilder(MetricNames.BULK_DOCUMENTS_FAILED)
                     .setUnit(COUNT_UNITS).build();
+                // Start each class's series at 0: a worker's first failures would otherwise be the series' first
+                // value, which contributes nothing to rate() or increase(), and a run without failures would show
+                // no data instead of 0.
+                for (var failureClass : FailureClass.values()) {
+                    bulkDocumentsFailedCounter.add(0, Attributes.of(FAILURE_CLASS_ATTR, failureClass.name()));
+                }
                 bulkOversizedOperationsCounter = meter.counterBuilder(MetricNames.BULK_OVERSIZED_OPERATIONS)
                     .setUnit(COUNT_UNITS).build();
                 documentsRejectedForSizeCounter = meter.counterBuilder(MetricNames.DOCUMENTS_REJECTED_FOR_SIZE)

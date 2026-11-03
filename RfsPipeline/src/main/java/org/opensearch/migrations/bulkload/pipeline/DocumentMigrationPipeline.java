@@ -157,7 +157,8 @@ public class DocumentMigrationPipeline {
                             : Math.addExact(previous.nextPosition(), Math.addExact(sourceMetrics.upserts(), sourceMetrics.deletes())),
                         result.docsInBatch(),
                         result.bytesInBatch(),
-                        previous.metrics().plus(new MigrationMetrics(sourceMetrics, result.target(), result.requests()))
+                        previous.metrics().plus(new MigrationMetrics(sourceMetrics, result.target(), result.requests(),
+                            result.failures()))
                     );
                 })
                 .skip(1)

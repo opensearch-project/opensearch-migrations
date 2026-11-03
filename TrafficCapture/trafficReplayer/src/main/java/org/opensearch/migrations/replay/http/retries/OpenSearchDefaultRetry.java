@@ -3,7 +3,9 @@ package org.opensearch.migrations.replay.http.retries;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -82,7 +84,8 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
         private String pendingFieldName = null;
         private boolean parseFailed = false;
 
-        private boolean foundTypeInCurrentError = false;
+        // Every type in the current item's error object: its own, then any caused_by types.
+        private final List<String> currentErrorTypeChain = new ArrayList<>();
         private final Set<String> errorTypes = new LinkedHashSet<>();
 
         @SneakyThrows
@@ -188,7 +191,11 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
                 itemDepth++;
             } else if (token == JsonToken.END_OBJECT) {
                 if (inErrorObject && itemDepth == errorObjectDepth) {
-                    if (!foundTypeInCurrentError) {
+                    // Decided once the whole error is read, since a deterministic cause can follow a
+                    // retryable-looking type.
+                    if (!errorClassifier.anyNonRetryable(currentErrorTypeChain)) {
+                        log.atDebug().setMessage("Found retryable bulk item error types: {}")
+                            .addArgument(currentErrorTypeChain).log();
                         hasRetryableError = true;
                     }
                     inErrorObject = false;
@@ -200,19 +207,14 @@ public final class OpenSearchDefaultRetry implements RequestReplayOwner.RetryPol
         private void processErrorFields(JsonToken token) throws IOException {
             if (inErrorObject && "type".equals(pendingFieldName) && token.isScalarValue()) {
                 hasAnyError = true;
-                foundTypeInCurrentError = true;
                 var errorType = parser.getValueAsString();
                 errorTypes.add(errorType);
-                if (!errorClassifier.isNonRetryable(errorType)) {
-                    log.atDebug().setMessage("Found retryable bulk item error type: {}")
-                        .addArgument(errorType).log();
-                    hasRetryableError = true;
-                }
+                currentErrorTypeChain.add(errorType);
             } else if ("error".equals(pendingFieldName) && token == JsonToken.START_OBJECT) {
                 hasAnyError = true;
                 inErrorObject = true;
                 errorObjectDepth = itemDepth;
-                foundTypeInCurrentError = false;
+                currentErrorTypeChain.clear();
             } else if ("error".equals(pendingFieldName) && token.isScalarValue()) {
                 hasAnyError = true;
                 hasRetryableError = true;

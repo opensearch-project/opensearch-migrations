@@ -11,6 +11,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.BulkRetryPolicy;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
@@ -48,7 +49,7 @@ class BulkRequestTraceTest {
         client = new OpenSearchClient_OS_2_11(restClient, mock(FailedRequestsLogger.class),
             Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, 100, 10_000_000) {
             @Override
-            protected Retry getBulkRetryStrategy() {
+            protected Retry getBulkRetryStrategy(BulkRetryPolicy.Batch batch) {
                 return Retry.fixedDelay(1, Duration.ofMillis(1));
             }
         };

@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.util.Collection;
 import java.util.Set;
 
 import lombok.experimental.UtilityClass;
@@ -30,6 +31,18 @@ public class BulkDocErrorTypes {
         "invalid_index_name_exception",
         "routing_missing_exception",
         "illegal_argument_exception",
-        "resource_already_exists_exception"
+        "resource_already_exists_exception",
+        // A value over the target's xcontent limits (e.g. opensearch.xcontent.string.length.max). OpenSearch reports
+        // it as the cause of another error, e.g. mapper_parsing_exception, or parse_exception from an ingest pipeline.
+        "stream_constraints_exception"
     );
+
+    /**
+     * Whether a bulk item error will fail the same way on every attempt: true if any type in its chain (its
+     * {@code type}, then each nested {@code caused_by} type) is in {@code nonRetryable}. A deterministic cause makes
+     * the failure deterministic whatever wraps it, so a retryable-looking outer type doesn't make it retryable.
+     */
+    public static boolean anyNonRetryable(Collection<String> errorTypeChain, Set<String> nonRetryable) {
+        return errorTypeChain.stream().anyMatch(nonRetryable::contains);
+    }
 }

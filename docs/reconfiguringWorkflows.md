@@ -386,6 +386,9 @@ Every field of `documentBackfillConfig` is listed here; a test in `orchestration
 | `spec.documentBackfillConfig.documentsSizePerBulkRequest` | Safe | Same as documentsPerBulkRequest | ❌ |
 | `spec.documentBackfillConfig.maxDocumentSizeBytes` | Impossible | Changes which documents migrate | ✅ |
 | `spec.documentBackfillConfig.initialLeaseDuration` | Safe | Only schedules leases granted after the change | ❌ |
+| `spec.documentBackfillConfig.maxLeaseDuration` | Safe | Only caps leases granted after the change | ❌ |
+| `spec.documentBackfillConfig.maxFailurePercentToFailDocuments` | Safe | Only changes when a failure counts against a document | ❌ |
+| `spec.documentBackfillConfig.bulkResponseTimeout` | Safe | Only changes how long each bulk waits for its response | ❌ |
 | `spec.documentBackfillConfig.maxConnections` | Gated on increase | Lowering only reduces load on the target; raising adds load, so it needs approval | ❌ |
 | `spec.documentBackfillConfig.maxShardSizeBytes` | Gated | Drives ephemeral-storage sizing for the worker pods | ❌ |
 | `spec.documentBackfillConfig.otelTraceExportEnabled` | Safe |  | ❌ |

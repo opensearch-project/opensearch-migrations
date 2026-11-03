@@ -87,6 +87,33 @@ function rootLogLevelOption(component: string) {
         .describe(`Log levels for the ${component}.` + LOG_LEVELS_DESC_SUFFIX);
 }
 
+export const ISO_DURATION_PATTERN = /^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/;
+
+/** Seconds in an ISO 8601 duration matching {@link ISO_DURATION_PATTERN}, or undefined if it doesn't match. */
+export function isoDurationSeconds(duration: string): number | undefined {
+    const match = ISO_DURATION_PATTERN.exec(duration);
+    if (!match) return undefined;
+    const [days, hours, minutes, seconds] = match.slice(1).map(part => part === undefined ? 0 : Number(part));
+    const total = ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
+    return duration.startsWith("-") ? -total : total;
+}
+
+function validateMaxLeaseDuration(
+    ctx: z.RefinementCtx,
+    data: {initialLeaseDuration?: string, maxLeaseDuration?: string}
+) {
+    if (data.initialLeaseDuration === undefined || data.maxLeaseDuration === undefined) return;
+    const initial = isoDurationSeconds(data.initialLeaseDuration);
+    const max = isoDurationSeconds(data.maxLeaseDuration);
+    if (initial !== undefined && max !== undefined && max < initial) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `maxLeaseDuration (${data.maxLeaseDuration}) must be at least initialLeaseDuration (${data.initialLeaseDuration}).`,
+            path: ["maxLeaseDuration"]
+        });
+    }
+}
+
 export const FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE =
     "Set failedDocumentStreamS3Bucket to record documents that can't be written, or set " +
     "disableFailedDocumentStream: true to run without a failed document stream.";
@@ -825,6 +852,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "When omitted, defaults to a built-in set including version_conflict_engine_exception, " +
             "mapper_parsing_exception, strict_dynamic_mapping_exception, and others. " +
             "Set explicitly to override the defaults entirely (not additive). " +
+            "An item is not retried if its error type or any of its caused_by types is in the list. " +
             "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
             "illegal_argument_exception, resource_already_exists_exception."),
     ...OTEL_EXPORT_OPTIONS,
@@ -1153,7 +1181,9 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
-        .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."),
+        .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests. " +
+            "5–15 MB works well; keep it at or under the largest request the target accepts: its http.max_content_length, " +
+            "or a smaller limit set in front of it."),
     maxDocumentSizeBytes: z.number().int().min(1).optional()
         .describe("Documents bigger than this many bytes are not sent to the target. They are recorded in the failed " +
             "document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies " +
@@ -1163,14 +1193,44 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .checksumFor('replayer')
         .changeRestriction('impossible'),
     initialLeaseDuration: z.string()
-        .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
+        .regex(ISO_DURATION_PATTERN)
         .default("PT1H").optional()
         .describe("[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). " +
             "If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. " +
             "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration. " +
             "Safe to change on a running migration: it only affects leases granted after the change."),
+    maxLeaseDuration: z.string()
+        .regex(ISO_DURATION_PATTERN)
+        .default("P1D").optional()
+        .describe("[Expert] ISO 8601 upper bound on a work item lease (e.g. 'P1D' = 1 day). The lease doubles each time " +
+            "a shard is picked up again after its lease expired; once the doubled lease would reach this value, it stays " +
+            "at this value. Must be at least initialLeaseDuration."),
+    maxFailurePercentToFailDocuments: z.number().min(0).max(100).default(5).optional()
+        .describe("[Expert] A failing bulk request is retried until it succeeds; throttles and an unavailable target " +
+            "(unavailable shards, blocked writes, refused connections) never count against a document. A single " +
+            "document is given up, into the failed document stream, after 3 retries that got an unknown status or 5 " +
+            "that timed out, and a batch is split to find such a document. A failure only counts toward that, or " +
+            "toward splitting, if no more than this percent (0-100) of the worker's other requests (for an item " +
+            "error, other documents) failed in the last two minutes; otherwise the target is assumed to be in " +
+            "trouble and the streak starts over, so a shard may wait until the target recovers. 100 ignores other " +
+            "requests' failures. Safe to change on a running migration."),
+    bulkResponseTimeout: z.string()
+        .regex(ISO_DURATION_PATTERN)
+        .refine(d => (isoDurationSeconds(d) ?? 0) > 0, {message: "bulkResponseTimeout must be positive"})
+        .default("PT310S").optional()
+        .describe("[Expert] ISO 8601 duration each bulk request waits for its response once sent, before it is retried as " +
+            "a request that got no response. The target keeps working on a bulk it has received, so a retry adds a second " +
+            "copy of the work; this should outlast the slowest bulk the target completes. The default is just over the " +
+            "300 s idle timeout common to load balancers in front of a cluster, so behind one a stuck bulk is answered " +
+            "with a 504 first. " +
+            "Work coordination and other requests keep their shorter timeout."),
     maxConnections: z.number().default(10).optional()
-        .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing. " +
+        .describe("M, the most bulk requests each RFS worker may have in flight to the target at once (and so the most " +
+            "connections it uses for them). The worker's limit L starts at 1: each success while L is in use adds 1 " +
+            "(1/L above the threshold), each throttle (429, rejected execution, response timeout) multiplies it by a " +
+            "random 0.5-0.7, " +
+            "and it stays within [1/32, M]; below 1 the worker paces its one request. So M is the ceiling, not what a " +
+            "worker always uses. " +
             "On a running migration, lowering it applies immediately; raising it adds load to the target and needs approval.")
         .gatedOnIncrease(),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
@@ -1281,6 +1341,7 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
     .superRefine((data, ctx) => {
         validateMinPodReplicas(ctx, data);
         validateFailedDocumentStreamChoice(ctx, data);
+        validateMaxLeaseDuration(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",

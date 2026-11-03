@@ -99,6 +99,54 @@ class BulkResponseParserPartitionTest {
         assertThat(partition, equalTo(null));
     }
 
+    // Item errors as OpenSearch 2.19 reports a string value over opensearch.xcontent.string.length.max: the
+    // stream_constraints_exception is only ever a cause.
+    private static final String OVER_LIMIT_THROUGH_INGEST_PIPELINE =
+        "{\"index\":{\"_index\":\"movies\",\"_id\":\"%s\",\"status\":400,\"error\":{\"type\":\"parse_exception\","
+            + "\"reason\":\"Failed to parse content to map\",\"caused_by\":{\"type\":\"stream_constraints_exception\","
+            + "\"reason\":\"String value length (1450) exceeds the maximum allowed (1000)\"}}}}";
+    private static final String OVER_LIMIT_WITHOUT_PIPELINE =
+        "{\"index\":{\"_index\":\"movies\",\"_id\":\"%s\",\"status\":400,\"error\":{\"type\":\"mapper_parsing_exception\","
+            + "\"reason\":\"failed to parse\",\"caused_by\":{\"type\":\"stream_constraints_exception\","
+            + "\"reason\":\"String value length (1450) exceeds the maximum allowed (1000)\"}}}}";
+
+    @Test
+    void aValueOverTheTargetsXContentLimitIsNotRetriedWhateverWrapsIt() {
+        var body = response(String.format(OVER_LIMIT_THROUGH_INGEST_PIPELINE, "a"),
+            String.format(OVER_LIMIT_WITHOUT_PIPELINE, "b"));
+
+        var partition = BulkResponseParser.partitionItems(body, DocumentExceptionAllowlist.empty());
+
+        assertThat(partition.getRetryableFailures(), empty());
+        assertThat(partition.getNonRetryableFailures(), hasSize(2));
+        // The record keeps the outer type, which is what the target reported for the item.
+        assertThat(partition.getNonRetryableFailures().get(0).getErrorType(), equalTo("parse_exception"));
+        assertThat(partition.getNonRetryableFailures().get(1).getErrorType(), equalTo("mapper_parsing_exception"));
+    }
+
+    @Test
+    void aDeterministicCauseMakesAnItemNonRetryableEvenWhenItIsListedBeforeTheType() {
+        var item = "{\"index\":{\"_id\":\"a\",\"status\":400,\"error\":{\"caused_by\":{\"reason\":\"r\","
+            + "\"caused_by\":{\"type\":\"illegal_argument_exception\"},\"type\":\"some_wrapper_exception\"},"
+            + "\"type\":\"some_outer_exception\"}}}";
+
+        var partition = BulkResponseParser.partitionItems(response(item), DocumentExceptionAllowlist.empty());
+
+        assertThat(partition.getNonRetryableFailures(), hasSize(1));
+        assertThat(partition.getNonRetryableFailures().get(0).getErrorType(), equalTo("some_outer_exception"));
+    }
+
+    @Test
+    void anUnknownCauseDoesNotMakeAnItemNonRetryable() {
+        var item = "{\"index\":{\"_id\":\"a\",\"status\":429,\"error\":{\"type\":\"es_rejected_execution_exception\","
+            + "\"caused_by\":{\"type\":\"some_brand_new_exception\"}}}}";
+
+        var partition = BulkResponseParser.partitionItems(response(item), DocumentExceptionAllowlist.empty());
+
+        assertThat(partition.getNonRetryableFailures(), empty());
+        assertThat(partition.getRetryableFailures().get(0).getErrorType(), equalTo("es_rejected_execution_exception"));
+    }
+
     @Test
     void unknownErrorTypeIsRetryable() {
         // A type not in BulkDocErrorTypes.NON_RETRYABLE is treated as retryable (transient).

@@ -29,6 +29,9 @@ final class ScriptedHttpServer implements AutoCloseable {
     /** Read the request and never answer it. */
     record Hang() implements Action {}
 
+    /** Answer as {@code respond} does, but only after {@code delay}. */
+    record RespondAfter(java.time.Duration delay, Respond respond) implements Action {}
+
     /** Read the request headers, then reset the connection (TCP RST) without reading the body. */
     record ResetMidRequest() implements Action {}
 
@@ -103,6 +106,15 @@ final class ScriptedHttpServer implements AutoCloseable {
                 }
                 switch (action) {
                     case Respond respond -> write(out, respond);
+                    case RespondAfter later -> {
+                        try {
+                            Thread.sleep(later.delay().toMillis());
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        write(out, later.respond());
+                    }
                     case ReadBody readBody -> throw new IllegalStateException("The body was already read");
                     case Hang hang -> {
                         // Hold the connection open until the client gives up and closes it.
