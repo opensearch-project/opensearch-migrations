@@ -13,13 +13,15 @@ import {
     DENORMALIZED_REPLAY_CONFIG,
     DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG,
     ENRICHED_SNAPSHOT_MIGRATION_FILTER,
-    getZodKeys,
     NAMED_KAFKA_CLIENT_CONFIG,
     NAMED_KAFKA_CLUSTER_CONFIG,
     NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
+    SNAPSHOT_CREATION_REFERENCE,
+    SNAPSHOT_SEQUENCE_PLAN,
+    RESOLVED_BACKFILL_REPEAT_POLICY,
 } from '@opensearch-migrations/schemas'
 import {
     AllowLiteralOrExpression,
@@ -31,7 +33,6 @@ import {
     InputParamDef,
     INTERNAL,
     makeParameterLoop,
-    selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
     Serialized,
     typeToken,
@@ -367,6 +368,13 @@ export const FullMigration = WorkflowBuilder.create({
                     configChecksum: b.inputs.configChecksum,
                     dataSnapshotName: b.inputs.resourceName,
                     dataSnapshotUid: expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "resourceUid"),
+                    // A restarted sequence must use the same snapshot name even if the workflow UID changes.
+                    uniqueRunNonce: expr.ternary(
+                        expr.not(expr.isEmpty(expr.dig(
+                            expr.deserializeRecord(b.inputs.snapshotItemConfig), ["sequenceName"], ""))),
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "resourceUid"),
+                        b.inputs.uniqueRunNonce,
+                    ),
                     // Solr import-prepare: empty for the normal create path. When set, createOrGetSnapshot
                     // runs the import workflow (schema upload, no backup) against this external backup.
                     solrExternalBackupName: expr.dig(
@@ -384,6 +392,20 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
+    .addTemplate("createIndependentSnapshot", t => t
+        .addRequiredInput("snapshotItemConfig", typeToken<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>())
+        .addRequiredInput("sourceConfig", typeToken<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addInputsFromRecord(uniqueRunNonceParam)
+        .addInputsFromRecord(ImageParameters)
+        .addSteps(b => b.addStep("createSnapshot", INTERNAL, "createSingleSnapshot", c =>
+            c.register({...selectInputsForRegister(b, c)}),
+            {when: {templateExp: expr.isEmpty(expr.dig(
+                expr.deserializeRecord(b.inputs.snapshotItemConfig), ["sequenceName"], ""))}}
+        ))
+    )
+
     .addTemplate("createSnapshotsForSource", t => t
         .addRequiredInput("snapshotsSourceConfig",
             typeToken<z.infer<typeof DENORMALIZED_CREATE_SNAPSHOTS_CONFIG>>())
@@ -393,11 +415,12 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
-            .addStep("createSnapshot", INTERNAL, "createSingleSnapshot", c =>
+            .addStep("createSnapshot", INTERNAL, "createIndependentSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     snapshotItemConfig: expr.serialize(expr.makeDict({
                         label: expr.get(c.item, "label"),
+                        sequenceName: expr.dig(c.item, ["sequenceName"], ""),
                         snapshotPrefix: expr.get(c.item, "snapshotPrefix"),
                         sourceConnectionIdentity: expr.deserializeRecord(expr.get(c.item, "sourceConnectionIdentity")),
                         config: expr.deserializeRecord(expr.get(c.item, "config")),
@@ -432,7 +455,7 @@ export const FullMigration = WorkflowBuilder.create({
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotsSourceConfig),
-                            "createSnapshotConfig"))
+                            "createSnapshotConfig")),
                 }
             )
         )
@@ -457,6 +480,7 @@ export const FullMigration = WorkflowBuilder.create({
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c =>
             expr.empty<z.infer<typeof ARGO_RFS_OPTIONS>>())
+        .addOptionalInput("skipBackfillApproval", () => false)
 
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
@@ -490,12 +514,15 @@ export const FullMigration = WorkflowBuilder.create({
                         name: expr.concat(expr.literal("documentbackfill."), b.inputs.crdName)
                     }),
                 {when: {templateExp: expr.and(
-                    expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
-                    expr.not(expr.get(
-                        expr.deserializeRecord(b.inputs.documentBackfillConfig),
-                        "skipApproval"
+                    expr.not(expr.deserializeRecord(b.inputs.skipBackfillApproval)),
+                    expr.and(
+                        expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
+                        expr.not(expr.get(
+                            expr.deserializeRecord(b.inputs.documentBackfillConfig),
+                            "skipApproval"
+                        ))
                     ))
-                )}}
+                }}
             )
         )
     )
@@ -569,6 +596,20 @@ export const FullMigration = WorkflowBuilder.create({
                     )})
                 }
             )
+            .addStep("readPreviousSnapshotName", ResourceManagement, "readDataSnapshotName", c =>
+                c.register({
+                    resourceName: expr.dig(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                        ["delta", "previousSnapshotNameResolution", "dataSnapshotResourceName"], ""),
+                }), {
+                    when: c => ({templateExp: expr.and(
+                        checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
+                        expr.not(expr.isEmpty(expr.dig(
+                            expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                            ["delta", "previousSnapshotNameResolution", "dataSnapshotResourceName"], "")))
+                    )}),
+                }
+            )
             .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
                     const snapshotMigrationConfig = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
                     const snapshotNameResolution = expr.get(snapshotMigrationConfig, "snapshotNameResolution");
@@ -578,6 +619,13 @@ export const FullMigration = WorkflowBuilder.create({
                         c.steps.readSnapshotName.outputs.snapshotName
                     );
                     const snapshotRepoConfig = expr.get(snapshotMigrationConfig, "snapshotConfig");
+                    const externalPreviousSnapshot = expr.dig(snapshotMigrationConfig,
+                        ["delta", "previousSnapshotNameResolution", "externalSnapshotName"], "");
+                    const previousSnapshotName = expr.ternary(
+                        expr.not(expr.isEmpty(externalPreviousSnapshot)),
+                        externalPreviousSnapshot,
+                        c.steps.readPreviousSnapshotName.outputs.snapshotName
+                    );
 
                     return c.register({
                         ...selectInputsForRegister(b, c),
@@ -599,8 +647,16 @@ export const FullMigration = WorkflowBuilder.create({
                         ),
                         documentBackfillConfig: expr.ternary(
                             expr.hasKey(snapshotMigrationConfig, "documentBackfillConfig"),
-                            expr.cast(expr.serialize(
-                                expr.getLoose(snapshotMigrationConfig, "documentBackfillConfig")
+                            expr.cast(expr.ternary(
+                                expr.hasKey(snapshotMigrationConfig, "delta"),
+                                expr.serialize(expr.mergeDicts(
+                                    expr.getLoose(snapshotMigrationConfig, "documentBackfillConfig"),
+                                    expr.makeDict({
+                                        previousSnapshotName,
+                                        deltaMode: expr.dig(snapshotMigrationConfig, ["delta", "mode"], ""),
+                                    })
+                                )),
+                                expr.serialize(expr.getLoose(snapshotMigrationConfig, "documentBackfillConfig"))
                             )).to<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>(),
                             expr.empty<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>()
                         ),
@@ -613,8 +669,13 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
-                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
+                        checksumForReplayer: expr.ternary(
+                            expr.hasKey(snapshotMigrationConfig, "sequenceName"),
+                            expr.literal(""),
+                            expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], "")
+                        ),
+                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum"),
+                        skipBackfillApproval: expr.hasKey(snapshotMigrationConfig, "sequenceName"),
                     });
                 }, {
                     when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),
@@ -625,13 +686,166 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                     phase: expr.literal("Completed"),
                     configChecksum: b.inputs.configChecksum,
-                    checksumForReplayer: expr.dig(
-                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                        ["checksumForReplayer"], ""
+                    checksumForReplayer: expr.ternary(
+                        expr.hasKey(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "sequenceName"),
+                        expr.literal(""),
+                        expr.dig(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), ["checksumForReplayer"], "")
                     ),
                 }),
                 {when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
+        })
+    )
+
+    .addTemplate("runIndependentSnapshotMigration", t => t
+        .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
+        .addOptionalInput("groupName_view", () => "Snapshot Migration")
+        .addOptionalInput("sortOrder_view", () => 4)
+        .addInputsFromRecord(uniqueRunNonceParam)
+        .addInputsFromRecord(ImageParameters)
+        .addSteps(b => b.addStep("backfill", INTERNAL, "runSingleSnapshotMigration", c =>
+            c.register({...selectInputsForRegister(b, c)}),
+            {when: {templateExp: expr.isEmpty(expr.dig(
+                expr.deserializeRecord(b.inputs.snapshotMigrationConfig), ["sequenceName"], ""))}}
+        ))
+    )
+
+    .addTemplate("createSequenceSnapshot", t => t
+        .addRequiredInput("config", typeToken<z.infer<typeof ARGO_MIGRATION_CONFIG>>())
+        .addRequiredInput("snapshotReference", typeToken<z.infer<typeof SNAPSHOT_CREATION_REFERENCE>>())
+        .addInputsFromRecord(uniqueRunNonceParam)
+        .addInputsFromRecord(ImageParameters)
+        .addSteps(b => {
+            const reference = expr.deserializeRecord(b.inputs.snapshotReference);
+            const source = expr.index(
+                expr.get(expr.deserializeRecord(b.inputs.config), "snapshots"),
+                expr.asInt(expr.get(reference, "sourceIndex")));
+            const snapshot = expr.index(
+                expr.get(source, "createSnapshotConfig"), expr.asInt(expr.get(reference, "snapshotIndex")));
+            return b.addStep("createSnapshot", INTERNAL, "createSingleSnapshot", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    snapshotItemConfig: expr.serialize(snapshot),
+                    sourceConfig: expr.serialize(expr.get(source, "sourceConfig")),
+                    resourceName: expr.concat(
+                        expr.dig(source, ["sourceConfig", "label"], ""),
+                        expr.literal("-"), expr.get(snapshot, "label")),
+                    configChecksum: expr.get(snapshot, "configChecksum"),
+                    groupName_view: expr.get(snapshot, "label"),
+                })
+            );
+        })
+    )
+
+    .addTemplate("evaluateBackfillRepeat", t => t
+        .addRequiredInput("repeatPolicy", typeToken<z.infer<typeof RESOLVED_BACKFILL_REPEAT_POLICY>>())
+        .addRequiredInput("run", typeToken<number>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("snapshotResourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(b => b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addCommand(["/bin/bash", "-lc"])
+            .addEnvVarsFromRecord({
+                RESOURCE_NAME: b.inputs.resourceName,
+                RESOURCE_UID: b.inputs.resourceUid,
+                CONFIG_CHECKSUM: b.inputs.configChecksum,
+                SNAPSHOT_RESOURCE_NAME: b.inputs.snapshotResourceName,
+                REPEAT_POLICY: b.inputs.repeatPolicy,
+                RUN_NUMBER: b.inputs.run,
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot),
+            })
+            .addArgs([workflowScriptCommand("evaluateBackfillRepeat.sh")])
+        )
+        .addPathOutput("action", "/tmp/backfill-repeat-action", typeToken<string>())
+        .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("runSnapshotSequence", t => t
+        .addRequiredInput("config", typeToken<z.infer<typeof ARGO_MIGRATION_CONFIG>>())
+        .addRequiredInput("sequencePlan", typeToken<z.infer<typeof SNAPSHOT_SEQUENCE_PLAN>>())
+        .addOptionalInput("stepIndex", () => expr.literal(0))
+        .addOptionalInput("groupName_view", () => "Successive snapshots")
+        .addOptionalInput("sortOrder_view", () => 4)
+        .addInputsFromRecord(uniqueRunNonceParam)
+        .addInputsFromRecord(ImageParameters)
+        .addSteps(b => {
+            const plan = expr.deserializeRecord(b.inputs.sequencePlan);
+            const steps = expr.get(plan, "steps");
+            const stepIndex = expr.asInt(expr.deserializeRecord(b.inputs.stepIndex));
+            const step = expr.index(steps, stepIndex);
+            const migration = expr.index(
+                expr.get(expr.deserializeRecord(b.inputs.config), "snapshotMigrations"),
+                expr.asInt(expr.get(step, "migrationIndex")));
+            const nextIndex = expr.add(stepIndex, expr.literal(1));
+            const evaluateRepeat = expr.and(expr.hasKey(plan, "repeat"), expr.hasKey(step, "completedRun"));
+            return b
+                .addStep("createSnapshot", INTERNAL, "createSequenceSnapshot", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        snapshotReference: expr.serialize(expr.dig(step, ["snapshotCreation"],
+                            expr.makeDict({sourceIndex: 0, snapshotIndex: 0}))),
+                    }),
+                    {when: {templateExp: expr.hasKey(step, "snapshotCreation")}}
+                )
+                .addStep("backfill", INTERNAL, "runSingleSnapshotMigration", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        snapshotMigrationConfig: expr.serialize(migration),
+                        resourceName: expr.get(migration, "resourceName"),
+                        configChecksum: expr.get(migration, "configChecksum"),
+                        resourceUid: expr.get(migration, "resourceUid"),
+                        groupName_view: expr.get(migration, "label"),
+                    })
+                )
+                .addStep("readCheckpoint", ResourceManagement, "readSnapshotSequenceCheckpoint", c =>
+                    c.register({resourceName: expr.get(migration, "resourceName")})
+                )
+                .addStep("approveBackfill", DocumentBulkLoad, "approveBackfill", c =>
+                    c.register({
+                        name: expr.concat(expr.literal("documentbackfill."), expr.get(migration, "resourceName")),
+                    }), {when: c => ({templateExp: expr.and(
+                        checksumNotDone(c.readCheckpoint.outputs.completedChecksum, expr.get(migration, "configChecksum")),
+                        expr.not(expr.dig(migration, ["documentBackfillConfig", "skipApproval"], false))
+                    )})}
+                )
+                .addStep("saveCheckpoint", ResourceManagement, "patchSnapshotSequenceCheckpoint", c =>
+                    c.register({
+                        resourceName: expr.get(migration, "resourceName"),
+                        phase: "Completed",
+                        sequenceCompletionChecksum: expr.get(migration, "configChecksum"),
+                        checksumForReplayer: expr.get(migration, "checksumForReplayer"),
+                    }), {when: c => ({templateExp: checksumNotDone(
+                        c.readCheckpoint.outputs.completedChecksum, expr.get(migration, "configChecksum")
+                    )})}
+                )
+                .addStep("evaluateRepeat", INTERNAL, "evaluateBackfillRepeat", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        repeatPolicy: expr.serialize(expr.dig(plan, ["repeat"], expr.makeDict({maxRuns: 1}))),
+                        run: expr.dig(step, ["completedRun"], 1),
+                        resourceName: expr.get(migration, "resourceName"),
+                        resourceUid: expr.get(migration, "resourceUid"),
+                        configChecksum: expr.get(migration, "configChecksum"),
+                        snapshotResourceName: expr.dig(migration, ["snapshotNameResolution", "dataSnapshotResourceName"], ""),
+                    }), {when: {templateExp: evaluateRepeat}}
+                )
+                // Argo withParam loops do not guarantee iteration order, even with
+                // parallelism=1. Recursion makes completion of the whole prior step,
+                // including its approval gate, the dependency of the next snapshot.
+                .addStepToSelf("next", c => c.register({
+                    ...selectInputsForRegister(b, c),
+                    stepIndex: nextIndex,
+                }), {when: c => ({templateExp: expr.and(
+                    expr.lessThan(nextIndex, expr.length(steps)),
+                    expr.ternary(evaluateRepeat, expr.equals(c.evaluateRepeat.outputs.action, "continue"), expr.literal(true)),
+                )})});
         })
     )
 
@@ -754,6 +968,68 @@ export const FullMigration = WorkflowBuilder.create({
         })
     )
 
+
+    .addTemplate("runConfiguredReplay", t => t
+        .addRequiredInput("replayConfig", typeToken<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>())
+        .addInputsFromRecord(ImageParameters)
+        .addSteps(b => {
+            const replay = expr.deserializeRecord(b.inputs.replayConfig);
+            return b.addStep("replay", INTERNAL, "runSingleReplay", c => c.register({
+                ...selectInputsForRegister(b, c),
+                name: expr.get(replay, "name"),
+                resourceName: expr.get(replay, "name"),
+                resourceUid: expr.get(replay, "resourceUid"),
+                configChecksum: expr.get(replay, "configChecksum"),
+                dependsOn: expr.serialize(expr.get(replay, "dependsOn")),
+                dependsOnSnapshotMigrations: expr.serialize(expr.get(replay, "dependsOnSnapshotMigrations")),
+                kafkaConfig: expr.serialize(expr.get(replay, "kafkaConfig")),
+                kafkaClusterName: expr.get(replay, "kafkaClusterName"),
+                sourceLabel: expr.get(replay, "sourceLabel"),
+                fromCapturedTraffic: expr.get(replay, "fromCapturedTraffic"),
+                fromCapturedTrafficSourceKind: expr.get(replay, "fromCapturedTrafficSourceKind"),
+                fromCapturedTrafficConfigChecksum: expr.get(replay, "fromCapturedTrafficConfigChecksum"),
+                targetConfig: expr.serialize(expr.get(replay, "toTarget")),
+                targetConnectionIdentity: expr.serialize(expr.get(replay, "targetConnectionIdentity")),
+                replayerOptions: expr.serialize(expr.get(replay, "replayerConfig")),
+                useLocalStack: expr.dig(replay, ["replayerConfig", "useLocalStack"], false),
+                groupName_view: expr.get(replay, "name"),
+                sortOrder_view: expr.literal(5),
+            }));
+        })
+    )
+
+    .addTemplate("runIndependentReplay", t => t
+        .addRequiredInput("replayConfig", typeToken<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>())
+        .addInputsFromRecord(ImageParameters)
+        .addSteps(b => b.addStep("replay", INTERNAL, "runConfiguredReplay", c =>
+            c.register({...selectInputsForRegister(b, c)}),
+            {when: {templateExp: expr.not(expr.hasKey(expr.deserializeRecord(b.inputs.replayConfig), "snapshotSequenceName"))}}
+        ))
+    )
+
+    .addTemplate("runSnapshotSequenceAndReplays", t => t
+        .addRequiredInput("config", typeToken<z.infer<typeof ARGO_MIGRATION_CONFIG>>())
+        .addRequiredInput("sequencePlan", typeToken<z.infer<typeof SNAPSHOT_SEQUENCE_PLAN>>())
+        .addInputsFromRecord(uniqueRunNonceParam)
+        .addInputsFromRecord(ImageParameters)
+        .addSteps(b => b
+            .addStep("sequence", INTERNAL, "runSnapshotSequence", c =>
+                c.register({...selectInputsForRegister(b, c)})
+            )
+            .addStep("replay", INTERNAL, "runConfiguredReplay", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    replayConfig: expr.serialize(expr.index(
+                        expr.get(expr.deserializeRecord(b.inputs.config), "trafficReplays"),
+                        expr.asInt(c.item),
+                    )),
+                }), {
+                    loopWith: makeParameterLoop(expr.dig(
+                        expr.deserializeRecord(b.inputs.sequencePlan), ["replayIndices"], [])),
+                }
+            )
+        )
+    )
 
     // ── Main ─────────────────────────────────────────────────────────────
 
@@ -939,7 +1215,7 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.get(expr.deserializeRecord(b.inputs.config), "snapshots"))
                 }
             )
-            .addStep("performSnapshotMigration", INTERNAL, "runSingleSnapshotMigration", c =>
+            .addStep("performSnapshotMigration", INTERNAL, "runIndependentSnapshotMigration", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: expr.get(c.item, "resourceName"),
@@ -958,31 +1234,23 @@ export const FullMigration = WorkflowBuilder.create({
                     sortOrder_view: expr.literal(4),
                 }), {
                     loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.config), "snapshotMigrations"))
+                        expr.get(expr.deserializeRecord(b.inputs.config), "snapshotMigrations")),
                 }
             )
-            .addStep("createTrafficReplayer", INTERNAL, "runSingleReplay", c =>
+            .addStep("performSnapshotSequence", INTERNAL, "runSnapshotSequenceAndReplays", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    config: b.inputs.config,
+                    sequencePlan: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_SEQUENCE_PLAN>>>(),
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.dig(expr.deserializeRecord(b.inputs.config), ["snapshotSequences"], [])),
+                }
+            )
+            .addStep("createTrafficReplayer", INTERNAL, "runIndependentReplay", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
-                        ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(DENORMALIZED_REPLAY_CONFIG)),
-                        targetConfig: expr.get(c.item, "toTarget"),
-                        replayerOptions: expr.get(c.item, "replayerConfig"),
-                        resourceName: expr.get(c.item, "name"),
-                        useLocalStack: expr.dig(
-                            expr.deserializeRecord(expr.get(c.item, "replayerConfig")),
-                            ["useLocalStack"],
-                            false
-                        ),
-                        groupName_view: expr.concat(
-                            expr.get(c.item, "fromCapturedTraffic"),
-                            expr.literal(" → "),
-                            expr.dig(
-                                expr.deserializeRecord(expr.get(c.item, "toTarget")),
-                                ["label"],
-                                ""
-                            )
-                        ),
-                        sortOrder_view: expr.literal(5),
+                        replayConfig: expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_REPLAY_CONFIG>>>(),
                     }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "trafficReplays"))
