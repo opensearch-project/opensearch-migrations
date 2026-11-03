@@ -490,7 +490,14 @@ class RegistryImageBuildUtils {
             def hostVisibleRef = ref.startsWith(intermediateRegistry.containerUrl)
                     ? "${intermediateRegistry.hostUrl}${ref.substring(intermediateRegistry.containerUrl.length())}"
                     : ref
-            [(key): [imageName: extractedImageName, repoPrefix: repoPrefix, hostVisibleRef: hostVisibleRef]]
+            // In a single repository whose tags name the images (ECR: "<repo>:migrations_<image>_<version>"), the
+            // producing image is named in the tag, not the repository.
+            def tag = colonIdx >= 0 ? nameAndTag.substring(colonIdx + 1) : ""
+            def producerImageName = imageToService.containsKey(extractedImageName) ? extractedImageName
+                    : imageToService.keySet().findAll { tag.startsWith("migrations_${it}_") }
+                        .max { it.length() } ?: extractedImageName
+            [(key): [imageName: extractedImageName, producerImageName: producerImageName, repoPrefix: repoPrefix,
+                     hostVisibleRef: hostVisibleRef]]
         }
 
         // Consumer buildKit_ tasks depend directly on producer buildKit_ tasks.
@@ -524,9 +531,9 @@ class RegistryImageBuildUtils {
         // archSuffix is used to locate the correct per-architecture metadata file.
         def resolveIntermediateArgs = { String archSuffix ->
             intermediateArgProducers.collect { key, info ->
-                def producerServiceName = imageToService[info.imageName]
+                def producerServiceName = imageToService[info.producerImageName]
                 if (!producerServiceName) {
-                    throw new GradleException("No BuildKit service produces image '${info.imageName}' " +
+                    throw new GradleException("No BuildKit service produces image '${info.producerImageName}' " +
                             "(needed by ${cfg.serviceName} build arg ${key}). Known images: ${imageToService.keySet()}")
                 }
                 def metadataFile = RegistryImageBuildUtils.metadataFileFor(project, producerServiceName, archSuffix)
