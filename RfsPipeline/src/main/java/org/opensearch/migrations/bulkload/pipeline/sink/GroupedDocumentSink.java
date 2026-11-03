@@ -18,6 +18,17 @@ public interface GroupedDocumentSink extends DocumentSink {
     int preferredSourceBatchGroupSize();
 
     /**
+     * Size one source document for the pipeline's first batching pass.
+     *
+     * <p>The default preserves source-oriented batching. A sink may return its exact encoded size when that is
+     * knowable before transformation, allowing the pipeline to make one tightly packed target request per source
+     * batch without a second split or a partially filled request at an intermediate group boundary.
+     */
+    default long sourceBatchBytes(String collectionName, Document document) {
+        return document.sourceLength();
+    }
+
+    /**
      * Write a bounded group of source batches.
      *
      * <p>Each inner list remains a distinct source/transform batch. The sink may flatten the output after
