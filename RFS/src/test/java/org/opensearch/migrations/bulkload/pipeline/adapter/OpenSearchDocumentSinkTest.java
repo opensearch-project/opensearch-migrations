@@ -43,7 +43,7 @@ class OpenSearchDocumentSinkTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void writeBatch_noTransformer_usesRawPath(boolean loadedIdentity) {
-        when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client,
             loadedIdentity ? () -> new TransformationLoader().getTransformerFactoryLoader(null) : null,
             false, DocumentExceptionAllowlist.empty(), null);
@@ -55,7 +55,7 @@ class OpenSearchDocumentSinkTest {
 
         assertNotNull(result);
         assertEquals(2, result.docsInBatch());
-        verify(client).sendBulkRequestRaw(eq("idx"), eq(docs), isNull(), eq(false), any());
+        verify(client).sendBulkRequestPreparedRaw(eq("idx"), anyList(), isNull(), any(), eq(1));
         verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any());
     }
 
@@ -75,7 +75,7 @@ class OpenSearchDocumentSinkTest {
 
     @Test
     void writeBatch_returnsBatchResultWithCorrectByteCounts() {
-        when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         byte[] src1 = "{\"x\":1}".getBytes();
         byte[] src2 = "{\"y\":2}".getBytes();
@@ -93,7 +93,7 @@ class OpenSearchDocumentSinkTest {
 
     @Test
     void writeBatch_nullSourceBytes_countsAsZeroBytes() {
-        when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(
             new Document("d1", null, Document.Operation.DELETE, Map.of(), Map.of())
@@ -108,7 +108,7 @@ class OpenSearchDocumentSinkTest {
 
     @Test
     void writeBatch_clientError_propagates() {
-        when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any()))
+        when(client.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1)))
             .thenReturn(Mono.error(new RuntimeException("bulk failed")));
 
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
