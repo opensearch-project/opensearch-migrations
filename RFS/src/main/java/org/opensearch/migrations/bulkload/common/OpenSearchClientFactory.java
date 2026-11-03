@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.lang.reflect.InvocationTargetException;
+import java.time.Duration;
 
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.UnboundVersionMatchers;
@@ -17,6 +18,7 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.Exceptions;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -25,10 +27,18 @@ import reactor.util.retry.Retry;
 @Slf4j
 public class OpenSearchClientFactory {
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final Retry RETRY_WHEN_NOT_4XX_STRATEGY = Retry.max(1)
-        .filter(throwable -> !(throwable instanceof OpenSearchClient.UnexpectedStatusCode &&
-            ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode >= 400 &&
-            ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode < 500));
+    private static final int MAX_COMPRESSION_CHECK_RETRIES = 2;
+    // Same shape as version detection: an immediate retry after a 429 almost always gets another 429.
+    private static final Retry COMPRESSION_CHECK_RETRY = Retry.backoff(MAX_COMPRESSION_CHECK_RETRIES, Duration.ofSeconds(1))
+        .maxBackoff(Duration.ofSeconds(5))
+        .filter(HttpRetryClassifier::isRetryable)
+        .doBeforeRetry(retrySignal -> log.atWarn()
+            .setCause(retrySignal.failure())
+            .setMessage("Checking whether the target supports compression failed ({}); retrying attempt {} of {}")
+            .addArgument(HttpRetryClassifier.describe(retrySignal.failure()))
+            .addArgument(retrySignal.totalRetries() + 2)
+            .addArgument(MAX_COMPRESSION_CHECK_RETRIES + 1)
+            .log());
 
     private final ConnectionContext connectionContext;
     private final int maxConnections;
@@ -107,12 +117,17 @@ public class OpenSearchClientFactory {
         log.atInfo().setMessage("Checking compression on cluster").log();
         return client.getAsync("_cluster/settings?include_defaults=true", null)
             .flatMap(this::checkCompressionFromResponse)
-            .doOnError(e -> log.atWarn()
-                .setMessage("Check cluster compression failed")
-                .setCause(e)
-                .log())
-            .retryWhen(RETRY_WHEN_NOT_4XX_STRATEGY)
-            .onErrorReturn(false)
+            .retryWhen(COMPRESSION_CHECK_RETRY)
+            .onErrorResume(e -> {
+                var cause = Exceptions.isRetryExhausted(e) && e.getCause() != null ? e.getCause() : e;
+                log.atWarn()
+                    .setCause(cause)
+                    .setMessage("Couldn't tell whether the target supports compression ({}); sending requests "
+                        + "uncompressed")
+                    .addArgument(HttpRetryClassifier.describe(cause))
+                    .log();
+                return Mono.just(false);
+            })
             .doOnNext(hasCompressionEnabled -> log.atInfo()
                 .setMessage("After querying target, compression={}")
                 .addArgument(hasCompressionEnabled).log())

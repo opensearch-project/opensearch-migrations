@@ -246,7 +246,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     exceptionConsumer.accept(e);
                     throw new RetriesExceededException(e, attempt);
                 }
-                long cappedDelay = Math.min(delay, maxDelayMs);
+                long cappedDelay = RetryJitter.equalJitterMillis(Math.min(delay, maxDelayMs));
                 if (deadline != null) {
                     long remainingMs = Duration.between(Instant.now(), deadline).toMillis();
                     if (remainingMs <= 0 || cappedDelay > remainingMs) {
@@ -657,7 +657,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 }
 
                 recordRetry(context);
-                var sleepDuration = Duration.ofMillis(delay);
+                var sleepDuration = Duration.ofMillis(RetryJitter.equalJitterMillis(delay));
                 log.atWarn().setCause(e)
                     .setMessage("Retry attempt {}/{} for {}. Backing off {} before next attempt. Error: {}")
                     .addArgument(failures)
@@ -666,7 +666,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     .addArgument(sleepDuration)
                     .addArgument(e.getClass().getSimpleName())
                     .log();
-                Thread.sleep(delay);
+                Thread.sleep(sleepDuration.toMillis());
                 delay = delay > Long.MAX_VALUE / EXPONENTIAL_BACKOFF_MULTIPLIER
                     ? Long.MAX_VALUE
                     : delay * EXPONENTIAL_BACKOFF_MULTIPLIER;
@@ -1092,9 +1092,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 }
 
                 ctx.addTraceException(e, false);
-                var sleepBeforeNextRetryDuration = Duration.ofMillis(
+                var sleepBeforeNextRetryDuration = Duration.ofMillis(RetryJitter.equalJitterMillis(
                     Math.min(MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL,
-                        (long) (Math.pow(2.0, (retries-1)) * ACQUIRE_WORK_RETRY_BASE_MS)));
+                        (long) (Math.pow(2.0, (retries-1)) * ACQUIRE_WORK_RETRY_BASE_MS))));
                 leaseChecker.checkRetryWaitTimeOrThrow(e, retries-1, sleepBeforeNextRetryDuration);
 
                 log.atWarn().setCause(e)
@@ -1390,21 +1390,23 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     logFailure(labelThatShouldBeAContext, attempt, suppliedVal, transformedVal, exception);
                     context.recordFailure();
                     throw new MaxTriesExceededException(suppliedVal, transformedVal);
-                } else {
-                    context.recordRetry();
-                    logRetry(labelThatShouldBeAContext, attempt, suppliedVal, transformedVal, exception);
                 }
-                Thread.sleep(sleepMillis);
+                context.recordRetry();
+                long jitteredSleepMillis = RetryJitter.equalJitterMillis(sleepMillis);
+                logRetry(labelThatShouldBeAContext, attempt, jitteredSleepMillis, suppliedVal, transformedVal, exception);
+                Thread.sleep(jitteredSleepMillis);
                 sleepMillis *= 2;
             }
         }
     }
 
-    private static <T, U> void logRetry(String contextLabel, int attempt, T suppliedVal, U transformedVal, Exception e) {
+    private static <T, U> void logRetry(String contextLabel, int attempt, long sleepMillis, T suppliedVal,
+                                        U transformedVal, Exception e) {
         log.atWarn()
-            .setMessage("Retrying {} (Attempt {}) for: ({}, {})")
+            .setMessage("Retrying {} (Attempt {}) in {} ms for: ({}, {})")
             .addArgument(contextLabel)
             .addArgument(attempt)
+            .addArgument(sleepMillis)
             .addArgument(suppliedVal)
             .addArgument(transformedVal)
             .setCause(e)
@@ -1502,8 +1504,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     } else {
                         ctx.addTraceException(e, false);
                         ctx.recordRecoverableClockError();
-                        sleepBeforeNextRetryDuration =
-                            Duration.ofMillis((long) (Math.pow(2.0, driftRetries) * ACQUIRE_WORK_RETRY_BASE_MS));
+                        sleepBeforeNextRetryDuration = Duration.ofMillis(RetryJitter.equalJitterMillis(
+                            (long) (Math.pow(2.0, driftRetries) * ACQUIRE_WORK_RETRY_BASE_MS)));
                         leaseChecker.checkRetryWaitTimeOrThrow(e, driftRetries, sleepBeforeNextRetryDuration);
                     }
                     ++driftRetries;
