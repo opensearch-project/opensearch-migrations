@@ -158,6 +158,33 @@ class BulkFlowInstrumentsTest {
     }
 
     @Test
+    void requestPreparationStagesAreReported() {
+        var context = DocumentMigrationTestContext.factory().withAllTracking();
+        var restClient = mock(RestClient.class);
+        var connection = mock(ConnectionContext.class);
+        when(connection.getUri()).thenReturn(URI.create("http://localhost/"));
+        when(restClient.getConnectionContext()).thenReturn(connection);
+        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(created("a")));
+        var client = new OpenSearchClient_OS_2_11(restClient, new FailedRequestsLogger(), Version.fromString("OS 2.11"),
+            CompressionMode.GZIP_BODY_COMPRESSION, 100, 10_000_000);
+        client.setBulkFlowMetrics(context.makeBulkFlowInstruments(null, null));
+
+        client.sendBulkRequestRaw("idx", List.of(new Document("a", "{}".getBytes(StandardCharsets.UTF_8),
+            Document.Operation.UPSERT, Map.of(), Map.of())), null, false, DocumentExceptionAllowlist.empty()).block();
+        client.sendBulkRequestRaw("idx", List.of(new Document("a", "{}".getBytes(StandardCharsets.UTF_8),
+            Document.Operation.UPSERT, Map.of(), Map.of())), null, false, DocumentExceptionAllowlist.empty()).block();
+
+        var names = context.inMemoryInstrumentationBundle.getFinishedMetrics().stream()
+            .map(MetricData::getName).collect(Collectors.toSet());
+        Assertions.assertTrue(names.containsAll(Set.of(
+            "bulkBatchPreparationDuration",
+            "bulkRequestAssemblyDuration",
+            "bulkRequestCompressionDuration",
+            "bulkRequestStartGap"
+        )), "reported: " + names);
+    }
+
+    @Test
     void reportsConfiguredLimitAndWorkerUtilizationBand() {
         var context = DocumentMigrationTestContext.factory().withAllTracking();
         context.makeBulkFlowInstruments(null, new AdaptiveLimit(10));
