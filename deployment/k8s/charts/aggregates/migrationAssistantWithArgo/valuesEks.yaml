@@ -156,6 +156,13 @@ metrics:
           - dimensions: [[container, namespace], [container, namespace, pod]]
             metric_name_selectors:
               - container_memory_working_set_bytes
+          # Per-pod configured limits let dashboards express RFS resource usage as percentages without hard-coding
+          # one workflow's pod shape. CPU usage remains aggregated separately below.
+          - dimensions: [[container, namespace, pod]]
+            metric_name_selectors:
+              - container_spec_cpu_quota
+              - container_spec_cpu_period
+              - container_spec_memory_limit_bytes
           # Already summed to one point per node and container by metricstransform/cadvisor, so no pod dimension.
           - dimensions: [[container, namespace]]
             metric_name_selectors:
