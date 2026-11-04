@@ -157,6 +157,73 @@ class DocumentMigrationPipelineBatchingTest {
     }
 
     @Test
+    void packsPreparedChunksByExactSizeIncludingAnOversizedDocument() {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = Stream.iterate(0, i -> i + 1)
+            .limit(6)
+            .map(i -> new Document("doc-" + i, new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()))
+            .toList();
+        var preparedSizes = List.of(4L, 4L, 4L, 11L, 4L, 4L);
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+
+        class ExactPackingSink implements GroupedDocumentSink<String> {
+            final List<List<String>> receivedBatches = new ArrayList<>();
+
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped path must be used");
+            }
+
+            @Override
+            public int preferredSourceBatchGroupSize() {
+                return 8;
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                int index = Integer.parseInt(document.id().substring("doc-".length()));
+                return new PreparedDocument<>(document, preparedSizes.get(index), "prepared-" + document.id());
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatchGroup(
+                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
+            ) {
+                throw new AssertionError("The prepared grouped path must be used");
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                sourceBatches.stream()
+                    .map(batch -> batch.stream().map(item -> item.document().id()).toList())
+                    .forEach(receivedBatches::add);
+                long count = sourceBatches.stream().mapToLong(List::size).sum();
+                return Mono.just(new BatchResult(count, count));
+            }
+        }
+
+        var sink = new ExactPackingSink();
+        new DocumentMigrationPipeline(source, sink, 10, 10, 1, 8)
+            .migratePartition(partition, "index", 0)
+            .blockLast(Duration.ofSeconds(10));
+
+        Assertions.assertEquals(
+            List.of(List.of("doc-0", "doc-1"), List.of("doc-2"), List.of("doc-3"), List.of("doc-4", "doc-5")),
+            sink.receivedBatches
+        );
+    }
+
+    @Test
     void preparesSourceBatchesInParallelWithoutReorderingThem() throws Exception {
         var partition = new EsShardPartition("snapshot", "index", 0);
         var documents = Stream.iterate(0, i -> i + 1)
@@ -241,5 +308,85 @@ class DocumentMigrationPipelineBatchingTest {
         Assertions.assertTrue(preparationsOverlapped);
         Assertions.assertTrue(sink.maxActivePreparations.get() >= 2);
         Assertions.assertEquals(documents.stream().map(Document::id).toList(), sink.received);
+    }
+
+    @Test
+    void keepsSeveralPreparationChunksInFlightWhenTheTargetBatchIsLarge() throws Exception {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = Stream.iterate(0, i -> i + 1)
+            .limit(8)
+            .map(i -> new Document("doc-" + i, new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()))
+            .toList();
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+
+        class ChunkedPreparationSink implements GroupedDocumentSink<String> {
+            final CountDownLatch preparationsStarted = new CountDownLatch(2);
+            final CountDownLatch releasePreparations = new CountDownLatch(1);
+            final AtomicInteger activePreparations = new AtomicInteger();
+            final AtomicInteger maxActivePreparations = new AtomicInteger();
+
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped path must be used");
+            }
+
+            @Override
+            public int preferredSourceBatchGroupSize() {
+                return 1;
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                int active = activePreparations.incrementAndGet();
+                maxActivePreparations.accumulateAndGet(active, Math::max);
+                preparationsStarted.countDown();
+                try {
+                    if (!releasePreparations.await(10, TimeUnit.SECONDS)) {
+                        throw new AssertionError("Timed out waiting to release preparation work");
+                    }
+                    return new PreparedDocument<>(document, document.sourceLength(), "prepared-" + document.id());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(e);
+                } finally {
+                    activePreparations.decrementAndGet();
+                }
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatchGroup(
+                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
+            ) {
+                throw new AssertionError("The prepared grouped path must be used");
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                long count = sourceBatches.stream().mapToLong(List::size).sum();
+                return Mono.just(new BatchResult(count, count));
+            }
+        }
+
+        var sink = new ChunkedPreparationSink();
+        var future = new DocumentMigrationPipeline(source, sink, 8, 100, 1, 4)
+            .migratePartition(partition, "index", 0)
+            .collectList()
+            .toFuture();
+        boolean preparationsOverlapped = sink.preparationsStarted.await(1, TimeUnit.SECONDS);
+        sink.releasePreparations.countDown();
+        future.get(10, TimeUnit.SECONDS);
+
+        Assertions.assertTrue(preparationsOverlapped);
+        Assertions.assertTrue(sink.maxActivePreparations.get() >= 2);
     }
 }
