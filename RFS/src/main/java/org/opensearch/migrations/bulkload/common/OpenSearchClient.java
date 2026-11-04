@@ -2,10 +2,12 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
@@ -847,6 +849,10 @@ public abstract class OpenSearchClient {
         return BulkNdjson.assemble(pending, PreparedOperation::encoded);
     }
 
+    private static BulkNdjson.PooledSerializedBulk assemblePooled(List<PreparedOperation> pending) {
+        return BulkNdjson.assemblePooled(pending, PreparedOperation::encoded);
+    }
+
     /**
      * Shared bulk request execution with retry, error handling, and compaction. A batch is retried, with the waits
      * of {@link BulkRetryPolicy}, until every operation has succeeded or been given up; it never gives up because of
@@ -899,29 +905,48 @@ public abstract class OpenSearchClient {
                     bulkFlowMetrics.onRequestStartGap(retry,
                         (requestStartNanos - previousStartNanos) / 1_000_000.0);
                 }
-                var request = assemble(pendingOps);
-                long assembledNanos = System.nanoTime();
-                var bodyBytes = request.bytes();
+                byte[] sentBytes;
+                int bodyLength;
+                MigrationMetrics.Operations target;
+                long assembledNanos;
+                if (gzipBulkBodies()) {
+                    try (var request = assemblePooled(pendingOps)) {
+                        assembledNanos = System.nanoTime();
+                        bodyLength = request.size();
+                        target = request.operations();
+                        var bodyBuffers = request.buffers();
+                        sentBytes = GzipPayloadRequestTransformer.gzip(bodyBuffers);
+                        traceRequest(indexName, totals.attempts + 1, pendingOps.size(), bodyBuffers,
+                            sentBytes.length, true);
+                    }
+                } else {
+                    var request = assemble(pendingOps);
+                    assembledNanos = System.nanoTime();
+                    var bodyBytes = request.bytes();
+                    bodyLength = bodyBytes.length;
+                    target = request.operations();
+                    sentBytes = bodyBytes;
+                    traceRequest(indexName, totals.attempts + 1, pendingOps.size(), bodyBytes,
+                        sentBytes.length, false);
+                }
                 if (totals.attempts == 0) {
-                    totals.target = request.operations();
+                    totals.target = target;
                 }
                 totals.attempts++;
-                totals.bytes += bodyBytes.length;
+                totals.bytes += bodyLength;
                 long attempt = totals.attempts;
                 if (attempt > 1) {
                     bulkFlowMetrics.onDocumentsResent(pendingOps.size());
                 }
-                var sentBytes = gzipBulkBodies() ? GzipPayloadRequestTransformer.gzip(bodyBytes) : bodyBytes;
                 long compressedNanos = System.nanoTime();
                 bulkFlowMetrics.onRequestPrepared(retry,
                     (assembledNanos - requestStartNanos) / 1_000_000.0,
                     (compressedNanos - assembledNanos) / 1_000_000.0);
-                bulkFlowMetrics.onRequestBody(pendingOps.size(), bodyBytes.length, sentBytes.length);
+                bulkFlowMetrics.onRequestBody(pendingOps.size(), bodyLength, sentBytes.length);
                 long start = System.nanoTime();
                 if (attempt > 1 && totals.lastAttemptEndNanos > 0) {
                     bulkFlowMetrics.onAttemptGap((start - totals.lastAttemptEndNanos) / 1_000_000);
                 }
-                traceRequest(indexName, attempt, pendingOps.size(), bodyBytes, sentBytes.length, gzipBulkBodies());
                 return postBulkRequest(indexName, sentBytes, context)
                     .doOnSuccess(response -> {
                         totals.lastAttemptEndNanos = System.nanoTime();
@@ -1002,6 +1027,24 @@ public abstract class OpenSearchClient {
             .log();
     }
 
+    private static void traceRequest(String indexName, long attempt, int operations, ByteBuffer[] body, int sentBytes,
+                                     boolean gzipped) {
+        if (!BULK_TRACE.isTraceEnabled()) {
+            return;
+        }
+        int bodyBytes = Arrays.stream(body).mapToInt(ByteBuffer::remaining).sum();
+        BULK_TRACE.atTrace()
+            .setMessage("Bulk request attempt {} to index '{}': {} operations, {} bytes, {} bytes sent {}\n{}")
+            .addArgument(attempt)
+            .addArgument(indexName)
+            .addArgument(operations)
+            .addArgument(bodyBytes)
+            .addArgument(sentBytes)
+            .addArgument(gzipped ? "gzipped" : "uncompressed")
+            .addArgument(traceBody(body))
+            .log();
+    }
+
     private static void traceResponse(String indexName, long attempt, HttpResponse response, long elapsedNanos) {
         if (!BULK_TRACE.isTraceEnabled()) {
             return;
@@ -1038,6 +1081,25 @@ public abstract class OpenSearchClient {
         }
         return new String(body, 0, limit, StandardCharsets.UTF_8)
             + "... [" + (body.length - limit) + " more bytes not logged]";
+    }
+
+    static String traceBody(ByteBuffer[] body) {
+        bulkTraceBodiesFormatted.incrementAndGet();
+        int available = Arrays.stream(body).mapToInt(ByteBuffer::remaining).sum();
+        int limit = BULK_TRACE_MAX_BYTES == 0 ? available : Math.min(available, BULK_TRACE_MAX_BYTES);
+        var prefix = new byte[limit];
+        int copied = 0;
+        for (var segment : body) {
+            if (copied == limit) {
+                break;
+            }
+            var view = segment.duplicate();
+            int bytes = Math.min(view.remaining(), limit - copied);
+            view.get(prefix, copied, bytes);
+            copied += bytes;
+        }
+        var text = new String(prefix, StandardCharsets.UTF_8);
+        return limit == available ? text : text + "... [" + (available - limit) + " more bytes not logged]";
     }
 
 

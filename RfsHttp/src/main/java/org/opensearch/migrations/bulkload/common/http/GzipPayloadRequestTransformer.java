@@ -78,31 +78,54 @@ public class GzipPayloadRequestTransformer implements RequestTransformer {
      * the transformer passes an already gzipped body through unchanged.
      */
     public static byte[] gzip(byte[] body) {
-        return gzipByteBufferSimple(ByteBuffer.wrap(body)).array();
+        return gzip(ByteBuffer.wrap(body));
+    }
+
+    /** Compress the remaining bytes without first copying them into a byte array. */
+    public static byte[] gzip(ByteBuffer body) {
+        return gzip(new ByteBuffer[] {body});
+    }
+
+    /** Compress several contiguous body regions as one gzip stream, without joining them first. */
+    public static byte[] gzip(ByteBuffer[] bodies) {
+        return gzipByteBuffers(bodies).array();
     }
 
     @SneakyThrows
     private static ByteBuffer gzipByteBufferSimple(final ByteBuffer inputBuffer) {
-        var readbuffer = inputBuffer.duplicate();
+        return gzipByteBuffers(new ByteBuffer[] {inputBuffer});
+    }
+
+    @SneakyThrows
+    private static ByteBuffer gzipByteBuffers(final ByteBuffer[] inputBuffers) {
+        long inputBytes = 0;
         var baos = new ByteArrayOutputStream();
         try (GZIPOutputStream gzipOutputStream = new FastGzipOutputStream(baos, READ_BUFFER_SIZE, false)) {
-            if (readbuffer.hasArray()) {
-                gzipOutputStream.write(readbuffer.array(),
-                    readbuffer.arrayOffset() + readbuffer.position(),
-                    readbuffer.remaining()
-                );
-            } else {
-                byte[] buffer = new byte[READ_BUFFER_SIZE];
-                while (readbuffer.hasRemaining()) {
-                    int bytesRead = Math.min(buffer.length, readbuffer.remaining());
-                    readbuffer.get(buffer, 0, bytesRead);
-                    gzipOutputStream.write(buffer, 0, bytesRead);
+            byte[] transferBuffer = null;
+            for (var inputBuffer : inputBuffers) {
+                var readBuffer = inputBuffer.duplicate();
+                inputBytes += readBuffer.remaining();
+                if (readBuffer.hasArray()) {
+                    gzipOutputStream.write(readBuffer.array(),
+                        readBuffer.arrayOffset() + readBuffer.position(),
+                        readBuffer.remaining()
+                    );
+                } else {
+                    if (transferBuffer == null) {
+                        transferBuffer = new byte[READ_BUFFER_SIZE];
+                    }
+                    while (readBuffer.hasRemaining()) {
+                        int bytesRead = Math.min(transferBuffer.length, readBuffer.remaining());
+                        readBuffer.get(transferBuffer, 0, bytesRead);
+                        gzipOutputStream.write(transferBuffer, 0, bytesRead);
+                    }
                 }
             }
         }
-        if (inputBuffer.remaining() > 0) {
+        if (inputBytes > 0) {
+            long uncompressedBytes = inputBytes;
             log.atDebug().setMessage("Gzip compression ratio: {}")
-                .addArgument(() -> String.format("%.2f%%", (double) baos.size() / inputBuffer.remaining() * 100)).log();
+                .addArgument(() -> String.format("%.2f%%", (double) baos.size() / uncompressedBytes * 100)).log();
         }
         return ByteBuffer.wrap(baos.toByteArray());
     }
