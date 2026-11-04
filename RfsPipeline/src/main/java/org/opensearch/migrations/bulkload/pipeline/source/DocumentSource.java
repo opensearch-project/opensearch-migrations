@@ -48,7 +48,12 @@ public interface DocumentSource extends AutoCloseable {
         return Optional.empty();
     }
 
-    /** Whether operations on the same document can depend on an earlier batch. */
+    /**
+     * Whether consecutive operation-type phases must complete in source order.
+     *
+     * <p>The pipeline may execute requests concurrently within one phase, but it will await every request in that
+     * phase before starting the next one. Delta snapshots use this to finish deletes before starting upserts.
+     */
     default boolean requiresOrderedWrites() {
         return false;
     }

@@ -51,6 +51,8 @@ public class DocumentMigrationPipeline {
     private final long maxBytesPerBatch;
     private final int partitionConcurrency;
     private final int batchConcurrency;
+    private final int preparationConcurrency;
+    private final boolean requiresOrderedWrites;
     private final GroupedDocumentSink<?> groupedSink;
     private final int sourceBatchGroupSize;
     private final int requestConcurrencyPerGroup;
@@ -104,7 +106,12 @@ public class DocumentMigrationPipeline {
         this.maxDocsPerBatch = maxDocsPerBatch;
         this.maxBytesPerBatch = maxBytesPerBatch;
         this.partitionConcurrency = partitionConcurrency;
-        this.batchConcurrency = source.requiresOrderedWrites() ? 1 : batchConcurrency;
+        this.batchConcurrency = batchConcurrency;
+        this.preparationConcurrency = Math.min(
+            batchConcurrency,
+            Math.max(1, Runtime.getRuntime().availableProcessors())
+        );
+        this.requiresOrderedWrites = source.requiresOrderedWrites();
         this.groupedSink = sink instanceof GroupedDocumentSink<?> grouped ? grouped : null;
         this.sourceBatchGroupSize = groupedSink != null ? groupedSink.preferredSourceBatchGroupSize() : 1;
         if (sourceBatchGroupSize < 1) {
@@ -148,9 +155,12 @@ public class DocumentMigrationPipeline {
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
-            var completedBatches = groupedSink == null
-                ? migrateDocumentBatches(partition, collectionName, startingPosition)
-                : migratePreparedBatches(groupedSink, partition, collectionName, startingPosition);
+            var documents = source.readDocuments(partition, startingPosition)
+                .subscribeOn(Schedulers.boundedElastic());
+            var completedBatches = writePhases(documents)
+                .concatMap(phase -> groupedSink == null
+                    ? migrateDocumentBatches(phase, collectionName)
+                    : migratePreparedBatches(groupedSink, phase, collectionName), 1);
             return completedBatches
                 // Advance checkpoints in emission order; writes may complete out of order.
                 .scan(new ProgressCursor(partition, startingPosition, 0, 0, MigrationMetrics.ZERO), (previous, batch) -> {
@@ -176,10 +186,9 @@ public class DocumentMigrationPipeline {
     }
 
     private Flux<CompletedBatch> migrateDocumentBatches(
-        Partition partition, String collectionName, long startingPosition
+        Flux<Document> documents, String collectionName
     ) {
-        return source.readDocuments(partition, startingPosition)
-            .subscribeOn(Schedulers.boundedElastic())
+        return documents
             .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
             .flatMapSequential(sourceBatch -> {
                 activeBatches.incrementAndGet();
@@ -193,13 +202,17 @@ public class DocumentMigrationPipeline {
 
     private <P> Flux<CompletedBatch> migratePreparedBatches(
         GroupedDocumentSink<P> preparedSink,
-        Partition partition,
-        String collectionName,
-        long startingPosition
+        Flux<Document> documents,
+        String collectionName
     ) {
-        return source.readDocuments(partition, startingPosition)
-            .subscribeOn(Schedulers.boundedElastic())
-            .map(document -> preparedSink.prepareSourceDocument(collectionName, document))
+        return documents
+            // Bound retained source data before handing CPU-heavy validation/encoding work to parallel rails.
+            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
+            .flatMapSequential(sourceBatch -> Mono.fromCallable(() -> sourceBatch.stream()
+                    .map(document -> preparedSink.prepareSourceDocument(collectionName, document))
+                    .toList())
+                .subscribeOn(Schedulers.parallel()), preparationConcurrency, 1)
+            .flatMapIterable(preparedBatch -> preparedBatch)
             .bufferUntil(new BatchSizePredicate<>(
                 maxDocsPerBatch,
                 maxBytesPerBatch,
@@ -223,6 +236,23 @@ public class DocumentMigrationPipeline {
                     .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
                     .doFinally(s -> activeBatches.decrementAndGet());
             }, batchGroupConcurrency, 1);
+    }
+
+    /**
+     * Ordered sources may contain independent phases whose requests can run concurrently within a phase but
+     * must not overlap the following phase. Delta snapshot streams use this for deletes followed by upserts.
+     */
+    private Flux<Flux<Document>> writePhases(Flux<Document> documents) {
+        if (!requiresOrderedWrites) {
+            return Flux.just(documents);
+        }
+        return Flux.defer(() -> {
+            var currentOperation = new AtomicReference<Document.Operation>();
+            return documents.windowUntil(document -> {
+                var previousOperation = currentOperation.getAndSet(document.operation());
+                return previousOperation != null && previousOperation != document.operation();
+            }, true, 1);
+        });
     }
 
     private static MigrationMetrics.Operations sourceMetrics(

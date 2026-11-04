@@ -6,6 +6,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
@@ -151,5 +154,92 @@ class DocumentMigrationPipelineBatchingTest {
                     .map(GroupedDocumentSink.PreparedDocument::preparation)
                     .toList())
                 .toList());
+    }
+
+    @Test
+    void preparesSourceBatchesInParallelWithoutReorderingThem() throws Exception {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = Stream.iterate(0, i -> i + 1)
+            .limit(4)
+            .map(i -> new Document("doc-" + i, new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()))
+            .toList();
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+
+        class ParallelPreparationSink implements GroupedDocumentSink<String> {
+            final CountDownLatch preparationsStarted = new CountDownLatch(2);
+            final CountDownLatch releasePreparations = new CountDownLatch(1);
+            final AtomicInteger activePreparations = new AtomicInteger();
+            final AtomicInteger maxActivePreparations = new AtomicInteger();
+            final List<String> received = new CopyOnWriteArrayList<>();
+
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped path must be used");
+            }
+
+            @Override
+            public int preferredSourceBatchGroupSize() {
+                return 1;
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                int active = activePreparations.incrementAndGet();
+                maxActivePreparations.accumulateAndGet(active, Math::max);
+                preparationsStarted.countDown();
+                try {
+                    if (!releasePreparations.await(10, TimeUnit.SECONDS)) {
+                        throw new AssertionError("Timed out waiting to release preparation work");
+                    }
+                    return new PreparedDocument<>(document, document.sourceLength(), "prepared-" + document.id());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(e);
+                } finally {
+                    activePreparations.decrementAndGet();
+                }
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatchGroup(
+                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
+            ) {
+                throw new AssertionError("The prepared grouped path must be used");
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                sourceBatches.stream()
+                    .flatMap(List::stream)
+                    .map(PreparedDocument::document)
+                    .map(Document::id)
+                    .forEach(received::add);
+                long count = sourceBatches.stream().mapToLong(List::size).sum();
+                return Mono.just(new BatchResult(count, count));
+            }
+        }
+
+        var sink = new ParallelPreparationSink();
+        var future = new DocumentMigrationPipeline(source, sink, 1, 100, 1, 4)
+            .migratePartition(partition, "index", 0)
+            .collectList()
+            .toFuture();
+        boolean preparationsOverlapped = sink.preparationsStarted.await(1, TimeUnit.SECONDS);
+        sink.releasePreparations.countDown();
+        future.get(10, TimeUnit.SECONDS);
+
+        Assertions.assertTrue(preparationsOverlapped);
+        Assertions.assertTrue(sink.maxActivePreparations.get() >= 2);
+        Assertions.assertEquals(documents.stream().map(Document::id).toList(), sink.received);
     }
 }
