@@ -1,9 +1,11 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -23,6 +25,7 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -37,17 +40,21 @@ import reactor.core.scheduler.Schedulers;
  * configurable exception allowlisting for idempotent migrations.
  */
 @Slf4j
-public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.PreparedRawOperation> {
+public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.EncodedOperation> {
 
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final int SOURCE_BATCHES_PER_REQUEST_GROUP = 8;
 
     private final OpenSearchClient client;
-    private final IJsonTransformer transformer;
-    private final List<BulkOperationTransformer> nativeTransformers;
+    private final Supplier<IJsonTransformer> transformerSupplier;
+    private final TransformationMode transformationMode;
+    private final ArrayDeque<TransformerState> availableTransformers = new ArrayDeque<>();
+    private final List<TransformerState> allTransformers = new ArrayList<>();
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
+    private boolean closed;
+
     public OpenSearchDocumentSink(
         OpenSearchClient client,
         Supplier<IJsonTransformer> transformerSupplier,
@@ -56,9 +63,15 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
         Supplier<IRfsContexts.IRequestContext> requestContextSupplier
     ) {
         this.client = client;
-        this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
-        this.nativeTransformers = this.transformer == null ? List.of()
-            : this.transformer.getNativeStages(BulkOperationTransformer.class).orElse(null);
+        this.transformerSupplier = transformerSupplier;
+        if (transformerSupplier == null) {
+            this.transformationMode = TransformationMode.RAW;
+        } else {
+            var initialState = makeTransformerState(transformerSupplier.get());
+            this.transformationMode = initialState.mode();
+            this.availableTransformers.add(initialState);
+            this.allTransformers.add(initialState);
+        }
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
         this.requestContextSupplier = requestContextSupplier;
@@ -113,13 +126,13 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
     }
 
     @Override
-    public PreparedDocument<BulkNdjson.PreparedRawOperation> prepareSourceDocument(
+    public PreparedDocument<BulkNdjson.EncodedOperation> prepareSourceDocument(
         String collectionName, Document document
     ) {
         if (!usesRawFastPath()) {
             return new PreparedDocument<>(document, document.sourceLength(), null);
         }
-        var prepared = BulkNdjson.prepareRaw(document, collectionName, allowServerGeneratedIds, OBJECT_MAPPER);
+        var prepared = BulkNdjson.encodeRaw(document, collectionName, allowServerGeneratedIds, OBJECT_MAPPER);
         return new PreparedDocument<>(document, prepared.size(), prepared);
     }
 
@@ -140,7 +153,7 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
     @Override
     public Mono<BatchResult> writePreparedBatchGroup(
         String collectionName,
-        List<List<PreparedDocument<BulkNdjson.PreparedRawOperation>>> sourceBatches,
+        List<List<PreparedDocument<BulkNdjson.EncodedOperation>>> sourceBatches,
         int requestConcurrency
     ) {
         long docsInBatch = sourceBatches.stream().mapToLong(List::size).sum();
@@ -156,29 +169,14 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
             var documents = sourceBatches.stream().flatMap(List::stream).toList();
             bulkMono = sendRaw(collectionName, documents, requestContext, splitRequestConcurrency);
-        } else if (nativeTransformers != null) {
-            var operations = new ArrayList<BulkOperationSpec>();
-            for (var batch : sourceBatches) {
-                List<BulkOperationSpec> transformed = batch.stream()
-                    .map(PreparedDocument::document)
-                    .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
-                    .collect(Collectors.toList());
-                for (var nativeTransformer : nativeTransformers) {
-                    transformed = nativeTransformer.transformOperations(transformed);
-                }
-                operations.addAll(transformed);
-            }
-            bulkMono = sendTransformed(collectionName, operations, requestContext, splitRequestConcurrency);
         } else {
-            var opsToSend = new ArrayList<BulkOperationSpec>();
-            for (var batch : sourceBatches) {
-                var bulkOps = batch.stream()
-                    .map(PreparedDocument::document)
-                    .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
-                    .collect(Collectors.toList());
-                opsToSend.addAll(applyTransformation(bulkOps));
-            }
-            bulkMono = sendTransformed(collectionName, opsToSend, requestContext, splitRequestConcurrency);
+            bulkMono = Flux.fromIterable(sourceBatches)
+                .flatMapSequential(batch -> Mono.fromCallable(() -> transformBatch(collectionName, batch))
+                    .subscribeOn(Schedulers.parallel()), splitRequestConcurrency, 1)
+                .collectList()
+                .map(transformedBatches -> transformedBatches.stream().flatMap(List::stream).toList())
+                .flatMap(operations ->
+                    sendTransformed(collectionName, operations, requestContext, splitRequestConcurrency));
         }
 
         return bulkMono.map(response -> new BatchResult(docsInBatch, bytesInBatch, response.target,
@@ -187,7 +185,7 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
 
     private Mono<OpenSearchClient.BulkResponse> sendRaw(
         String collectionName,
-        List<PreparedDocument<BulkNdjson.PreparedRawOperation>> documents,
+        List<PreparedDocument<BulkNdjson.EncodedOperation>> documents,
         IRfsContexts.IRequestContext requestContext,
         int splitRequestConcurrency
     ) {
@@ -196,7 +194,7 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
                 document.document(),
                 document.preparation() != null
                     ? document.preparation()
-                    : BulkNdjson.prepareRaw(
+                    : BulkNdjson.encodeRaw(
                         document.document(), collectionName, allowServerGeneratedIds, OBJECT_MAPPER
                     )))
             .toList();
@@ -223,14 +221,110 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
     }
 
     private boolean usesRawFastPath() {
-        return nativeTransformers != null && nativeTransformers.isEmpty();
+        return transformationMode == TransformationMode.RAW;
+    }
+
+    private List<BulkOperationSpec> transformBatch(
+        String collectionName,
+        List<PreparedDocument<BulkNdjson.EncodedOperation>> batch
+    ) {
+        var transformerState = acquireTransformer();
+        try {
+            if (transformationMode == TransformationMode.NATIVE) {
+                List<BulkOperationSpec> transformed = batch.stream()
+                    .map(PreparedDocument::document)
+                    .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
+                    .collect(Collectors.toList());
+                for (var nativeTransformer : transformerState.nativeTransformers()) {
+                    transformed = nativeTransformer.transformOperations(transformed);
+                }
+                return transformed;
+            }
+            var bulkOps = batch.stream()
+                .map(PreparedDocument::document)
+                .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
+                .collect(Collectors.toList());
+            return applyTransformation(bulkOps, transformerState.transformer());
+        } finally {
+            releaseTransformer(transformerState);
+        }
+    }
+
+    private TransformerState acquireTransformer() {
+        synchronized (availableTransformers) {
+            if (closed) {
+                throw new IllegalStateException("Document sink is closed");
+            }
+            var available = availableTransformers.pollFirst();
+            if (available != null) {
+                return available;
+            }
+        }
+
+        var created = makeTransformerState(transformerSupplier.get());
+        if (created.mode() != transformationMode) {
+            closeTransformer(created.transformer());
+            throw new IllegalStateException("Transformer supplier returned inconsistent execution modes");
+        }
+        synchronized (availableTransformers) {
+            if (closed) {
+                closeTransformer(created.transformer());
+                throw new IllegalStateException("Document sink is closed");
+            }
+            allTransformers.add(created);
+        }
+        return created;
+    }
+
+    private void releaseTransformer(TransformerState transformerState) {
+        synchronized (availableTransformers) {
+            if (!closed) {
+                availableTransformers.addLast(transformerState);
+                return;
+            }
+        }
+        closeTransformer(transformerState.transformer());
+    }
+
+    private static TransformerState makeTransformerState(IJsonTransformer transformer) {
+        var nonNullTransformer = Objects.requireNonNull(
+            transformer,
+            "transformerSupplier must not return null"
+        );
+        var nativeStages = nonNullTransformer.getNativeStages(BulkOperationTransformer.class).orElse(null);
+        var mode = nativeStages == null
+            ? TransformationMode.JSON
+            : nativeStages.isEmpty() ? TransformationMode.RAW : TransformationMode.NATIVE;
+        return new TransformerState(nonNullTransformer, nativeStages, mode);
+    }
+
+    @Override
+    public void close() {
+        List<TransformerState> transformers;
+        synchronized (availableTransformers) {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            transformers = List.copyOf(allTransformers);
+            availableTransformers.clear();
+            allTransformers.clear();
+        }
+        transformers.forEach(state -> closeTransformer(state.transformer()));
+    }
+
+    private static void closeTransformer(IJsonTransformer transformer) {
+        try {
+            transformer.close();
+        } catch (Exception e) {
+            log.atWarn().setCause(e).setMessage("Failed to close document transformer").log();
+        }
     }
 
     @SuppressWarnings("unchecked")
-    private List<BulkOperationSpec> applyTransformation(List<BulkOperationSpec> ops) {
-        if (transformer == null) {
-            return ops;
-        }
+    private List<BulkOperationSpec> applyTransformation(
+        List<BulkOperationSpec> ops, IJsonTransformer transformer
+    ) {
         // Snapshot the original (pre-transformation) document bodies, keyed by document id,
         // so we can re-attach them to the transformed ops below. The transformer round-trips
         // ops through Maps (dropping the in-memory originalSource), and may reorder, add, or
@@ -269,4 +363,16 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
         var meta = op.getOperation();
         return meta != null ? meta.getId() : null;
     }
+
+    private enum TransformationMode {
+        RAW,
+        NATIVE,
+        JSON
+    }
+
+    private record TransformerState(
+        IJsonTransformer transformer,
+        List<BulkOperationTransformer> nativeTransformers,
+        TransformationMode mode
+    ) {}
 }

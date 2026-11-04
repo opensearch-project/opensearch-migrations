@@ -87,32 +87,56 @@ class ProgressCursorPositionTest {
     }
 
     @Test
-    void orderedSourcesFinishEarlierBatchesBeforeSendingLaterBatches() throws Exception {
+    void orderedSourcesRunEachOperationPhaseConcurrentlyButAwaitItsCompletion() throws Exception {
         var source = new SparseSource(List.of(0, 1), true) {
             @Override
             public boolean requiresOrderedWrites() {
                 return true;
             }
-        };
-        var firstStarted = new CountDownLatch(1);
-        var firstCompleted = Sinks.<BatchResult>one();
-        var started = new CopyOnWriteArrayList<String>();
-        var sink = new CountingSink() {
+
             @Override
-            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
-                started.add(batch.get(0).id());
-                firstStarted.countDown();
-                return started.size() == 1 ? firstCompleted.asMono() : Mono.just(new BatchResult(1, 1));
+            public Flux<Document> readDocuments(Partition partition, long start) {
+                return Flux.just(
+                    new Document("delete-0", new byte[] { 1 }, Document.Operation.DELETE, Map.of(), Map.of()),
+                    new Document("delete-1", new byte[] { 1 }, Document.Operation.DELETE, Map.of(), Map.of()),
+                    new Document("upsert-0", new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()),
+                    new Document("upsert-1", new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of())
+                );
             }
         };
-        var result = new DocumentMigrationPipeline(source, sink, 1, 100)
+        var deletesStarted = new CountDownLatch(2);
+        var upsertsStarted = new CountDownLatch(2);
+        var deleteCompletions = List.of(Sinks.<BatchResult>one(), Sinks.<BatchResult>one());
+        var started = new CopyOnWriteArrayList<String>();
+        var sink = new CountingSink() {
+            int nextDelete;
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                var document = batch.get(0);
+                started.add(document.id());
+                if (document.operation() == Document.Operation.DELETE) {
+                    deletesStarted.countDown();
+                    return deleteCompletions.get(nextDelete++).asMono();
+                }
+                upsertsStarted.countDown();
+                return Mono.just(new BatchResult(1, 1));
+            }
+        };
+        var result = new DocumentMigrationPipeline(source, sink, 1, 100, 1, 2)
             .migratePartition(partition(), IDX, 0).collectList().toFuture();
-        Assertions.assertTrue(firstStarted.await(10, TimeUnit.SECONDS));
-        Assertions.assertEquals(List.of("doc-0"), started);
-        firstCompleted.tryEmitValue(new BatchResult(1, 1));
+        boolean bothDeletesRanConcurrently = deletesStarted.await(1, TimeUnit.SECONDS);
+        deleteCompletions.get(0).tryEmitValue(new BatchResult(1, 1));
+        Assertions.assertFalse(upsertsStarted.await(200, TimeUnit.MILLISECONDS),
+            "No upsert may start while any delete request remains incomplete");
+        deleteCompletions.get(1).tryEmitValue(new BatchResult(1, 1));
+
         var cursors = result.get(10, TimeUnit.SECONDS);
-        Assertions.assertEquals(List.of("doc-0", "doc-1"), started);
-        Assertions.assertEquals(2, cursors.get(1).metrics().source().upserts());
+        Assertions.assertTrue(bothDeletesRanConcurrently,
+            "Ordered sources should retain concurrency within a write phase");
+        Assertions.assertEquals(List.of("delete-0", "delete-1"), started.subList(0, 2));
+        Assertions.assertEquals(2, cursors.get(3).metrics().source().upserts());
+        Assertions.assertEquals(2, cursors.get(3).metrics().source().deletes());
     }
 
     @Test

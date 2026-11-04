@@ -8,10 +8,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.Version;
@@ -70,6 +72,12 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     private OpenSearchDocumentSink sink(IJsonTransformer transformer, int maxDocs, long maxBytes, Retry retry) {
+        return sinkFromSupplier(transformer == null ? null : () -> transformer, maxDocs, maxBytes, retry);
+    }
+
+    private OpenSearchDocumentSink sinkFromSupplier(
+        Supplier<IJsonTransformer> transformerSupplier, int maxDocs, long maxBytes, Retry retry
+    ) {
         var connection = mock(ConnectionContext.class);
         when(connection.getUri()).thenReturn(URI.create("http://localhost/"));
         when(transport.getConnectionContext()).thenReturn(connection);
@@ -84,7 +92,7 @@ class OpenSearchDocumentSinkBatchingTest {
                 return retry;
             }
         };
-        return new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
+        return new OpenSearchDocumentSink(client, transformerSupplier,
             false, DocumentExceptionAllowlist.empty(), null);
     }
 
@@ -157,16 +165,15 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
-    void rawSourceSizingDefersJsonValidationUntilTheConcurrentSendPath() {
+    void rawSourcePreparationValidatesBeforeEnteringTheSendPath() {
         var invalid = doc("d1", "{\"value\":}");
         var valid = doc("d1", "{\"value\":1}");
         var sink = sink(null, Integer.MAX_VALUE, 1024);
 
-        long measured = assertDoesNotThrow(() -> sink.sourceBatchBytes("idx", invalid));
+        var prepared = assertDoesNotThrow(() -> sink.prepareSourceDocument("idx", valid));
 
-        assertEquals(serialized(List.of(valid)).length - valid.sourceLength() + invalid.sourceLength(), measured);
-        assertThrows(RuntimeException.class,
-            () -> sink.writeBatch("idx", List.of(invalid)).block(Duration.ofSeconds(10)));
+        assertEquals(serialized(List.of(valid)).length, prepared.sizeBytes());
+        assertThrows(IOException.class, () -> sink.prepareSourceDocument("idx", invalid));
     }
 
     @Test
@@ -301,6 +308,45 @@ class OpenSearchDocumentSinkBatchingTest {
         assertNotNull(cursors);
         assertEquals(1, cursors.size());
         assertEquals(4, cursors.get(0).nextPosition());
+    }
+
+    @Test
+    void transformsSourceBatchesInParallelAndRetainsTheirOrder() throws Exception {
+        var transformationsStarted = new CountDownLatch(2);
+        var releaseTransformations = new CountDownLatch(1);
+        var nextTransformer = new AtomicInteger();
+        var sink = sinkFromSupplier(() -> {
+            int transformerNumber = nextTransformer.getAndIncrement();
+            return input -> {
+                transformationsStarted.countDown();
+                try {
+                    if (!releaseTransformations.await(10, TimeUnit.SECONDS)) {
+                        throw new AssertionError("Timed out waiting to release transformations");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(e);
+                }
+                @SuppressWarnings("unchecked")
+                var operations = (List<Map<String, Object>>) input;
+                operations.forEach(operation -> operation.put("document",
+                    Map.of("transformer", transformerNumber)));
+                return operations;
+            };
+        }, Integer.MAX_VALUE, 1_000_000, Retry.max(0));
+        var batches = List.of(
+            List.of(doc("d1", "{\"x\":1}")),
+            List.of(doc("d2", "{\"x\":1}"))
+        );
+
+        var result = CompletableFuture.supplyAsync(() ->
+            sink.writeBatchGroup("idx", batches, 2).block(Duration.ofSeconds(10)));
+        boolean transformationsOverlapped = transformationsStarted.await(1, TimeUnit.SECONDS);
+        releaseTransformations.countDown();
+        assertNotNull(result.get(10, TimeUnit.SECONDS));
+
+        assertTrue(transformationsOverlapped);
+        assertEquals(List.of("d1", "d2"), sentIds());
     }
 
     @Test
