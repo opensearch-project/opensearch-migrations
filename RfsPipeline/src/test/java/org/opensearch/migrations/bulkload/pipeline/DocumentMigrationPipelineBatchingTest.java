@@ -10,11 +10,14 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.sink.GroupedDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -79,5 +82,74 @@ class DocumentMigrationPipelineBatchingTest {
         Assertions.assertEquals(expectedCounts, counts);
         Assertions.assertEquals(expectedMiB, sizes);
         Assertions.assertEquals(documents.stream().map(Document::id).toList(), writtenIds);
+    }
+
+    @Test
+    void carriesPreparedSizeAnnotationsFromBatchingToTheSink() {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = List.of(
+            new Document("doc-1", new byte[] {'1'}, Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("doc-2", new byte[] {'2'}, Document.Operation.UPSERT, Map.of(), Map.of())
+        );
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+
+        class AnnotatingSink implements GroupedDocumentSink<String> {
+            final List<List<PreparedDocument<String>>> receivedBatches = new ArrayList<>();
+
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped pipeline must retain the preparation annotation");
+            }
+
+            @Override
+            public int preferredSourceBatchGroupSize() {
+                return 2;
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                return new PreparedDocument<>(document, 6, "prepared-" + document.id());
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatchGroup(
+                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
+            ) {
+                throw new AssertionError("The grouped pipeline must retain the preparation annotation");
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                receivedBatches.addAll(sourceBatches);
+                long documentCount = sourceBatches.stream().mapToLong(List::size).sum();
+                return Mono.just(new BatchResult(documentCount, documentCount));
+            }
+        }
+
+        var sink = new AnnotatingSink();
+        new DocumentMigrationPipeline(source, sink, Integer.MAX_VALUE, 10)
+            .migratePartition(partition, "index", 0)
+            .blockLast(Duration.ofSeconds(10));
+
+        Assertions.assertEquals(List.of(List.of("doc-1"), List.of("doc-2")),
+            sink.receivedBatches.stream()
+                .map(batch -> batch.stream().map(prepared -> prepared.document().id()).toList())
+                .toList());
+        Assertions.assertEquals(List.of(List.of("prepared-doc-1"), List.of("prepared-doc-2")),
+            sink.receivedBatches.stream()
+                .map(batch -> batch.stream()
+                    .map(GroupedDocumentSink.PreparedDocument::preparation)
+                    .toList())
+                .toList());
     }
 }
