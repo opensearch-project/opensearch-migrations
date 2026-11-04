@@ -1,0 +1,78 @@
+---
+# Proves the GitHub -> AWS wiring: main runs get osm-ci-main; PRs get osm-ci-pr only when a maintainer adds
+# run-aws-smoke-test. Each run prints the job's OIDC claims and the role it assumed.
+name: AWS CI smoke test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/aws-ci-*.yml'
+      - 'deployment/cdk/ci-infra/**'
+  # Only `labeled`: a maintainer's label approves the PR's code at that moment (aws-ci-pr-gate.yml).
+  pull_request_target:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pr-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-aws-smoke-test
+
+  # On PRs, nothing reads PR data until the gate allows the run.
+  sanitize-input:
+    needs: pr-gate
+    if: |
+      !cancelled() && (github.event_name != 'pull_request_target' || needs.pr-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/sanitize-repo-details.yml
+
+  smoke-main:
+    if: |
+      !cancelled() && github.event_name != 'pull_request_target' && needs.sanitize-input.result == 'success'
+    needs: sanitize-input
+    uses: ./.github/workflows/aws-ci-job.yml
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: main
+      collect-logs: false
+      test-name: smoke-main
+      commit: ${{ needs.sanitize-input.outputs.commit_hash }}
+      run: aws sts get-caller-identity --query Arn --output text
+      timeout-minutes: 10
+      print-oidc-claims: true
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+
+  smoke-pr:
+    needs: [pr-gate, sanitize-input]
+    if: |
+      !cancelled() && needs.pr-gate.outputs.allowed == 'true' && needs.sanitize-input.result == 'success'
+    uses: ./.github/workflows/aws-ci-job.yml
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: pr
+      collect-logs: false
+      test-name: smoke-pr
+      commit: ${{ needs.sanitize-input.outputs.commit_hash }}
+      run: aws sts get-caller-identity --query Arn --output text
+      timeout-minutes: 10
+      print-oidc-claims: true
+    secrets:
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
