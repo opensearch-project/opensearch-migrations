@@ -246,8 +246,16 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
             description = "Optional. The maximum bulk request body size in bytes, including action metadata and newlines. " +
-                "A document that exceeds the limit by itself is sent alone. Default 10 MiB")
+                "Enforced after transformations. Oversized operations fail unless supported staging is enabled. Default 10 MiB")
         long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
+
+        @Parameter(required = false,
+            names = { "--large-document-staging-index" },
+            description = "Optional, experimental. Assemble oversized index operations in this dedicated staging index " +
+                "and publish complete documents with local reindex. Requires OpenSearch, explicit document IDs, " +
+                "task-status permissions, and no version conditions. Serializes batches; keep the same staging index on restart. " +
+                "Each staging request obeys --documents-size-per-bulk-request.")
+        String largeDocumentStagingIndex;
 
         @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
@@ -612,6 +620,7 @@ public class RfsMigrateDocuments {
         var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate(
             arguments.numDocsPerBulkRequest, arguments.numBytesPerBulkRequest);
+        targetClient.setLargeDocumentStagingIndex(arguments.largeDocumentStagingIndex);
         var targetVersion = targetClient.getClusterVersion();
 
         // Build the failed document stream sink and attach it to the target client. The sink is closed in

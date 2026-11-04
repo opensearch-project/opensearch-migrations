@@ -2,16 +2,19 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.BitSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -25,6 +28,7 @@ import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
+import org.opensearch.migrations.bulkload.common.http.GzipPayloadRequestTransformer;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.pipeline.BatchSizePredicate;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -77,6 +81,7 @@ public abstract class OpenSearchClient {
     private final CompressionMode compressionMode;
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
+    private volatile StagedDocumentWriter stagedDocumentWriter;
 
     // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
     // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
@@ -101,6 +106,30 @@ public abstract class OpenSearchClient {
         this.compressionMode = compressionMode;
         this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
         this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
+    }
+
+    /**
+     * Enable the opt-in oversized-index path. Configure before submitting document batches.
+     * Other operations continue to require a complete operation to fit in one request.
+     */
+    public void setLargeDocumentStagingIndex(String indexName) {
+        if (indexName == null) {
+            stagedDocumentWriter = null;
+            return;
+        }
+        if (version.getFlavor() != Flavor.OPENSEARCH && version.getFlavor() != Flavor.AMAZON_MANAGED_OPENSEARCH) {
+            throw new IllegalArgumentException("Large document staging requires an OpenSearch target with local reindex support");
+        }
+        stagedDocumentWriter = new StagedDocumentWriter(client, indexName, maxBytesPerBulkRequest);
+    }
+
+    public boolean isLargeDocumentStagingEnabled() {
+        return stagedDocumentWriter != null;
+    }
+
+    public Mono<Void> prepareLargeDocumentPartition(String collection, String partition) {
+        var writer = stagedDocumentWriter;
+        return writer == null ? Mono.empty() : writer.preparePartition(collection, partition);
     }
 
     /**
@@ -555,15 +584,142 @@ public abstract class OpenSearchClient {
         IRfsContexts.IRequestContext context, DocumentExceptionAllowlist allowlist
     ) {
         // The batching predicate and retry state must be fresh for every subscription.
-        return Mono.defer(() -> Flux.fromIterable(docs)
+        return Mono.defer(() -> {
+            var writer = stagedDocumentWriter;
+            var ready = writer == null ? Mono.<Void>empty() : writer.beforeWrites(indexName);
+            return ready.thenMany(Flux.fromIterable(docs)
             .map(prepare)
-            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
-                (PreparedOperation op) -> op.encoded().size()), true)
+            .bufferUntil(new OperationBatcher(indexName, writer != null), true)
             // A split batch completes in source order, before its source checkpoint can advance.
-            .concatMap(batch -> executeBulkWithRetry(indexName, batch, context, allowlist), 1)
+            .concatMap(batch -> batch.get(0).encoded().size() > maxBytesPerBulkRequest
+                ? sendOversizedOperation(indexName, batch.get(0), context)
+                : executeBulkWithRetry(indexName, batch, context, allowlist), 1))
             .reduce((previous, next) -> new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
                 previous.target.plus(next.target), previous.requests.plus(next.requests)))
-            .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+            .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"));
+        });
+    }
+
+    /** Do not compact/retry an earlier action after a later action on the same ID has succeeded. */
+    private final class OperationBatcher implements Predicate<PreparedOperation> {
+        private final String defaultIndex;
+        private final boolean ordered;
+        private final HashSet<List<String>> identities = new HashSet<>();
+        private BatchSizePredicate<PreparedOperation> sizes = newSizes();
+
+        OperationBatcher(String defaultIndex, boolean ordered) {
+            this.defaultIndex = defaultIndex;
+            this.ordered = ordered;
+        }
+
+        private BatchSizePredicate<PreparedOperation> newSizes() {
+            return new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest, op -> op.encoded().size());
+        }
+
+        @Override
+        public boolean test(PreparedOperation operation) {
+            List<String> identity = null;
+            if (ordered) {
+                try {
+                    var metadata = OBJECT_MAPPER.readTree(operation.encoded().action()).elements().next();
+                    if (metadata.hasNonNull("_id")) {
+                        identity = List.of(metadata.path("_index").asText(defaultIndex), metadata.path("_id").asText());
+                    }
+                } catch (IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            }
+            boolean repeated = identity != null && identities.contains(identity);
+            if (repeated) {
+                sizes = newSizes();
+            }
+            boolean cut = sizes.test(operation) || repeated;
+            if (cut) {
+                identities.clear();
+            }
+            if (identity != null) {
+                identities.add(identity);
+            }
+            return cut;
+        }
+    }
+
+    private Mono<BulkResponse> sendOversizedOperation(
+        String indexName, PreparedOperation operation, IRfsContexts.IRequestContext context
+    ) {
+        var writer = stagedDocumentWriter;
+        Mono<BulkResponse> response = writer == null
+            ? Mono.error(new OversizedDocumentException(operation.encoded().size(), maxBytesPerBulkRequest,
+                "Increase the limit or enable --large-document-staging-index for supported index operations."))
+            : writer.write(indexName, operation.encoded(), context);
+        return response.onErrorResume(error -> recordOversizedFailure(indexName, operation, error)
+            .then(Mono.error(error)));
+    }
+
+    private Mono<Void> recordOversizedFailure(String defaultIndex, PreparedOperation prepared, Throwable error) {
+        return Mono.defer(() -> {
+            try {
+                var operation = prepared.operation().get();
+                // Capture raw originals before Jackson's diagnostic conversion materializes any Maps.
+                String originalDocument = operation.getOriginalSourceBytes() != null
+                    ? new String(operation.getOriginalSourceBytes(), StandardCharsets.UTF_8)
+                    : operation.getOriginalSource() == null ? null : OBJECT_MAPPER.writeValueAsString(operation.getOriginalSource());
+                String transformedRequest = new String(assemble(List.of(prepared)).bytes(), StandardCharsets.UTF_8);
+                var metadata = OBJECT_MAPPER.readTree(prepared.encoded().action()).elements().next();
+                String index = metadata.path("_index").asText(defaultIndex);
+                var stagedFailure = error instanceof StagedDocumentException staged ? staged.getFailure() : null;
+                failedRequestsLogger.logLargeDocumentFailure(index, transformedRequest, originalDocument, stagedFailure, error);
+                var sink = failedDocumentStreamSink;
+                if (sink == null) {
+                    return Mono.empty();
+                }
+                var lastResponse = StagedDocumentWriter.responseOf(error);
+                JsonNode responseItem = null;
+                if (lastResponse != null && lastResponse.body != null) {
+                    try {
+                        responseItem = OBJECT_MAPPER.readTree(lastResponse.body);
+                    } catch (IOException malformedResponse) {
+                        responseItem = OBJECT_MAPPER.getNodeFactory().textNode(lastResponse.body);
+                    }
+                }
+                var detail = responseItem == null ? OBJECT_MAPPER.createObjectNode()
+                    : responseItem.has("response") ? responseItem.path("response") : responseItem;
+                var taskFailure = detail.path("failures").path(0);
+                String type = detail.path("error").path("type").asText(null);
+                if (type == null) {
+                    type = taskFailure.path("cause").path("type").asText(null);
+                }
+                int status = taskFailure.path("status").asInt(lastResponse == null ? 0 : lastResponse.statusCode);
+                boolean invalidDocument = false;
+                for (var cause = error; cause != null; cause = cause.getCause()) {
+                    invalidDocument |= cause instanceof IllegalArgumentException
+                        || cause instanceof com.fasterxml.jackson.core.JsonProcessingException;
+                }
+                boolean nonRetryable = (stagedFailure == null || !stagedFailure.publicationMayHaveCommitted())
+                    && (invalidDocument || (status >= 400 && status < 500 && status != 429));
+                var requestItem = OBJECT_MAPPER.<ObjectNode>valueToTree(operation);
+                if (originalDocument != null) {
+                    requestItem.set("document", OBJECT_MAPPER.readTree(originalDocument));
+                }
+                var record = FailedDocumentStreamRecord.builder()
+                    .sessionId(failedDocumentStreamSessionId).workerId(failedDocumentStreamWorkerId)
+                    .workItemId(failedDocumentStreamWorkItemId).targetIndex(index).documentId(metadata.path("_id").asText(null))
+                    .timestamp(Instant.now().toString()).failureType(type == null ? error.getClass().getSimpleName() : type)
+                    .failureClass(nonRetryable ? FailureClass.NON_RETRYABLE : FailureClass.RETRYABLE_EXHAUSTED)
+                    .requestItem(requestItem).responseItem(responseItem)
+                    .transformedRequestBody(transformedRequest).originalDocument(originalDocument).stagedFailure(stagedFailure)
+                    .build();
+                // An aborted batch never reaches the bootstrap's per-cursor flush. Gate the error here.
+                return sink.write(record).then(Mono.defer(sink::flush)).timeout(Duration.ofMinutes(5))
+                    .onErrorMap(persistenceError -> {
+                        persistenceError.addSuppressed(error);
+                        return persistenceError;
+                    });
+            } catch (IOException e) {
+                e.addSuppressed(error);
+                return Mono.error(e);
+            }
+        });
     }
 
     private static BulkNdjson.SerializedBulk assemble(List<PreparedOperation> pending) {
@@ -660,10 +816,28 @@ public abstract class OpenSearchClient {
 
     private Mono<HttpResponse> postBulkRequest(String indexName, byte[] bodyBytes,
                                                        IRfsContexts.IRequestContext context) {
+        if (bodyBytes.length > maxBytesPerBulkRequest) {
+            return Mono.error(new OversizedDocumentException(bodyBytes.length, maxBytesPerBulkRequest,
+                "A complete bulk request must fit before transmission."));
+        }
         var additionalHeaders = new HashMap<String, List<String>>();
         if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
             RestClient.addGzipRequestHeaders(additionalHeaders);
             RestClient.addGzipResponseHeaders(additionalHeaders);
+            // Gzip can expand small or incompressible bodies. Measure the compressed bytes too;
+            // RestClient recognizes already-compressed bodies and will not compress them twice.
+            return new GzipPayloadRequestTransformer()
+                .transform("POST", getBulkRequestPath(indexName), additionalHeaders, Mono.just(ByteBuffer.wrap(bodyBytes)))
+                .flatMap(request -> request.getBody())
+                .flatMap(compressed -> {
+                    if (compressed.remaining() > maxBytesPerBulkRequest) {
+                        additionalHeaders.remove(GzipPayloadRequestTransformer.CONTENT_ENCODING_HEADER_NAME);
+                        return client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context);
+                    }
+                    var bytes = new byte[compressed.remaining()];
+                    compressed.get(bytes);
+                    return client.postAsyncBytes(getBulkRequestPath(indexName), bytes, additionalHeaders, context);
+                });
         }
         return client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context);
     }

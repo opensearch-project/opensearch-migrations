@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
@@ -90,6 +91,16 @@ public class OpenSearchDocumentSink implements DocumentSink {
         })
             .subscribeOn(Schedulers.boundedElastic())
             .then();
+    }
+
+    @Override
+    public boolean requiresOrderedWrites() {
+        return client.isLargeDocumentStagingEnabled();
+    }
+
+    @Override
+    public Mono<Void> preparePartition(Partition partition, String collectionName) {
+        return client.prepareLargeDocumentPartition(collectionName, partition.name());
     }
 
     @Override

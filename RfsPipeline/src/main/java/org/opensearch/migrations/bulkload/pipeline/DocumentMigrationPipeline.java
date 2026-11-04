@@ -97,8 +97,8 @@ public class DocumentMigrationPipeline {
         }
         this.maxDocsPerBatch = maxDocsPerBatch;
         this.maxBytesPerBatch = maxBytesPerBatch;
-        this.partitionConcurrency = partitionConcurrency;
-        this.batchConcurrency = source.requiresOrderedWrites() ? 1 : batchConcurrency;
+        this.partitionConcurrency = sink.requiresOrderedWrites() ? 1 : partitionConcurrency;
+        this.batchConcurrency = source.requiresOrderedWrites() || sink.requiresOrderedWrites() ? 1 : batchConcurrency;
     }
 
     /** Snapshot of pipeline progress, safe to read from any thread. */
@@ -132,7 +132,9 @@ public class DocumentMigrationPipeline {
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
-            return source.readDocuments(partition, startingPosition)
+            var prepared = sink.requiresOrderedWrites() ? sink.preparePartition(partition, collectionName) : Mono.<Void>empty();
+            return prepared
+                .thenMany(Flux.defer(() -> source.readDocuments(partition, startingPosition)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
                 .flatMapSequential(batch -> {

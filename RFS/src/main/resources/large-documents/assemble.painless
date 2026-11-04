@@ -1,0 +1,47 @@
+if (ctx._source.next == params.seq + 1) {
+    ctx.op = 'noop';
+    return;
+}
+if (ctx._source.next != params.seq) {
+    throw new IllegalStateException('Out of order document chunk');
+}
+def stack = ctx._source.stack;
+for (def event : params.events) {
+    def kind = event[0];
+    def value = event.size() == 2 ? event[1] : null;
+    if (kind == 'object' || kind == 'array' || kind == 'string' || kind == 'number') {
+        stack.add(['value': kind == 'object' ? [:] : kind == 'array' ? [] : value,
+                   'key': '', 'number': kind == 'number']);
+    } else if (kind == 'key') {
+        stack[stack.size() - 1].key = value;
+    } else if (kind == 'key+') {
+        stack[stack.size() - 1].key += value;
+    } else if (kind == 'string+' || kind == 'number+') {
+        stack[stack.size() - 1].value += value;
+    } else {
+        if (kind == 'end') {
+            def frame = stack.remove(stack.size() - 1);
+            value = frame.value;
+            if (frame.number) {
+                def path = [];
+                for (def ancestor : stack) {
+                    path.add(ancestor.value instanceof Map ? ancestor.key : ancestor.value.size());
+                }
+                ctx._source.numbers.add(path);
+            }
+        } else if (kind != 'value') {
+            throw new IllegalArgumentException('Unknown document event');
+        }
+        if (stack.isEmpty()) {
+            ctx._source.document = value;
+        } else {
+            def parent = stack[stack.size() - 1];
+            if (parent.value instanceof Map) {
+                parent.value[parent.key] = value;
+            } else {
+                parent.value.add(value);
+            }
+        }
+    }
+}
+ctx._source.next++;

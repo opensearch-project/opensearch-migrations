@@ -17,6 +17,7 @@ import java.util.stream.IntStream;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.OversizedDocumentException;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
@@ -180,16 +181,17 @@ class OpenSearchDocumentSinkBatchingTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"raw", "native", "json"})
-    void isolatesOversizedOperationsAndRetainsOrder(String path) throws Exception {
+    void rejectsOversizedOperationsBeforeSendingThemOrLaterOperations(String path) throws Exception {
         var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":\"" + "a".repeat(1000) + "\"}"),
             doc("d3", "{\"x\":1}"));
         long limit = 200;
 
-        sink(identity(path), Integer.MAX_VALUE, limit).writeBatch("idx", docs).block(Duration.ofSeconds(10));
+        assertThrows(OversizedDocumentException.class,
+            () -> sink(identity(path), Integer.MAX_VALUE, limit).writeBatch("idx", docs).block(Duration.ofSeconds(10)));
 
-        assertEquals(List.of(1, 1, 1), requestCounts());
-        assertTrue(requests.get(1).length > limit);
-        assertEquals(List.of("d1", "d2", "d3"), sentIds());
+        assertEquals(List.of(1), requestCounts());
+        assertTrue(requests.stream().allMatch(bytes -> bytes.length <= limit));
+        assertEquals(List.of("d1"), sentIds());
     }
 
     @ParameterizedTest
@@ -216,6 +218,33 @@ class OpenSearchDocumentSinkBatchingTest {
         assertTrue(requests.stream().allMatch(bytes -> bytes.length <= limit));
         assertEquals(3, result.target().upserts());
         assertEquals(3, result.docsInBatch());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aTransformationCanShrinkAnOversizedSourceWithoutStaging(boolean nativeTransform) {
+        IJsonTransformer transform = nativeTransform
+            ? (BulkOperationTransformer) operations -> {
+                operations.forEach(op -> op.setDocument(Map.of("small", true)));
+                return operations;
+            }
+            : input -> {
+                @SuppressWarnings("unchecked")
+                var operations = (List<Map<String, Object>>) input;
+                operations.forEach(op -> op.put("document", Map.of("small", true)));
+                return operations;
+            };
+        var result = sink(transform, 100, 200).writeBatch("idx",
+            List.of(doc("d1", "{\"large\":\"" + "x".repeat(10_000) + "\"}"))).block();
+        assertNotNull(result);
+        assertEquals(1, requests.size());
+        assertTrue(requests.get(0).length <= 200);
+    }
+
+    @Test
+    void rawValidationUsesTheRfsNameLimitRatherThanJacksonDefaults() throws Exception {
+        var document = doc("d1", MAPPER.writeValueAsString(Map.of("k".repeat(100_000), "value")));
+        assertSame(document.source(), BulkNdjson.encodeRaw(document, "idx", false, MAPPER).body());
     }
 
     @Test

@@ -90,7 +90,8 @@ To see the default shard size, use the `--help` CLI option:
 | --target-password                 | The password for target cluster authentication                                                                                                           |
 | --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                            |
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
-| --documents-size-per-bulk-request | Optional. Maximum bulk request body size in bytes, including action metadata and newlines. A document exceeding the limit by itself is sent alone. Default: 10 MiB |
+| --documents-size-per-bulk-request | Optional. Hard maximum request body size in bytes after document transformations, including action metadata and newlines. An oversized operation fails before transmission unless supported staging is enabled. Default: 10 MiB |
+| --large-document-staging-index | Optional, experimental. Dedicated staging index for documents larger than one request. Supports plain OpenSearch index operations with explicit IDs; preserves routing and ingest pipelines. Serializes batches and requires staging index, update, reindex, and task-status permissions. Keep the same staging index across restarts. See [large document support](../RFS/docs/bounded-document-requests.md) for operation restrictions, recovery, DLQ records, and costs. |
 | --allowed-doc-exception-types     | Optional. Comma-separated list of document-level exception types to treat as successful operations. Enables idempotent migrations by allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success. Default: none |
 
 ## Advanced Arguments

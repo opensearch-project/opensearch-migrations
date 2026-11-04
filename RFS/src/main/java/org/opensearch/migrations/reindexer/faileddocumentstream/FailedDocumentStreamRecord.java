@@ -36,4 +36,10 @@ public class FailedDocumentStreamRecord {
     JsonNode requestItem;
     /** The full per-item response object from the OpenSearch bulk response, as JSON. */
     JsonNode responseItem;
+    /** Exact transformed action/source NDJSON, including all fields and numeric precision. */
+    String transformedRequestBody;
+    /** Exact pre-transformation JSON when retained by the source/transformer. */
+    String originalDocument;
+    /** Failed bounded request and recovery state for an oversized logical document. */
+    StagedRequestFailure stagedFailure;
 }

@@ -18,6 +18,13 @@ It is recommended to refer to the respective README of the tool you want to use 
 
 ## Native bulk transformations
 
+RFS enforces the configured request body limit after transformations and ID handling.
+Single operations larger than the limit fail before transmission by default. The
+experimental `--large-document-staging-index` option assembles supported oversized
+index operations through bounded requests, then publishes the complete document
+with local reindexing. See [bounded requests and large documents](docs/bounded-document-requests.md)
+for the design, operation restrictions, end-to-end tests, and recovery requirements.
+
 Java document providers can implement the functional interface
 [`BulkOperationTransformer`](src/main/java/org/opensearch/migrations/bulkload/transformers/BulkOperationTransformer.java)
 and return it through the existing `IJsonTransformerProvider` service interface.
