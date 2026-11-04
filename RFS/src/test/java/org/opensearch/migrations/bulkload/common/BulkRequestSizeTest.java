@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.ByteArrayInputStream;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -101,8 +102,8 @@ class BulkRequestSizeTest {
                     null, false, DocumentExceptionAllowlist.empty()).subscribe());
             }
 
-            ndjson.verify(() -> BulkNdjson.assemble(anyList(), any()), times(1));
-            gzip.verify(() -> GzipPayloadRequestTransformer.gzip(any(byte[].class)), times(1));
+            ndjson.verify(() -> BulkNdjson.assemblePooled(anyList(), any()), times(1));
+            gzip.verify(() -> GzipPayloadRequestTransformer.gzip(any(ByteBuffer[].class)), times(1));
         } finally {
             subscriptions.forEach(reactor.core.Disposable::dispose);
         }
