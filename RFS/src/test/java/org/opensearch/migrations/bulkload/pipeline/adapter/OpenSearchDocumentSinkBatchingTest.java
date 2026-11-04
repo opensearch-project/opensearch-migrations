@@ -170,6 +170,23 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
+    void rawSourceSizingDoesNotRetainDocumentsInTheSink() throws Exception {
+        var sink = sink(null, Integer.MAX_VALUE, 1024);
+
+        sink.sourceBatchBytes("idx", doc("d1", "{\"value\":1}"));
+
+        int retainedDocuments;
+        try {
+            var field = OpenSearchDocumentSink.class.getDeclaredField("preparedRawDocuments");
+            field.setAccessible(true);
+            retainedDocuments = ((Map<?, ?>) field.get(sink)).size();
+        } catch (NoSuchFieldException e) {
+            retainedDocuments = 0;
+        }
+        assertEquals(0, retainedDocuments, "Source sizing must carry preparation with the document");
+    }
+
+    @Test
     void rejectsUnescapedControlBytesInsideStrings() {
         for (char control = 0; control < ' '; control++) {
             var source = "{\n\"text\":\"before" + control + "after\"}";

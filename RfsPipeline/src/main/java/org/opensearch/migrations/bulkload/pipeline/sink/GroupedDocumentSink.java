@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.pipeline.sink;
 
 import java.util.List;
+import java.util.Objects;
 
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -10,7 +11,19 @@ import reactor.core.publisher.Mono;
 /**
  * A sink that can preserve source/transform batch boundaries while packing their output together.
  */
-public interface GroupedDocumentSink extends DocumentSink {
+public interface GroupedDocumentSink<P> extends DocumentSink {
+
+    /**
+     * A source document together with the exact size and optional sink-specific preparation computed for it.
+     */
+    record PreparedDocument<P>(Document document, long sizeBytes, P preparation) {
+        public PreparedDocument {
+            Objects.requireNonNull(document, "document must not be null");
+            if (sizeBytes < 0) {
+                throw new IllegalArgumentException("sizeBytes must be nonnegative, got " + sizeBytes);
+            }
+        }
+    }
 
     /**
      * The number of source batches that the pipeline should offer to one sink write.
@@ -29,6 +42,16 @@ public interface GroupedDocumentSink extends DocumentSink {
     }
 
     /**
+     * Prepare and size one source document for batching.
+     *
+     * <p>The pipeline carries this value with the document so the sink can reuse preparation performed while
+     * sizing instead of retaining it in shared mutable state.
+     */
+    default PreparedDocument<P> prepareSourceDocument(String collectionName, Document document) {
+        return new PreparedDocument<>(document, sourceBatchBytes(collectionName, document), null);
+    }
+
+    /**
      * Write a bounded group of source batches.
      *
      * <p>Each inner list remains a distinct source/transform batch. The sink may flatten the output after
@@ -43,4 +66,21 @@ public interface GroupedDocumentSink extends DocumentSink {
         List<List<Document>> sourceBatches,
         int requestConcurrency
     );
+
+    /**
+     * Write source batches with their carried sizing annotations.
+     *
+     * <p>The default keeps existing grouped sinks source-compatible; sinks that prepare data while sizing can
+     * override this method to consume that preparation.
+     */
+    default Mono<BatchResult> writePreparedBatchGroup(
+        String collectionName,
+        List<List<PreparedDocument<P>>> sourceBatches,
+        int requestConcurrency
+    ) {
+        var documents = sourceBatches.stream()
+            .map(batch -> batch.stream().map(PreparedDocument::document).toList())
+            .toList();
+        return writeBatchGroup(collectionName, documents, requestConcurrency);
+    }
 }
