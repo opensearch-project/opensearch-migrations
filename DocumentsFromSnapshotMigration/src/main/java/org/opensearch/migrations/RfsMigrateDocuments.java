@@ -245,9 +245,17 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
-            description = "Optional. The maximum bulk request body size in bytes, including action metadata and newlines. " +
-                "Enforced after transformations. Oversized operations fail unless supported staging is enabled. Default 10 MiB")
+            description = "Optional. Bulk request batching target in bytes, including action metadata and newlines, " +
+                "measured after transformations. A single larger operation is sent on its own unless staging is enabled. " +
+                "Default 10 MiB")
         long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
+
+        @Parameter(required = false,
+            names = { "--max-document-size-bytes" },
+            description = "Optional. Reject a single encoded operation above this size after transformations and ID handling, " +
+                "including action metadata and newlines. Applies even with staging enabled. Must be positive. " +
+                "Default " + Long.MAX_VALUE + " (effectively unlimited).")
+        long maxDocumentSizeBytes = Long.MAX_VALUE;
 
         @Parameter(required = false,
             names = { "--large-document-staging-index" },
@@ -478,6 +486,9 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
+        if (args.maxDocumentSizeBytes < 1) {
+            throw new ParameterException("--max-document-size-bytes must be positive.");
+        }
         // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.repoUri == null) {
@@ -620,6 +631,7 @@ public class RfsMigrateDocuments {
         var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate(
             arguments.numDocsPerBulkRequest, arguments.numBytesPerBulkRequest);
+        targetClient.setMaxDocumentSizeBytes(arguments.maxDocumentSizeBytes);
         targetClient.setLargeDocumentStagingIndex(arguments.largeDocumentStagingIndex);
         var targetVersion = targetClient.getClusterVersion();
 

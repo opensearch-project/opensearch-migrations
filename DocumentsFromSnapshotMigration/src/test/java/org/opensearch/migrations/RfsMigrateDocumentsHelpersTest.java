@@ -298,6 +298,33 @@ class RfsMigrateDocumentsHelpersTest {
 
     // ---- validateArgs ---------------------------------------------------
 
+    @Test
+    void documentSizeCeilingDefaultsToUnlimitedAndAcceptsLongValuesFromJson() {
+        var args = new RfsMigrateDocuments.Args();
+        assertThat(args.maxDocumentSizeBytes, equalTo(Long.MAX_VALUE));
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"maxDocumentSizeBytes\":4294967296}"});
+        assertThat(args.maxDocumentSizeBytes, equalTo(4294967296L));
+    }
+
+    @Test
+    void documentSizeCeilingIsIndependentOfTheBulkTarget() {
+        var args = validEsArgs();
+        JsonCommandLineParser.newBuilder().addObject(args).build().parse(new String[]{
+            "--target-host", "http://localhost:9200",
+            "--max-document-size-bytes", "1024", "--documents-size-per-bulk-request", "4096"});
+        assertThat(args.maxDocumentSizeBytes, equalTo(1024L));
+        assertThat(args.numBytesPerBulkRequest, equalTo(4096L));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+        args.maxDocumentSizeBytes = 8192;
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+        for (long invalid : new long[]{0, -1, Long.MIN_VALUE}) {
+            args.maxDocumentSizeBytes = invalid;
+            var error = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+            assertThat(error.getMessage(), org.hamcrest.Matchers.containsString("--max-document-size-bytes"));
+        }
+    }
+
     private static RfsMigrateDocuments.Args validEsArgs() {
         var args = new RfsMigrateDocuments.Args();
         args.snapshotName = "my-snap";

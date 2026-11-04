@@ -18,10 +18,12 @@ It is recommended to refer to the respective README of the tool you want to use 
 
 ## Native bulk transformations
 
-RFS enforces the configured request body limit after transformations and ID handling.
-Single operations larger than the limit fail before transmission by default. The
+RFS batches encoded operations after transformations and ID handling. The configured
+batch byte target continues to allow a larger single operation in its own request.
+Use `--max-document-size-bytes` to opt into rejecting larger operations; its default
+is `Long.MAX_VALUE`. The
 experimental `--large-document-staging-index` option assembles supported oversized
-index operations through bounded requests, then publishes the complete document
+index operations through a lazy stream of bounded requests, then publishes the complete document
 with local reindexing. See [bounded requests and large documents](docs/bounded-document-requests.md)
 for the design, operation restrictions, end-to-end tests, and recovery requirements.
 

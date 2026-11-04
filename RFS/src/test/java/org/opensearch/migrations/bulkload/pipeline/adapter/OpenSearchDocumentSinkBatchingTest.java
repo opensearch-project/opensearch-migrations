@@ -65,13 +65,17 @@ class OpenSearchDocumentSinkBatchingTest {
     private final RestClient transport = mock(RestClient.class);
 
     private OpenSearchDocumentSink sink(IJsonTransformer transformer, int maxDocs, long maxBytes) {
+        return sink(transformer, maxDocs, maxBytes, Long.MAX_VALUE);
+    }
+
+    private OpenSearchDocumentSink sink(IJsonTransformer transformer, int maxDocs, long maxBytes, long maxDocumentBytes) {
         var connection = mock(ConnectionContext.class);
         when(connection.getUri()).thenReturn(URI.create("http://localhost/"));
         when(transport.getConnectionContext()).thenReturn(connection);
-        when(transport.postAsyncBytes(any(), any(), any(), any())).thenAnswer(invocation -> {
+        doAnswer(invocation -> {
             requests.add(invocation.getArgument(1));
             return Mono.just(OK);
-        });
+        }).when(transport).postAsyncBytes(any(), any(), any(), any());
         var client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
             Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, maxDocs, maxBytes) {
             @Override
@@ -79,6 +83,7 @@ class OpenSearchDocumentSinkBatchingTest {
                 return Retry.max(0);
             }
         };
+        client.setMaxDocumentSizeBytes(maxDocumentBytes);
         return new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
             false, DocumentExceptionAllowlist.empty(), null);
     }
@@ -181,17 +186,48 @@ class OpenSearchDocumentSinkBatchingTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"raw", "native", "json"})
-    void rejectsOversizedOperationsBeforeSendingThemOrLaterOperations(String path) throws Exception {
+    void keepsOversizedOperationsInSingletonRequestsByDefault(String path) throws Exception {
+        var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":\"" + "a".repeat(1000) + "\"}"),
+            doc("d3", "{\"x\":1}"), doc("d4", "{\"x\":1}"));
+        var result = sink(identity(path), Integer.MAX_VALUE, 200).writeBatch("idx", docs).block();
+
+        assertNotNull(result);
+        assertEquals(List.of(1, 1, 2), requestCounts());
+        assertTrue(requests.get(0).length <= 200);
+        assertTrue(requests.get(1).length > 200);
+        assertTrue(requests.get(2).length <= 200);
+        assertEquals(List.of("d1", "d2", "d3", "d4"), sentIds());
+        assertEquals(4, result.target().upserts());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"raw", "native", "json"})
+    void explicitDocumentCeilingRejectsBeforeSendingTheOperationOrLaterOnes(String path) throws Exception {
         var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":\"" + "a".repeat(1000) + "\"}"),
             doc("d3", "{\"x\":1}"));
         long limit = 200;
 
         assertThrows(OversizedDocumentException.class,
-            () -> sink(identity(path), Integer.MAX_VALUE, limit).writeBatch("idx", docs).block(Duration.ofSeconds(10)));
+            () -> sink(identity(path), Integer.MAX_VALUE, limit, 500).writeBatch("idx", docs).block(Duration.ofSeconds(10)));
 
         assertEquals(List.of(1), requestCounts());
         assertTrue(requests.stream().allMatch(bytes -> bytes.length <= limit));
         assertEquals(List.of("d1"), sentIds());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"raw", "native", "json"})
+    void documentCeilingIncludesMetadataUtf8AndNewlinesButDoesNotLimitTheAggregateBatch(String path) throws Exception {
+        var docs = List.of(doc("é1", "{\"x\":\"雪\"}"), doc("é2", "{\"x\":\"雪\"}"));
+        long exactSize = serialized(docs.subList(0, 1)).length;
+        sink(identity(path), 100, 1000, exactSize).writeBatch("idx", docs).block();
+        assertEquals(List.of(2), requestCounts());
+        assertTrue(requests.get(0).length > exactSize);
+        requests.clear();
+
+        assertThrows(OversizedDocumentException.class,
+            () -> sink(identity(path), 100, 1000, exactSize - 1).writeBatch("idx", docs).block());
+        assertTrue(requests.isEmpty(), "Check every operation even when the entire batch fits the batching target");
     }
 
     @ParameterizedTest
@@ -234,11 +270,34 @@ class OpenSearchDocumentSinkBatchingTest {
                 operations.forEach(op -> op.put("document", Map.of("small", true)));
                 return operations;
             };
-        var result = sink(transform, 100, 200).writeBatch("idx",
+        var result = sink(transform, 100, 200, 200).writeBatch("idx",
             List.of(doc("d1", "{\"large\":\"" + "x".repeat(10_000) + "\"}"))).block();
         assertNotNull(result);
         assertEquals(1, requests.size());
         assertTrue(requests.get(0).length <= 200);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rejectsTransformationGrowthOnlyWhenTheDocumentCeilingIsConfigured(boolean nativeTransform) {
+        IJsonTransformer transform = nativeTransform
+            ? (BulkOperationTransformer) operations -> {
+                operations.forEach(op -> op.setDocument(Map.of("expanded", "雪".repeat(1000))));
+                return operations;
+            }
+            : input -> {
+                @SuppressWarnings("unchecked")
+                var operations = (List<Map<String, Object>>) input;
+                operations.forEach(op -> op.put("document", Map.of("expanded", "雪".repeat(1000))));
+                return operations;
+            };
+        var docs = List.of(doc("d1", "{}"));
+        sink(transform, 100, 200).writeBatch("idx", docs).block();
+        assertTrue(requests.get(0).length > 200, "The batching target still allows a transformed oversized singleton");
+        requests.clear();
+        assertThrows(OversizedDocumentException.class,
+            () -> sink(transform, 100, 200, 1000).writeBatch("idx", docs).block());
+        assertTrue(requests.isEmpty());
     }
 
     @Test

@@ -37,6 +37,7 @@ for (def event : params.events) {
         } else {
             def parent = stack[stack.size() - 1];
             if (parent.value instanceof Map) {
+                if (parent.value.containsKey(parent.key)) { throw new IllegalArgumentException('Duplicate field'); }
                 parent.value[parent.key] = value;
             } else {
                 parent.value.add(value);

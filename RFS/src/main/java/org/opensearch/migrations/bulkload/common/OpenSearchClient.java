@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -41,6 +42,7 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
+import org.opensearch.migrations.reindexer.faileddocumentstream.StagedRequestFailure;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -81,14 +83,15 @@ public abstract class OpenSearchClient {
     private final CompressionMode compressionMode;
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
-    private volatile StagedDocumentWriter stagedDocumentWriter;
+    private volatile long maxDocumentSizeBytes = Long.MAX_VALUE;
+    private final AtomicReference<StagedDocumentWriter> stagedDocumentWriter = new AtomicReference<>();
 
     // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
     // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
-    // volatile: emitFailedDocumentStreamRecord runs on concurrent bulk-write threads (batchConcurrency defaults
+    // Atomic/volatile publication: emitFailedDocumentStreamRecord runs on concurrent bulk-write threads (batchConcurrency defaults
     // to 10) while setFailedDocumentStreamContext/setFailedDocumentStreamWorkItem are written from the pipeline thread, so these
     // need safe publication across threads.
-    private volatile FailedDocumentStreamSink failedDocumentStreamSink;
+    private final AtomicReference<FailedDocumentStreamSink> failedDocumentStreamSink = new AtomicReference<>();
     private volatile String failedDocumentStreamSessionId = "unknown-session";
     private volatile String failedDocumentStreamWorkerId = "unknown-worker";
     // Canonical work-item id (index + shard + checkpoint) for the work item currently being
@@ -109,26 +112,38 @@ public abstract class OpenSearchClient {
     }
 
     /**
+     * Optional rejection ceiling for one encoded operation, including metadata and newlines.
+     * Independent of the bulk batching target; applied after transformations and ID handling.
+     * Configure before submitting document batches.
+     */
+    public void setMaxDocumentSizeBytes(long maxDocumentSizeBytes) {
+        if (maxDocumentSizeBytes < 1) {
+            throw new IllegalArgumentException("Maximum document size must be positive");
+        }
+        this.maxDocumentSizeBytes = maxDocumentSizeBytes;
+    }
+
+    /**
      * Enable the opt-in oversized-index path. Configure before submitting document batches.
-     * Other operations continue to require a complete operation to fit in one request.
+     * With staging enabled, unsupported oversized operations fail instead of exceeding the request target.
      */
     public void setLargeDocumentStagingIndex(String indexName) {
         if (indexName == null) {
-            stagedDocumentWriter = null;
+            stagedDocumentWriter.set(null);
             return;
         }
         if (version.getFlavor() != Flavor.OPENSEARCH && version.getFlavor() != Flavor.AMAZON_MANAGED_OPENSEARCH) {
             throw new IllegalArgumentException("Large document staging requires an OpenSearch target with local reindex support");
         }
-        stagedDocumentWriter = new StagedDocumentWriter(client, indexName, maxBytesPerBulkRequest);
+        stagedDocumentWriter.set(new StagedDocumentWriter(client, indexName, maxBytesPerBulkRequest));
     }
 
     public boolean isLargeDocumentStagingEnabled() {
-        return stagedDocumentWriter != null;
+        return stagedDocumentWriter.get() != null;
     }
 
     public Mono<Void> prepareLargeDocumentPartition(String collection, String partition) {
-        var writer = stagedDocumentWriter;
+        var writer = stagedDocumentWriter.get();
         return writer == null ? Mono.empty() : writer.preparePartition(collection, partition);
     }
 
@@ -138,7 +153,7 @@ public abstract class OpenSearchClient {
      * requests are issued.
      */
     public void setFailedDocumentStreamContext(FailedDocumentStreamSink failedDocumentStreamSink, String sessionId, String workerId) {
-        this.failedDocumentStreamSink = failedDocumentStreamSink;
+        this.failedDocumentStreamSink.set(failedDocumentStreamSink);
         this.failedDocumentStreamSessionId = sessionId;
         this.failedDocumentStreamWorkerId = workerId;
     }
@@ -156,7 +171,7 @@ public abstract class OpenSearchClient {
     }
 
     public FailedDocumentStreamSink getFailedDocumentStreamSink() {
-        return failedDocumentStreamSink;
+        return failedDocumentStreamSink.get();
     }
 
     public Version getClusterVersion() {
@@ -585,15 +600,13 @@ public abstract class OpenSearchClient {
     ) {
         // The batching predicate and retry state must be fresh for every subscription.
         return Mono.defer(() -> {
-            var writer = stagedDocumentWriter;
+            var writer = stagedDocumentWriter.get();
             var ready = writer == null ? Mono.<Void>empty() : writer.beforeWrites(indexName);
             return ready.thenMany(Flux.fromIterable(docs)
             .map(prepare)
             .bufferUntil(new OperationBatcher(indexName, writer != null), true)
             // A split batch completes in source order, before its source checkpoint can advance.
-            .concatMap(batch -> batch.get(0).encoded().size() > maxBytesPerBulkRequest
-                ? sendOversizedOperation(indexName, batch.get(0), context)
-                : executeBulkWithRetry(indexName, batch, context, allowlist), 1))
+            .concatMap(batch -> sendPreparedBatch(indexName, batch, writer, context, allowlist), 1))
             .reduce((previous, next) -> new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
                 previous.target.plus(next.target), previous.requests.plus(next.requests)))
             .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"));
@@ -644,16 +657,26 @@ public abstract class OpenSearchClient {
         }
     }
 
-    private Mono<BulkResponse> sendOversizedOperation(
-        String indexName, PreparedOperation operation, IRfsContexts.IRequestContext context
+    private Mono<BulkResponse> sendPreparedBatch(
+        String indexName, List<PreparedOperation> batch, StagedDocumentWriter writer,
+        IRfsContexts.IRequestContext context, DocumentExceptionAllowlist allowlist
     ) {
-        var writer = stagedDocumentWriter;
-        Mono<BulkResponse> response = writer == null
-            ? Mono.error(new OversizedDocumentException(operation.encoded().size(), maxBytesPerBulkRequest,
-                "Increase the limit or enable --large-document-staging-index for supported index operations."))
-            : writer.write(indexName, operation.encoded(), context);
-        return response.onErrorResume(error -> recordOversizedFailure(indexName, operation, error)
-            .then(Mono.error(error)));
+        // This ceiling applies to each operation, never to their aggregate batch size.
+        // Check it before staging too: chunking must not bypass an explicit document rejection policy.
+        for (var operation : batch) {
+            if (operation.encoded().size() > maxDocumentSizeBytes) {
+                var error = new OversizedDocumentException(operation.encoded().size(), maxDocumentSizeBytes,
+                    "Increase --max-document-size-bytes to allow this operation.");
+                return recordOversizedFailure(indexName, operation, error).then(Mono.error(error));
+            }
+        }
+        var first = batch.get(0);
+        if (writer != null && first.encoded().size() > maxBytesPerBulkRequest) {
+            return writer.write(indexName, first.encoded(), context)
+                .onErrorResume(error -> recordOversizedFailure(indexName, first, error).then(Mono.error(error)));
+        }
+        // Preserve the existing singleton exception to the batching target when staging is disabled.
+        return executeBulkWithRetry(indexName, batch, context, allowlist);
     }
 
     private Mono<Void> recordOversizedFailure(String defaultIndex, PreparedOperation prepared, Throwable error) {
@@ -661,56 +684,20 @@ public abstract class OpenSearchClient {
             try {
                 var operation = prepared.operation().get();
                 // Capture raw originals before Jackson's diagnostic conversion materializes any Maps.
-                String originalDocument = operation.getOriginalSourceBytes() != null
-                    ? new String(operation.getOriginalSourceBytes(), StandardCharsets.UTF_8)
-                    : operation.getOriginalSource() == null ? null : OBJECT_MAPPER.writeValueAsString(operation.getOriginalSource());
+                String originalDocument = originalDocumentOf(operation);
                 String transformedRequest = new String(assemble(List.of(prepared)).bytes(), StandardCharsets.UTF_8);
                 var metadata = OBJECT_MAPPER.readTree(prepared.encoded().action()).elements().next();
                 String index = metadata.path("_index").asText(defaultIndex);
                 var stagedFailure = error instanceof StagedDocumentException staged ? staged.getFailure() : null;
                 failedRequestsLogger.logLargeDocumentFailure(index, transformedRequest, originalDocument, stagedFailure, error);
-                var sink = failedDocumentStreamSink;
+                var sink = failedDocumentStreamSink.get();
                 if (sink == null) {
                     return Mono.empty();
                 }
-                var lastResponse = StagedDocumentWriter.responseOf(error);
-                JsonNode responseItem = null;
-                if (lastResponse != null && lastResponse.body != null) {
-                    try {
-                        responseItem = OBJECT_MAPPER.readTree(lastResponse.body);
-                    } catch (IOException malformedResponse) {
-                        responseItem = OBJECT_MAPPER.getNodeFactory().textNode(lastResponse.body);
-                    }
-                }
-                var detail = responseItem == null ? OBJECT_MAPPER.createObjectNode()
-                    : responseItem.has("response") ? responseItem.path("response") : responseItem;
-                var taskFailure = detail.path("failures").path(0);
-                String type = detail.path("error").path("type").asText(null);
-                if (type == null) {
-                    type = taskFailure.path("cause").path("type").asText(null);
-                }
-                int status = taskFailure.path("status").asInt(lastResponse == null ? 0 : lastResponse.statusCode);
-                boolean invalidDocument = false;
-                for (var cause = error; cause != null; cause = cause.getCause()) {
-                    invalidDocument |= cause instanceof IllegalArgumentException
-                        || cause instanceof com.fasterxml.jackson.core.JsonProcessingException;
-                }
-                boolean nonRetryable = (stagedFailure == null || !stagedFailure.publicationMayHaveCommitted())
-                    && (invalidDocument || (status >= 400 && status < 500 && status != 429));
-                var requestItem = OBJECT_MAPPER.<ObjectNode>valueToTree(operation);
-                if (originalDocument != null) {
-                    requestItem.set("document", OBJECT_MAPPER.readTree(originalDocument));
-                }
-                var record = FailedDocumentStreamRecord.builder()
-                    .sessionId(failedDocumentStreamSessionId).workerId(failedDocumentStreamWorkerId)
-                    .workItemId(failedDocumentStreamWorkItemId).targetIndex(index).documentId(metadata.path("_id").asText(null))
-                    .timestamp(Instant.now().toString()).failureType(type == null ? error.getClass().getSimpleName() : type)
-                    .failureClass(nonRetryable ? FailureClass.NON_RETRYABLE : FailureClass.RETRYABLE_EXHAUSTED)
-                    .requestItem(requestItem).responseItem(responseItem)
-                    .transformedRequestBody(transformedRequest).originalDocument(originalDocument).stagedFailure(stagedFailure)
-                    .build();
+                var failureRecord = oversizedFailureRecord(index, metadata, operation, originalDocument,
+                    transformedRequest, error, stagedFailure);
                 // An aborted batch never reaches the bootstrap's per-cursor flush. Gate the error here.
-                return sink.write(record).then(Mono.defer(sink::flush)).timeout(Duration.ofMinutes(5))
+                return sink.write(failureRecord).then(Mono.defer(sink::flush)).timeout(Duration.ofMinutes(5))
                     .onErrorMap(persistenceError -> {
                         persistenceError.addSuppressed(error);
                         return persistenceError;
@@ -720,6 +707,66 @@ public abstract class OpenSearchClient {
                 return Mono.error(e);
             }
         });
+    }
+
+    private static String originalDocumentOf(BulkOperationSpec operation) throws IOException {
+        if (operation.getOriginalSourceBytes() != null) {
+            return new String(operation.getOriginalSourceBytes(), StandardCharsets.UTF_8);
+        }
+        return operation.getOriginalSource() == null ? null : OBJECT_MAPPER.writeValueAsString(operation.getOriginalSource());
+    }
+
+    private FailedDocumentStreamRecord oversizedFailureRecord(
+        String index, JsonNode metadata, BulkOperationSpec operation, String originalDocument,
+        String transformedRequest, Throwable error,
+        StagedRequestFailure stagedFailure
+    ) throws IOException {
+        var lastResponse = StagedDocumentWriter.responseOf(error);
+        var responseItem = diagnosticResponse(lastResponse);
+        var detail = responseItem == null ? OBJECT_MAPPER.createObjectNode() : responseItem;
+        if (detail.has("response")) {
+            detail = detail.path("response");
+        }
+        var taskFailure = detail.path("failures").path(0);
+        String type = detail.path("error").path("type").asText(null);
+        if (type == null) {
+            type = taskFailure.path("cause").path("type").asText(error.getClass().getSimpleName());
+        }
+        int status = taskFailure.path("status").asInt(lastResponse == null ? 0 : lastResponse.statusCode);
+        boolean nonRetryable = (stagedFailure == null || !stagedFailure.publicationMayHaveCommitted())
+            && (isInvalidDocument(error) || (status >= 400 && status < 500 && status != 429));
+        var requestItem = OBJECT_MAPPER.<ObjectNode>valueToTree(operation);
+        if (originalDocument != null) {
+            requestItem.set("document", OBJECT_MAPPER.readTree(originalDocument));
+        }
+        return FailedDocumentStreamRecord.builder()
+            .sessionId(failedDocumentStreamSessionId).workerId(failedDocumentStreamWorkerId)
+            .workItemId(failedDocumentStreamWorkItemId).targetIndex(index).documentId(metadata.path("_id").asText(null))
+            .timestamp(Instant.now().toString()).failureType(type)
+            .failureClass(nonRetryable ? FailureClass.NON_RETRYABLE : FailureClass.RETRYABLE_EXHAUSTED)
+            .requestItem(requestItem).responseItem(responseItem)
+            .transformedRequestBody(transformedRequest).originalDocument(originalDocument).stagedFailure(stagedFailure)
+            .build();
+    }
+
+    private static JsonNode diagnosticResponse(HttpResponse response) {
+        if (response == null || response.body == null) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.readTree(response.body);
+        } catch (IOException malformedResponse) {
+            return OBJECT_MAPPER.getNodeFactory().textNode(response.body);
+        }
+    }
+
+    private static boolean isInvalidDocument(Throwable error) {
+        for (var cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof IllegalArgumentException || cause instanceof com.fasterxml.jackson.core.JsonProcessingException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static BulkNdjson.SerializedBulk assemble(List<PreparedOperation> pending) {
@@ -816,10 +863,6 @@ public abstract class OpenSearchClient {
 
     private Mono<HttpResponse> postBulkRequest(String indexName, byte[] bodyBytes,
                                                        IRfsContexts.IRequestContext context) {
-        if (bodyBytes.length > maxBytesPerBulkRequest) {
-            return Mono.error(new OversizedDocumentException(bodyBytes.length, maxBytesPerBulkRequest,
-                "A complete bulk request must fit before transmission."));
-        }
         var additionalHeaders = new HashMap<String, List<String>>();
         if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
             RestClient.addGzipRequestHeaders(additionalHeaders);
@@ -830,7 +873,7 @@ public abstract class OpenSearchClient {
                 .transform("POST", getBulkRequestPath(indexName), additionalHeaders, Mono.just(ByteBuffer.wrap(bodyBytes)))
                 .flatMap(request -> request.getBody())
                 .flatMap(compressed -> {
-                    if (compressed.remaining() > maxBytesPerBulkRequest) {
+                    if (bodyBytes.length <= maxBytesPerBulkRequest && compressed.remaining() > maxBytesPerBulkRequest) {
                         additionalHeaders.remove(GzipPayloadRequestTransformer.CONTENT_ENCODING_HEADER_NAME);
                         return client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context);
                     }
@@ -960,7 +1003,8 @@ public abstract class OpenSearchClient {
     }
 
     void emitFailedDocumentStreamRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
-        if (failedDocumentStreamSink == null) {
+        var sink = failedDocumentStreamSink.get();
+        if (sink == null) {
             return;
         }
         try {
@@ -989,7 +1033,7 @@ public abstract class OpenSearchClient {
                 .requestItem(requestItem)
                 .responseItem(responseItem)
                 .build();
-            failedDocumentStreamSink.write(failedDocumentStreamRecord).subscribe(
+            sink.write(failedDocumentStreamRecord).subscribe(
                 v -> {},
                 err -> log.atError().setCause(err)
                     .setMessage("Failed to buffer failed document stream record for index {}: {}")

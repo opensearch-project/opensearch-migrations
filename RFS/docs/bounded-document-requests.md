@@ -1,11 +1,13 @@
 # Bounded requests and documents larger than a request
 
-RFS can enforce a request body limit independently of the size of a supported
-document. Ordinary operations are batched at operation boundaries. An optional
-staging path assembles an oversized document inside OpenSearch, then indexes its
-complete source through a small local `_reindex` request.
+RFS preserves the existing bulk batching target: an individual larger operation
+is sent in a singleton request by default. An independent, optional document
+ceiling can reject larger operations. With experimental staging enabled, the
+batching target becomes a body limit for document requests: a lazy stream of
+bounded updates assembles a supported oversized document inside OpenSearch, then
+a small local `_reindex` request publishes its complete source.
 
-This is a hard body limit, not a promise of unlimited document size. The target's
+Staging does not promise unlimited document size. The target's
 document, mapping, script, memory, and parser limits still apply. A request also
 needs enough room for its protocol envelope and action metadata.
 
@@ -17,10 +19,10 @@ transformations and ID handling. `BulkNdjson.EncodedOperation` retains the actua
 UTF-8 action/body bytes, including each newline, for batching and retries.
 `OpenSearchClient.sendBulkRequests` executes split requests in order.
 
-Its remaining exception was an individual oversized operation: `BatchSizePredicate`
-put it in a singleton batch and the client sent it anyway. That exception made
-the configured size a soft limit. RFS now either handles that singleton through
-the explicitly enabled staging path or fails before sending it. The source
+An individual oversized operation is kept in a singleton batch by
+`BatchSizePredicate`. This behavior remains the default. RFS splits that singleton
+only when staging is explicitly enabled, or rejects it when it exceeds an
+explicit document ceiling. The source
 pipeline's batches still bound input buffering; only the final encoded operations
 determine outgoing request boundaries.
 
@@ -44,8 +46,29 @@ strict size or general JSON solution:
 --large-document-staging-index rfs-large-document-staging
 ```
 
-The first option is now a hard bound even when the staging option is absent.
-This intentionally changes the previous "send an oversized singleton" behavior.
+`--documents-size-per-bulk-request` defaults to 10 MiB. Without the staging option,
+larger single operations continue to be sent on their own, including their existing
+operation and version semantics.
+
+`--max-document-size-bytes` is a separate, positive ceiling on one encoded operation,
+including action metadata and newlines. Its default is `9223372036854775807`
+(`Long.MAX_VALUE`), so existing migrations have no new size rejection policy.
+It is measured after transformations and ID handling, before compression. It
+applies even when staging is enabled: chunking does not bypass an explicit document
+ceiling. A batch containing multiple individually allowed operations may exceed
+this document ceiling, subject to the ordinary batch target.
+
+For example, a 10 MiB batching target and a 50 MiB document ceiling allow a 25 MiB
+operation. Without staging it is a singleton bulk request; with staging it is
+assembled through requests no larger than 10 MiB. An operation above 50 MiB is
+rejected in either configuration. Setting both sizes to the same value gives
+strict bounds without staging. Leave the document ceiling above the batch target
+when staging larger documents.
+
+The decision order is: reject above the document ceiling; otherwise batch fitting
+operations normally; otherwise send a singleton or use staging, according to the
+staging option. A size rejection fails the source batch, retains the full document
+in the configured failure outputs, and does not advance that batch's checkpoint.
 
 The staging option is experimental and disabled by default. RFS creates or
 validates the named concrete staging index. It must have:
@@ -65,7 +88,10 @@ Enabling staging serializes batches within each partition and partitions sharing
 one sink, even if higher concurrency was requested. Independent RFS workers can
 still process separate partitions.
 
-| Operation or metadata | Behavior when oversized |
+The following restrictions apply **only with staging enabled** to operations above
+the batching target:
+
+| Operation or metadata | Behavior when oversized with staging enabled |
 | --- | --- |
 | Plain `index` with explicit `_id` | Supported through opt-in staging |
 | Routing, destination index/alias, explicit pipeline, `require_alias` | Preserved |
@@ -85,14 +111,15 @@ allowlist is configured.
 
 ## Request-size contract
 
-The limit includes action metadata, document bytes, JSON escaping, and all bulk
+Both byte settings include action metadata, document bytes, JSON escaping, and all bulk
 newlines. HTTP headers, request lines, TLS framing, and response bodies are outside
 this body-size setting.
 
 The normal bulk path measures the final uncompressed bytes. When gzip is enabled,
-it also measures the compressed representation. If compression would exceed the
-limit, it sends the already fitting uncompressed representation. Otherwise the
-transport receives the measured compressed bytes and does not compress them again.
+it also measures the compressed representation. If a body fits the batching target
+but gzip would exceed it, RFS sends the fitting uncompressed representation.
+An oversized singleton without staging keeps its normal compression behavior.
+The transport receives the measured compressed bytes and does not compress them again.
 
 Staging initialization, scripted updates, setup, and publication requests are
 checked against the same limit. Staging uses uncompressed bodies. Update chunks
@@ -100,6 +127,32 @@ are filled according to the **serialized** JSON envelope, including the script
 and changing sequence number. UTF-8 characters, JSON escapes, and surrogate pairs
 are accounted for; strings are never split inside a surrogate pair. Metadata or a
 script envelope that cannot fit causes failure, never an oversized fallback.
+
+## Streaming boundary
+
+`OperationSplitter.split(encodedOperation, requestLimit)` returns a cold
+`Flux<Part>`, with a sequence number and bounded body for each part.
+The staging writer subscribes after creating the upload. It requests one part at
+a time with no prefetch and awaits that part's acknowledgement, including retries,
+before requesting the next. Retries reuse the same byte array. Failure or cancellation
+stops generation; completion of the parts still requires publication and journal
+completion before the original document can be acknowledged.
+
+The JSON splitter scans the already validated UTF-8 bytes, copying escaped ranges
+directly into parts. It does not build a document tree, materialize complete strings
+or field names, collect all parts, or reparse each generated request. Its additional
+memory is proportional to the request size and container depth. Both raw UTF-8 and
+escaped surrogate pairs stay together. Duplicate field names are rejected during
+staging assembly, before publication, using the map that already holds the source.
+
+This boundary follows the existing RFS source and transformation contracts:
+`Document` owns source bytes, and a JSON/Map transformer may materialize the entire
+document. The encoded operation is retained for retries and complete failure
+diagnostics. The existing logger and failed-document record schema also materialize
+whole-document diagnostic values on failure. This change makes **operation expansion**
+streaming; it does not make those existing APIs or OpenSearch's source rewrites
+constant-memory. A fully streamed source-to-DLQ path would require changing those
+contracts to accept streams or spooled document references.
 
 ## Assembly and publication
 
@@ -110,9 +163,9 @@ script envelope that cannot fit causes failure, never an oversized fallback.
    transformed action metadata and a SHA-256 digest of the encoded document.
    Create its staging document with a create-only indexing request. A delayed
    initialization retry therefore cannot reset chunks already written.
-4. Convert the encoded JSON body into container, field-name, string, number, and
-   scalar events. An update script assembles these into a stack of unfinished
-   containers in the staging document.
+4. Lazily convert the encoded JSON body into container, field-name, string, number,
+   and scalar events as each request is demanded. An update script assembles these
+   into a stack of unfinished containers in the staging document.
 5. Send updates sequentially. Every request supplies its sequence number.
    Retrying the most recently applied sequence is a no-op; an unexpected sequence fails.
 6. Refresh staging and conditionally record `publishing` in the journal before
@@ -296,14 +349,22 @@ guarantee a fitting size for every document.
 `OpenSearchDocumentSinkBatchingTest`, `JsonDocumentChunksTest`, and
 `StagedDocumentWriterTest` cover exact byte boundaries, the final newline, metadata,
 UTF-8/escaping, surrogate pairs, transformation growth/shrinkage, one-to-many
-transforms, conditional-operation rejection, gzip expansion, staging ownership,
-and source checkpoint behavior.
+transforms, legacy oversized singletons, independent document ceilings,
+conditional-operation rejection, gzip expansion, staging ownership, and source
+checkpoint behavior. Demand, retry, failure, and cancellation assertions verify that
+only the current part is generated. Allocation checks require the first 8 KiB part
+of a 16 MiB string or field name to allocate less than 1 MiB after warmup.
 
 `RfsBoundedRequestsEndToEndTest` creates a real OpenSearch snapshot and reads its
 Lucene documents through RFS. It runs against real 2.19.4 and 3.7.0 targets with
 `http.max_content_length=8192b`, behind an independent proxy that records and
 rejects oversized compressed or uncompressed bodies. It first proves that a direct
 large document receives HTTP 413.
+
+Compatibility cases send an operation above a 4 KiB batching target through the
+same 8 KiB target successfully, then reject it with an explicit document ceiling,
+then migrate it through staging with every request below 4 KiB. All three RFS
+transformation paths compare the entire stored source.
 
 The tests validate raw, native, and JSON transformation paths, exact stored
 documents and routing, strings and field names larger than a request, nested
@@ -337,9 +398,12 @@ The test covers:
   task ID allows checkpoint replay to complete.
 * A real mapping failure in a later field, with full-document and failed-stage
   fidelity in both S3 and the legacy logger.
-* A duplicate key detected during later chunk encoding, after earlier updates
-  committed, with the complete raw document and an explicit client-side error
-  retained in S3.
+* Multiple root objects detected during later chunk encoding, after earlier
+  updates committed, with the complete raw document and an explicit client-side
+  error retained in S3.
+* Equivalent duplicate field names, including escaped names and a prior null value,
+  rejected by the real assembly script after earlier chunks committed; the full
+  document, failed part, and target error are retained in S3.
 * Mixed successful, non-retryable, and retryable bulk items, followed by a dependent
   delete. Acknowledged unrelated documents are not retried.
 * A withheld S3 upload completion, proving failure reporting waits for durability.
@@ -359,7 +423,7 @@ cluster storage disaster.
   --tests '*RfsStagedRecoveryEndToEndTest'
 ```
 
-Validation on 2026-11-04: **287 selected tests passed**, with no failures or skips: 181 RFS unit tests, one RFS LocalStack integration test, 24 pipeline tests, nine HTTP tests, 67 migration argument/bootstrap tests, and five end-to-end invocations. The recovery suite also passed a subsequent run on both target versions with explicit destination-index and document-ID renaming before the injected failure. Java formatter checks passed for all four changed modules, as did `git diff --check`. These are targeted regression suites, not a run of every repository test.
+Validation on 2026-11-04: **311 selected tests passed**, with no failures or skips: 203 RFS unit tests, one RFS LocalStack integration test, 24 pipeline tests, nine HTTP tests, 69 migration argument/bootstrap tests, and five end-to-end invocations. Java formatter checks passed for all four changed modules, as did `git diff --check`. The final metadata-validation cleanup also passed a 27-test follow-up. Local SonarQube 25.10 analysis of the 17 changed production Java files reports zero open issues with the repository rule configuration. These are targeted regression suites, not a run of every repository test.
 
 ## Primary references
 

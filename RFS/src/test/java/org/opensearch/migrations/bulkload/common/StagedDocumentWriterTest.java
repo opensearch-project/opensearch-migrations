@@ -3,9 +3,14 @@ package org.opensearch.migrations.bulkload.common;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.DeleteOp;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.enums.IndexOpType;
@@ -17,25 +22,174 @@ import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 
 import io.netty.handler.codec.http.HttpMethod;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class StagedDocumentWriterTest {
+    private static final String STAGING_INDEX = """
+        {"staging":{"mappings":{"enabled":false,"_meta":{"rfs_large_document_staging":2}},"settings":{}}}
+        """;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"create", "version", "delete"})
+    void legacyOversizedSingletonsPreserveTheirOperationSemantics(String kind) {
+        var metadata = IndexOperationMeta.builder().index("target").id("id").build();
+        if (kind.equals("create")) {
+            metadata.setOpType(IndexOpType.CREATE);
+        } else if (kind.equals("version")) {
+            metadata.setVersioning(VersionControlMetadata.builder().version(12L).versionType(VersionType.EXTERNAL_GTE).build());
+        }
+        BulkOperationSpec operation = kind.equals("delete")
+            ? DeleteOp.builder().operation(DeleteOperationMeta.builder().index("target").id("id").build()).build()
+            : IndexOp.builder().operation(metadata).document(Map.of("text", "x".repeat(1000))).build();
+        byte[] expected = BulkNdjson.toBulkNdjsonBytes(List.of(operation), ObjectMapperFactory.createDefaultMapper());
+        var transport = mock(RestClient.class);
+        when(transport.postAsyncBytes(any(), any(), any(), any())).thenAnswer(call -> {
+            assertArrayEquals(expected, call.getArgument(1));
+            return Mono.just(response(200, "{\"errors\":false,\"items\":[]}"));
+        });
+        var client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
+            Version.fromString("OS 2.19"), CompressionMode.UNCOMPRESSED, 100, expected.length - 1L);
+        client.sendBulkRequest("target", List.of(operation), null).block();
+        verify(transport).postAsyncBytes(any(), any(), any(), any());
+        verify(transport, never()).asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void explicitDocumentCeilingCannotBeBypassedByStagingAndRetainsFullDiagnostics(boolean staging) {
+        var transport = mock(RestClient.class);
+        when(transport.asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            String path = call.getArgument(1);
+            assertTrue(path.equals("staging") || path.startsWith("staging/_doc/journal-"),
+                "Only staging recovery setup is allowed before rejection");
+            return Mono.just(response(path.equals("staging") ? 200 : 404, STAGING_INDEX));
+        });
+        var logger = mock(FailedRequestsLogger.class);
+        var client = new OpenSearchClient_OS_2_11(transport, logger,
+            Version.fromString("OS 2.19"), CompressionMode.UNCOMPRESSED, 100, 4096);
+        assertThrows(IllegalArgumentException.class, () -> client.setMaxDocumentSizeBytes(0));
+        assertThrows(IllegalArgumentException.class, () -> client.setMaxDocumentSizeBytes(-1));
+        client.setMaxDocumentSizeBytes(5000);
+        if (staging) {
+            client.setLargeDocumentStagingIndex("staging");
+        }
+        byte[] original = "{\"before\":1}".getBytes(StandardCharsets.UTF_8);
+        var op = IndexOp.builder().operation(IndexOperationMeta.builder().index("renamed").id("new-id").build())
+            .document(Map.of("expanded", "雪".repeat(3000))).originalSourceBytes(original).build();
+        var records = mock(FailedDocumentStreamSink.class);
+        var flush = Sinks.<Void>empty();
+        when(records.write(any())).thenReturn(Mono.empty());
+        when(records.flush()).thenReturn(flush.asMono());
+        client.setFailedDocumentStreamContext(records, "session", "worker");
+        var failed = client.sendBulkRequest("default-index", List.of(op), null).toFuture();
+        assertFalse(failed.isDone(), "The failure must await DLQ durability");
+        var capture = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(records).write(capture.capture());
+        var record = capture.getValue();
+        assertEquals("renamed", record.getTargetIndex());
+        assertEquals("new-id", record.getDocumentId());
+        assertEquals(FailureClass.NON_RETRYABLE, record.getFailureClass());
+        assertEquals(new String(original, StandardCharsets.UTF_8), record.getOriginalDocument());
+        assertEquals(new String(BulkNdjson.toBulkNdjsonBytes(List.of(op), ObjectMapperFactory.createDefaultMapper()),
+            StandardCharsets.UTF_8), record.getTransformedRequestBody());
+        assertNull(record.getStagedFailure(), "No split or upload was attempted");
+        verify(transport, never()).postAsyncBytes(any(), any(), any(), any());
+        verify(logger).logLargeDocumentFailure(org.mockito.ArgumentMatchers.eq("renamed"),
+            org.mockito.ArgumentMatchers.eq(record.getTransformedRequestBody()),
+            org.mockito.ArgumentMatchers.eq(record.getOriginalDocument()),
+            org.mockito.ArgumentMatchers.isNull(), any(OversizedDocumentException.class));
+        flush.tryEmitEmpty();
+        assertThrows(java.util.concurrent.CompletionException.class, failed::join);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void requestsNoNextPartWhileRetryingAndStopsGenerationOnFailureOrCancellation(boolean cancel) throws Exception {
+        var transport = mock(RestClient.class);
+        var firstAck = Sinks.<HttpResponse>one();
+        var secondAck = Sinks.<HttpResponse>one();
+        var retryStarted = new CountDownLatch(1);
+        var secondStarted = new CountDownLatch(1);
+        var requests = new CopyOnWriteArrayList<byte[]>();
+        when(transport.asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            String path = call.getArgument(1);
+            HttpMethod method = call.getArgument(0);
+            if (path.equals("staging")) {
+                return Mono.just(response(200, STAGING_INDEX));
+            }
+            if (path.contains("/_update/")) {
+                requests.add(call.getArgument(2));
+                if (requests.size() == 1) {
+                    return Mono.error(new java.io.IOException("Lost chunk ACK"));
+                }
+                if (requests.size() == 2) {
+                    retryStarted.countDown();
+                    return firstAck.asMono();
+                }
+                secondStarted.countDown();
+                return secondAck.asMono();
+            }
+            return Mono.just(response(method.equals(HttpMethod.GET) ? 404 : 201,
+                "{\"_seq_no\":1,\"_primary_term\":1}"));
+        });
+        var produced = new AtomicInteger();
+        OperationSplitter splitter = (operation, limit) -> JsonDocumentChunks.split(operation, limit)
+            .doOnNext(part -> produced.incrementAndGet());
+        var operation = BulkNdjson.encode(IndexOp.builder()
+            .operation(IndexOperationMeta.builder().index("target").id("id").build())
+            .document(Map.of("text", "x".repeat(50_000))).build(), ObjectMapperFactory.createDefaultMapper());
+        var future = new StagedDocumentWriter(transport, "staging", 4096, splitter).write("target", operation, null).toFuture();
+        try {
+            assertTrue(retryStarted.await(10, TimeUnit.SECONDS));
+            assertEquals(1, produced.get(), "Retry must retain one part without reading the next");
+            assertEquals(2, requests.size());
+            assertSame(requests.get(0), requests.get(1), "Retry must reuse the measured bytes");
+            firstAck.tryEmitValue(response(200, "{}"));
+            assertTrue(secondStarted.await(10, TimeUnit.SECONDS));
+            assertEquals(2, produced.get());
+            if (cancel) {
+                future.cancel(true);
+                assertTrue(future.isCancelled());
+            } else {
+                secondAck.tryEmitValue(response(400, "{\"error\":{\"type\":\"mapper_parsing_exception\"}}"));
+                assertThrows(java.util.concurrent.CompletionException.class, future::join);
+            }
+            assertEquals(2, produced.get());
+            assertEquals(3, requests.size());
+        } finally {
+            future.cancel(true);
+        }
+    }
+
+    private static HttpResponse response(int status, String body) {
+        return new HttpResponse(status, "", Map.of(), body);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"missing", "string", "fractional", "negative", "overflow", "empty", "two", "noop", "timeout", "failures"})
     void refusesAmbiguousOrMalformedTaskSuccessCounters(String kind) throws Exception {

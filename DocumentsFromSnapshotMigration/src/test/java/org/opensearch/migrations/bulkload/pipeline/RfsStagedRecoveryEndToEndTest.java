@@ -131,6 +131,7 @@ class RfsStagedRecoveryEndToEndTest {
             refusesBlindReplayAfterLostSubmissionAcknowledgement(target, cluster);
             recordsRealLateFieldMappingFailure(target, cluster);
             recordsEncodingFailureAfterEarlierChunksCommitted(target, cluster);
+            rejectsDuplicateKeysAfterEarlierChunksCommitted(target, cluster);
             preservesOrderAcrossMixedBulkItemStatuses(target, cluster);
         }
     }
@@ -452,7 +453,7 @@ class RfsStagedRecoveryEndToEndTest {
         String index = "late-encoding-error";
         createIndex(cluster, index);
         assertEquals(201, cluster.put("/" + index + "/_doc/bad", "{\"value\":\"old\"}").getKey());
-        String invalid = "{\"padding\":\"" + "x".repeat(40_000) + "\",\"duplicate\":1,\"duplicate\":2}";
+        String invalid = "{\"padding\":\"" + "x".repeat(40_000) + "\",\"value\":1} {}";
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
              var failures = new FailureFiles()) {
             var checkpoint = checkpoint(index);
@@ -467,8 +468,39 @@ class RfsStagedRecoveryEndToEndTest {
             assertEquals(invalid, record.path("transformedRequestBody").asText().split("\n")[1]);
             var detail = record.path("stagedFailure");
             assertEquals("ENCODE_CHUNK", detail.path("stage").asText());
-            assertTrue(detail.path("errorMessage").asText().contains("Duplicate field"));
+            assertTrue(detail.path("errorMessage").asText().contains("exactly one JSON object"));
             assertTrue(detail.path("method").isNull(), "Encoding failed before a request for this chunk existed");
+            assertTrue(source(cluster, index + "-staging", detail.path("uploadId").asText()).path("next").asLong() > 0);
+            assertBounds(proxy);
+        }
+    }
+
+    private void rejectsDuplicateKeysAfterEarlierChunksCommitted(
+        SearchClusterContainer target, ClusterOperations cluster
+    ) throws Exception {
+        String index = "late-duplicate-key";
+        createIndex(cluster, index);
+        assertEquals(201, cluster.put("/" + index + "/_doc/bad", "{\"value\":\"old\"}").getKey());
+        // Equivalent escaped names, and null as the first value, must still count as a duplicate.
+        String duplicate = "{\"padding\":\"" + "x".repeat(40_000) + "\",\"duplicate\":null,\"dupli\\u0063ate\":2}";
+        try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
+             var failures = new FailureFiles()) {
+            var checkpoint = checkpoint(index);
+            assertThrows(RfsException.class, worker(target, proxy, index, List.of(doc("bad", duplicate, 0)), checkpoint,
+                null, new FailedRequestsLogger(), failures)::run);
+            assertEquals(0, readCheckpoint(checkpoint));
+            assertEquals(tree("{\"value\":\"old\"}"), source(cluster, index, "bad"));
+            assertEquals(0, publications(proxy));
+            assertEquals(1, failures.records().size());
+            var record = failures.records().get(0);
+            assertEquals("NON_RETRYABLE", record.path("failureClass").asText());
+            assertEquals(duplicate, record.path("originalDocument").asText());
+            assertEquals(duplicate, record.path("transformedRequestBody").asText().split("\n")[1]);
+            var detail = record.path("stagedFailure");
+            assertEquals("CHUNK", detail.path("stage").asText());
+            assertTrue(detail.path("responseBody").asText().contains("Duplicate field"));
+            assertEquals("POST", detail.path("method").asText());
+            assertTrue(detail.path("requestBody").asText().contains("duplicate"));
             assertTrue(source(cluster, index + "-staging", detail.path("uploadId").asText()).path("next").asLong() > 0);
             assertBounds(proxy);
         }

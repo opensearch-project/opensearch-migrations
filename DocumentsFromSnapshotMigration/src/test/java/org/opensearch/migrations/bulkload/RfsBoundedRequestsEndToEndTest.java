@@ -17,6 +17,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OversizedDocumentException;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.StagedDocumentException;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
@@ -141,12 +142,66 @@ class RfsBoundedRequestsEndToEndTest {
                 verifyLargeDocuments(target, operations, path);
             }
             verifyOrdinaryTransformedBatches(target, operations);
+            verifyLegacySingletonsAndIndependentDocumentCeiling(target, operations);
             verifyPublicationFailureDoesNotCheckpointOrReplaceTarget(target, operations);
             verifyMixedIndexAndDeleteOperations(target, operations);
             verifyLargeVectorAndExplicitPipelineThroughAlias(target, operations);
             verifyExactNumericValuesWithoutAnIngestPipeline(target, operations);
             verifyMappingFailurePreservesExistingDocument(target, operations);
             verifyEmptyHttp200PublicationIsNotAcknowledged(target, operations);
+        }
+    }
+
+    private void verifyLegacySingletonsAndIndependentDocumentCeiling(
+        SearchClusterContainer target, ClusterOperations operations
+    ) throws Exception {
+        int batchTarget = 4096;
+        String largeSource = "{\"value\":\"" + "é".repeat(2500) + "\"}";
+        for (String path : List.of("raw", "native", "json")) {
+            String index = "legacy-singleton-" + path;
+            operations.createIndex(index, "{\"settings\":{\"number_of_replicas\":0},\"mappings\":{\"enabled\":false}}");
+            try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT)) {
+                var client = client(target, proxy, batchTarget);
+                IJsonTransformer transform = switch (path) {
+                    case "raw" -> null;
+                    case "native" -> (BulkOperationTransformer) ops -> ops;
+                    default -> input -> input;
+                };
+                var sink = new OpenSearchDocumentSink(client, transform == null ? null : () -> transform,
+                    false, DocumentExceptionAllowlist.empty(), null);
+                var docs = List.of(
+                    new Document("first", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+                    new Document("large", largeSource.getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+                    new Document("last", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()));
+                var result = sink.writeBatch(index, docs).block(Duration.ofSeconds(20));
+                assertNotNull(result);
+                assertEquals(3, result.target().upserts());
+                assertEquals(MAPPER.readTree(largeSource),
+                    MAPPER.readTree(operations.get("/" + index + "/_doc/large").getValue()).path("_source"));
+                var bulks = proxy.requests.stream().filter(r -> r.path().endsWith("/_bulk")).toList();
+                assertEquals(3, bulks.size());
+                assertTrue(bulks.get(1).body().length > batchTarget);
+                assertEquals(2, new String(bulks.get(1).body(), StandardCharsets.UTF_8).split("\n").length);
+                assertFalse(proxy.requests.stream().anyMatch(r -> r.path().startsWith("/_reindex")));
+
+                int sent = proxy.requests.size();
+                client.setMaxDocumentSizeBytes(batchTarget);
+                assertThrows(OversizedDocumentException.class,
+                    () -> sink.writeBatch(index, List.of(docs.get(1))).block(Duration.ofSeconds(20)));
+                assertEquals(sent, proxy.requests.size(), "An explicit document ceiling must reject before transmission");
+
+                client.setMaxDocumentSizeBytes(Long.MAX_VALUE);
+                client.setLargeDocumentStagingIndex("legacy-split-staging-" + path);
+                int stagedStart = proxy.requests.size();
+                var staged = sink.writeBatch(index, List.of(docs.get(1))).block(Duration.ofMinutes(1));
+                assertNotNull(staged);
+                assertTrue(proxy.requests.subList(stagedStart, proxy.requests.size()).stream()
+                    .allMatch(r -> r.body().length <= batchTarget && r.wireBody().length <= batchTarget));
+                assertTrue(proxy.requests.stream().anyMatch(r -> r.path().startsWith("/_reindex")));
+                assertEquals(MAPPER.readTree(largeSource),
+                    MAPPER.readTree(operations.get("/" + index + "/_doc/large").getValue()).path("_source"));
+                assertBounds(proxy);
+            }
         }
     }
 
