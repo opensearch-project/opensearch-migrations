@@ -7,6 +7,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
@@ -27,6 +31,10 @@ import lombok.experimental.UtilityClass;
 public final class BulkNdjson {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final JsonFactory JSON_FACTORY = new JsonFactory();
+    private static final int POOLED_BUFFER_SIZE_CLASS_BYTES = 256 * 1024;
+    private static final int MAX_POOLED_BUFFER_BYTES = 16 * 1024 * 1024;
+    private static final long MAX_RETAINED_POOLED_BYTES = 128L * 1024 * 1024;
+    private static final BulkBufferPool BULK_BUFFER_POOL = new BulkBufferPool();
 
     /**
      * The exact bytes of an operation, retained for batching, sending, and retries.
@@ -132,6 +140,93 @@ public final class BulkNdjson {
     @SuppressWarnings({"java:S100", "java:S1186"})
     public record SerializedBulk(byte[] bytes, MigrationMetrics.Operations operations) {}
 
+    /**
+     * A bulk body assembled into a bounded reusable heap buffer. The returned view is valid until close.
+     *
+     * <p>This is used as compression input, so the large uncompressed buffer can return to the pool before the
+     * asynchronous HTTP request starts.
+     */
+    public static final class PooledSerializedBulk implements AutoCloseable {
+        private final byte[] buffer;
+        private final int size;
+        private final MigrationMetrics.Operations operations;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private PooledSerializedBulk(byte[] buffer, int size, MigrationMetrics.Operations operations) {
+            this.buffer = buffer;
+            this.size = size;
+            this.operations = operations;
+        }
+
+        public ByteBuffer[] buffers() {
+            if (closed.get()) {
+                throw new IllegalStateException("Pooled bulk buffer has been released");
+            }
+            return new ByteBuffer[] {
+                ByteBuffer.wrap(buffer, 0, size).slice().asReadOnlyBuffer()
+            };
+        }
+
+        public int size() {
+            return size;
+        }
+
+        public MigrationMetrics.Operations operations() {
+            return operations;
+        }
+
+        @Override
+        public void close() {
+            if (closed.compareAndSet(false, true)) {
+                BULK_BUFFER_POOL.release(buffer);
+            }
+        }
+    }
+
+    /** Bounded scratch-buffer pool; request payloads never outlive compression. */
+    private static final class BulkBufferPool {
+        private final Map<Integer, ConcurrentLinkedQueue<byte[]>> buffers = new ConcurrentHashMap<>();
+        private final AtomicLong retainedBytes = new AtomicLong();
+
+        byte[] acquire(int requestedBytes) {
+            int capacity = capacityFor(requestedBytes);
+            if (capacity == 0 || capacity > MAX_POOLED_BUFFER_BYTES) {
+                return new byte[capacity];
+            }
+            var available = buffers.computeIfAbsent(capacity, ignored -> new ConcurrentLinkedQueue<>());
+            var buffer = available.poll();
+            if (buffer != null) {
+                retainedBytes.addAndGet(-buffer.length);
+                return buffer;
+            }
+            return new byte[capacity];
+        }
+
+        void release(byte[] buffer) {
+            if (buffer.length == 0 || buffer.length > MAX_POOLED_BUFFER_BYTES) {
+                return;
+            }
+            long retained;
+            do {
+                retained = retainedBytes.get();
+                if (retained + buffer.length > MAX_RETAINED_POOLED_BYTES) {
+                    return;
+                }
+            } while (!retainedBytes.compareAndSet(retained, retained + buffer.length));
+            buffers.computeIfAbsent(buffer.length, ignored -> new ConcurrentLinkedQueue<>()).offer(buffer);
+        }
+
+        private static int capacityFor(int requestedBytes) {
+            if (requestedBytes <= 0 || requestedBytes > MAX_POOLED_BUFFER_BYTES) {
+                return requestedBytes;
+            }
+            return Math.multiplyExact(
+                Math.ceilDiv(requestedBytes, POOLED_BUFFER_SIZE_CLASS_BYTES),
+                POOLED_BUFFER_SIZE_CLASS_BYTES
+            );
+        }
+    }
+
     /** Assemble exactly the bytes that were measured, with one allocation and no growing-buffer copy. */
     public static SerializedBulk assemble(List<EncodedOperation> operations) {
         return assemble(operations, Function.identity());
@@ -160,6 +255,51 @@ public final class BulkNdjson {
         }
         return new SerializedBulk(buffer.array(),
             new MigrationMetrics.Operations(upserts, operations.size() - upserts, bodyBytes));
+    }
+
+    /** Assemble into a reusable buffer, released by closing the returned value. */
+    public static PooledSerializedBulk assemblePooled(List<EncodedOperation> operations) {
+        return assemblePooled(operations, Function.identity());
+    }
+
+    /** Assemble prepared operations directly into a reusable buffer. */
+    public static <T> PooledSerializedBulk assemblePooled(List<T> operations, Function<T, EncodedOperation> encoded) {
+        long size = 0;
+        for (var operation : operations) {
+            size += encoded.apply(operation).size();
+        }
+        int requestedBytes = Math.toIntExact(size);
+        var buffer = BULK_BUFFER_POOL.acquire(requestedBytes);
+        long upserts = 0;
+        long bodyBytes = 0;
+        int offset = 0;
+        try {
+            for (var item : operations) {
+                var operation = encoded.apply(item);
+                System.arraycopy(operation.action(), 0, buffer, offset, operation.action().length);
+                offset += operation.action().length;
+                if (operation.body() != null) {
+                    buffer[offset++] = '\n';
+                    System.arraycopy(operation.body(), 0, buffer, offset, operation.body().length);
+                    offset += operation.body().length;
+                    bodyBytes += operation.body().length;
+                }
+                buffer[offset++] = '\n';
+                if (operation.upsert()) {
+                    upserts++;
+                }
+            }
+            if (offset != requestedBytes) {
+                throw new IllegalStateException(
+                    "Assembled " + offset + " bytes after measuring " + requestedBytes
+                );
+            }
+            return new PooledSerializedBulk(buffer, requestedBytes,
+                new MigrationMetrics.Operations(upserts, operations.size() - upserts, bodyBytes));
+        } catch (RuntimeException | Error e) {
+            BULK_BUFFER_POOL.release(buffer);
+            throw e;
+        }
     }
 
     public static SerializedBulk serialize(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
