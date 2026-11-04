@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
@@ -45,6 +46,9 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class DocumentMigrationPipeline {
 
+    private static final int MAX_PREPARATION_CHUNK_DOCUMENTS = 4 * 1024;
+    private static final int PREPARED_CHUNKS_PER_PREPARATION_RAIL = 3;
+
     private final DocumentSource source;
     private final DocumentSink sink;
     private final int maxDocsPerBatch;
@@ -52,6 +56,7 @@ public class DocumentMigrationPipeline {
     private final int partitionConcurrency;
     private final int batchConcurrency;
     private final int preparationConcurrency;
+    private final int preparationChunkDocuments;
     private final boolean requiresOrderedWrites;
     private final GroupedDocumentSink<?> groupedSink;
     private final int sourceBatchGroupSize;
@@ -110,6 +115,10 @@ public class DocumentMigrationPipeline {
         this.preparationConcurrency = Math.min(
             batchConcurrency,
             Math.max(1, Runtime.getRuntime().availableProcessors())
+        );
+        this.preparationChunkDocuments = Math.min(
+            MAX_PREPARATION_CHUNK_DOCUMENTS,
+            1 + (maxDocsPerBatch - 1) / 4
         );
         this.requiresOrderedWrites = source.requiresOrderedWrites();
         this.groupedSink = sink instanceof GroupedDocumentSink<?> grouped ? grouped : null;
@@ -205,19 +214,7 @@ public class DocumentMigrationPipeline {
         Flux<Document> documents,
         String collectionName
     ) {
-        return documents
-            // Bound retained source data before handing CPU-heavy validation/encoding work to parallel rails.
-            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
-            .flatMapSequential(sourceBatch -> Mono.fromCallable(() -> sourceBatch.stream()
-                    .map(document -> preparedSink.prepareSourceDocument(collectionName, document))
-                    .toList())
-                .subscribeOn(Schedulers.parallel()), preparationConcurrency, 1)
-            .flatMapIterable(preparedBatch -> preparedBatch)
-            .bufferUntil(new BatchSizePredicate<>(
-                maxDocsPerBatch,
-                maxBytesPerBatch,
-                GroupedDocumentSink.PreparedDocument::sizeBytes
-            ), true)
+        return prepareAndPackBatches(preparedSink, documents, collectionName)
             .buffer(sourceBatchGroupSize)
             .flatMapSequential(sourceBatches -> {
                 activeBatches.incrementAndGet();
@@ -236,6 +233,39 @@ public class DocumentMigrationPipeline {
                     .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
                     .doFinally(s -> activeBatches.decrementAndGet());
             }, batchGroupConcurrency, 1);
+    }
+
+    private <P> Flux<List<GroupedDocumentSink.PreparedDocument<P>>> prepareAndPackBatches(
+        GroupedDocumentSink<P> preparedSink,
+        Flux<Document> documents,
+        String collectionName
+    ) {
+        return Flux.defer(() -> {
+            var packer = new PreparedBatchPacker<P>(maxDocsPerBatch, maxBytesPerBatch);
+            var preparedChunks = documents
+                // Document count determines normal fan-out granularity. The byte cap is a secondary memory
+                // bound for unusually large source documents.
+                .bufferUntil(new BatchSizePredicate<>(
+                    preparationChunkDocuments,
+                    maxBytesPerBatch,
+                    Document::sourceLength
+                ), true)
+                .flatMapSequential(sourceChunk -> Mono.fromCallable(() -> sourceChunk.stream()
+                        .map(document -> preparedSink.prepareSourceDocument(collectionName, document))
+                        .toList())
+                    .subscribeOn(Schedulers.parallel()), preparationConcurrency, 1);
+
+            // Packing is synchronous on whichever preparation rail produced the next ordered chunk. Keeping
+            // prepared documents as block elements avoids a Reactor signal per document and avoids a publishOn
+            // handoff merely to obtain buffering. Prefetch keeps several chunks available per preparation rail
+            // while bounding the reservoir by a known number of document- and source-byte-bounded chunks.
+            return preparedChunks
+                .concatMapIterable(
+                    packer::add,
+                    preparationConcurrency * PREPARED_CHUNKS_PER_PREPARATION_RAIL
+                )
+                .concatWith(Flux.defer(() -> Flux.fromIterable(packer.finish())));
+        });
     }
 
     /**
@@ -268,6 +298,45 @@ public class DocumentMigrationPipeline {
             }
         }
         return new MigrationMetrics.Operations(upserts, batch.size() - upserts, bytes);
+    }
+
+    private static final class PreparedBatchPacker<P> {
+        private final BatchSizePredicate<GroupedDocumentSink.PreparedDocument<P>> startsNewBatch;
+        private List<GroupedDocumentSink.PreparedDocument<P>> pending = new ArrayList<>();
+
+        private PreparedBatchPacker(int maxDocuments, long maxBytes) {
+            startsNewBatch = new BatchSizePredicate<>(
+                maxDocuments,
+                maxBytes,
+                GroupedDocumentSink.PreparedDocument::sizeBytes
+            );
+        }
+
+        private List<List<GroupedDocumentSink.PreparedDocument<P>>> add(
+            List<GroupedDocumentSink.PreparedDocument<P>> preparedChunk
+        ) {
+            List<List<GroupedDocumentSink.PreparedDocument<P>>> completed = null;
+            for (var document : preparedChunk) {
+                if (startsNewBatch.test(document)) {
+                    if (completed == null) {
+                        completed = new ArrayList<>();
+                    }
+                    completed.add(pending);
+                    pending = new ArrayList<>();
+                }
+                pending.add(document);
+            }
+            return completed == null ? List.of() : completed;
+        }
+
+        private List<List<GroupedDocumentSink.PreparedDocument<P>>> finish() {
+            if (pending.isEmpty()) {
+                return List.of();
+            }
+            var finalBatch = pending;
+            pending = new ArrayList<>();
+            return List.of(finalBatch);
+        }
     }
 
     // Sonar flags the compiler-generated record constructor parameters as unused.
