@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -50,7 +51,7 @@ public class DocumentMigrationPipeline {
     private final long maxBytesPerBatch;
     private final int partitionConcurrency;
     private final int batchConcurrency;
-    private final GroupedDocumentSink groupedSink;
+    private final GroupedDocumentSink<?> groupedSink;
     private final int sourceBatchGroupSize;
     private final int requestConcurrencyPerGroup;
     private final int batchGroupConcurrency;
@@ -104,7 +105,7 @@ public class DocumentMigrationPipeline {
         this.maxBytesPerBatch = maxBytesPerBatch;
         this.partitionConcurrency = partitionConcurrency;
         this.batchConcurrency = source.requiresOrderedWrites() ? 1 : batchConcurrency;
-        this.groupedSink = sink instanceof GroupedDocumentSink grouped ? grouped : null;
+        this.groupedSink = sink instanceof GroupedDocumentSink<?> grouped ? grouped : null;
         this.sourceBatchGroupSize = groupedSink != null ? groupedSink.preferredSourceBatchGroupSize() : 1;
         if (sourceBatchGroupSize < 1) {
             throw new IllegalArgumentException(
@@ -147,33 +148,10 @@ public class DocumentMigrationPipeline {
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
-            var sourceBatchBytes = groupedSink == null
-                ? (java.util.function.ToLongFunction<Document>) Document::sourceLength
-                : (java.util.function.ToLongFunction<Document>) document ->
-                    groupedSink.sourceBatchBytes(collectionName, document);
-            return source.readDocuments(partition, startingPosition)
-                .subscribeOn(Schedulers.boundedElastic())
-                .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, sourceBatchBytes), true)
-                .buffer(sourceBatchGroupSize)
-                .flatMapSequential(sourceBatches -> {
-                    activeBatches.incrementAndGet();
-                    // Preserve source positions and transform-batch boundaries while allowing the sink to repack
-                    // transformed output into exact target requests across this bounded checkpoint window.
-                    var lastBatch = sourceBatches.get(sourceBatches.size() - 1);
-                    var lastPosition = lastBatch.get(lastBatch.size() - 1).position();
-                    var sourceMetrics = sourceBatches.stream()
-                        .map(MigrationMetrics.Operations::fromDocuments)
-                        .reduce(MigrationMetrics.Operations.ZERO, MigrationMetrics.Operations::plus);
-                    return Mono.defer(() -> groupedSink != null
-                            ? groupedSink.writeBatchGroup(
-                                collectionName,
-                                sourceBatches,
-                                Math.min(requestConcurrencyPerGroup, sourceBatches.size())
-                            )
-                            : sink.writeBatch(collectionName, sourceBatches.get(0)))
-                        .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
-                        .doFinally(s -> activeBatches.decrementAndGet());
-                }, batchGroupConcurrency, 1)
+            var completedBatches = groupedSink == null
+                ? migrateDocumentBatches(partition, collectionName, startingPosition)
+                : migratePreparedBatches(groupedSink, partition, collectionName, startingPosition);
+            return completedBatches
                 // Advance checkpoints in emission order; writes may complete out of order.
                 .scan(new ProgressCursor(partition, startingPosition, 0, 0, MigrationMetrics.ZERO), (previous, batch) -> {
                     var result = batch.result();
@@ -195,6 +173,71 @@ public class DocumentMigrationPipeline {
                 .onErrorMap(e -> !(e instanceof PipelineException),
                     e -> new PipelineException("Failed migrating partition " + partition, e));
         });
+    }
+
+    private Flux<CompletedBatch> migrateDocumentBatches(
+        Partition partition, String collectionName, long startingPosition
+    ) {
+        return source.readDocuments(partition, startingPosition)
+            .subscribeOn(Schedulers.boundedElastic())
+            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
+            .flatMapSequential(sourceBatch -> {
+                activeBatches.incrementAndGet();
+                var lastPosition = sourceBatch.get(sourceBatch.size() - 1).position();
+                var sourceMetrics = MigrationMetrics.Operations.fromDocuments(sourceBatch);
+                return Mono.defer(() -> sink.writeBatch(collectionName, sourceBatch))
+                    .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
+                    .doFinally(s -> activeBatches.decrementAndGet());
+            }, batchConcurrency, 1);
+    }
+
+    private <P> Flux<CompletedBatch> migratePreparedBatches(
+        GroupedDocumentSink<P> preparedSink,
+        Partition partition,
+        String collectionName,
+        long startingPosition
+    ) {
+        return source.readDocuments(partition, startingPosition)
+            .subscribeOn(Schedulers.boundedElastic())
+            .map(document -> preparedSink.prepareSourceDocument(collectionName, document))
+            .bufferUntil(new BatchSizePredicate<>(
+                maxDocsPerBatch,
+                maxBytesPerBatch,
+                GroupedDocumentSink.PreparedDocument::sizeBytes
+            ), true)
+            .buffer(sourceBatchGroupSize)
+            .flatMapSequential(sourceBatches -> {
+                activeBatches.incrementAndGet();
+                // Preserve source positions and transform-batch boundaries while allowing the sink to repack
+                // transformed output into exact target requests across this bounded checkpoint window.
+                var lastBatch = sourceBatches.get(sourceBatches.size() - 1);
+                var lastPosition = lastBatch.get(lastBatch.size() - 1).document().position();
+                var sourceMetrics = sourceBatches.stream()
+                    .map(DocumentMigrationPipeline::sourceMetrics)
+                    .reduce(MigrationMetrics.Operations.ZERO, MigrationMetrics.Operations::plus);
+                return Mono.defer(() -> preparedSink.writePreparedBatchGroup(
+                        collectionName,
+                        sourceBatches,
+                        Math.min(requestConcurrencyPerGroup, sourceBatches.size())
+                    ))
+                    .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
+                    .doFinally(s -> activeBatches.decrementAndGet());
+            }, batchGroupConcurrency, 1);
+    }
+
+    private static MigrationMetrics.Operations sourceMetrics(
+        List<? extends GroupedDocumentSink.PreparedDocument<?>> batch
+    ) {
+        long upserts = 0;
+        long bytes = 0;
+        for (var preparedDocument : batch) {
+            var document = preparedDocument.document();
+            if (document.operation() == Document.Operation.UPSERT) {
+                upserts++;
+                bytes += document.sourceLength();
+            }
+        }
+        return new MigrationMetrics.Operations(upserts, batch.size() - upserts, bytes);
     }
 
     // Sonar flags the compiler-generated record constructor parameters as unused.
