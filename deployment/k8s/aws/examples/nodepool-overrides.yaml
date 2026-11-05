@@ -2,11 +2,11 @@
 # Pass with:
 #   ./deployment/k8s/aws/aws-bootstrap.sh --helm-values deployment/k8s/aws/examples/nodepool-overrides.yaml ...
 #
-# The chart requires on-demand capacity for dedicated Kafka, proxy and replayer pools by default
-# while leaving the shared and dedicated k6 capacity types unconstrained. This example requires
-# on-demand for every pool, narrows selection to current-generation compute, general-purpose and
-# memory optimized instances up to 4xlarge, and caps the pool's total size (the chart sets no
-# limits by default). Omitted map fields fall back to the chart defaults.
+# The chart requires on-demand capacity for dedicated RFS, Kafka, proxy and replayer pools by
+# default while leaving the shared and dedicated k6 capacity types unconstrained. This example
+# requires on-demand for every pool, narrows selection to current-generation compute,
+# general-purpose and memory optimized instances up to 4xlarge, and caps the pool's total size
+# (the chart sets no limits by default). Omitted map fields fall back to the chart defaults.
 # List fields replace the full default list, so provide the complete desired list when overriding.
 
 workloadsNodePool:
@@ -24,6 +24,12 @@ workloadsNodePool:
     consolidateAfter: 30m
   dedicatedPools:
     # Dedicated-pool limits are independent of the shared-pool limit above.
+    rfs:
+      # Exact types replace the inherited architecture/category/generation/size filters.
+      instanceTypes: ["c6id.24xlarge"]
+      limits:
+        cpu: "640"
+        memory: "1280Gi"
     kafka:
       limits:
         cpu: "192"

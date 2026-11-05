@@ -55,8 +55,16 @@ import {
     COMPONENT_LABEL,
     COMPONENTS,
     MIGRATION_RESOURCE_UID_LABEL,
+    WORKLOAD_SELECTOR_LABEL_KEYS,
     workloadSelectorLabels,
 } from "./commonUtils/resourceLabels";
+import {
+    workloadNodePoolResolvedInput,
+    workloadNodeSelector,
+    workloadNodeTolerations,
+    workloadZoneSpreadConstraints,
+    workloadZoneSpreadResolvedInput,
+} from "./commonUtils/workloadNodePool";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -151,6 +159,8 @@ const startHistoricalBackfillInputs = {
     snapshotK8sLabel: defineRequiredParam<string>(),
     fromSnapshotMigrationK8sLabel: defineRequiredParam<string>(),
     taskK8sLabel: defineParam<string>({expression: expr.literal("reindexFromSnapshot")}),
+    ...workloadNodePoolResolvedInput("rfsNodePoolName"),
+    ...workloadZoneSpreadResolvedInput(),
     ...makeRequiredImageParametersForKeys(["ReindexFromSnapshot"])
 };
 
@@ -183,7 +193,10 @@ function getRfsDeploymentManifest
     targetK8sLabel: BaseExpression<string>,
     snapshotK8sLabel: BaseExpression<string>,
     fromSnapshotMigrationK8sLabel: BaseExpression<string>,
-    taskK8sLabel: BaseExpression<string>
+    taskK8sLabel: BaseExpression<string>,
+    workloadNodePoolName: BaseExpression<string>,
+    workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }): Deployment {
     const ownerReferences: OwnerReference[] = [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -288,6 +301,15 @@ function getRfsDeploymentManifest
                 },
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
+                    nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
+                    tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
+                    topologySpreadConstraints: makeDirectTypeProxy(
+                        workloadZoneSpreadConstraints(
+                            args.workloadZoneSpread,
+                            args.workloadZoneSpreadExtras,
+                            WORKLOAD_SELECTOR_LABEL_KEYS,
+                        )
+                    ),
                     containers: [finalContainerDefinition.container],
                     volumes: finalContainerDefinition.volumes
                 }
@@ -494,6 +516,9 @@ function makeRfsDeploymentDefinition(
             snapshotK8sLabel: inputs.snapshotK8sLabel,
             fromSnapshotMigrationK8sLabel: inputs.fromSnapshotMigrationK8sLabel,
             taskK8sLabel: inputs.taskK8sLabel,
+            workloadNodePoolName: inputs.workloadNodePoolName,
+            workloadZoneSpread: inputs.workloadZoneSpread,
+            workloadZoneSpreadExtras: inputs.workloadZoneSpreadExtras,
         })
     };
 }
