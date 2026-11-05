@@ -259,10 +259,11 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--split-large-documents" },
-            description = "Optional, experimental. Split oversized plain index operations into bounded, ordered requests " +
+            description = "Optional. Split oversized plain index operations into bounded, ordered requests " +
                 "on the destination document. Requires explicit IDs, complete _source, no ingest pipelines or version conditions, " +
                 "and permission to add an unmapped temporary assembly field. Partial documents remain visible until completion. " +
-                "Serializes batches and obeys --documents-size-per-bulk-request. Disabled by default.")
+                "Sequences each document's parts while retaining independent batch concurrency. Numeric literals must fit whole " +
+                "within --documents-size-per-bulk-request, including the assembly envelope. Disabled by default.")
         boolean splitLargeDocuments;
 
         @Parameter(required = false,

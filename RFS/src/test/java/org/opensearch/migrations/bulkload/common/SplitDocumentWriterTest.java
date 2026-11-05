@@ -217,6 +217,57 @@ class SplitDocumentWriterTest {
         assertThrows(java.util.concurrent.CompletionException.class, failed::join);
     }
 
+    @Test
+    void oversizedNumericLiteralAfterEarlierPartsRetainsWholeDocumentAndWaitsForDlq() {
+        var transport = mock(RestClient.class);
+        var updates = new AtomicInteger();
+        when(transport.asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            String path = call.getArgument(1);
+            HttpMethod method = call.getArgument(0);
+            if (path.equals("target")) return Mono.just(response(200, TARGET_INDEX));
+            if (path.endsWith("/_mapping")) return Mono.just(response(200, "{\"acknowledged\":true}"));
+            if (method.equals(HttpMethod.GET)) return Mono.just(response(404, "{\"found\":false}"));
+            if (method.equals(HttpMethod.PUT)) {
+                return Mono.just(response(201, "{\"_seq_no\":0,\"_primary_term\":1,\"result\":\"created\"}"));
+            }
+            byte[] body = call.getArgument(2);
+            assertTrue(body.length <= 2048);
+            assertFalse(ObjectMapperFactory.createDefaultMapper().readTree(body).path("script").path("params").has("chunks"),
+                "An encoding failure must never send completion");
+            return Mono.just(response(200,
+                "{\"_seq_no\":" + updates.incrementAndGet() + ",\"_primary_term\":1,\"result\":\"updated\"}"));
+        });
+        var records = mock(FailedDocumentStreamSink.class);
+        var flushed = Sinks.<Void>empty();
+        when(records.write(any())).thenReturn(Mono.empty());
+        when(records.flush()).thenReturn(flushed.asMono());
+        var client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
+            Version.fromString("OS 2.19"), CompressionMode.UNCOMPRESSED, 100, 2048);
+        client.setSplitLargeDocuments(true);
+        client.setFailedDocumentStreamContext(records, "session", "worker");
+        String source = "{\"padding\":\"" + "x".repeat(30_000) + "\",\"n\":" + "9".repeat(900) + "}";
+        var operation = IndexOp.builder().operation(IndexOperationMeta.builder().index("target").id("id").build())
+            .rawDocument(source.getBytes(StandardCharsets.UTF_8)).originalSourceBytes(source.getBytes(StandardCharsets.UTF_8)).build();
+        var future = client.sendBulkRequest("target", List.of(operation), null).toFuture();
+        try {
+            assertTrue(updates.get() > 1, "Exercise a numeric rejection after earlier parts were acknowledged");
+            assertFalse(future.isDone(), "Failure must await durable diagnostics");
+            var capture = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+            verify(records).write(capture.capture());
+            var record = capture.getValue();
+            assertEquals(source, record.getOriginalDocument());
+            assertEquals(source, record.getTransformedRequestBody().split("\n")[1]);
+            assertEquals("ENCODE_PART", record.getSplitFailure().stage());
+            assertEquals(updates.get(), record.getSplitFailure().partSequence());
+            assertNull(record.getSplitFailure().requestBody(), "No request was generated for the rejected numeric literal");
+            assertTrue(record.getSplitFailure().errorMessage().contains("numeric literal must fit whole"));
+            flushed.tryEmitEmpty();
+            assertThrows(java.util.concurrent.CompletionException.class, future::join);
+        } finally {
+            future.cancel(true);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void requestsNoNextPartWhileRetryingAndStopsGenerationOnFailureOrCancellation(boolean cancel) throws Exception {

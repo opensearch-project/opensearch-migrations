@@ -3,7 +3,7 @@
 RFS encodes and batches operations **after all transformations and ID handling**.
 The existing bulk byte setting remains a batching target: a larger individual
 operation is sent in a singleton request by default. An independent document
-ceiling and experimental direct splitting are opt-in.
+ceiling and direct splitting are opt-in.
 
 ## Configuration
 
@@ -77,7 +77,8 @@ Fitting operations continue through the normal bulk path.
 | Disabled, filtered, or derived `_source` | Rejected; assembly requires complete stored source |
 | Async translog durability | Rejected |
 | Reserved assembly field with incompatible mapping | Rejected before document writes |
-| Elasticsearch and OpenSearch Serverless targets | Enabling this experimental implementation is rejected |
+| A numeric literal larger than an assembly request's payload capacity | Rejected; numeric literals are never fragmented |
+| Elasticsearch and OpenSearch Serverless targets | Enabling this implementation is rejected |
 
 The target index must already exist. The worker needs index metadata, mapping
 update, document get/index, and scripted update permissions. No reindex or task
@@ -153,8 +154,13 @@ The request envelope, script, parameters, and changing part number count toward
 the limit. At most 512 events are emitted per part to bound script work.
 
 Large strings, field names, nested arrays/objects, nulls, and vectors use the same
-event stream. Duplicate keys are rejected during assembly. Numbers remain lexical
-strings with recorded paths until final completion; repeated source parsing cannot
+event stream. Duplicate keys are rejected during assembly. Only strings and field
+names are fragmented. Numbers, booleans, and nulls are emitted whole; arrays and
+objects may span requests between their events. A numeric literal must fit inside
+one request including its assembly envelope. An oversized numeric literal fails
+without allocating a copy of that entire token, and the source batch remains
+unacknowledged. Numbers remain exact lexical strings with recorded paths until
+final completion; repeated source parsing cannot
 round them during assembly. The final script restores `BigInteger`/`BigDecimal`
 and negative floating-point zero. JSON whitespace, exponent spelling, and key
 order are not preserved.

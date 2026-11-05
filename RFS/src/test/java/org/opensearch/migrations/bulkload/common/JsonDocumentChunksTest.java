@@ -86,6 +86,70 @@ class JsonDocumentChunksTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {2048, 4096})
+    void keepsNumericLiteralsWholeAndExactAcrossRequests(int limit) throws Exception {
+        var literals = List.of("-9223372036854775808", "18446744073709551615", "-0.0", "1e-300", "1E+100",
+            "0.123456789012345678901234567890123456789", "9".repeat(200));
+        var expected = new ArrayList<String>();
+        for (int i = 0; i < 20; i++) {
+            expected.addAll(literals);
+        }
+        var input = "{\"text\":\"" + "x".repeat(3000) + "\",\"numbers\":[" + String.join(",", expected) + "]}";
+        var actual = new ArrayList<String>();
+        int requests = 0;
+        try (var chunks = new JsonDocumentChunks(input.getBytes(StandardCharsets.UTF_8), limit)) {
+            while (chunks.hasNext()) {
+                byte[] request = chunks.next();
+                assertTrue(request.length <= limit);
+                requests++;
+                for (var event : MAPPER.readTree(request).path("script").path("params").path("events")) {
+                    String kind = event.get(0).asText();
+                    assertFalse(kind.equals("number+"), "Only text may be fragmented");
+                    if (kind.equals("number")) {
+                        assertTrue(event.get(1).isTextual(), "Keep exact numeric spelling through request parsing");
+                        actual.add(event.get(1).asText());
+                    }
+                }
+            }
+        }
+        assertTrue(requests > 2);
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void acceptsANumericLiteralThatExactlyFillsTheRequest() throws Exception {
+        int limit = 4096;
+        int baseSize;
+        try (var chunks = new JsonDocumentChunks("{\"n\":1}".getBytes(StandardCharsets.UTF_8), limit)) {
+            baseSize = chunks.next().length;
+        }
+        String literal = "9".repeat(limit - baseSize + 1);
+        try (var chunks = new JsonDocumentChunks(("{\"n\":" + literal + "}").getBytes(StandardCharsets.UTF_8), limit)) {
+            byte[] request = chunks.next();
+            assertEquals(limit, request.length);
+            var events = MAPPER.readTree(request).path("script").path("params").path("events");
+            assertEquals(literal, events.get(2).get(1).asText());
+            assertFalse(chunks.hasNext());
+        }
+    }
+
+    @Test
+    void rejectsANumericLiteralLargerThanARequestWithoutMaterializingIt() {
+        byte[] input = ("{\"n\":" + "9".repeat(16 * 1024 * 1024) + "}").getBytes(StandardCharsets.UTF_8);
+        var allocations = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
+        assertTrue(allocations.isThreadAllocatedMemorySupported());
+        allocations.setThreadAllocatedMemoryEnabled(true);
+        long thread = Thread.currentThread().threadId();
+        try (var chunks = new JsonDocumentChunks(input, 4096)) {
+            long before = allocations.getThreadAllocatedBytes(thread);
+            var error = assertThrows(IllegalArgumentException.class, chunks::next);
+            long allocated = allocations.getThreadAllocatedBytes(thread) - before;
+            assertTrue(error.getMessage().contains("numeric literal must fit whole"));
+            assertTrue(allocated < 1024 * 1024, () -> "Rejecting a large numeric literal allocated " + allocated + " bytes");
+        }
+    }
+
     @Test
     void acceptsTheUtf8BomAllowedByRawSourceValidation() throws Exception {
         try (var chunks = new JsonDocumentChunks("\uFEFF{\"text\":\"value\"}".getBytes(StandardCharsets.UTF_8), 8192)) {

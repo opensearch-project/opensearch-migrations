@@ -17,6 +17,7 @@ import reactor.core.publisher.Flux;
  * Splits the validated JSON bytes produced by BulkNdjson without materializing strings or a tree.
  * Copies escaped byte ranges directly into request parts, preserving UTF-8 and escape boundaries.
  * Additional live state is one bounded request plus the container stack, independent of token size.
+ * Only strings and field names are fragmented; numeric literals must fit whole in a request.
  * JSON syntax validation belongs to BulkNdjson; duplicate keys are rejected by the assembly script.
  */
 final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
@@ -25,6 +26,7 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
     private static final byte[] EVENTS = bytes(",\"events\":[");
     private static final byte[] SUFFIX = bytes("]}}}");
     private static final byte[] TEXT_SUFFIX = bytes("\"]");
+    private static final byte[] NUMBER_PREFIX = bytes("[\"number\",\"");
 
     private byte[] document;
     private final long limit;
@@ -32,7 +34,6 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
     private int offset;
     private byte[] pending;
     private String textKind;
-    private boolean number;
     private boolean endText;
     private boolean finished;
     private long sequence;
@@ -148,7 +149,6 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
             case ',' -> containers.peek().key = containers.peek().object;
             case '"' -> {
                 textKind = containers.peek().key ? "key" : "string";
-                number = false;
             }
             case 't' -> scalar("true");
             case 'f' -> scalar("false");
@@ -158,8 +158,7 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
                 if (!numberByte(document[offset])) {
                     throw new IllegalArgumentException("Invalid split JSON token at byte " + offset);
                 }
-                textKind = "number";
-                number = true;
+                readNumber();
             }
         }
     }
@@ -190,6 +189,20 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
         pending = bytes("[\"value\"," + literal + "]");
     }
 
+    /** Keep numbers whole and lexical: parsing them as request parameters could round decimals. */
+    private void readNumber() {
+        int start = offset;
+        long capacity = limit - PREFIX.length - Long.toString(sequence).length() - EVENTS.length - SUFFIX.length
+            - NUMBER_PREFIX.length - TEXT_SUFFIX.length;
+        while (offset < document.length && numberByte(document[offset])) {
+            if (offset - start >= capacity) {
+                throw new IllegalArgumentException("A numeric literal must fit whole in one document assembly request");
+            }
+            offset++;
+        }
+        pending = textEvent(NUMBER_PREFIX, start, offset - start);
+    }
+
     /** Keep the existing escaping; every fragment is itself a valid JSON string. */
     private byte[] takeText(long available) {
         byte[] header = bytes("[\"" + textKind + "\",\"");
@@ -203,14 +216,9 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
         if (length == 0 && !complete) {
             return null;
         }
-        var event = new byte[header.length + length + TEXT_SUFFIX.length];
-        System.arraycopy(header, 0, event, 0, header.length);
-        System.arraycopy(document, start, event, header.length, length);
-        System.arraycopy(TEXT_SUFFIX, 0, event, header.length + length, TEXT_SUFFIX.length);
+        var event = textEvent(header, start, length);
         if (complete) {
-            if (!number) {
-                offset++; // closing quote
-            }
+            offset++; // closing quote
             endText = !textKind.startsWith("key");
             textKind = null;
         } else if (!textKind.endsWith("+")) {
@@ -219,12 +227,20 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
         return event;
     }
 
+    private byte[] textEvent(byte[] header, int start, int length) {
+        var event = new byte[header.length + length + TEXT_SUFFIX.length];
+        System.arraycopy(header, 0, event, 0, header.length);
+        System.arraycopy(document, start, event, header.length, length);
+        System.arraycopy(TEXT_SUFFIX, 0, event, header.length + length, TEXT_SUFFIX.length);
+        return event;
+    }
+
     private boolean advanceText(int start, long capacity) {
         while (offset < document.length) {
-            if (number ? !numberByte(document[offset]) : document[offset] == '"') {
+            if (document[offset] == '"') {
                 return true;
             }
-            int width = number ? 1 : stringUnitWidth(offset);
+            int width = stringUnitWidth(offset);
             if (offset - start + width > capacity) {
                 return false;
             }

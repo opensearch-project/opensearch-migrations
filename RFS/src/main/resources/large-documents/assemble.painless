@@ -6,26 +6,24 @@ def stack = state.stack;
 for (def event : params.events) {
     def kind = event[0];
     def value = event.size() == 2 ? event[1] : null;
-    if (kind == 'object' || kind == 'array' || kind == 'string' || kind == 'number') {
+    if (kind == 'object' || kind == 'array' || kind == 'string') {
         stack.add(['value': kind == 'object' ? [:] : kind == 'array' ? [] : value,
-                   'key': '', 'number': kind == 'number']);
+                   'key': '']);
     } else if (kind == 'key') {
         stack[stack.size() - 1].key = value;
     } else if (kind == 'key+') {
         stack[stack.size() - 1].key += value;
-    } else if (kind == 'string+' || kind == 'number+') {
+    } else if (kind == 'string+') {
         stack[stack.size() - 1].value += value;
     } else {
         if (kind == 'end') {
-            def frame = stack.remove(stack.size() - 1);
-            value = frame.value;
-            if (frame.number) {
-                def path = [];
-                for (def ancestor : stack) {
-                    path.add(ancestor.value instanceof Map ? ancestor.key : ancestor.value.size());
-                }
-                state.numbers.add(path);
+            value = stack.remove(stack.size() - 1).value;
+        } else if (kind == 'number') {
+            def path = [];
+            for (def ancestor : stack) {
+                path.add(ancestor.value instanceof Map ? ancestor.key : ancestor.value.size());
             }
+            state.numbers.add(path);
         } else if (kind != 'value') {
             throw new IllegalArgumentException('Unknown document event');
         }
