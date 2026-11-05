@@ -366,6 +366,87 @@ public class WorkCoordinatorTest {
 
     @ParameterizedTest
     @MethodSource("containerVersions")
+    public void testLeaseGrowthSaturatesAcrossRepeatedReleases(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
+        var context = WorkCoordinationTestContext.factory().noOtelTracking();
+        var workItemId = workId("repeated-release", 0, 0L);
+        var lease = Duration.ofMinutes(10);
+        try (var worker = factory.get(httpClientSupplier.get(), 15, "worker")) {
+            worker.createUnassignedWorkItem(workItemId, context::createUnassignedWorkContext);
+            for (int acquisition = 0; acquisition < 70; acquisition++) {
+                var before = Instant.now();
+                // Exercise both scripts and both Java response paths.
+                var outcome = acquisition % 2 == 0
+                    ? worker.acquireNextWorkItem(lease, context::createAcquireNextItemContext)
+                    : worker.createOrUpdateLeaseForWorkItem(workItemId, lease, context::createAcquireSpecificItemContext);
+                var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+                long expectedSeconds = Math.min(OpenSearchWorkCoordinator.MAX_LEASE_DURATION_SECONDS,
+                    600L * (1L << Math.min(acquisition, OpenSearchWorkCoordinator.MAX_LEASE_EXPONENT)));
+                var duration = Duration.between(before, acquired.leaseExpirationTime);
+                Assertions.assertTrue(acquired.leaseExpirationTime.getEpochSecond() >= before.getEpochSecond() + expectedSeconds);
+                Assertions.assertTrue(acquired.leaseExpirationTime.getEpochSecond() <= Instant.now().getEpochSecond() + expectedSeconds);
+                Assertions.assertDoesNotThrow(duration::toMillis);
+                Assertions.assertDoesNotThrow(duration::toNanos);
+                var document = readWorkDocument(worker, workItemId);
+                Assertions.assertTrue(document.path("nextAcquisitionLeaseExponent").asLong()
+                    <= OpenSearchWorkCoordinator.MAX_LEASE_EXPONENT);
+                worker.releaseWorkItem(workItemId, context::createReleaseWorkItemContext);
+                Assertions.assertEquals(0, readWorkDocument(worker, workItemId).path("expiration").asLong());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testExtremeLeaseInputsRemainAcquirable(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
+        var context = WorkCoordinationTestContext.factory().noOtelTracking();
+        var mapper = new ObjectMapper();
+        try (var worker = factory.get(httpClientSupplier.get(), 15, "worker")) {
+            var workItemId = workId("overflow", 0, 0L);
+            for (long exponent : new long[]{54, Integer.MAX_VALUE, Long.MAX_VALUE, Long.MIN_VALUE}) {
+                worker.createUnassignedWorkItem(workItemId, context::createUnassignedWorkContext);
+                var body = mapper.createObjectNode();
+                body.putObject("doc").put("nextAcquisitionLeaseExponent", exponent);
+                for (boolean specific : new boolean[]{false, true}) {
+                    var response = httpClientSupplier.get().makeJsonRequest(
+                        "POST", worker.getPathForUpdates(workItemId), null, mapper.writeValueAsString(body));
+                    Assertions.assertEquals(200, response.getStatusCode());
+                    var before = Instant.now();
+                    var lease = Duration.ofSeconds(Long.MAX_VALUE);
+                    var outcome = specific
+                        ? worker.createOrUpdateLeaseForWorkItem(workItemId, lease, context::createAcquireSpecificItemContext)
+                        : worker.acquireNextWorkItem(lease, context::createAcquireNextItemContext);
+                    var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+                    var duration = Duration.between(before, acquired.leaseExpirationTime);
+                    Assertions.assertTrue(acquired.leaseExpirationTime.getEpochSecond()
+                        >= before.getEpochSecond() + OpenSearchWorkCoordinator.MAX_LEASE_DURATION_SECONDS);
+                    Assertions.assertTrue(acquired.leaseExpirationTime.getEpochSecond()
+                        <= Instant.now().getEpochSecond() + OpenSearchWorkCoordinator.MAX_LEASE_DURATION_SECONDS);
+                    Assertions.assertDoesNotThrow(duration::toNanos);
+                    worker.releaseWorkItem(workItemId, context::createReleaseWorkItemContext);
+                }
+            }
+            // The CREATED response must use the same cap as the server-side upsert.
+            var before = Instant.now();
+            var created = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class,
+                worker.createOrUpdateLeaseForWorkItem(workId("created-overflow", 0, 0L),
+                    Duration.ofSeconds(Long.MAX_VALUE), context::createAcquireSpecificItemContext));
+            Assertions.assertTrue(created.leaseExpirationTime.getEpochSecond()
+                >= before.getEpochSecond() + OpenSearchWorkCoordinator.MAX_LEASE_DURATION_SECONDS);
+            Assertions.assertTrue(created.leaseExpirationTime.getEpochSecond()
+                <= Instant.now().getEpochSecond() + OpenSearchWorkCoordinator.MAX_LEASE_DURATION_SECONDS);
+            Assertions.assertDoesNotThrow(() -> Duration.between(Instant.now(), created.leaseExpirationTime).toNanos());
+        }
+    }
+
+    private JsonNode readWorkDocument(OpenSearchWorkCoordinator worker, String workItemId) throws IOException {
+        var response = httpClientSupplier.get().makeJsonRequest("GET", worker.getPathForGets(workItemId), null, null);
+        return new ObjectMapper().readTree(response.getPayloadBytes()).path("_source");
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
     public void testReleaseWorkItemIsNoopIfLeaseRolledOver(SearchClusterContainer.ContainerVersion version) throws Exception {
         // If workerA's lease has already expired and workerB has picked the item up, a late
         // releaseWorkItem call from workerA must NOT clobber workerB's lease — otherwise we

@@ -1340,12 +1340,16 @@ public class RfsMigrateDocuments {
         var leaseAcquisitionTime = workItemTimeProvider.getLeaseAcquisitionTimeRef().get();
         var documentMigrationStartTime = workItemTimeProvider.getDocumentMigraionStartTimeRef().get();
         var leaseDuration = Duration.between(leaseAcquisitionTime, leaseExpirationTime);
-        var leaseDurationFactor = (double) leaseDuration.toMillis() / initialLeaseDuration.toMillis();
+        var leaseDurationSeconds = leaseDuration.getSeconds() + leaseDuration.getNano() / 1_000_000_000.0;
+        var initialLeaseDurationSeconds = initialLeaseDuration.getSeconds() + initialLeaseDuration.getNano() / 1_000_000_000.0;
+        var leaseDurationFactor = leaseDurationSeconds / initialLeaseDurationSeconds;
         // 2 ^ n = leaseDurationFactor <==> log2(leaseDurationFactor) = n, n >= 0
-        var existingNextAcquisitionLeaseExponent = Math.max(Math.round(Math.log(leaseDurationFactor) / Math.log(2)), 0);
+        var existingNextAcquisitionLeaseExponent = Math.max(0, Math.min(OpenSearchWorkCoordinator.MAX_LEASE_EXPONENT,
+                Math.round(Math.log(leaseDurationFactor) / Math.log(2))));
         var shardSetupDuration = Duration.between(leaseAcquisitionTime, documentMigrationStartTime);
 
-        var shardSetupDurationFactor = (double) shardSetupDuration.toMillis() / leaseDuration.toMillis();
+        var shardSetupDurationSeconds = shardSetupDuration.getSeconds() + shardSetupDuration.getNano() / 1_000_000_000.0;
+        var shardSetupDurationFactor = shardSetupDurationSeconds / leaseDurationSeconds;
         int successorShardNextAcquisitionLeaseExponent = (int) existingNextAcquisitionLeaseExponent;
         if (shardSetupDurationFactor < DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD && successorShardNextAcquisitionLeaseExponent > 0) {
             // This can happen after a period of slow shard downloads e.g. S3 throttling/slow workers
@@ -1362,7 +1366,8 @@ public class RfsMigrateDocuments {
                     .addArgument(String.format("%.2f", shardSetupDurationFactor * 100))
                     .addArgument(String.format("%.2f", INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
                     .log();
-            successorShardNextAcquisitionLeaseExponent = successorShardNextAcquisitionLeaseExponent + 1;
+            successorShardNextAcquisitionLeaseExponent = Math.min(OpenSearchWorkCoordinator.MAX_LEASE_EXPONENT,
+                    successorShardNextAcquisitionLeaseExponent + 1);
         }
 
         log.atDebug().setMessage("SuccessorNextAcquisitionLeaseExponent calculated values:" +
