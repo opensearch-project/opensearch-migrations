@@ -1,0 +1,75 @@
+---
+# Decides whether a pull_request_target run may go on to the AWS test account. The maintainer's label is the approval:
+# a PR reaches AWS only when a maintainer (listed in .github/CODEOWNERS on the base branch, with write access or more)
+# adds the test's run-* label. It approves the PR's code at that moment only: callers trigger on `labeled` alone, so a
+# later push runs nothing until a maintainer adds the label again. GitHub lets users with only Triage add labels, so
+# the label alone isn't enough.
+name: AWS CI PR gate
+on:
+  workflow_call:
+    inputs:
+      label:
+        description: 'Label that opts a PR into this test, e.g. run-eks-tests'
+        required: true
+        type: string
+    outputs:
+      allowed:
+        description: "'true' if a maintainer just added the label"
+        value: ${{ jobs.gate.outputs.allowed }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - id: check
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          GATE_LABEL: ${{ inputs.label }}
+        with:
+          script: |
+            const label = process.env.GATE_LABEL;
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+
+            const deny = (reason) => {
+              core.notice(`Not running AWS tests for #${pr?.number}: ${reason}`);
+              core.setOutput('allowed', 'false');
+            };
+
+            if (context.eventName !== 'pull_request_target' || !pr) {
+              return deny(`unsupported event ${context.eventName}`);
+            }
+            if (context.payload.action !== 'labeled') {
+              return deny(`'${context.payload.action}' doesn't run AWS tests; a maintainer adds '${label}' to run them`);
+            }
+            if (context.payload.label.name !== label) {
+              return deny(`label '${context.payload.label.name}' is not '${label}'`);
+            }
+            const labeler = context.payload.sender.login;
+
+            // Maintainers are the CODEOWNERS users on the base commit, which a PR can't change.
+            const { data: file } = await github.rest.repos.getContent({
+              owner, repo, path: '.github/CODEOWNERS', ref: pr.base.sha,
+            });
+            const maintainers = Buffer.from(file.content, 'base64').toString('utf8')
+              .split('\n')
+              .map((line) => line.replace(/#.*/, ''))
+              .flatMap((line) => line.match(/@[A-Za-z0-9-]+(?=\s|$)/g) ?? [])
+              .map((handle) => handle.slice(1).toLowerCase());
+            if (!maintainers.includes(labeler.toLowerCase())) {
+              return deny(`'${label}' was added by ${labeler}, who isn't in .github/CODEOWNERS`);
+            }
+
+            // `permission` folds maintain into write and triage into read.
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: labeler });
+            if (!['admin', 'write'].includes(data.permission)) {
+              return deny(`'${label}' was added by ${labeler}, who has ${data.role_name} permission`);
+            }
+
+            core.info(`'${label}' added by maintainer ${labeler}; running the AWS tests on ${pr.head.sha}`);
+            core.setOutput('allowed', 'true');

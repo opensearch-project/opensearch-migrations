@@ -1,0 +1,8 @@
+{
+  "app": "npx ts-node --prefer-ts-exts bin/app.ts",
+  "context": {
+    "githubRepository": "opensearch-project/opensearch-migrations",
+    "githubSubjectPrefix": "repo:opensearch-project/opensearch-migrations",
+    "testRoleManagedPolicyArns": ["arn:aws:iam::aws:policy/AdministratorAccess"]
+  }
+}

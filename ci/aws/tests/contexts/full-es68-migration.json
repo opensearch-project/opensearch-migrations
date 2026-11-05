@@ -1,0 +1,38 @@
+{
+  "full-migration": {
+    "stage": "<STAGE>",
+    "vpcId": "<VPC_ID>",
+    "engineVersion": "OS_2.19",
+    "domainName": "os-cluster-<STAGE>",
+    "dataNodeCount": 2,
+    "openAccessPolicyEnabled": true,
+    "domainRemovalPolicy": "DESTROY",
+    "artifactBucketRemovalPolicy": "DESTROY",
+    "captureProxyServiceEnabled": true,
+    "targetClusterProxyServiceEnabled": true,
+    "trafficReplayerServiceEnabled": true,
+    "trafficReplayerGroupId": "logging-group-<TEST_UNIQUE_ID>",
+    "trafficReplayerExtraArgs": "--speedup-factor 10.0",
+    "reindexFromSnapshotServiceEnabled": true,
+    "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 <RFS_TRANSFORMERS_B64>",
+    "sourceCluster": {
+      "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+      "auth": {
+        "type": "none"
+      },
+      "version": "ES_6.8.23"
+    },
+    "tlsSecurityPolicy": "TLS_1_2",
+    "enforceHTTPS": true,
+    "nodeToNodeEncryptionEnabled": true,
+    "encryptionAtRestEnabled": true,
+    "vpcEnabled": true,
+    "vpcAZCount": 2,
+    "mskAZCount": 2,
+    "migrationAssistanceEnabled": true,
+    "replayerOutputEFSRemovalPolicy": "DESTROY",
+    "migrationConsoleServiceEnabled": true,
+    "otelMetricsCollectorEnabled": true,
+    "otelTraceCollectorEnabled": false
+  }
+}
