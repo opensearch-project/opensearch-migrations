@@ -5,7 +5,6 @@ import java.util.List;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
-import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 
 import reactor.core.publisher.Mono;
 
@@ -36,11 +35,6 @@ public interface DocumentSink extends AutoCloseable {
      * @return batch-local stats (docs written, bytes written)
      */
     Mono<BatchResult> writeBatch(String collectionName, List<Document> batch);
-
-    /** Recover an ordered sink's durable state before reading or replaying any operations in a partition. */
-    default Mono<Void> preparePartition(Partition partition, String collectionName) {
-        return Mono.empty();
-    }
 
     /** Whether batches and partitions sharing this sink must be written sequentially. */
     default boolean requiresOrderedWrites() {

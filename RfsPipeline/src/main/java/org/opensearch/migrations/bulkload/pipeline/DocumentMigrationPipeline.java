@@ -132,9 +132,7 @@ public class DocumentMigrationPipeline {
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
-            var prepared = sink.requiresOrderedWrites() ? sink.preparePartition(partition, collectionName) : Mono.<Void>empty();
-            return prepared
-                .thenMany(Flux.defer(() -> source.readDocuments(partition, startingPosition)))
+            return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
                 .flatMapSequential(batch -> {

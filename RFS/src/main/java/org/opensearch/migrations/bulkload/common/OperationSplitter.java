@@ -7,7 +7,7 @@ import reactor.core.publisher.Flux;
 /**
  * Expands one already transformed, encoded operation into bounded request parts on demand.
  * Parts must be applied in order; completion of the stream is not acknowledgement of the document.
- * The caller owns initialization, retries, publication, and the original operation's checkpoint.
+ * The caller owns indexing the initial state, retries, final completion, and the original operation's checkpoint.
  */
 @FunctionalInterface
 interface OperationSplitter {

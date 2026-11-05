@@ -19,7 +19,7 @@ import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OversizedDocumentException;
 import org.opensearch.migrations.bulkload.common.RestClient;
-import org.opensearch.migrations.bulkload.common.StagedDocumentException;
+import org.opensearch.migrations.bulkload.common.SplitDocumentException;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.metadata.WriteMetadata;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
@@ -143,12 +143,12 @@ class RfsBoundedRequestsEndToEndTest {
             }
             verifyOrdinaryTransformedBatches(target, operations);
             verifyLegacySingletonsAndIndependentDocumentCeiling(target, operations);
-            verifyPublicationFailureDoesNotCheckpointOrReplaceTarget(target, operations);
+            verifyCompletionFailureDoesNotCheckpoint(target, operations);
             verifyMixedIndexAndDeleteOperations(target, operations);
-            verifyLargeVectorAndExplicitPipelineThroughAlias(target, operations);
+            verifyLargeVectorThroughAlias(target, operations);
             verifyExactNumericValuesWithoutAnIngestPipeline(target, operations);
-            verifyMappingFailurePreservesExistingDocument(target, operations);
-            verifyEmptyHttp200PublicationIsNotAcknowledged(target, operations);
+            verifyMappingFailureRetainsRecoverablePartialDocument(target, operations);
+            verifyMalformedCompletionIsNotAcknowledged(target, operations);
         }
     }
 
@@ -191,13 +191,13 @@ class RfsBoundedRequestsEndToEndTest {
                 assertEquals(sent, proxy.requests.size(), "An explicit document ceiling must reject before transmission");
 
                 client.setMaxDocumentSizeBytes(Long.MAX_VALUE);
-                client.setLargeDocumentStagingIndex("legacy-split-staging-" + path);
+                client.setSplitLargeDocuments(true);
                 int stagedStart = proxy.requests.size();
                 var staged = sink.writeBatch(index, List.of(docs.get(1))).block(Duration.ofMinutes(1));
                 assertNotNull(staged);
                 assertTrue(proxy.requests.subList(stagedStart, proxy.requests.size()).stream()
                     .allMatch(r -> r.body().length <= batchTarget && r.wireBody().length <= batchTarget));
-                assertTrue(proxy.requests.stream().anyMatch(r -> r.path().startsWith("/_reindex")));
+                assertTrue(proxy.requests.stream().anyMatch(SizeLimitingProxy.Request::completesDocument));
                 assertEquals(MAPPER.readTree(largeSource),
                     MAPPER.readTree(operations.get("/" + index + "/_doc/large").getValue()).path("_source"));
                 assertBounds(proxy);
@@ -219,7 +219,7 @@ class RfsBoundedRequestsEndToEndTest {
             operations.createIndex("large-absolute-size", "{\"settings\":{\"number_of_replicas\":0},\"mappings\":{\"enabled\":false}}");
             try (var proxy = new SizeLimitingProxy(target.getUrl(), requestLimit)) {
                 var client = client(target, proxy, requestLimit);
-                client.setLargeDocumentStagingIndex("rfs-absolute-staging");
+                client.setSplitLargeDocuments(true);
                 BulkOperationTransformer expand = ops -> {
                     ops.forEach(op -> op.setRawDocument(transformed));
                     return ops;
@@ -249,7 +249,7 @@ class RfsBoundedRequestsEndToEndTest {
              var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT,
                  directory.resolve(target.getContainerVersion().getVersion().toString() + "-" + index)).build()) {
             var client = client(target, proxy);
-            client.setLargeDocumentStagingIndex("rfs-bounded-staging");
+            client.setSplitLargeDocuments(true);
             proxy.loseNextUpdateAcknowledgement.set(true);
             IJsonTransformer transformer = transformer(path, index, EXPANSION);
             var sink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
@@ -259,7 +259,7 @@ class RfsBoundedRequestsEndToEndTest {
             var publicationStarted = new CountDownLatch(1);
             var releasePublication = new CountDownLatch(1);
             proxy.beforeForward = request -> {
-                if (request.path().startsWith("/_reindex") && publicationStarted.getCount() != 0) {
+                if (request.completesDocument() && publicationStarted.getCount() != 0) {
                     publicationStarted.countDown();
                     try {
                         if (!releasePublication.await(30, TimeUnit.SECONDS)) {
@@ -278,8 +278,9 @@ class RfsBoundedRequestsEndToEndTest {
                 assertFalse(future.isDone());
                 assertTrue(cursors.isEmpty(), "A partially uploaded document cannot advance a source checkpoint");
                 String firstLargeId = path.equals("raw") ? "large" : path + "-first";
-                assertEquals(404, get(operations, index, firstLargeId).getKey(),
-                    "The target must not contain a partially assembled document");
+                var partial = get(operations, index, firstLargeId);
+                assertEquals(200, partial.getKey(), "Assembly takes place directly in the destination document");
+                assertTrue(MAPPER.readTree(partial.getValue()).path("_source").has("_rfs_large_document"));
             } finally {
                 releasePublication.countDown();
             }
@@ -292,8 +293,6 @@ class RfsBoundedRequestsEndToEndTest {
                 if (!path.equals("raw")) {
                     expected.put("text", expected.get("text") + EXPANSION);
                 }
-                expected.put("default_runs", 1);
-                expected.put("final_runs", 1);
                 var response = get(operations, index, path.equals("raw") ? entry.getKey() : path + "-" + entry.getKey());
                 assertEquals(200, response.getKey(), response.getValue());
                 var actual = MAPPER.readTree(response.getValue());
@@ -305,15 +304,9 @@ class RfsBoundedRequestsEndToEndTest {
             assertBounds(proxy);
             var updates = proxy.requests.stream().filter(r -> r.path().contains("/_update/")).toList();
             assertTrue(updates.size() > 2);
-            assertTrue(hasDuplicateUpdate(updates), "Actually lose an update ACK after the server commits it");
-            operations.refresh("rfs-bounded-staging");
-            var retained = MAPPER.readTree(operations.get("/rfs-bounded-staging/_search?size=100").getValue())
-                .path("hits").path("hits");
-            assertTrue(retained.size() > 0, "Retain compact publication journals for checkpoint recovery");
-            for (var hit : retained) {
-                assertTrue(hit.path("_id").asText().startsWith("journal-"), "Successful uploads remove their payload documents");
-                assertEquals("complete", hit.path("_source").path("phase").asText());
-            }
+            assertFalse(proxy.loseNextUpdateAcknowledgement.get(), "Lose an ACK after the actual server applies a part");
+            assertTrue(proxy.requests.stream().anyMatch(r -> r.path().contains("_source_includes=")),
+                "Read back the attempt token and part sequence to resolve a lost ACK");
         }
     }
 
@@ -321,6 +314,8 @@ class RfsBoundedRequestsEndToEndTest {
         for (String path : List.of("native", "json")) {
             String index = "ordinary-" + path;
             createTarget(operations, index);
+            assertEquals(200, operations.put("/" + index + "/_settings",
+                "{\"index.default_pipeline\":\"bounded-default\",\"index.final_pipeline\":\"bounded-final\"}").getKey());
             try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
                  var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT,
                      directory.resolve(target.getContainerVersion().getVersion().toString() + "-" + index)).build()) {
@@ -348,33 +343,30 @@ class RfsBoundedRequestsEndToEndTest {
         }
     }
 
-    private void verifyPublicationFailureDoesNotCheckpointOrReplaceTarget(
+    private void verifyCompletionFailureDoesNotCheckpoint(
         SearchClusterContainer target, ClusterOperations operations
     ) throws Exception {
-        String index = "publication-failure";
+        String index = "completion-failure";
         createTarget(operations, index);
         operations.createDocument(index, "large", MAPPER.writeValueAsString(document(-1, Map.of("previous", true))),
             URLEncoder.encode(ROUTING, StandardCharsets.UTF_8), null);
-        var before = MAPPER.readTree(get(operations, index, "large").getValue()).path("_source");
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
              var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT,
                  directory.resolve(target.getContainerVersion().getVersion().toString() + "-failure")).build()) {
-            proxy.rejectPublication.set(true);
+            proxy.rejectCompletion.set(true);
             var client = client(target, proxy);
-            client.setLargeDocumentStagingIndex("rfs-failed-staging");
+            client.setSplitLargeDocuments(true);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
             List<ProgressCursor> cursors = new ArrayList<>();
             assertThrows(RuntimeException.class, () -> new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE, 1, 1)
                 .migratePartition(source.listPartitions(SOURCE).get(0), index, 0).doOnNext(cursors::add)
                 .blockLast(Duration.ofSeconds(60)));
             assertTrue(cursors.isEmpty());
-            assertEquals(before, MAPPER.readTree(get(operations, index, "large").getValue()).path("_source"));
+            assertTrue(MAPPER.readTree(get(operations, index, "large").getValue()).path("_source").has("_rfs_large_document"));
             assertEquals(404, get(operations, index, "last").getKey());
-            assertEquals(1, proxy.requests.stream().filter(r -> r.path().startsWith("/_reindex")).count(),
-                "Publication must not be retried while its outcome might be unknown");
+            assertEquals(1, proxy.requests.stream().filter(SizeLimitingProxy.Request::completesDocument).count(),
+                "Completion must not be retried while its outcome might be unknown");
             assertBounds(proxy);
-            operations.refresh("rfs-failed-staging");
-            assertEquals(2, count(operations, "rfs-failed-staging"), "Retain the upload and its publication journal for recovery");
         }
     }
 
@@ -392,7 +384,7 @@ class RfsBoundedRequestsEndToEndTest {
             new Document("c", small, Document.Operation.UPSERT, hints, Map.of()));
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT)) {
             var client = client(target, proxy);
-            client.setLargeDocumentStagingIndex("rfs-mixed-staging");
+            client.setSplitLargeDocuments(true);
             var result = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null)
                 .writeBatch(index, documents).block(Duration.ofSeconds(60));
             assertNotNull(result);
@@ -437,7 +429,7 @@ class RfsBoundedRequestsEndToEndTest {
         };
     }
 
-    private void verifyLargeVectorAndExplicitPipelineThroughAlias(
+    private void verifyLargeVectorThroughAlias(
         SearchClusterContainer target, ClusterOperations operations
     ) throws Exception {
         String index = "large-vector";
@@ -449,11 +441,11 @@ class RfsBoundedRequestsEndToEndTest {
         assertTrue(body.length > LIMIT, "The vector array alone must exceed a request");
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT)) {
             var client = client(target, proxy);
-            client.setLargeDocumentStagingIndex("rfs-vector-staging");
+            client.setSplitLargeDocuments(true);
             BulkOperationTransformer transform = operationsToWrite -> {
                 for (var operation : operationsToWrite) {
                     ((IndexOp) operation).getOperation().setWrite(WriteMetadata.builder()
-                        .pipeline("bounded-custom").requireAlias(true).build());
+                        .requireAlias(true).build());
                 }
                 return operationsToWrite;
             };
@@ -464,17 +456,16 @@ class RfsBoundedRequestsEndToEndTest {
                 .block(Duration.ofSeconds(60));
             assertNotNull(result);
             assertEquals(1, result.target().upserts());
-            document.put("custom_runs", 1);
-            document.put("final_runs", 1);
             var response = get(operations, index, "vector");
             assertEquals(200, response.getKey(), response.getValue());
             assertEquals(MAPPER.readTree(MAPPER.writeValueAsBytes(document)), MAPPER.readTree(response.getValue()).path("_source"));
-            assertTrue(proxy.requests.stream().anyMatch(r -> r.path().equals("/_reindex?wait_for_completion=false&require_alias=true")));
+            assertTrue(proxy.requests.stream().filter(r -> r.path().contains("/_update/"))
+                .allMatch(r -> r.path().startsWith("/" + index + "/")), "Pin every part to the resolved concrete index");
             assertBounds(proxy);
         }
     }
 
-    private void verifyMappingFailurePreservesExistingDocument(
+    private void verifyMappingFailureRetainsRecoverablePartialDocument(
         SearchClusterContainer target, ClusterOperations operations
     ) throws Exception {
         String index = "mapping-failure";
@@ -483,19 +474,21 @@ class RfsBoundedRequestsEndToEndTest {
         previous.put("vector", java.util.Collections.nCopies(9, 1.0));
         operations.createDocument(index, "large", MAPPER.writeValueAsString(previous),
             URLEncoder.encode(ROUTING, StandardCharsets.UTF_8), null);
-        var before = MAPPER.readTree(get(operations, index, "large").getValue()).path("_source");
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT)) {
             var client = client(target, proxy);
-            client.setLargeDocumentStagingIndex("rfs-mapping-staging");
+            client.setSplitLargeDocuments(true);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
             var document = new Document("large", MAPPER.writeValueAsBytes(original.get("large")), Document.Operation.UPSERT,
                 Map.of(Document.HINT_ROUTING, ROUTING), Map.of());
-            var error = assertThrows(StagedDocumentException.class,
+            var error = assertThrows(SplitDocumentException.class,
                 () -> sink.writeBatch(index, List.of(document)).block(Duration.ofSeconds(60)));
-            assertEquals(200, error.getFailure().responseStatus(), "The task result carries the target mapping rejection");
-            assertFalse(MAPPER.readTree(error.getFailure().responseBody()).path("response").path("failures").isEmpty());
-            assertEquals(before, MAPPER.readTree(get(operations, index, "large").getValue()).path("_source"));
-            assertEquals(1, proxy.requests.stream().filter(r -> r.path().startsWith("/_reindex")).count());
+            assertEquals(400, error.getFailure().responseStatus());
+            assertEquals("COMPLETE", error.getFailure().stage());
+            assertTrue(error.getFailure().responseBody().contains("vector"));
+            var partial = MAPPER.readTree(get(operations, index, "large").getValue()).path("_source");
+            assertTrue(partial.has("_rfs_large_document"));
+            assertFalse(partial.has("payload"), "Replay's first index removes obsolete fields");
+            assertEquals(1, proxy.requests.stream().filter(SizeLimitingProxy.Request::completesDocument).count());
             assertBounds(proxy);
         }
     }
@@ -518,7 +511,7 @@ class RfsBoundedRequestsEndToEndTest {
             + "\"padding\":\"" + "x".repeat(30_000) + "\"}";
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT)) {
             var client = client(target, proxy);
-            client.setLargeDocumentStagingIndex("rfs-numeric-staging");
+            client.setSplitLargeDocuments(true);
             new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null)
                 .writeBatch(index, List.of(new Document("number", json.getBytes(StandardCharsets.UTF_8),
                     Document.Operation.UPSERT, Map.of(), Map.of()))).block(Duration.ofSeconds(60));
@@ -532,33 +525,23 @@ class RfsBoundedRequestsEndToEndTest {
         }
     }
 
-    private void verifyEmptyHttp200PublicationIsNotAcknowledged(
+    private void verifyMalformedCompletionIsNotAcknowledged(
         SearchClusterContainer target, ClusterOperations operations
     ) throws Exception {
-        String index = "empty-publication";
+        String index = "malformed-completion";
         createTarget(operations, index);
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT)) {
             var client = client(target, proxy);
-            client.setLargeDocumentStagingIndex("rfs-empty-staging");
-            proxy.beforeForward = request -> {
-                if (request.path().startsWith("/_reindex")) {
-                    try {
-                        String id = MAPPER.readTree(request.body()).path("source").path("query").path("ids")
-                            .path("values").get(0).asText();
-                        assertEquals(200, operations.delete("/rfs-empty-staging/_doc/" + id + "?refresh=true").getKey());
-                    } catch (Exception e) {
-                        throw new IllegalStateException(e);
-                    }
-                }
-            };
+            client.setSplitLargeDocuments(true);
+            proxy.intercept = request -> request.completesDocument()
+                ? new SizeLimitingProxy.Response(200, "{}".getBytes(StandardCharsets.UTF_8)) : null;
             var document = new Document("large", MAPPER.writeValueAsBytes(original.get("large")), Document.Operation.UPSERT,
                 Map.of(Document.HINT_ROUTING, ROUTING), Map.of());
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
-            var error = assertThrows(StagedDocumentException.class,
+            var error = assertThrows(SplitDocumentException.class,
                 () -> sink.writeBatch(index, List.of(document)).block(Duration.ofSeconds(60)));
-            assertEquals(200, error.getFailure().responseStatus(), "The completed task is retrieved successfully over HTTP");
-            assertEquals(0, MAPPER.readTree(error.getFailure().responseBody()).path("response").path("total").asInt());
-            assertEquals(404, get(operations, index, "large").getKey());
+            assertEquals("COMPLETE", error.getFailure().stage());
+            assertTrue(MAPPER.readTree(get(operations, index, "large").getValue()).path("_source").has("_rfs_large_document"));
             assertBounds(proxy);
         }
     }
@@ -615,8 +598,7 @@ class RfsBoundedRequestsEndToEndTest {
 
     private static void createTarget(ClusterOperations operations, String index, int vectorDimension) {
         operations.createIndex(index, """
-            {"settings":{"number_of_shards":2,"number_of_replicas":0,"index.knn":true,
-                         "index.default_pipeline":"bounded-default","index.final_pipeline":"bounded-final"},
+            {"settings":{"number_of_shards":2,"number_of_replicas":0,"index.knn":true},
              "mappings":{"dynamic":"strict","_routing":{"required":true},"properties":{
                 "ordinal":{"type":"integer"},"text":{"type":"text"},
                 "vector":{"type":"knn_vector","dimension":%d},"payload":{"type":"object","enabled":false},
@@ -641,19 +623,12 @@ class RfsBoundedRequestsEndToEndTest {
     private static void assertBounds(SizeLimitingProxy proxy, int limit) {
         assertFalse(proxy.requests.isEmpty());
         assertNull(proxy.failure.get(), "Proxy forwarding must succeed");
+        assertTrue(proxy.requests.stream().noneMatch(r -> r.path().contains("staging") || r.path().startsWith("/_reindex")
+            || r.path().startsWith("/_tasks")), "No staging index, reindex, or task API");
         for (var request : proxy.requests) {
             assertTrue(request.body().length <= limit, request.path() + ": uncompressed body exceeds cap");
             assertTrue(request.wireBody().length <= limit, request.path() + ": transmitted body exceeds cap");
         }
     }
 
-    private static boolean hasDuplicateUpdate(List<SizeLimitingProxy.Request> updates) throws Exception {
-        for (int i = 1; i < updates.size(); i++) {
-            if (updates.get(i).path().equals(updates.get(i - 1).path())
-                && Arrays.equals(updates.get(i).body(), updates.get(i - 1).body())) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

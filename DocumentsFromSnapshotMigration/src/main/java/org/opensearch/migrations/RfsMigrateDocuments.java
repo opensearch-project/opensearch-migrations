@@ -246,24 +246,24 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
             description = "Optional. Bulk request batching target in bytes, including action metadata and newlines, " +
-                "measured after transformations. A single larger operation is sent on its own unless staging is enabled. " +
+                "measured after transformations. A single larger operation is sent on its own unless splitting is enabled. " +
                 "Default 10 MiB")
         long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
 
         @Parameter(required = false,
             names = { "--max-document-size-bytes" },
             description = "Optional. Reject a single encoded operation above this size after transformations and ID handling, " +
-                "including action metadata and newlines. Applies even with staging enabled. Must be positive. " +
+                "including action metadata and newlines. Applies even with splitting enabled. Must be positive. " +
                 "Default " + Long.MAX_VALUE + " (effectively unlimited).")
         long maxDocumentSizeBytes = Long.MAX_VALUE;
 
         @Parameter(required = false,
-            names = { "--large-document-staging-index" },
-            description = "Optional, experimental. Assemble oversized index operations in this dedicated staging index " +
-                "and publish complete documents with local reindex. Requires OpenSearch, explicit document IDs, " +
-                "task-status permissions, and no version conditions. Serializes batches; keep the same staging index on restart. " +
-                "Each staging request obeys --documents-size-per-bulk-request.")
-        String largeDocumentStagingIndex;
+            names = { "--split-large-documents" },
+            description = "Optional, experimental. Split oversized plain index operations into bounded, ordered requests " +
+                "on the destination document. Requires explicit IDs, complete _source, no ingest pipelines or version conditions, " +
+                "and permission to add an unmapped temporary assembly field. Partial documents remain visible until completion. " +
+                "Serializes batches and obeys --documents-size-per-bulk-request. Disabled by default.")
+        boolean splitLargeDocuments;
 
         @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
@@ -632,7 +632,7 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate(
             arguments.numDocsPerBulkRequest, arguments.numBytesPerBulkRequest);
         targetClient.setMaxDocumentSizeBytes(arguments.maxDocumentSizeBytes);
-        targetClient.setLargeDocumentStagingIndex(arguments.largeDocumentStagingIndex);
+        targetClient.setSplitLargeDocuments(arguments.splitLargeDocuments);
         var targetVersion = targetClient.getClusterVersion();
 
         // Build the failed document stream sink and attach it to the target client. The sink is closed in

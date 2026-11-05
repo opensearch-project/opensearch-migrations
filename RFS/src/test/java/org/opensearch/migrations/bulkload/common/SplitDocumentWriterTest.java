@@ -44,16 +44,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class StagedDocumentWriterTest {
-    private static final String STAGING_INDEX = """
-        {"staging":{"mappings":{"enabled":false,"_meta":{"rfs_large_document_staging":2}},"settings":{}}}
-        """;
-
+class SplitDocumentWriterTest {
+    private static final String TARGET_INDEX = "{\"target\":{\"mappings\":{},\"settings\":{}}}";
     @ParameterizedTest
     @ValueSource(strings = {"create", "version", "delete"})
     void legacyOversizedSingletonsPreserveTheirOperationSemantics(String kind) {
@@ -81,22 +77,16 @@ class StagedDocumentWriterTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void explicitDocumentCeilingCannotBeBypassedByStagingAndRetainsFullDiagnostics(boolean staging) {
+    void explicitDocumentCeilingCannotBeBypassedBySplittingAndRetainsFullDiagnostics(boolean splitting) {
         var transport = mock(RestClient.class);
-        when(transport.asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any())).thenAnswer(call -> {
-            String path = call.getArgument(1);
-            assertTrue(path.equals("staging") || path.startsWith("staging/_doc/journal-"),
-                "Only staging recovery setup is allowed before rejection");
-            return Mono.just(response(path.equals("staging") ? 200 : 404, STAGING_INDEX));
-        });
         var logger = mock(FailedRequestsLogger.class);
         var client = new OpenSearchClient_OS_2_11(transport, logger,
             Version.fromString("OS 2.19"), CompressionMode.UNCOMPRESSED, 100, 4096);
         assertThrows(IllegalArgumentException.class, () -> client.setMaxDocumentSizeBytes(0));
         assertThrows(IllegalArgumentException.class, () -> client.setMaxDocumentSizeBytes(-1));
         client.setMaxDocumentSizeBytes(5000);
-        if (staging) {
-            client.setLargeDocumentStagingIndex("staging");
+        if (splitting) {
+            client.setSplitLargeDocuments(true);
         }
         byte[] original = "{\"before\":1}".getBytes(StandardCharsets.UTF_8);
         var op = IndexOp.builder().operation(IndexOperationMeta.builder().index("renamed").id("new-id").build())
@@ -117,7 +107,7 @@ class StagedDocumentWriterTest {
         assertEquals(new String(original, StandardCharsets.UTF_8), record.getOriginalDocument());
         assertEquals(new String(BulkNdjson.toBulkNdjsonBytes(List.of(op), ObjectMapperFactory.createDefaultMapper()),
             StandardCharsets.UTF_8), record.getTransformedRequestBody());
-        assertNull(record.getStagedFailure(), "No split or upload was attempted");
+        assertNull(record.getSplitFailure(), "No split or upload was attempted");
         verify(transport, never()).postAsyncBytes(any(), any(), any(), any());
         verify(logger).logLargeDocumentFailure(org.mockito.ArgumentMatchers.eq("renamed"),
             org.mockito.ArgumentMatchers.eq(record.getTransformedRequestBody()),
@@ -136,26 +126,31 @@ class StagedDocumentWriterTest {
         var retryStarted = new CountDownLatch(1);
         var secondStarted = new CountDownLatch(1);
         var requests = new CopyOnWriteArrayList<byte[]>();
+        var state = new java.util.concurrent.atomic.AtomicReference<String>();
         when(transport.asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any())).thenAnswer(call -> {
             String path = call.getArgument(1);
             HttpMethod method = call.getArgument(0);
-            if (path.equals("staging")) {
-                return Mono.just(response(200, STAGING_INDEX));
+            if (path.equals("target")) return Mono.just(response(200, TARGET_INDEX));
+            if (path.endsWith("/_mapping")) return Mono.just(response(200, "{\"acknowledged\":true}"));
+            if (method.equals(HttpMethod.GET)) {
+                return Mono.just(state.get() == null ? response(404, "{\"found\":false}")
+                    : response(200, "{\"found\":true,\"_seq_no\":0,\"_primary_term\":1,\"_source\":" + state.get() + "}"));
             }
-            if (path.contains("/_update/")) {
-                requests.add(call.getArgument(2));
-                if (requests.size() == 1) {
-                    return Mono.error(new java.io.IOException("Lost chunk ACK"));
-                }
-                if (requests.size() == 2) {
-                    retryStarted.countDown();
-                    return firstAck.asMono();
-                }
-                secondStarted.countDown();
-                return secondAck.asMono();
+            if (method.equals(HttpMethod.PUT)) {
+                state.set(new String(call.<byte[]>getArgument(2), StandardCharsets.UTF_8));
+                assertTrue(path.contains("op_type=create"));
+                return Mono.just(response(201, "{\"_seq_no\":0,\"_primary_term\":1,\"result\":\"created\"}"));
             }
-            return Mono.just(response(method.equals(HttpMethod.GET) ? 404 : 201,
-                "{\"_seq_no\":1,\"_primary_term\":1}"));
+            requests.add(call.getArgument(2));
+            if (requests.size() <= 2) assertTrue(path.contains("if_seq_no=0&if_primary_term=1"));
+            if (requests.size() == 1) return Mono.error(new java.io.IOException("ACK lost before the request applied"));
+            if (requests.size() == 2) {
+                retryStarted.countDown();
+                return firstAck.asMono();
+            }
+            assertTrue(path.contains("if_seq_no=1&if_primary_term=1"));
+            secondStarted.countDown();
+            return secondAck.asMono();
         });
         var produced = new AtomicInteger();
         OperationSplitter splitter = (operation, limit) -> JsonDocumentChunks.split(operation, limit)
@@ -163,13 +158,13 @@ class StagedDocumentWriterTest {
         var operation = BulkNdjson.encode(IndexOp.builder()
             .operation(IndexOperationMeta.builder().index("target").id("id").build())
             .document(Map.of("text", "x".repeat(50_000))).build(), ObjectMapperFactory.createDefaultMapper());
-        var future = new StagedDocumentWriter(transport, "staging", 4096, splitter).write("target", operation, null).toFuture();
+        var future = new SplitDocumentWriter(transport, 4096, splitter).write("target", operation, null).toFuture();
         try {
             assertTrue(retryStarted.await(10, TimeUnit.SECONDS));
             assertEquals(1, produced.get(), "Retry must retain one part without reading the next");
             assertEquals(2, requests.size());
             assertSame(requests.get(0), requests.get(1), "Retry must reuse the measured bytes");
-            firstAck.tryEmitValue(response(200, "{}"));
+            firstAck.tryEmitValue(response(200, "{\"_seq_no\":1,\"_primary_term\":1,\"result\":\"updated\"}"));
             assertTrue(secondStarted.await(10, TimeUnit.SECONDS));
             assertEquals(2, produced.get());
             if (cancel) {
@@ -188,31 +183,6 @@ class StagedDocumentWriterTest {
 
     private static HttpResponse response(int status, String body) {
         return new HttpResponse(status, "", Map.of(), body);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"missing", "string", "fractional", "negative", "overflow", "empty", "two", "noop", "timeout", "failures"})
-    void refusesAmbiguousOrMalformedTaskSuccessCounters(String kind) throws Exception {
-        var task = ObjectMapperFactory.createDefaultMapper().readTree("""
-            {"completed":true,"response":{"timed_out":false,"total":1,"created":1,"updated":0,
-                "deleted":0,"version_conflicts":0,"noops":0,"failures":[]}}
-            """);
-        assertTrue(StagedDocumentWriter.successfulPublication(task));
-        var result = (com.fasterxml.jackson.databind.node.ObjectNode) task.path("response");
-        switch (kind) {
-            case "missing" -> result.remove("noops");
-            case "string" -> result.put("created", "1");
-            case "fractional" -> result.put("created", 1.5);
-            case "negative" -> result.put("created", -1);
-            case "overflow" -> result.put("created", new java.math.BigInteger("18446744073709551617"));
-            case "empty" -> result.put("total", 0);
-            case "two" -> result.put("updated", 1);
-            case "noop" -> result.put("noops", 1);
-            case "timeout" -> result.put("timed_out", true);
-            case "failures" -> result.putArray("failures").addObject().put("status", 400);
-            default -> throw new IllegalArgumentException(kind);
-        }
-        assertFalse(StagedDocumentWriter.successfulPublication(task));
     }
 
     @ParameterizedTest
@@ -241,17 +211,17 @@ class StagedDocumentWriterTest {
         }
         var encoded = operation;
         assertThrows(OversizedDocumentException.class,
-            () -> new StagedDocumentWriter(transport, "staging", 4096).write("target", encoded, null).block());
+            () -> new SplitDocumentWriter(transport, 4096).write("target", encoded, null).block());
         verifyNoInteractions(transport);
     }
 
     @Test
-    void rejectsStagingOnServerlessAndElasticsearch() {
+    void rejectsSplittingOnServerlessAndElasticsearch() {
         for (String version : List.of("AOSS 2.0", "ES 7.10")) {
             var transport = mock(RestClient.class);
             var client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
                 Version.fromString(version), CompressionMode.UNCOMPRESSED, 100, 4096);
-            assertThrows(IllegalArgumentException.class, () -> client.setLargeDocumentStagingIndex("staging"));
+            assertThrows(IllegalArgumentException.class, () -> client.setSplitLargeDocuments(true));
             verifyNoInteractions(transport);
         }
     }
@@ -276,23 +246,35 @@ class StagedDocumentWriterTest {
         client.sendBulkRequest("i", List.of(op), null).block();
     }
 
-    @Test
-    void refusesToUseAnExistingIndexWithoutTheStagingContract() {
+    @ParameterizedTest
+    @ValueSource(strings = {"default_pipeline", "final_pipeline", "disabled-source", "source-includes", "source-excludes",
+        "derived-source", "async-durability", "reserved-field"})
+    void rejectsUnsupportedTargetConfigurationBeforeAnyDocumentWrite(String kind) throws Exception {
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var index = mapper.createObjectNode();
+        var mappings = index.putObject("mappings");
+        var settings = index.putObject("settings").putObject("index");
+        switch (kind) {
+            case "default_pipeline", "final_pipeline" -> settings.put(kind, "pipeline");
+            case "disabled-source" -> mappings.putObject("_source").put("enabled", false);
+            case "source-includes" -> mappings.putObject("_source").putArray("includes").add("only-this");
+            case "source-excludes" -> mappings.putObject("_source").putArray("excludes").add("something");
+            case "derived-source" -> settings.putObject("derived_source").put("enabled", true);
+            case "async-durability" -> settings.putObject("translog").put("durability", "async");
+            case "reserved-field" -> mappings.putObject("properties").putObject(SplitDocumentWriter.STATE_FIELD).put("type", "keyword");
+            default -> throw new IllegalArgumentException(kind);
+        }
         var transport = mock(RestClient.class);
         when(transport.asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any())).thenAnswer(call -> {
-            HttpMethod method = call.getArgument(0);
-            assertTrue(method.equals(HttpMethod.PUT) || method.equals(HttpMethod.GET),
-                "No document writes may reach an unrelated index");
-            return Mono.just(method.equals(HttpMethod.PUT)
-                ? new HttpResponse(400, "Bad Request", Map.of(),
-                    "{\"error\":{\"type\":\"resource_already_exists_exception\"}}")
-                : new HttpResponse(200, "OK", Map.of(), "{\"staging\":{\"mappings\":{},\"settings\":{}}}"));
+            assertEquals(HttpMethod.GET, call.getArgument(0), "Reject before changing mappings or writing a document");
+            assertEquals("target", call.getArgument(1));
+            return Mono.just(response(200, mapper.writeValueAsString(Map.of("target", index))));
         });
         var operation = BulkNdjson.encode(IndexOp.builder()
             .operation(IndexOperationMeta.builder().index("target").id("id").build())
-            .document(Map.of("text", "x".repeat(10_000))).build(), ObjectMapperFactory.createDefaultMapper());
-        assertThrows(IllegalArgumentException.class,
-            () -> new StagedDocumentWriter(transport, "staging", 4096).write("target", operation, null).block());
-        verify(transport, times(2)).asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any());
+            .document(Map.of("text", "x".repeat(10_000))).build(), mapper);
+        assertThrows(SplitDocumentException.class,
+            () -> new SplitDocumentWriter(transport, 4096).write("target", operation, null).block());
+        verify(transport).asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any());
     }
 }

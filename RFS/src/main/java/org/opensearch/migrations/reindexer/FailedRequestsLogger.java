@@ -6,7 +6,7 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
-import org.opensearch.migrations.reindexer.faileddocumentstream.StagedRequestFailure;
+import org.opensearch.migrations.reindexer.faileddocumentstream.SplitRequestFailure;
 
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
@@ -36,14 +36,14 @@ public class FailedRequestsLogger {
     }
 
     public void logLargeDocumentFailure(
-        String indexName, String transformedRequestBody, String originalDocument, StagedRequestFailure stagedFailure, Throwable error
+        String indexName, String transformedRequestBody, String originalDocument, SplitRequestFailure splitFailure, Throwable error
     ) {
-        logFailure(indexName, () -> 1, () -> transformedRequestBody, originalDocument, stagedFailure, error);
+        logFailure(indexName, () -> 1, () -> transformedRequestBody, originalDocument, splitFailure, error);
     }
 
     private void logFailure(
         String indexName, IntSupplier failedItemCounter, Supplier<String> bulkRequestBodySupplier,
-        String originalDocument, StagedRequestFailure stagedFailure, Throwable error
+        String originalDocument, SplitRequestFailure splitFailure, Throwable error
     ) {
         var rootCause = getRootCause(error);
         var failedItemCount = failedItemCounter.getAsInt();
@@ -58,10 +58,10 @@ public class FailedRequestsLogger {
         // Do not include failedItems in log to prevent customer data leakage
         log.atError()
             .setCause(error)
-            .setMessage(stagedFailure != null
+            .setMessage(splitFailure != null
                 ? "Large document migration failed for {} index on {} document(s). Response body: {}. "
                     + "Full document and failed stage details are in the FailedRequests logger. "
-                    + "Reconcile pending publication in the staging journal before replay. With root cause {}"
+                    + "Replay the whole document from the unacknowledged checkpoint. With root cause {}"
                 : "Bulk request failed for {} index on {} items. Response body: {}." +
                     "Request body logged to failed document stream (FailedRequests logger) for manual investigation and retry." +
                     "With root cause {}")
@@ -81,11 +81,11 @@ public class FailedRequestsLogger {
         if (originalDocument != null) {
             event.addKeyValue(FailedRequestsLoggerKeys.ORIGINAL_DOCUMENT, originalDocument);
         }
-        if (stagedFailure != null) {
-            event.addKeyValue(FailedRequestsLoggerKeys.STAGED_FAILURE,
-                ObjectMapperFactory.createDefaultMapper().valueToTree(stagedFailure).toString());
+        if (splitFailure != null) {
+            event.addKeyValue(FailedRequestsLoggerKeys.SPLIT_FAILURE,
+                ObjectMapperFactory.createDefaultMapper().valueToTree(splitFailure).toString());
         }
-        event.log(stagedFailure == null ? "Bulk failure logged to failed document stream"
+        event.log(splitFailure == null ? "Bulk failure logged to failed document stream"
             : "Large document failure logged to failed document stream");
     }
 
@@ -98,7 +98,7 @@ public class FailedRequestsLogger {
         public static final String REQUEST_BODY = "requestBody";
         public static final String RESPONSE_BODY = "responseBody";
         public static final String ORIGINAL_DOCUMENT = "originalDocument";
-        public static final String STAGED_FAILURE = "stagedFailure";
+        public static final String SPLIT_FAILURE = "splitFailure";
     }
 
     private Throwable getRootCause(Throwable error) {

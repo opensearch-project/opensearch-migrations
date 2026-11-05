@@ -1,434 +1,223 @@
-# Bounded requests and documents larger than a request
+# Bounded requests and oversized documents
 
-RFS preserves the existing bulk batching target: an individual larger operation
-is sent in a singleton request by default. An independent, optional document
-ceiling can reject larger operations. With experimental staging enabled, the
-batching target becomes a body limit for document requests: a lazy stream of
-bounded updates assembles a supported oversized document inside OpenSearch, then
-a small local `_reindex` request publishes its complete source.
+RFS encodes and batches operations **after all transformations and ID handling**.
+The existing bulk byte setting remains a batching target: a larger individual
+operation is sent in a singleton request by default. An independent document
+ceiling and experimental direct splitting are opt-in.
 
-Staging does not promise unlimited document size. The target's
-document, mapping, script, memory, and parser limits still apply. A request also
-needs enough room for its protocol envelope and action metadata.
-
-## Existing behavior and the remaining gap
-
-The starting point for this change is upstream `fb3fcde52`. The earlier exact-size
-batching change, `bcc8e6eb0` / PR #3483, already encodes operations **after**
-transformations and ID handling. `BulkNdjson.EncodedOperation` retains the actual
-UTF-8 action/body bytes, including each newline, for batching and retries.
-`OpenSearchClient.sendBulkRequests` executes split requests in order.
-
-An individual oversized operation is kept in a singleton batch by
-`BatchSizePredicate`. This behavior remains the default. RFS splits that singleton
-only when staging is explicitly enabled, or rejects it when it exceeds an
-explicit document ceiling. The source
-pipeline's batches still bound input buffering; only the final encoded operations
-determine outgoing request boundaries.
-
-The console's
-[`migrate_document.py`](../../migrationConsole/cluster_tools/src/cluster_tools/tools/migrate_document.py)
-demonstrates server-side assembly through scripted updates, but it is not a
-strict size or general JSON solution:
-
-* It splits Python strings by character count, not serialized UTF-8 bytes.
-* It does not reserve space for the script, parameters, JSON escaping, or metadata.
-* It handles top-level strings, not large arrays, nested structures, or field names.
-* The initial document can remain oversized after all eligible strings are removed.
-* Appending a retried chunk can duplicate data.
-* The target sees partial documents; mappings and ingest pipelines can observe
-  incomplete values. Version conditions and create/delete semantics need separate treatment.
-
-## Configuration and compatibility
+## Configuration
 
 ```text
 --documents-size-per-bulk-request 10485760
---large-document-staging-index rfs-large-document-staging
+--split-large-documents
 ```
 
-`--documents-size-per-bulk-request` defaults to 10 MiB. Without the staging option,
-larger single operations continue to be sent on their own, including their existing
-operation and version semantics.
-
-`--max-document-size-bytes` is a separate, positive ceiling on one encoded operation,
-including action metadata and newlines. Its default is `9223372036854775807`
-(`Long.MAX_VALUE`), so existing migrations have no new size rejection policy.
-It is measured after transformations and ID handling, before compression. It
-applies even when staging is enabled: chunking does not bypass an explicit document
-ceiling. A batch containing multiple individually allowed operations may exceed
-this document ceiling, subject to the ordinary batch target.
+`--documents-size-per-bulk-request` defaults to 10 MiB. With splitting disabled,
+an oversized singleton retains its original operation semantics and compression
+behavior. `--max-document-size-bytes` is a separate positive limit on one encoded
+operation, including action metadata and newlines. Its default is `Long.MAX_VALUE`
+(`9223372036854775807`). It applies before splitting and after transformations;
+splitting never bypasses an explicit document ceiling. A batch of individually
+allowed operations can exceed this per-document ceiling.
 
 For example, a 10 MiB batching target and a 50 MiB document ceiling allow a 25 MiB
-operation. Without staging it is a singleton bulk request; with staging it is
-assembled through requests no larger than 10 MiB. An operation above 50 MiB is
-rejected in either configuration. Setting both sizes to the same value gives
-strict bounds without staging. Leave the document ceiling above the batch target
-when staging larger documents.
+operation. By default it is sent alone. With `--split-large-documents`, supported
+index operations use individual request bodies no larger than 10 MiB. Operations
+above 50 MiB fail in either configuration. Setting both limits to the same value
+rejects oversized operations without enabling splitting.
 
-The decision order is: reject above the document ceiling; otherwise batch fitting
-operations normally; otherwise send a singleton or use staging, according to the
-staging option. A size rejection fails the source batch, retains the full document
-in the configured failure outputs, and does not advance that batch's checkpoint.
+## Direct index and ordered updates
 
-The staging option is experimental and disabled by default. RFS creates or
-validates the named concrete staging index. It must have:
+The splitter uses the destination document itself. It creates no staging index,
+recovery journal, reindex task, or separate payload document.
 
-* Root mappings disabled and complete `_source` storage.
-* An `rfs_large_document_staging: 2` mapping metadata marker.
-* No default or final ingest pipeline, no required routing, and request translog durability.
+1. Validate a plain `index` operation with an explicit ID, then resolve its target
+   and pin the operation to one concrete index. Preserve explicit or alias routing.
+2. Add or validate the reserved `_rfs_large_document` object mapping with
+   `enabled: false`. Read the destination's concurrency metadata.
+3. Send an initial **indexing replacement** containing a fresh attempt token and
+   empty assembly state. Use `if_seq_no` and `if_primary_term` for an existing
+   document, or `op_type=create` for an absent document. This removes obsolete
+   fields from any previous complete or partial source.
+4. Lazily generate a bounded part. Apply it with a scripted update conditional on
+   the last acknowledged sequence number and primary term. Only after that part
+   succeeds may the splitter generate the next part.
+5. Send a final conditional update that verifies assembly is complete, restores
+   numeric values, and replaces `_source` with the complete document. The temporary
+   field is removed from the source. Its disabled mapping remains on the index.
+6. Acknowledge the logical operation only after the final update succeeds. The
+   source batch checkpoint still waits for every operation in that batch.
 
-An existing unrelated index is rejected. The staging index remains after the
-migration; successfully acknowledged upload documents are removed, while small
-per-partition recovery journals remain. Keep the same dedicated staging index
-through every worker restart and checkpoint replay. Use a dedicated
-index with access controls appropriate for the migrated source contents.
-The worker needs permission to create/read that index, write/update/delete its
-documents, refresh it, run local reindex into the destination, and read task status.
-Enabling staging serializes batches within each partition and partitions sharing
-one sink, even if higher concurrency was requested. Independent RFS workers can
-still process separate partitions.
+The temporary field is necessary for values that cannot be indexed piecemeal,
+such as a fixed-dimension vector, an unfinished field name, or a numeric value.
+It holds the assembly stack, text fragments, and numeric literals without exposing
+these intermediate representations to user mappings. The completed document is
+mapped by the final update. An oversized document containing the reserved top-level field is
+rejected rather than silently changing that field's mapping semantics.
 
-The following restrictions apply **only with staging enabled** to operations above
-the batching target:
+**Partial destination documents are visible.** During assembly, the target source
+contains the temporary field rather than the previous document. Refreshing the
+index can expose that intermediate document to searches. A failed final mapping
+check leaves the temporary state in place. Whole-document replay replaces it and
+starts over; it does not append to an old attempt. This protocol does not provide
+atomic visibility across multiple requests or preserve the old source on failure.
 
-| Operation or metadata | Behavior when oversized with staging enabled |
+## Supported semantics
+
+Restrictions below apply to oversized operations when splitting is enabled.
+Fitting operations continue through the normal bulk path.
+
+| Operation or target feature | Direct splitting |
 | --- | --- |
-| Plain `index` with explicit `_id` | Supported through opt-in staging |
-| Routing, destination index/alias, explicit pipeline, `require_alias` | Preserved |
-| Default/final target ingest pipelines | Applied to the complete published document |
-| `delete` | Remains a one-line bulk action; oversized metadata fails |
-| `create`, arbitrary `update`/scripts | Not rewritten into index operations |
-| External/internal version conditions, sequence number/primary term conditions | Rejected before staging |
-| Server-generated IDs, legacy document types | Rejected before staging |
-| Serverless and Elasticsearch targets | This implementation rejects enabling staging |
+| Plain OpenSearch `index` with explicit ID | Supported |
+| Explicit routing, write alias, `require_alias` | Preserved; requests use the resolved concrete index |
+| `create`, delete, arbitrary update/script, generated ID | Oversized operation rejected |
+| External/internal version or sequence conditions, legacy types | Rejected rather than rewritten |
+| Explicit, default, or final ingest pipelines | Rejected; partial updates cannot preserve complete-document pipeline semantics |
+| Disabled, filtered, or derived `_source` | Rejected; assembly requires complete stored source |
+| Async translog durability | Rejected |
+| Reserved assembly field with incompatible mapping | Rejected before document writes |
+| Elasticsearch and OpenSearch Serverless targets | Enabling this experimental implementation is rejected |
 
-The implemented protocol is tested against OpenSearch 2.19.4 and 3.7.0. Tests do
-not establish managed-service permission compatibility or production throughput.
-Ingest pipelines must produce one indexed document; a dropped document is not
-acknowledged as successful publication. Unlike ordinary bulk item handling,
-staging/publication failures fail the batch even when a document exception
-allowlist is configured.
+The target index must already exist. The worker needs index metadata, mapping
+update, document get/index, and scripted update permissions. No reindex or task
+permissions are needed. Target mappings, settings, aliases, and index identity
+must remain stable during a migration. Destination ingest processing differs
+from RFS transformations: RFS transformations still run fully before splitting.
 
-## Request-size contract
+## Ordering, lost responses, and checkpoint replay
 
-Both byte settings include action metadata, document bytes, JSON escaping, and all bulk
-newlines. HTTP headers, request lines, TLS framing, and response bodies are outside
-this body-size setting.
+Connection reuse alone does not order server-side effects after a lost response.
+RFS therefore combines sequential subscription with conditional writes:
 
-The normal bulk path measures the final uncompressed bytes. When gzip is enabled,
-it also measures the compressed representation. If a body fits the batching target
-but gzip would exceed it, RFS sends the fitting uncompressed representation.
-An oversized singleton without staging keeps its normal compression behavior.
-The transport receives the measured compressed bytes and does not compress them again.
+* Splitting forces one batch in flight and one partition at a time per sink.
+  Merely emitting concurrent batch results in order would not order their writes.
+* The post-transformation batcher cuts before a repeated document ID, conservatively
+  across index names as well. Different aliases may point to the same index.
+  Retry compaction cannot then retry an earlier index after a later delete of
+  that ID has already succeeded in the same request.
+* Each part uses the previous acknowledged sequence number and primary term.
+  Retrying the same condition cannot apply an append twice. A real-time get of
+  only the attempt token and progress counter resolves a lost index/part response.
+* An initial replacement is not blindly retried. Its lost response is accepted
+  only if readback proves that this attempt initialized the document.
+* Replay generates a fresh attempt and starts with an indexing replacement.
+  A delayed part or completion from the abandoned attempt cannot modify that
+  replacement because its concurrency condition is stale. An initial replacement
+  conditional on a previously existing document is fenced in the same way.
+* Final completion removes the progress token. A lost or malformed final response
+  fails the batch and holds its checkpoint. Replay indexes the whole document
+  again, whether the previous completion committed or left partial state.
+* Mapping, encoding, unsupported-operation, and exhausted request failures keep
+  the source batch unacknowledged. Exception allowlisting cannot discard one
+  failed part and mark an incomplete document successful.
 
-Staging initialization, scripted updates, setup, and publication requests are
-checked against the same limit. Staging uses uncompressed bodies. Update chunks
-are filled according to the **serialized** JSON envelope, including the script
-and changing sequence number. UTF-8 characters, JSON escapes, and surrogate pairs
-are accounted for; strings are never split inside a surrogate pair. Metadata or a
-script envelope that cannot fit causes failure, never an oversized fallback.
+This is an exclusive backfill contract: one active owner per source partition,
+deterministic transformations, and destination identities that do not collide
+across independent workers or live writers. It does not provide exactly-once
+indexing or target-side fencing for the ordinary bulk path.
 
-## Streaming boundary
+There is also a specific missing-document limit: a create-only initialization
+prevents resetting a **present** document, but cannot fence a delayed initial
+create after another writer has created and then deleted that ID. If initialization
+has an unknown outcome and readback cannot confirm its token, stop/quiesce that
+attempt before allowing a successor to delete or recreate the ID. Arbitrarily
+overlapping workers in that window require a durable target-side generation
+protocol; connection ordering and a source checkpoint alone cannot supply it.
+The tests do not establish safety for that overlap or for violated worker leases.
+
+## Streaming and exact byte bounds
 
 `OperationSplitter.split(encodedOperation, requestLimit)` returns a cold
-`Flux<Part>`, with a sequence number and bounded body for each part.
-The staging writer subscribes after creating the upload. It requests one part at
-a time with no prefetch and awaits that part's acknowledgement, including retries,
-before requesting the next. Retries reuse the same byte array. Failure or cancellation
-stops generation; completion of the parts still requires publication and journal
-completion before the original document can be acknowledged.
+`Flux<Part>`. The writer consumes it with zero prefetch: one generated part remains
+live while its request and any retries complete. Cancellation or failure stops
+further generation. Retried requests reuse their measured byte array.
 
-The JSON splitter scans the already validated UTF-8 bytes, copying escaped ranges
-directly into parts. It does not build a document tree, materialize complete strings
-or field names, collect all parts, or reparse each generated request. Its additional
-memory is proportional to the request size and container depth. Both raw UTF-8 and
-escaped surrogate pairs stay together. Duplicate field names are rejected during
-staging assembly, before publication, using the map that already holds the source.
+The JSON cursor scans already validated UTF-8 bytes and copies escaped ranges
+into request envelopes. It does not materialize an entire string or field name,
+construct a document tree, collect all parts, or repeatedly serialize candidate
+chunks. Additional live client memory is proportional to request size and nesting
+depth. UTF-8 code points, JSON escapes, and escaped surrogate pairs stay intact.
+The request envelope, script, parameters, and changing part number count toward
+the limit. At most 512 events are emitted per part to bound script work.
 
-This boundary follows the existing RFS source and transformation contracts:
-`Document` owns source bytes, and a JSON/Map transformer may materialize the entire
-document. The encoded operation is retained for retries and complete failure
-diagnostics. The existing logger and failed-document record schema also materialize
-whole-document diagnostic values on failure. This change makes **operation expansion**
-streaming; it does not make those existing APIs or OpenSearch's source rewrites
-constant-memory. A fully streamed source-to-DLQ path would require changing those
-contracts to accept streams or spooled document references.
+Large strings, field names, nested arrays/objects, nulls, and vectors use the same
+event stream. Duplicate keys are rejected during assembly. Numbers remain lexical
+strings with recorded paths until final completion; repeated source parsing cannot
+round them during assembly. The final script restores `BigInteger`/`BigDecimal`
+and negative floating-point zero. JSON whitespace, exponent spelling, and key
+order are not preserved.
 
-## Assembly and publication
+Both byte settings count uncompressed encoded bytes, including metadata and
+newlines. HTTP headers, request lines, TLS framing, and response bodies are outside
+the body limit. Split requests are uncompressed. Ordinary fitting bulk requests
+also check their compressed size; if gzip overhead would exceed the target, the
+fitting uncompressed body is sent instead. Oversized singletons retain their
+existing compression behavior when splitting is disabled.
 
-1. Apply the entire configured RFS transformation chain.
-2. Encode the resulting operation after ID handling. Retain those bytes.
-3. For an oversized supported index operation, conditionally claim the partition's
-   journal with a new upload ID and owner token. The journal also retains the
-   transformed action metadata and a SHA-256 digest of the encoded document.
-   Create its staging document with a create-only indexing request. A delayed
-   initialization retry therefore cannot reset chunks already written.
-4. Lazily convert the encoded JSON body into container, field-name, string, number,
-   and scalar events as each request is demanded. An update script assembles these
-   into a stack of unfinished containers in the staging document.
-5. Send updates sequentially. Every request supplies its sequence number.
-   Retrying the most recently applied sequence is a no-op; an unexpected sequence fails.
-6. Refresh staging and conditionally record `publishing` in the journal before
-   submitting asynchronous local `_reindex`, filtered to the upload ID. Its
-   script verifies completion, unwraps the document, restores numbers, and sets
-   the original transformed ID. Destination routing and pipeline settings are
-   passed explicitly. Application and transport retries are both disabled for
-   submission. `X-Opaque-Id` carries the upload ID for task identification.
-7. Durably record the returned task ID, poll until the task is complete, and
-   require a result proving exactly one document was created or updated,
-   with no timeout, failures, conflicts, deletes, or no-ops.
-8. Durably record the terminal publication state. Attempt to delete the successful
-   upload, then complete the logical source batch.
+The streaming boundary is **operation expansion**, not the entire existing RFS
+pipeline. Source `Document` objects and encoded operations already retain source
+bytes; JSON/Map transformations may materialize documents. Failure record and
+logger APIs also materialize full diagnostic values. Those contracts would need
+streams or spooled references to make source-to-DLQ processing fully streamed.
 
-The event stack avoids embedding a full JSON path in each HTTP request. Large
-field names, large strings, and long nested paths therefore do not become
-indivisible request parameters. Arrays can be assembled across requests without
-ever presenting a partial vector to target mappings.
+## Failure records and recovery
 
-Numbers require additional care. Repeated update operations parse stored `_source`
-into Maps; eagerly storing a high-precision decimal as a JSON number can round it
-on the next update. Staging retains numeric literals as strings and records their
-paths outside the user document. The final reindex script converts them to
-`BigInteger`/`BigDecimal`, preserving negative floating-point zero. Numeric values
-are therefore preserved until the normal destination indexing/ingest path handles
-them. JSON whitespace, exponent spelling, and object key order are not promised.
-Duplicate object keys are rejected by the staging parser rather than silently
-collapsed during assembly.
+A terminal split failure produces one logical failed-document record, with:
 
-The original source document is retained for failure reporting when the
-transformation adapter can preserve its association with the resulting operation.
-Internal chunk count does not inflate target document counts: one staged index
-operation counts as one target upsert. Per-document HTTP attempts, retries, and
-uncompressed body bytes are counted; shared staging-index setup is not charged
-repeatedly to each document.
+* `transformedRequestBody`: the exact full transformed action/source NDJSON.
+* `originalDocument`: original source JSON when the transformation adapter retains
+  the association, including raw numeric spelling where raw bytes are available.
+* `splitFailure`: attempt ID, stage, part sequence, request method/path/body,
+  response status/body, error message, and whether final completion may have committed.
 
-## Ordering, failure, and recovery
+The dedicated `FailedRequestsLogger` carries the same full document and part
+information. A final mapping rejection retains the engine response identifying
+its failing field. Encoding failures have no transmitted request for that part.
+The failed-part body is diagnostic, not an independent replay instruction.
 
-Staging requires ordered sink writes. `DocumentMigrationPipeline` forces one batch
-in flight per partition and one partition at a time per sink. This differs from
-`flatMapSequential` alone: ordered result emission does not order concurrent writes.
-Within each source batch, all split requests complete sequentially.
+RFS awaits both record acceptance and **durable flush** before propagating a split
+failure: an aborted batch will never reach the normal per-checkpoint flush.
+Persistence failure also aborts the batch. Delivery remains at least once, so
+replaying a failing operation can produce another record. Repair the cause and
+replay the complete source operation from its unacknowledged checkpoint; do not
+apply an RFS transformation twice or retry an append in isolation.
 
-The post-transformation bulk batcher also cuts before a repeated destination
-index/document ID. An earlier retryable index cannot be compacted out and retried
-after a later delete of that ID has already succeeded in the same bulk request.
-Deletes remain one-line actions. A cursor cannot advance while a staged operation
-in its source batch remains unacknowledged.
+## Verification and longer-term limits
 
-Assembly occurs entirely in staging. The target receives a full indexing
-replacement, so an assembly failure or mapping rejection leaves the previous
-target document intact. A successful replay replaces an existing partial target
-document and removes its obsolete fields. This does not make the entire source
-batch transactional or promise exactly-once execution of ingest processors.
+The focused unit tests cover exact byte boundaries, transformation growth and
+shrinkage, one-to-many transformations, the default singleton exception,
+independent document ceilings, operation rejection, gzip expansion, streaming
+demand, cancellation, and retained request bytes during retry. Allocation tests
+require generating the first 8 KiB part of a 16 MiB string or field name without
+allocating a copy of the whole value.
 
-Before reading any documents from a resumed partition, RFS reads its durable
-journal. Its ID uses the collection and partition identity, including the snapshot
-and shard for a Lucene source, rather than the checkpoint offset.
+`RfsBoundedRequestsEndToEndTest` uses a real Lucene snapshot, all three RFS
+transformation paths, and OpenSearch 2.19.4 and 3.7.0 behind an independent proxy
+that limits both transmitted and decoded request bodies. The target also sets
+its HTTP limit to 8 KiB. It tests full stored source equality, routing and aliases,
+large fields/names/nested values/vectors, exact numeric values, visible partial
+state, held checkpoints, malformed final responses, mixed index/delete ordering,
+and a 25 MiB document through 1 MiB requests.
 
-| Prior state | Recovery before any replayed target writes |
-| --- | --- |
-| No journal | Start normally |
-| Partly or fully assembled, publication not claimed | Conditionally abandon the old owner; replay uses a new upload initialized from scratch |
-| Publication has a durable task ID | Claim recovery ownership, wait for that task to terminate, record its result, then replay the source from its checkpoint |
-| Publication claimed but no durable task ID | Stop; task submission may have committed or may still be in flight |
-| Task status missing/unavailable | Stop; do not infer that the task failed or that retrying is safe |
-| Terminal state durably recorded | Replay from the checkpoint; do not skip a source operation merely because an earlier attempt published it |
+`RfsSplitRecoveryEndToEndTest` uses the production bootstrap, a persisted cursor,
+fresh clients/sources/sinks on restart, and real gzip failure objects uploaded by
+the AWS SDK to LocalStack S3. It tests a lost initial response, a later part failure,
+DLQ durability, delayed conditional index/part/completion requests, lost final
+completion, repair after a real later-field mapping failure, encoding failures,
+duplicate keys, and mixed successful/permanent/retryable bulk item statuses.
+The fixtures assert that no staging-index, reindex, or task requests occur.
 
-All journal transitions use sequence-number/primary-term conditions. A lost
-journal-write acknowledgement is accepted only if a real-time read proves that
-the exact owner/generation/state was stored. A stale uploader cannot claim
-publication after a successor fences its journal. A successor also changes the
-owner before recovering an existing task, so a predecessor cannot acknowledge
-its delayed completion against the successor's journal.
+Bounded HTTP requests do not mean unlimited document size or bounded server memory.
+Every update reads and rewrites the growing source, so many small parts can incur
+quadratic cumulative work. The 25 MiB scale fixture uses a 2 GiB target heap with
+circuit breakers enabled. Parser, mapping, Lucene, script, and cluster memory limits
+still apply. Numeric restoration and deeply nested paths can hit script loop limits.
 
-Chunks carry sequence numbers. An identical retry of the most recently applied
-chunk is a no-op, and an out-of-order sequence fails. Fresh replay uses a distinct
-upload document: late chunks from an abandoned attempt cannot alter its replacement.
-Replaying begins only after any known earlier publication has terminated, which
-prevents that task from resurrecting a document after a replayed delete.
-
-There is an unavoidable ambiguity with existing APIs between sending `_reindex`
-and durably recording its task ID. An upload token is sent as `X-Opaque-Id` and
-appears in task headers, but an absent task in a running-task listing does not prove
-that no task was submitted or completed. RFS therefore **fails closed** in this
-window. Identify the exact tagged task, then conditionally attach its task ID to
-the retained journal while preserving its other fields. A fresh worker can then
-perform the normal task-completion recovery. Do not clear the journal to bypass
-this check. If the task cannot be identified, further operator reconciliation is
-required; automatic recovery of that case needs target-side commit tokens.
-
-Use this path for an exclusive backfill with a single active worker lease per
-source partition, deterministic transformations, and independent destination
-identities across partitions. The journal fences staged publication attempts;
-it does not add target-side fencing to ordinary bulk operations or live writers.
-Ingest processors must preserve document identity for the bulk dependency check
-to apply. Transformations that collapse identities across workers, concurrent
-applications/CDC, lease violations, changes to the staging index on restart, and
-loss/deletion of acknowledged journal storage are outside this ordering contract.
-The rejected version/sequence conditions cannot be replaced by client chunking.
-
-Failures and cancellation retain unfinished uploads and journals. Successful
-cleanup failure is logged without republishing. Keep journals and task records
-until workers and publications have stopped and recovery is complete, then remove
-retained uploads, completed task records, and the dedicated staging index.
-
-## Failed-document records
-
-A terminal oversized-operation failure emits **one logical document record**,
-not one record per attempted chunk. Existing `requestItem`/`responseItem` fields
-remain available. Additional fields preserve:
-
-* `transformedRequestBody`: the exact full action/source NDJSON, including numeric
-  spelling, routing, and the post-transformation destination and ID.
-* `originalDocument`: pre-transformation JSON, using the original raw bytes when
-  retained and otherwise the adapter's source object; it may be
-  absent for synthesized operations or transformations that lose source association.
-* `stagedFailure`: journal/upload/task identifiers, logical stage, chunk sequence
-  when relevant, request method/path/body, response status/body, error message, and whether
-  publication may have committed.
-
-The dedicated `FailedRequestsLogger` carries the same full transformed request,
-original source, and a JSON representation of the staged failure. A publication
-mapping error retains the complete task failure response, including the failing
-field, plus the publication envelope. A status-poll failure is identified as such;
-it is not misreported as a failed document fragment.
-
-An aborted staged batch will not reach the bootstrap's normal per-cursor failed
-document flush. The client therefore awaits buffering **and durable flush** before
-propagating this error. Flush failure also aborts the batch. A work-item replay
-can emit another record for the same logical failure; delivery is at least once.
-Chunk bodies are diagnostic, not independent replay instructions. Recover the
-whole operation through the journal/checkpoint path, without applying an RFS
-transformation twice. The full failure record itself is not restricted to the
-OpenSearch request-body limit.
-
-Staged failures keep the source batch unacknowledged, including non-retryable
-mapping failures. Correct the cause before replay. They do not use ordinary bulk
-compaction's skip-and-checkpoint behavior or an exception allowlist to discard an
-incomplete logical operation.
-
-## Limits and the long-term design
-
-The staging path uses existing APIs and supports documents larger than both the
-client cap and the server's HTTP content limit. It trades performance and
-operational simplicity for that compatibility:
-
-* Each update reads and rewrites the growing staging `_source`. With many small
-  chunks, cumulative work can approach quadratic growth in document size.
-  The 25 MiB scale test with 1 MiB requests hit the real parent circuit breaker
-  on the default 1 GiB test node; its passing scale fixture uses a 2 GiB heap and keeps
-  circuit breakers enabled. Small HTTP requests do not imply small heap usage.
-* Numeric path records and temporary container state add storage and heap cost.
-* Updates cap events per request to limit script work. Final numeric restoration
-  still has work proportional to numeric path count/depth and can hit Painless
-  loop limits.
-* RFS still holds the encoded document in memory. Its configured JSON parser
-  limits, the target's parser/depth limits, Lucene limits, mappings, and cluster
-  memory remain real constraints. The raw encoder uses the same RFS parser
-  limits as the transformed path.
-* Local reindex and task-status permissions, script support, cleanup, and resolution of
-  uncertain publication outcomes are prerequisites.
-
-A scalable general solution is a target-side multipart indexing API, not
-arbitrary splitting of existing bulk lines. Such an API should accept bounded
-chunks into durable/spooled storage under an upload ID, verify offsets/lengths and
-a content digest, then commit through the normal indexing path exactly once for
-that upload token. Commit must preserve the original action, routing, explicit
-ID, create/version/sequence conditions, and pipeline semantics. It should expose
-queryable upload/commit state and expiration so a lost acknowledgement is
-recoverable without issuing an ambiguous second publication. Transformation runs
-before upload, while target ingest processing runs once at commit.
-
-That requires target support (a native feature or compatible plugin). A client
-cannot create such transactional semantics merely by changing the size of HTTP
-chunks. Transfer-Encoding chunking still represents one HTTP request; gzip cannot
-guarantee a fitting size for every document.
-
-## Verification
-
-`OpenSearchDocumentSinkBatchingTest`, `JsonDocumentChunksTest`, and
-`StagedDocumentWriterTest` cover exact byte boundaries, the final newline, metadata,
-UTF-8/escaping, surrogate pairs, transformation growth/shrinkage, one-to-many
-transforms, legacy oversized singletons, independent document ceilings,
-conditional-operation rejection, gzip expansion, staging ownership, and source
-checkpoint behavior. Demand, retry, failure, and cancellation assertions verify that
-only the current part is generated. Allocation checks require the first 8 KiB part
-of a 16 MiB string or field name to allocate less than 1 MiB after warmup.
-
-`RfsBoundedRequestsEndToEndTest` creates a real OpenSearch snapshot and reads its
-Lucene documents through RFS. It runs against real 2.19.4 and 3.7.0 targets with
-`http.max_content_length=8192b`, behind an independent proxy that records and
-rejects oversized compressed or uncompressed bodies. It first proves that a direct
-large document receives HTTP 413.
-
-Compatibility cases send an operation above a 4 KiB batching target through the
-same 8 KiB target successfully, then reject it with an explicit document ceiling,
-then migrate it through staging with every request below 4 KiB. All three RFS
-transformation paths compare the entire stored source.
-
-The tests validate raw, native, and JSON transformation paths, exact stored
-documents and routing, strings and field names larger than a request, nested
-objects/arrays/nulls, a 4096-dimensional vector larger than a request, aliases,
-explicit/default/final pipelines, mixed index/delete ordering, cleanup, publication
-failure, and checkpoints held until publication. The proxy deliberately loses an
-update response **after OpenSearch applies the chunk**, then verifies that the
-retry does not duplicate content. Exact numeric assertions use arbitrary-precision
-parsing so a rounded-double comparison cannot conceal loss of source data.
-
-A separate scale case expands a two-byte source document to a 25 MiB string after
-transformation, migrates it through a 1 MiB HTTP cap, and compares the entire stored
-string including Unicode at both ends.
-
-`RfsStagedRecoveryEndToEndTest` uses the production bootstrap, persists its emitted
-checkpoint to disk, and constructs new clients, sources, document sinks, and S3
-failure sinks to resume from that checkpoint. Both target versions run behind the
-size-enforcing proxy. The failed-document stream uses the real AWS SDK uploader
-against LocalStack S3; assertions retrieve and decompress the stored objects.
-The test covers:
-
-* A lost initialization ACK, several committed chunks, then a rejected later
-  field/chunk; the old target stays intact and restart fully replaces it.
-* A delayed stale worker's publication CAS, rejected by the real cluster after
-  its successor completes a later delete.
-* A real running reindex task held by unavailable replicas while the first worker
-  loses task-status access; recovery waits before reading or replaying any source
-  operations, then finishes in order after replicas are released.
-* Submission that actually commits but loses its response; exactly one task is
-  submitted, blind restart is blocked, and attaching the independently identified
-  task ID allows checkpoint replay to complete.
-* A real mapping failure in a later field, with full-document and failed-stage
-  fidelity in both S3 and the legacy logger.
-* Multiple root objects detected during later chunk encoding, after earlier
-  updates committed, with the complete raw document and an explicit client-side
-  error retained in S3.
-* Equivalent duplicate field names, including escaped names and a prior null value,
-  rejected by the real assembly script after earlier chunks committed; the full
-  document, failed part, and target error are retained in S3.
-* Mixed successful, non-retryable, and retryable bulk items, followed by a dependent
-  delete. Acknowledged unrelated documents are not retried.
-* A withheld S3 upload completion, proving failure reporting waits for durability.
-
-The checkpoint fixture exercises bootstrap cursor publication and restart offsets;
-it does not simulate the work coordinator's lease-election algorithm or a full
-cluster storage disaster.
-
-```bash
-./gradlew :RFS:test \
-  --tests '*OpenSearchDocumentSinkBatchingTest' \
-  --tests '*JsonDocumentChunksTest' \
-  --tests '*StagedDocumentWriterTest'
-
-./gradlew :DocumentsFromSnapshotMigration:isolatedTest \
-  --tests '*RfsBoundedRequestsEndToEndTest' \
-  --tests '*RfsStagedRecoveryEndToEndTest'
-```
-
-Validation on 2026-11-04: **311 selected tests passed**, with no failures or skips: 203 RFS unit tests, one RFS LocalStack integration test, 24 pipeline tests, nine HTTP tests, 69 migration argument/bootstrap tests, and five end-to-end invocations. Java formatter checks passed for all four changed modules, as did `git diff --check`. The final metadata-validation cleanup also passed a 27-test follow-up. Local SonarQube 25.10 analysis of the 17 changed production Java files reports zero open issues with the repository rule configuration. These are targeted regression suites, not a run of every repository test.
-
-## Primary references
-
-* [OpenSearch Bulk API](https://docs.opensearch.org/latest/api-reference/document-apis/bulk/)
-* [OpenSearch Update Document API](https://docs.opensearch.org/latest/api-reference/document-apis/update-document/)
-* [OpenSearch Reindex API](https://docs.opensearch.org/latest/api-reference/document-apis/reindex/)
-* [OpenSearch Get Task API](https://docs.opensearch.org/latest/api-reference/tasks/get-tasks/)
-* [OpenSearch HTTP settings](https://docs.opensearch.org/latest/install-and-configure/configuring-opensearch/network-settings/)
+A scalable general solution would need a target multipart indexing API or plugin
+with durable chunk offsets, a generation token, and a queryable idempotent commit.
+That would allow spooled assembly and one normal indexing/ingest pass, preserve
+version/create semantics, and fence attempts even across deletion. The direct
+client implementation cannot manufacture those guarantees from existing update
+requests. HTTP transfer chunking remains one request; compression does not guarantee
+that arbitrary document contents fit a request limit.

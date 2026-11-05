@@ -25,7 +25,11 @@ import com.sun.net.httpserver.HttpServer;
 
 /** Records real HTTP bodies, enforces a limit independently of the client, and can lose an ACK after commit. */
 public final class SizeLimitingProxy implements AutoCloseable {
-    public record Request(String method, String path, byte[] wireBody, byte[] body) {}
+    public record Request(String method, String path, byte[] wireBody, byte[] body) {
+        public boolean completesDocument() {
+            return path.contains("/_update/") && new String(body, StandardCharsets.UTF_8).contains("\"chunks\":");
+        }
+    }
     public record Response(int status, byte[] body) {}
     public record CompletedRequest(Request request, Response response) {}
 
@@ -38,7 +42,7 @@ public final class SizeLimitingProxy implements AutoCloseable {
     public final List<Request> requests = new CopyOnWriteArrayList<>();
     public final List<CompletedRequest> completedRequests = new CopyOnWriteArrayList<>();
     public final AtomicBoolean loseNextUpdateAcknowledgement = new AtomicBoolean();
-    public final AtomicBoolean rejectPublication = new AtomicBoolean();
+    public final AtomicBoolean rejectCompletion = new AtomicBoolean();
     public final AtomicReference<Throwable> failure = new AtomicReference<>();
     public volatile Consumer<Request> beforeForward = request -> {};
     public volatile Function<Request, Response> intercept = request -> null;
@@ -73,8 +77,8 @@ public final class SizeLimitingProxy implements AutoCloseable {
                 respond(exchange, 413, "{\"error\":\"request too large\"}".getBytes(StandardCharsets.UTF_8));
                 return;
             }
-            if (request.path().startsWith("/_reindex") && rejectPublication.get()) {
-                respond(exchange, 503, "{\"error\":\"publication unavailable\"}".getBytes(StandardCharsets.UTF_8));
+            if (request.completesDocument() && rejectCompletion.get()) {
+                respond(exchange, 503, "{\"error\":\"completion unavailable\"}".getBytes(StandardCharsets.UTF_8));
                 return;
             }
             beforeForward.accept(request);

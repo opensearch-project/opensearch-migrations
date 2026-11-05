@@ -22,10 +22,12 @@ RFS batches encoded operations after transformations and ID handling. The config
 batch byte target continues to allow a larger single operation in its own request.
 Use `--max-document-size-bytes` to opt into rejecting larger operations; its default
 is `Long.MAX_VALUE`. The
-experimental `--large-document-staging-index` option assembles supported oversized
-index operations through a lazy stream of bounded requests, then publishes the complete document
-with local reindexing. See [bounded requests and large documents](docs/bounded-document-requests.md)
-for the design, operation restrictions, end-to-end tests, and recovery requirements.
+experimental `--split-large-documents` option indexes initial state directly into
+the destination document, streams bounded conditional updates, and acknowledges
+the document only after the final update. It creates no staging index. Partial
+documents are visible until completion, and replay starts with an indexing replacement.
+See [bounded requests and large documents](docs/bounded-document-requests.md) for the
+reserved temporary field, supported operations, end-to-end tests, and recovery limits.
 
 Java document providers can implement the functional interface
 [`BulkOperationTransformer`](src/main/java/org/opensearch/migrations/bulkload/transformers/BulkOperationTransformer.java)

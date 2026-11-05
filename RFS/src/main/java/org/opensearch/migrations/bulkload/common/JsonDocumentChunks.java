@@ -59,7 +59,7 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
         }
         skipWhitespace();
         if (offset == document.length || document[offset++] != '{') {
-            throw new IllegalArgumentException("A staged document must be a JSON object");
+            throw new IllegalArgumentException("A split document must be a JSON object");
         }
         containers.push(new Container(true));
         pending = bytes("[\"object\"]");
@@ -130,7 +130,7 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
         while (pending == null && textKind == null) {
             skipWhitespace();
             if (offset == document.length) {
-                throw new IllegalArgumentException("Incomplete staged JSON object");
+                throw new IllegalArgumentException("Incomplete split JSON object");
             }
             readEvent();
         }
@@ -156,7 +156,7 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
             default -> {
                 offset--;
                 if (!numberByte(document[offset])) {
-                    throw new IllegalArgumentException("Invalid staged JSON token at byte " + offset);
+                    throw new IllegalArgumentException("Invalid split JSON token at byte " + offset);
                 }
                 textKind = "number";
                 number = true;
@@ -173,7 +173,7 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
         if (containers.isEmpty()) {
             skipWhitespace();
             if (offset != document.length) {
-                throw new IllegalArgumentException("A staged document must contain exactly one JSON object");
+                throw new IllegalArgumentException("A split document must contain exactly one JSON object");
             }
             finished = true;
         }
@@ -183,7 +183,7 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
         int start = offset - 1;
         for (int i = 0; i < literal.length(); i++) {
             if (start + i >= document.length || document[start + i] != literal.charAt(i)) {
-                throw new IllegalArgumentException("Invalid staged JSON scalar");
+                throw new IllegalArgumentException("Invalid split JSON scalar");
             }
         }
         offset = start + literal.length();
@@ -230,7 +230,7 @@ final class JsonDocumentChunks implements Iterator<byte[]>, AutoCloseable {
             }
             offset += width;
         }
-        throw new IllegalArgumentException("Incomplete staged JSON token");
+        throw new IllegalArgumentException("Incomplete split JSON token");
     }
 
     private int stringUnitWidth(int start) {

@@ -42,7 +42,7 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
-import org.opensearch.migrations.reindexer.faileddocumentstream.StagedRequestFailure;
+import org.opensearch.migrations.reindexer.faileddocumentstream.SplitRequestFailure;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -84,7 +84,7 @@ public abstract class OpenSearchClient {
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
     private volatile long maxDocumentSizeBytes = Long.MAX_VALUE;
-    private final AtomicReference<StagedDocumentWriter> stagedDocumentWriter = new AtomicReference<>();
+    private final AtomicReference<SplitDocumentWriter> splitDocumentWriter = new AtomicReference<>();
 
     // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
     // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
@@ -123,28 +123,16 @@ public abstract class OpenSearchClient {
         this.maxDocumentSizeBytes = maxDocumentSizeBytes;
     }
 
-    /**
-     * Enable the opt-in oversized-index path. Configure before submitting document batches.
-     * With staging enabled, unsupported oversized operations fail instead of exceeding the request target.
-     */
-    public void setLargeDocumentStagingIndex(String indexName) {
-        if (indexName == null) {
-            stagedDocumentWriter.set(null);
-            return;
+    /** Enable ordered, bounded splitting of plain oversized index operations. Configure before writing. */
+    public void setSplitLargeDocuments(boolean enabled) {
+        if (enabled && version.getFlavor() != Flavor.OPENSEARCH && version.getFlavor() != Flavor.AMAZON_MANAGED_OPENSEARCH) {
+            throw new IllegalArgumentException("Large document splitting requires an OpenSearch target");
         }
-        if (version.getFlavor() != Flavor.OPENSEARCH && version.getFlavor() != Flavor.AMAZON_MANAGED_OPENSEARCH) {
-            throw new IllegalArgumentException("Large document staging requires an OpenSearch target with local reindex support");
-        }
-        stagedDocumentWriter.set(new StagedDocumentWriter(client, indexName, maxBytesPerBulkRequest));
+        splitDocumentWriter.set(enabled ? new SplitDocumentWriter(client, maxBytesPerBulkRequest) : null);
     }
 
-    public boolean isLargeDocumentStagingEnabled() {
-        return stagedDocumentWriter.get() != null;
-    }
-
-    public Mono<Void> prepareLargeDocumentPartition(String collection, String partition) {
-        var writer = stagedDocumentWriter.get();
-        return writer == null ? Mono.empty() : writer.preparePartition(collection, partition);
+    public boolean isLargeDocumentSplittingEnabled() {
+        return splitDocumentWriter.get() != null;
     }
 
     /**
@@ -600,13 +588,12 @@ public abstract class OpenSearchClient {
     ) {
         // The batching predicate and retry state must be fresh for every subscription.
         return Mono.defer(() -> {
-            var writer = stagedDocumentWriter.get();
-            var ready = writer == null ? Mono.<Void>empty() : writer.beforeWrites(indexName);
-            return ready.thenMany(Flux.fromIterable(docs)
+            var writer = splitDocumentWriter.get();
+            return Flux.fromIterable(docs)
             .map(prepare)
-            .bufferUntil(new OperationBatcher(indexName, writer != null), true)
+            .bufferUntil(new OperationBatcher(writer != null), true)
             // A split batch completes in source order, before its source checkpoint can advance.
-            .concatMap(batch -> sendPreparedBatch(indexName, batch, writer, context, allowlist), 1))
+            .concatMap(batch -> sendPreparedBatch(indexName, batch, writer, context, allowlist), 1)
             .reduce((previous, next) -> new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
                 previous.target.plus(next.target), previous.requests.plus(next.requests)))
             .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"));
@@ -615,13 +602,11 @@ public abstract class OpenSearchClient {
 
     /** Do not compact/retry an earlier action after a later action on the same ID has succeeded. */
     private final class OperationBatcher implements Predicate<PreparedOperation> {
-        private final String defaultIndex;
         private final boolean ordered;
-        private final HashSet<List<String>> identities = new HashSet<>();
+        private final HashSet<String> identities = new HashSet<>();
         private BatchSizePredicate<PreparedOperation> sizes = newSizes();
 
-        OperationBatcher(String defaultIndex, boolean ordered) {
-            this.defaultIndex = defaultIndex;
+        OperationBatcher(boolean ordered) {
             this.ordered = ordered;
         }
 
@@ -631,12 +616,13 @@ public abstract class OpenSearchClient {
 
         @Override
         public boolean test(PreparedOperation operation) {
-            List<String> identity = null;
+            String identity = null;
             if (ordered) {
                 try {
                     var metadata = OBJECT_MAPPER.readTree(operation.encoded().action()).elements().next();
                     if (metadata.hasNonNull("_id")) {
-                        identity = List.of(metadata.path("_index").asText(defaultIndex), metadata.path("_id").asText());
+                        // Different aliases can resolve to the same destination. Conservatively cut on ID alone.
+                        identity = metadata.path("_id").asText();
                     }
                 } catch (IOException e) {
                     throw new java.io.UncheckedIOException(e);
@@ -658,11 +644,11 @@ public abstract class OpenSearchClient {
     }
 
     private Mono<BulkResponse> sendPreparedBatch(
-        String indexName, List<PreparedOperation> batch, StagedDocumentWriter writer,
+        String indexName, List<PreparedOperation> batch, SplitDocumentWriter writer,
         IRfsContexts.IRequestContext context, DocumentExceptionAllowlist allowlist
     ) {
         // This ceiling applies to each operation, never to their aggregate batch size.
-        // Check it before staging too: chunking must not bypass an explicit document rejection policy.
+        // Check it before splitting too: chunking must not bypass an explicit document rejection policy.
         for (var operation : batch) {
             if (operation.encoded().size() > maxDocumentSizeBytes) {
                 var error = new OversizedDocumentException(operation.encoded().size(), maxDocumentSizeBytes,
@@ -675,7 +661,7 @@ public abstract class OpenSearchClient {
             return writer.write(indexName, first.encoded(), context)
                 .onErrorResume(error -> recordOversizedFailure(indexName, first, error).then(Mono.error(error)));
         }
-        // Preserve the existing singleton exception to the batching target when staging is disabled.
+        // Preserve the existing singleton exception to the batching target when splitting is disabled.
         return executeBulkWithRetry(indexName, batch, context, allowlist);
     }
 
@@ -688,14 +674,14 @@ public abstract class OpenSearchClient {
                 String transformedRequest = new String(assemble(List.of(prepared)).bytes(), StandardCharsets.UTF_8);
                 var metadata = OBJECT_MAPPER.readTree(prepared.encoded().action()).elements().next();
                 String index = metadata.path("_index").asText(defaultIndex);
-                var stagedFailure = error instanceof StagedDocumentException staged ? staged.getFailure() : null;
-                failedRequestsLogger.logLargeDocumentFailure(index, transformedRequest, originalDocument, stagedFailure, error);
+                var splitFailure = error instanceof SplitDocumentException split ? split.getFailure() : null;
+                failedRequestsLogger.logLargeDocumentFailure(index, transformedRequest, originalDocument, splitFailure, error);
                 var sink = failedDocumentStreamSink.get();
                 if (sink == null) {
                     return Mono.empty();
                 }
                 var failureRecord = oversizedFailureRecord(index, metadata, operation, originalDocument,
-                    transformedRequest, error, stagedFailure);
+                    transformedRequest, error, splitFailure);
                 // An aborted batch never reaches the bootstrap's per-cursor flush. Gate the error here.
                 return sink.write(failureRecord).then(Mono.defer(sink::flush)).timeout(Duration.ofMinutes(5))
                     .onErrorMap(persistenceError -> {
@@ -719,22 +705,15 @@ public abstract class OpenSearchClient {
     private FailedDocumentStreamRecord oversizedFailureRecord(
         String index, JsonNode metadata, BulkOperationSpec operation, String originalDocument,
         String transformedRequest, Throwable error,
-        StagedRequestFailure stagedFailure
+        SplitRequestFailure splitFailure
     ) throws IOException {
-        var lastResponse = StagedDocumentWriter.responseOf(error);
+        var lastResponse = SplitDocumentWriter.responseOf(error);
         var responseItem = diagnosticResponse(lastResponse);
         var detail = responseItem == null ? OBJECT_MAPPER.createObjectNode() : responseItem;
-        if (detail.has("response")) {
-            detail = detail.path("response");
-        }
-        var taskFailure = detail.path("failures").path(0);
-        String type = detail.path("error").path("type").asText(null);
-        if (type == null) {
-            type = taskFailure.path("cause").path("type").asText(error.getClass().getSimpleName());
-        }
-        int status = taskFailure.path("status").asInt(lastResponse == null ? 0 : lastResponse.statusCode);
-        boolean nonRetryable = (stagedFailure == null || !stagedFailure.publicationMayHaveCommitted())
-            && (isInvalidDocument(error) || (status >= 400 && status < 500 && status != 429));
+        String type = detail.path("error").path("type").asText(error.getClass().getSimpleName());
+        int status = lastResponse == null ? 0 : lastResponse.statusCode;
+        boolean nonRetryable = (splitFailure == null || !splitFailure.completionMayHaveCommitted())
+            && (isInvalidDocument(error) || (status >= 400 && status < 500 && status != 429 && status != 409));
         var requestItem = OBJECT_MAPPER.<ObjectNode>valueToTree(operation);
         if (originalDocument != null) {
             requestItem.set("document", OBJECT_MAPPER.readTree(originalDocument));
@@ -745,7 +724,7 @@ public abstract class OpenSearchClient {
             .timestamp(Instant.now().toString()).failureType(type)
             .failureClass(nonRetryable ? FailureClass.NON_RETRYABLE : FailureClass.RETRYABLE_EXHAUSTED)
             .requestItem(requestItem).responseItem(responseItem)
-            .transformedRequestBody(transformedRequest).originalDocument(originalDocument).stagedFailure(stagedFailure)
+            .transformedRequestBody(transformedRequest).originalDocument(originalDocument).splitFailure(splitFailure)
             .build();
     }
 

@@ -74,7 +74,6 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -83,13 +82,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Real OpenSearch, the production bootstrap/checkpoint path, real gzip failed-document files, and
  * controlled network failures. Each restart constructs a new client, sink, source and bootstrap
  * using the checkpoint persisted by its predecessor. Source ordering is deliberately not requested:
- * the staging sink must enforce it even when the configured batch concurrency is eight.
+ * the splitting sink must enforce it even when the configured batch concurrency is eight.
  */
 @Tag("isolatedTest")
-class RfsStagedRecoveryEndToEndTest {
+class RfsSplitRecoveryEndToEndTest {
     private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final int LIMIT = 8192;
-    private static final String BUCKET = "rfs-staged-recovery";
+    private static final String BUCKET = "rfs-split-recovery";
     private static final LocalStackContainer S3_CONTAINER = new LocalStackContainer(
         DockerImageName.parse("localstack/localstack:4.3.0")).withServices(LocalStackContainer.Service.S3);
     private static S3AsyncClient s3;
@@ -126,9 +125,10 @@ class RfsStagedRecoveryEndToEndTest {
             target.start();
             var cluster = new ClusterOperations(target);
             resumesLaterChunkFailureAndFlushesWholeDocument(target, cluster);
-            fencesDelayedPredecessorBeforeItCanPublish(target, cluster);
-            waitsForRunningTaskBeforeCheckpointReplay(target, cluster);
-            refusesBlindReplayAfterLostSubmissionAcknowledgement(target, cluster);
+            for (String phase : List.of("INDEX", "PART", "COMPLETE")) {
+                fencesDelayedPredecessor(target, cluster, phase);
+            }
+            resumesAfterLostCompletionAcknowledgement(target, cluster);
             recordsRealLateFieldMappingFailure(target, cluster);
             recordsEncodingFailureAfterEarlierChunksCommitted(target, cluster);
             rejectsDuplicateKeysAfterEarlierChunksCommitted(target, cluster);
@@ -144,7 +144,6 @@ class RfsStagedRecoveryEndToEndTest {
         String targetId = "renamed-partial";
         createIndex(cluster, index);
         assertEquals(201, cluster.put("/" + index + "/_doc/" + targetId, "{\"obsolete\":true,\"early_field\":\"partial\"}").getKey());
-        var before = source(cluster, index, targetId);
         var documents = List.of(doc("done", "{\"value\":1}", 0), doc("partial", "{\"source\":\"original\"}", 1),
             doc("later", "{\"value\":3}", 2));
         var checkpoint = checkpoint(index);
@@ -155,8 +154,8 @@ class RfsStagedRecoveryEndToEndTest {
              var logs = new CloseableLogSetup(FailedRequestsLogger.FAILED_REQUESTS_LOGGER)) {
             var rejected = new AtomicReference<SizeLimitingProxy.Request>();
             var loseCreateAcknowledgement = new AtomicBoolean(true);
-            proxy.afterForward = (request, response) -> request.path().contains("/_create/upload-")
-                && response.status() == 201 && loseCreateAcknowledgement.compareAndSet(true, false) ? null : response;
+            proxy.afterForward = (request, response) -> request.method().equals("PUT") && request.path().contains("/_doc/" + targetId)
+                && response.status() == 200 && loseCreateAcknowledgement.compareAndSet(true, false) ? null : response;
             proxy.intercept = request -> {
                 if (request.path().contains("/_update/") && text(request.body()).contains("\"late_field\"")) {
                     rejected.set(request);
@@ -178,9 +177,10 @@ class RfsStagedRecoveryEndToEndTest {
                 new FailedRequestsLogger(logs.getTestLogger()), failures);
             var failedRun = CompletableFuture.supplyAsync(first::run);
             assertTrue(flushStarted.await(30, TimeUnit.SECONDS));
-            assertFalse(failedRun.isDone(), "A staged failure must await durable DLQ flush before reporting the batch error");
+            assertFalse(failedRun.isDone(), "A split failure must await durable DLQ flush before reporting the batch error");
             assertEquals(1, readCheckpoint(checkpoint), "Only the earlier complete document may checkpoint");
-            assertEquals(before, source(cluster, index, targetId), "No partially assembled target source is visible");
+            assertTrue(source(cluster, index, targetId).has("_rfs_large_document"), "Assembly is visible in the destination document");
+            assertFalse(source(cluster, index, targetId).has("obsolete"), "The initial index replaces pre-existing partial source");
             assertEquals(404, cluster.get("/" + index + "/_doc/later").getKey());
             durable.complete(null);
             assertThrows(java.util.concurrent.ExecutionException.class, () -> failedRun.get(30, TimeUnit.SECONDS));
@@ -195,21 +195,21 @@ class RfsStagedRecoveryEndToEndTest {
             assertEquals("{\"source\":\"original\"}", record.path("originalDocument").asText());
             assertEquals(LARGE, record.path("transformedRequestBody").asText().split("\n")[1],
                 "Preserve the whole transformed document and its exact decimal spelling");
-            assertEquals("CHUNK", record.path("stagedFailure").path("stage").asText());
-            assertTrue(record.path("stagedFailure").path("chunkSequence").asLong() >= 2);
-            assertFalse(record.path("stagedFailure").path("publicationMayHaveCommitted").asBoolean());
-            assertEquals(text(rejected.get().body()), record.path("stagedFailure").path("requestBody").asText());
-            String uploadId = record.path("stagedFailure").path("uploadId").asText();
-            var partialStage = source(cluster, sourceIndex + "-staging", uploadId);
-            assertTrue(partialStage.path("next").asLong() > 0, "Several chunks really committed before the later chunk failed");
+            assertEquals("PART", record.path("splitFailure").path("stage").asText());
+            assertTrue(record.path("splitFailure").path("partSequence").asLong() >= 2);
+            assertFalse(record.path("splitFailure").path("completionMayHaveCommitted").asBoolean());
+            assertEquals(text(rejected.get().body()), record.path("splitFailure").path("requestBody").asText());
+            var partialState = source(cluster, index, targetId).path("_rfs_large_document");
+            assertTrue(partialState.path("next").asLong() > 0, "Several parts really committed before the later part failed");
+            assertEquals(record.path("splitFailure").path("attemptId"), partialState.path("attempt"));
             assertEquals(1, logs.getCapturedLogEvents().size());
             var logged = logs.getCapturedLogEvents().get(0).getContextData();
             assertEquals(record.path("transformedRequestBody").asText(), logged.get("requestBody"));
             assertEquals(record.path("originalDocument").asText(), logged.get("originalDocument"));
-            assertEquals(record.path("stagedFailure"), tree(logged.get("stagedFailure")));
+            assertEquals(record.path("splitFailure"), tree(logged.get("splitFailure")));
             assertFalse(loseCreateAcknowledgement.get(), "The initial create really committed before its response was lost");
-            assertTrue(proxy.completedRequests.stream().anyMatch(exchange -> exchange.request().path().contains("/_create/upload-")
-                && exchange.response().status() == 409), "A retry must not reset already initialized staging state");
+            assertEquals(1, proxy.requests.stream().filter(r -> r.method().equals("PUT")
+                && r.path().contains("/_doc/" + targetId)).count(), "A lost initial ACK must be read back without repeating the replacement");
 
             proxy.intercept = request -> null;
             var second = worker(target, proxy, sourceIndex, documents, checkpoint, transform, new FailedRequestsLogger(), failures);
@@ -217,7 +217,7 @@ class RfsStagedRecoveryEndToEndTest {
             assertEquals(List.of(1L), second.source.readOffsets, "The successor must read from the persisted cursor");
             assertEquals(3, readCheckpoint(checkpoint));
             assertEquals(tree(LARGE), source(cluster, index, targetId));
-            assertFalse(source(cluster, index, targetId).has("obsolete"), "Publication fully replaces a pre-existing partial document");
+            assertFalse(source(cluster, index, targetId).has("obsolete"), "Replay fully replaces a pre-existing partial document");
             assertEquals(tree("{\"value\":3}"), source(cluster, index, "later"));
             assertEquals(1, failures.records().size());
             assertTrue(second.cursor.get().isShardComplete());
@@ -227,155 +227,85 @@ class RfsStagedRecoveryEndToEndTest {
         }
     }
 
-    private void fencesDelayedPredecessorBeforeItCanPublish(SearchClusterContainer target, ClusterOperations cluster) throws Exception {
-        String index = "fence-predecessor";
+    private void fencesDelayedPredecessor(SearchClusterContainer target, ClusterOperations cluster, String phase) throws Exception {
+        String index = "fence-" + phase.toLowerCase(java.util.Locale.ROOT);
         createIndex(cluster, index);
+        assertEquals(201, cluster.put("/" + index + "/_doc/same", "{\"obsolete\":true}").getKey());
         var documents = List.of(doc("same", LARGE, 0), delete("same", 1), doc("later", "{\"value\":2}", 2));
         var checkpoint = checkpoint(index);
         try (var firstProxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
              var secondProxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
              var failures = new FailureFiles()) {
-            var publicationClaimStarted = new CountDownLatch(1);
-            var releaseOldClaim = new CountDownLatch(1);
-            var delayedClaim = new AtomicReference<SizeLimitingProxy.Request>();
+            var delayed = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            var held = new AtomicReference<SizeLimitingProxy.Request>();
             firstProxy.beforeForward = request -> {
-                if (request.method().equals("PUT") && request.path().contains("/_doc/journal-")
-                    && "publishing".equals(tree(request.body()).path("phase").asText())) {
-                    delayedClaim.set(request);
-                    publicationClaimStarted.countDown();
-                    await(releaseOldClaim);
+                boolean match = switch (phase) {
+                    case "INDEX" -> request.method().equals("PUT") && request.path().contains("/_doc/same");
+                    case "PART" -> request.path().contains("/_update/")
+                        && tree(request.body()).path("script").path("params").path("seq").asLong(-1) == 2;
+                    case "COMPLETE" -> request.completesDocument();
+                    default -> throw new IllegalArgumentException(phase);
+                };
+                if (match && held.compareAndSet(null, request)) {
+                    delayed.countDown();
+                    await(release);
                 }
             };
             var predecessor = worker(target, firstProxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures);
-            var oldRun = CompletableFuture.supplyAsync(predecessor::run);
+            var predecessorRun = CompletableFuture.supplyAsync(predecessor::run);
             try {
-                assertTrue(publicationClaimStarted.await(30, TimeUnit.SECONDS));
+                assertTrue(delayed.await(30, TimeUnit.SECONDS));
                 assertEquals(0, readCheckpoint(checkpoint));
                 var successor = worker(target, secondProxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures);
                 assertEquals(CompletionStatus.WORK_COMPLETED, successor.run());
-                assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey(), "The successor's later delete has completed");
                 assertEquals(3, readCheckpoint(checkpoint));
-            } finally {
-                releaseOldClaim.countDown();
-            }
-            assertThrows(java.util.concurrent.ExecutionException.class, () -> oldRun.get(30, TimeUnit.SECONDS));
-            assertTrue(firstProxy.completedRequests.stream().anyMatch(exchange ->
-                exchange.request() == delayedClaim.get() && exchange.response().status() == 409),
-                "The real cluster must reject the stale publication CAS");
-            assertEquals(0, publications(firstProxy), "An abandoned worker must never submit its reindex after the successor");
-            assertEquals(1, publications(secondProxy));
-            assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey(), "No late publication may resurrect the deleted document");
-            assertEquals("CLAIM_PUBLICATION", failures.records().get(0).path("stagedFailure").path("stage").asText());
-            assertBounds(firstProxy);
-            assertBounds(secondProxy);
-        }
-    }
-
-    private void waitsForRunningTaskBeforeCheckpointReplay(SearchClusterContainer target, ClusterOperations cluster) throws Exception {
-        String index = "recover-task";
-        createIndex(cluster, index);
-        // This target shard cannot satisfy writes requiring all replicas until the test releases it.
-        assertEquals(200, cluster.put("/" + index + "/_settings",
-            "{\"number_of_replicas\":1,\"index.write.wait_for_active_shards\":\"all\"}").getKey());
-        var documents = List.of(doc("same", LARGE, 0), delete("same", 1), doc("later", "{\"value\":2}", 2));
-        var checkpoint = checkpoint(index);
-        try (var firstProxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
-             var secondProxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
-             var failures = new FailureFiles()) {
-            firstProxy.intercept = request -> request.path().startsWith("/_tasks/")
-                ? response(403, "{\"error\":{\"type\":\"security_exception\",\"reason\":\"lost access to task status\"}}") : null;
-            var predecessor = worker(target, firstProxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures);
-            assertThrows(RfsException.class, predecessor::run);
-            assertEquals(0, readCheckpoint(checkpoint));
-            var failed = failures.records().get(0);
-            assertEquals("WAIT_PUBLICATION", failed.path("stagedFailure").path("stage").asText());
-            assertFalse(failed.path("stagedFailure").path("taskId").asText().isEmpty());
-            assertTrue(failed.path("stagedFailure").path("publicationMayHaveCommitted").asBoolean());
-            var taskObservedRunning = new CountDownLatch(1);
-            secondProxy.afterForward = (request, response) -> {
-                if (request.path().startsWith("/_tasks/") && !tree(response.body()).path("completed").asBoolean(true)) {
-                    taskObservedRunning.countDown();
-                }
-                return response;
-            };
-            var successor = worker(target, secondProxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures);
-            var recovered = CompletableFuture.supplyAsync(successor::run);
-            try {
-                assertTrue(taskObservedRunning.await(15, TimeUnit.SECONDS), "A real asynchronous publication must still be running");
-                assertFalse(recovered.isDone());
-                assertTrue(successor.source.readOffsets.isEmpty(), "Wait for publication before reading/replaying any source documents");
-                assertEquals(0, publications(secondProxy));
                 assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey());
             } finally {
-                assertEquals(200, cluster.put("/" + index + "/_settings", "{\"number_of_replicas\":0}").getKey());
+                release.countDown();
             }
-            assertEquals(CompletionStatus.WORK_COMPLETED, recovered.get(60, TimeUnit.SECONDS));
-            assertEquals(3, readCheckpoint(checkpoint));
-            assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey(), "A completed old task cannot race the replayed delete");
+            assertThrows(java.util.concurrent.ExecutionException.class, () -> predecessorRun.get(30, TimeUnit.SECONDS));
+            assertTrue(held.get().path().contains("if_seq_no="));
+            assertTrue(firstProxy.completedRequests.stream().anyMatch(r -> r.request().equals(held.get())
+                && r.response().status() == 409), "The real primary must reject the stale conditional request");
+            assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey(), "A late predecessor cannot resurrect the successor's delete");
             assertEquals(tree("{\"value\":2}"), source(cluster, index, "later"));
-            assertEquals(1, publications(firstProxy));
-            assertEquals(1, publications(secondProxy), "Replay starts a fresh full replacement after the previous task terminates");
+            assertEquals(3, readCheckpoint(checkpoint));
+            assertEquals(phase, failures.records().get(0).path("splitFailure").path("stage").asText());
             assertBounds(firstProxy);
             assertBounds(secondProxy);
         }
     }
 
-    private void refusesBlindReplayAfterLostSubmissionAcknowledgement(
-        SearchClusterContainer target, ClusterOperations cluster
-    ) throws Exception {
-        String index = "unknown-publication";
+    private void resumesAfterLostCompletionAcknowledgement(SearchClusterContainer target, ClusterOperations cluster) throws Exception {
+        String index = "lost-completion";
         createIndex(cluster, index);
-        var documents = List.of(doc("same", LARGE, 0), delete("same", 1));
         var checkpoint = checkpoint(index);
-        try (var firstProxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
-             var secondProxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
+        var documents = List.of(doc("same", LARGE, 0), delete("same", 1), doc("later", "{\"value\":3}", 2));
+        try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
              var failures = new FailureFiles()) {
-            var actualTask = new AtomicReference<String>();
-            firstProxy.afterForward = (request, response) -> {
-                if (request.path().startsWith("/_reindex")) {
-                    assertEquals(200, response.status());
-                    actualTask.set(tree(response.body()).path("task").asText());
-                    return null;
-                }
-                return response;
-            };
+            var lose = new AtomicBoolean(true);
+            proxy.afterForward = (request, response) -> request.completesDocument() && response.status() == 200
+                && lose.compareAndSet(true, false) ? null : response;
             assertThrows(RfsException.class,
-                worker(target, firstProxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures)::run);
-            assertEquals(1, publications(firstProxy), "The transport must not retry a task submission after a lost ACK");
-            assertNotNull(actualTask.get());
-            var finished = cluster.get("/_tasks/" + actualTask.get() + "?wait_for_completion=true&timeout=30s");
-            assertEquals(200, finished.getKey());
-            assertTrue(tree(finished.getValue()).path("completed").asBoolean());
-            assertEquals(tree(LARGE), source(cluster, index, "same"), "Publication actually committed despite the lost ACK");
-            var failed = failures.records().get(0);
-            assertEquals("SUBMIT_PUBLICATION", failed.path("stagedFailure").path("stage").asText());
-            assertTrue(failed.path("stagedFailure").path("publicationMayHaveCommitted").asBoolean());
-            assertTrue(failed.path("stagedFailure").path("taskId").isNull());
-            assertEquals(LARGE, failed.path("transformedRequestBody").asText().split("\n")[1]);
-            assertEquals(failed.path("stagedFailure").path("uploadId").asText(),
-                tree(finished.getValue()).path("task").path("headers").path("X-Opaque-Id").asText(),
-                "The server-side task must be identifiable by the upload token even when its submission ACK was lost");
-            var successor = worker(target, secondProxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures);
-            assertThrows(RfsException.class, successor::run);
-            assertTrue(successor.source.readOffsets.isEmpty());
-            assertEquals(0, publications(secondProxy));
-            assertFalse(secondProxy.requests.stream().anyMatch(r -> r.path().endsWith("/_bulk")));
+                worker(target, proxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures)::run);
+            assertFalse(lose.get());
             assertEquals(0, readCheckpoint(checkpoint));
-            assertEquals(tree(LARGE), source(cluster, index, "same"), "Fail closed: no later delete or blind replacement was issued");
-            assertEquals(1, failures.records().size(), "Recovery must not attribute the prior document's failure to a different input");
-            // An operator can identify the tagged task and attach its ID using a conditional journal write.
-            String journalPath = "/" + index + "-staging/_doc/" + failed.path("stagedFailure").path("journalId").asText();
-            var journal = tree(cluster.get(journalPath).getValue());
-            var repaired = ((ObjectNode) journal.path("_source")).deepCopy().put("taskId", actualTask.get());
-            assertEquals(200, cluster.put(journalPath + "?if_seq_no=" + journal.path("_seq_no").asLong()
-                + "&if_primary_term=" + journal.path("_primary_term").asLong(), repaired.toString()).getKey());
-            var reconciled = worker(target, secondProxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures);
-            assertEquals(CompletionStatus.WORK_COMPLETED, reconciled.run());
-            assertEquals(2, readCheckpoint(checkpoint));
-            assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey(),
-                "After reconciliation, checkpoint replay must finish with the later delete");
-            assertBounds(firstProxy);
-            assertBounds(secondProxy);
+            assertEquals(tree(LARGE), source(cluster, index, "same"), "Completion committed, but its ACK was lost");
+            assertEquals(404, cluster.get("/" + index + "/_doc/later").getKey());
+            assertEquals(1, publications(proxy), "Do not blindly retry the final source replacement");
+            var failed = failures.records().get(0);
+            assertEquals("COMPLETE", failed.path("splitFailure").path("stage").asText());
+            assertTrue(failed.path("splitFailure").path("completionMayHaveCommitted").asBoolean());
+            assertEquals(LARGE, failed.path("transformedRequestBody").asText().split("\n")[1]);
+            var successor = worker(target, proxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures);
+            assertEquals(CompletionStatus.WORK_COMPLETED, successor.run());
+            assertEquals(List.of(0L), successor.source.readOffsets);
+            assertEquals(3, readCheckpoint(checkpoint));
+            assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey());
+            assertEquals(tree("{\"value\":3}"), source(cluster, index, "later"));
+            assertEquals(2, publications(proxy));
+            assertBounds(proxy);
         }
     }
 
@@ -386,24 +316,37 @@ class RfsStagedRecoveryEndToEndTest {
                 "early_field":{"type":"text","index":false},"late_field":{"type":"integer","coerce":false}}}}
             """);
         assertEquals(201, cluster.put("/" + index + "/_doc/bad", "{\"early_field\":\"old\",\"late_field\":1}").getKey());
-        var before = source(cluster, index, "bad");
         String bad = "{\"early_field\":\"" + "x".repeat(40_000) + "\",\"late_field\":\"not-an-integer\"}";
         var documents = List.of(doc("bad", bad, 0), doc("later", "{\"early_field\":\"later\",\"late_field\":2}", 1));
+        var checkpoint = checkpoint(index);
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
              var failures = new FailureFiles()) {
             assertThrows(RfsException.class,
-                worker(target, proxy, index, documents, checkpoint(index), null, new FailedRequestsLogger(), failures)::run);
-            assertEquals(before, source(cluster, index, "bad"));
+                worker(target, proxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures)::run);
+            assertTrue(source(cluster, index, "bad").path("_rfs_large_document").path("next").asLong() > 3);
+            assertEquals(0, readCheckpoint(checkpoint));
             assertEquals(404, cluster.get("/" + index + "/_doc/later").getKey());
             var failed = failures.records().get(0);
             assertEquals("mapper_parsing_exception", failed.path("failureType").asText());
             assertEquals("NON_RETRYABLE", failed.path("failureClass").asText());
-            assertEquals("PUBLICATION_RESULT", failed.path("stagedFailure").path("stage").asText());
-            assertFalse(failed.path("stagedFailure").path("publicationMayHaveCommitted").asBoolean());
+            assertEquals("COMPLETE", failed.path("splitFailure").path("stage").asText());
+            assertFalse(failed.path("splitFailure").path("completionMayHaveCommitted").asBoolean());
             assertEquals(bad, failed.path("transformedRequestBody").asText().split("\n")[1]);
-            assertTrue(failed.path("stagedFailure").path("responseBody").asText().contains("late_field"));
-            assertTrue(tree(failed.path("stagedFailure").path("requestBody").asText()).has("script"));
+            assertTrue(failed.path("splitFailure").path("responseBody").asText().contains("late_field"));
+            assertTrue(tree(failed.path("splitFailure").path("requestBody").asText()).has("script"));
             assertTrue(proxy.requests.stream().filter(r -> r.path().contains("/_update/")).count() > 3);
+            String repaired = bad.replace("\"not-an-integer\"", "17");
+            BulkOperationTransformer repair = operations -> {
+                operations.forEach(op -> {
+                    if ("bad".equals(op.getOperation().getId())) op.setRawDocument(bytes(repaired));
+                });
+                return operations;
+            };
+            assertEquals(CompletionStatus.WORK_COMPLETED,
+                worker(target, proxy, index, documents, checkpoint, repair, new FailedRequestsLogger(), failures).run());
+            assertEquals(2, readCheckpoint(checkpoint));
+            assertEquals(tree(repaired), source(cluster, index, "bad"));
+            assertEquals(1, failures.records().size());
             assertBounds(proxy);
         }
     }
@@ -411,6 +354,16 @@ class RfsStagedRecoveryEndToEndTest {
     private void preservesOrderAcrossMixedBulkItemStatuses(SearchClusterContainer target, ClusterOperations cluster) throws Exception {
         String index = "mixed-item-status";
         cluster.createIndex(index, "{\"settings\":{\"number_of_replicas\":0},\"mappings\":{\"properties\":{\"value\":{\"type\":\"integer\",\"coerce\":false}}}}");
+        String alias = index + "-alias";
+        assertEquals(200, cluster.put("/" + index + "/_alias/" + alias, "{}").getKey());
+        BulkOperationTransformer useAliasForIndex = operations -> {
+            operations.forEach(op -> {
+                if (op instanceof IndexOp indexOp && "same".equals(op.getOperation().getId())) {
+                    indexOp.getOperation().setIndex(alias);
+                }
+            });
+            return operations;
+        };
         var documents = List.of(doc("same", "{\"value\":1}", 0), doc("bad", "{\"value\":\"invalid\"}", 1),
             doc("good", "{\"value\":3}", 2), delete("same", 3), doc("last", "{\"value\":4}", 4));
         try (var proxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
@@ -429,7 +382,7 @@ class RfsStagedRecoveryEndToEndTest {
                 return response;
             };
             var checkpoint = checkpoint(index);
-            var worker = worker(target, proxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures, 100);
+            var worker = worker(target, proxy, index, documents, checkpoint, useAliasForIndex, new FailedRequestsLogger(), failures, 100);
             assertEquals(CompletionStatus.WORK_COMPLETED, worker.run());
             assertEquals(5, readCheckpoint(checkpoint));
             assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey(), "An earlier index retry cannot resurrect a later delete");
@@ -438,10 +391,13 @@ class RfsStagedRecoveryEndToEndTest {
             assertEquals(404, cluster.get("/" + index + "/_doc/bad").getKey());
             assertEquals(1, failures.records().size());
             assertEquals("bad", failures.records().get(0).path("documentId").asText());
-            assertTrue(failures.records().get(0).path("stagedFailure").isNull(), "Normal failures stay attached to their own document");
+            assertTrue(failures.records().get(0).path("splitFailure").isNull(), "Normal failures stay attached to their own document");
             var bulks = proxy.requests.stream().filter(r -> r.path().endsWith("/_bulk")).toList();
             assertEquals(3, bulks.size(), "Initial distinct IDs, retry of one ID, then its dependent delete");
             assertEquals("same", tree(text(bulks.get(1).body()).split("\n")[0]).path("index").path("_id").asText());
+            assertEquals(alias, tree(text(bulks.get(1).body()).split("\n")[0]).path("index").path("_index").asText());
+            assertEquals(index, tree(text(bulks.get(2).body()).split("\n")[0]).path("delete").path("_index").asText(),
+                "The dependent delete names the concrete index while its predecessor names an alias");
             assertArrayEquals(bytes("{\"value\":1}"), bytes(text(bulks.get(1).body()).split("\n")[1]));
             assertBounds(proxy);
         }
@@ -460,17 +416,17 @@ class RfsStagedRecoveryEndToEndTest {
             assertThrows(RfsException.class, worker(target, proxy, index, List.of(doc("bad", invalid, 0)), checkpoint,
                 null, new FailedRequestsLogger(), failures)::run);
             assertEquals(0, readCheckpoint(checkpoint));
-            assertEquals(tree("{\"value\":\"old\"}"), source(cluster, index, "bad"));
+            assertTrue(source(cluster, index, "bad").has("_rfs_large_document"));
             assertEquals(0, publications(proxy));
             var record = failures.records().get(0);
             assertEquals("NON_RETRYABLE", record.path("failureClass").asText());
             assertEquals(invalid, record.path("originalDocument").asText());
             assertEquals(invalid, record.path("transformedRequestBody").asText().split("\n")[1]);
-            var detail = record.path("stagedFailure");
-            assertEquals("ENCODE_CHUNK", detail.path("stage").asText());
+            var detail = record.path("splitFailure");
+            assertEquals("ENCODE_PART", detail.path("stage").asText());
             assertTrue(detail.path("errorMessage").asText().contains("exactly one JSON object"));
             assertTrue(detail.path("method").isNull(), "Encoding failed before a request for this chunk existed");
-            assertTrue(source(cluster, index + "-staging", detail.path("uploadId").asText()).path("next").asLong() > 0);
+            assertTrue(source(cluster, index, "bad").path("_rfs_large_document").path("next").asLong() > 0);
             assertBounds(proxy);
         }
     }
@@ -489,19 +445,19 @@ class RfsStagedRecoveryEndToEndTest {
             assertThrows(RfsException.class, worker(target, proxy, index, List.of(doc("bad", duplicate, 0)), checkpoint,
                 null, new FailedRequestsLogger(), failures)::run);
             assertEquals(0, readCheckpoint(checkpoint));
-            assertEquals(tree("{\"value\":\"old\"}"), source(cluster, index, "bad"));
+            assertTrue(source(cluster, index, "bad").has("_rfs_large_document"));
             assertEquals(0, publications(proxy));
             assertEquals(1, failures.records().size());
             var record = failures.records().get(0);
             assertEquals("NON_RETRYABLE", record.path("failureClass").asText());
             assertEquals(duplicate, record.path("originalDocument").asText());
             assertEquals(duplicate, record.path("transformedRequestBody").asText().split("\n")[1]);
-            var detail = record.path("stagedFailure");
-            assertEquals("CHUNK", detail.path("stage").asText());
+            var detail = record.path("splitFailure");
+            assertEquals("PART", detail.path("stage").asText());
             assertTrue(detail.path("responseBody").asText().contains("Duplicate field"));
             assertEquals("POST", detail.path("method").asText());
             assertTrue(detail.path("requestBody").asText().contains("duplicate"));
-            assertTrue(source(cluster, index + "-staging", detail.path("uploadId").asText()).path("next").asLong() > 0);
+            assertTrue(source(cluster, index, "bad").path("_rfs_large_document").path("next").asLong() > 0);
             assertBounds(proxy);
         }
     }
@@ -525,7 +481,7 @@ class RfsStagedRecoveryEndToEndTest {
                 return Retry.fixedDelay(2, Duration.ofMillis(10));
             }
         };
-        client.setLargeDocumentStagingIndex(index + "-staging");
+        client.setSplitLargeDocuments(true);
         failures.configure(client);
         var source = new RestartableSource(index, documents);
         var sink = new OpenSearchDocumentSink(client, transform == null ? null : () -> transform,
@@ -669,7 +625,7 @@ class RfsStagedRecoveryEndToEndTest {
     private static byte[] bytes(String value) { return value.getBytes(StandardCharsets.UTF_8); }
     private static String text(byte[] value) { return new String(value, StandardCharsets.UTF_8); }
     private static SizeLimitingProxy.Response response(int status, String body) { return new SizeLimitingProxy.Response(status, bytes(body)); }
-    private static long publications(SizeLimitingProxy proxy) { return proxy.requests.stream().filter(r -> r.path().startsWith("/_reindex")).count(); }
+    private static long publications(SizeLimitingProxy proxy) { return proxy.requests.stream().filter(SizeLimitingProxy.Request::completesDocument).count(); }
 
     private static void await(CountDownLatch latch) {
         try {
@@ -683,6 +639,8 @@ class RfsStagedRecoveryEndToEndTest {
     private static void assertBounds(SizeLimitingProxy proxy) {
         assertNull(proxy.failure.get());
         assertFalse(proxy.requests.isEmpty());
+        assertTrue(proxy.requests.stream().noneMatch(r -> r.path().contains("staging") || r.path().startsWith("/_reindex")
+            || r.path().startsWith("/_tasks")), "Use only the destination index and document");
         for (var request : proxy.requests) {
             assertTrue(request.wireBody().length <= LIMIT, request.path());
             assertTrue(request.body().length <= LIMIT, request.path());

@@ -41,5 +41,5 @@ public class FailedDocumentStreamRecord {
     /** Exact pre-transformation JSON when retained by the source/transformer. */
     String originalDocument;
     /** Failed bounded request and recovery state for an oversized logical document. */
-    StagedRequestFailure stagedFailure;
+    SplitRequestFailure splitFailure;
 }
