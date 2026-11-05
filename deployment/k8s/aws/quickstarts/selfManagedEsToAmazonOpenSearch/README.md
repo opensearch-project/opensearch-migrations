@@ -824,7 +824,8 @@ false).
 
 **Placement** is set through Helm values passed to `aws-bootstrap.sh --helm-values`:
 
-- Kafka, proxies and replayers get dedicated on-demand NodePools (`workloadsNodePool.mode: isolated`).
+- RFS workers, Kafka, proxies and replayers get dedicated on-demand NodePools
+  (`workloadsNodePool.mode: isolated`).
 - EKS spreads them across zones by default (`workloadsNodePool.zoneSpread: required`, with
   `minDomains` set from the subnet count).
 

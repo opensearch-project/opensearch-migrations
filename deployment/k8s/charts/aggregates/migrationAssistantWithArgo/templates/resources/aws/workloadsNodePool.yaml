@@ -3,6 +3,7 @@
 {{- $base := $root.Values.workloadsNodePool -}}
 {{- $pool := .pool -}}
 {{- $dedicated := .dedicated -}}
+{{- $instanceTypes := ternary $pool.instanceTypes $base.instanceTypes (hasKey $pool "instanceTypes") -}}
 {{- $architectures := ternary $pool.architectures $base.architectures (hasKey $pool "architectures") -}}
 {{- $capacityTypes := ternary $pool.capacityTypes $base.capacityTypes (hasKey $pool "capacityTypes") -}}
 {{- $instanceCategories := ternary $pool.instanceCategories $base.instanceCategories (hasKey $pool "instanceCategories") -}}
@@ -40,6 +41,11 @@ spec:
           operator: In
           values: {{ $capacityTypes | toJson }}
         {{- end }}
+        {{- if $instanceTypes }}
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: {{ $instanceTypes | toJson }}
+        {{- else }}
         {{- if $instanceCategories }}
         - key: eks.amazonaws.com/instance-category
           operator: In
@@ -59,6 +65,7 @@ spec:
         - key: eks.amazonaws.com/instance-size
           operator: In
           values: {{ $instanceSizes | toJson }}
+        {{- end }}
         {{- end }}
         - key: kubernetes.io/os
           operator: In
@@ -82,7 +89,7 @@ spec:
 {{ include "migration.workloadNodePool" (dict "root" $ "pool" $pool "dedicated" true) }}
 {{ end }}
 {{ if eq $mode "isolated" }}
-{{ range $name := list "kafka" "proxy" "replayer" }}
+{{ range $name := list "rfs" "kafka" "proxy" "replayer" }}
 {{ $pool := get $.Values.workloadsNodePool.dedicatedPools $name }}
 ---
 {{ include "migration.workloadNodePool" (dict "root" $ "pool" $pool "dedicated" true) }}

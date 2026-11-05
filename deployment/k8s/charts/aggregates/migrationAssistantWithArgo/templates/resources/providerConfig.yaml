@@ -44,9 +44,11 @@ data:
   {{- $kafkaPoolName := ternary .Values.workloadsNodePool.dedicatedPools.kafka.name $sharedPoolName (eq $mode "isolated") }}
   {{- $proxyPoolName := ternary .Values.workloadsNodePool.dedicatedPools.proxy.name $sharedPoolName (eq $mode "isolated") }}
   {{- $replayerPoolName := ternary .Values.workloadsNodePool.dedicatedPools.replayer.name $sharedPoolName (eq $mode "isolated") }}
+  {{- $rfsPoolName := ternary .Values.workloadsNodePool.dedicatedPools.rfs.name $sharedPoolName (eq $mode "isolated") }}
   kafkaNodePoolName: {{ ternary $kafkaPoolName "" $nodePoolsEnabled | quote }}
   proxyNodePoolName: {{ ternary $proxyPoolName "" $nodePoolsEnabled | quote }}
   replayerNodePoolName: {{ ternary $replayerPoolName "" $nodePoolsEnabled | quote }}
+  rfsNodePoolName: {{ ternary $rfsPoolName "" $nodePoolsEnabled | quote }}
   {{- $zoneSpread := .Values.workloadsNodePool.zoneSpread | default "preferred" }}
   {{- if not (has $zoneSpread (list "required" "preferred" "none")) }}
   {{- fail (printf "workloadsNodePool.zoneSpread must be required, preferred or none, got %q" $zoneSpread) }}
