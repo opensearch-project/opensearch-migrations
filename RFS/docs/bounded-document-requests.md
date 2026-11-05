@@ -90,8 +90,19 @@ from RFS transformations: RFS transformations still run fully before splitting.
 Connection reuse alone does not order server-side effects after a lost response.
 RFS therefore combines sequential subscription with conditional writes:
 
-* Splitting forces one batch in flight and one partition at a time per sink.
-  Merely emitting concurrent batch results in order would not order their writes.
+* Each split operation remains one asynchronous write: initialize, send each part
+  sequentially, then complete. Only final completion acknowledges the operation.
+  Splitting does not change thread scheduling, batch concurrency, partition
+  concurrency, or checkpoint arithmetic. Independent snapshot documents retain
+  the configured concurrency. The existing pipeline emits batch results in source
+  order, so later completed batches cannot advance a partition's checkpoint past
+  an unfinished earlier batch.
+* Sources with dependent operations, such as delta snapshots containing repeated
+  IDs and deletes, retain their existing `requiresOrderedWrites()` contract.
+  They finish an earlier batch before starting the next. Transformations must
+  preserve destination independence when using concurrent batches or partitions;
+  if they introduce cross-batch ID dependencies, configure sequential batches
+  (and sequential partitions for dependencies across partitions).
 * The post-transformation batcher cuts before a repeated document ID, conservatively
   across index names as well. Different aliases may point to the same index.
   Retry compaction cannot then retry an earlier index after a later delete of

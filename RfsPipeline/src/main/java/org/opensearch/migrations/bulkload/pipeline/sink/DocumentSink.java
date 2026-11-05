@@ -36,11 +36,6 @@ public interface DocumentSink extends AutoCloseable {
      */
     Mono<BatchResult> writeBatch(String collectionName, List<Document> batch);
 
-    /** Whether batches and partitions sharing this sink must be written sequentially. */
-    default boolean requiresOrderedWrites() {
-        return false;
-    }
-
     @Override
     default void close() throws Exception {
         // Default no-op

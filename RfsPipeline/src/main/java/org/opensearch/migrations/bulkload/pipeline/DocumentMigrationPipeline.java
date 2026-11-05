@@ -97,8 +97,8 @@ public class DocumentMigrationPipeline {
         }
         this.maxDocsPerBatch = maxDocsPerBatch;
         this.maxBytesPerBatch = maxBytesPerBatch;
-        this.partitionConcurrency = sink.requiresOrderedWrites() ? 1 : partitionConcurrency;
-        this.batchConcurrency = source.requiresOrderedWrites() || sink.requiresOrderedWrites() ? 1 : batchConcurrency;
+        this.partitionConcurrency = partitionConcurrency;
+        this.batchConcurrency = source.requiresOrderedWrites() ? 1 : batchConcurrency;
     }
 
     /** Snapshot of pipeline progress, safe to read from any thread. */

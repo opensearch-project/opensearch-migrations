@@ -20,6 +20,13 @@ import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperation
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
+import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
+import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
@@ -29,8 +36,10 @@ import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
 import io.netty.handler.codec.http.HttpMethod;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
@@ -50,6 +59,97 @@ import static org.mockito.Mockito.when;
 
 class SplitDocumentWriterTest {
     private static final String TARGET_INDEX = "{\"target\":{\"mappings\":{},\"settings\":{}}}";
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void independentWritesStayConcurrentWithoutCheckpointingAnIncompleteSplit(
+        boolean separatePartitions, boolean failBlockedPart
+    ) throws Exception {
+        var transport = mock(RestClient.class);
+        var blockedAck = Sinks.<HttpResponse>one();
+        var blockedStarted = new CountDownLatch(1);
+        var independentFinished = new CountDownLatch(2);
+        var blockedUpdates = new AtomicInteger();
+        var independentUpdates = new AtomicInteger();
+        when(transport.asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            String path = call.getArgument(1);
+            HttpMethod method = call.getArgument(0);
+            if (path.equals("target")) return Mono.just(response(200, TARGET_INDEX));
+            if (path.endsWith("/_mapping")) return Mono.just(response(200, "{\"acknowledged\":true}"));
+            if (method.equals(HttpMethod.GET)) return Mono.just(response(404, "{\"found\":false}"));
+            if (method.equals(HttpMethod.PUT)) {
+                return Mono.just(response(201, "{\"_seq_no\":0,\"_primary_term\":1,\"result\":\"created\"}"));
+            }
+            boolean blocked = path.contains("/blocked?");
+            int sequence = (blocked ? blockedUpdates : independentUpdates).getAndIncrement();
+            assertTrue(path.contains("if_seq_no=" + sequence + "&if_primary_term=1"));
+            if (blocked && sequence == 0) {
+                blockedStarted.countDown();
+                return blockedAck.asMono();
+            }
+            boolean complete = ObjectMapperFactory.createDefaultMapper()
+                .readTree(call.<byte[]>getArgument(2)).path("script").path("params").has("chunks");
+            return Mono.just(response(200,
+                "{\"_seq_no\":" + (sequence + 1) + ",\"_primary_term\":1,\"result\":\"updated\"}"))
+                .doOnSuccess(ignored -> {
+                    if (!blocked && complete) independentFinished.countDown();
+                });
+        });
+        when(transport.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(response(200,
+            "{\"errors\":false,\"items\":[{\"index\":{\"_index\":\"target\",\"_id\":\"small\",\"status\":201}}]}"))
+            .doOnSuccess(ignored -> independentFinished.countDown()));
+        var client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
+            Version.fromString("OS 2.19"), CompressionMode.UNCOMPRESSED, 100, 4096);
+        client.setSplitLargeDocuments(true);
+        var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null) {
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+        };
+        var first = new EsShardPartition("snapshot", "target", 0);
+        var second = new EsShardPartition("snapshot", "target", 1);
+        byte[] large = ("{\"text\":\"" + "x".repeat(50_000) + "\"}").getBytes(StandardCharsets.UTF_8);
+        var blocked = new Document("blocked", large, Document.Operation.UPSERT, Map.of(), Map.of());
+        var independent = new Document("independent", large, Document.Operation.UPSERT, Map.of(), Map.of());
+        var small = new Document("small", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of());
+        var source = mock(DocumentSource.class);
+        when(source.listPartitions("target")).thenReturn(separatePartitions ? List.of(first, second) : List.of(first));
+        when(source.readDocuments(first, 0)).thenReturn(Flux.fromIterable(
+            separatePartitions ? List.of(blocked) : List.of(blocked, independent, small)));
+        if (separatePartitions) {
+            when(source.readDocuments(second, 0)).thenReturn(Flux.just(independent, small));
+        }
+        var cursors = new CopyOnWriteArrayList<ProgressCursor>();
+        var future = new DocumentMigrationPipeline(source, sink, 1, Long.MAX_VALUE, 2, 3)
+            .migrateCollection("target").doOnNext(cursors::add).then().toFuture();
+        try {
+            assertTrue(blockedStarted.await(10, TimeUnit.SECONDS));
+            assertTrue(independentFinished.await(10, TimeUnit.SECONDS),
+                "An independent split and ordinary bulk must finish while the first split is waiting");
+            assertEquals(1, blockedUpdates.get(), "The blocked document must not send its next part");
+            assertTrue(independentUpdates.get() > 2, "The independent document must send all parts and completion");
+            assertTrue(cursors.stream().noneMatch(cursor -> cursor.partition().equals(first)),
+                "No checkpoint may pass the blocked document, even if later batches have finished");
+            assertFalse(future.isDone());
+            blockedAck.tryEmitValue(failBlockedPart
+                ? response(400, "{\"error\":{\"type\":\"mapper_parsing_exception\"}}")
+                : response(200, "{\"_seq_no\":1,\"_primary_term\":1,\"result\":\"updated\"}"));
+            if (failBlockedPart) {
+                assertThrows(java.util.concurrent.ExecutionException.class, () -> future.get(10, TimeUnit.SECONDS));
+                assertEquals(1, blockedUpdates.get());
+                assertTrue(cursors.stream().noneMatch(cursor -> cursor.partition().equals(first)));
+            } else {
+                future.get(10, TimeUnit.SECONDS);
+                assertEquals(separatePartitions ? List.of(1L) : List.of(1L, 2L, 3L),
+                    cursors.stream().filter(cursor -> cursor.partition().equals(first))
+                        .map(ProgressCursor::nextPosition).toList());
+            }
+        } finally {
+            future.cancel(true);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"create", "version", "delete"})
     void legacyOversizedSingletonsPreserveTheirOperationSemantics(String kind) {

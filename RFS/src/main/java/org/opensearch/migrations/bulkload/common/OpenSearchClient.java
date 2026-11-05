@@ -131,10 +131,6 @@ public abstract class OpenSearchClient {
         splitDocumentWriter.set(enabled ? new SplitDocumentWriter(client, maxBytesPerBulkRequest) : null);
     }
 
-    public boolean isLargeDocumentSplittingEnabled() {
-        return splitDocumentWriter.get() != null;
-    }
-
     /**
      * Install the failed document stream sink and identifiers used to tag records. Called by the bootstrap
      * once the session/worker identifiers are known. Safe to call before any bulk

@@ -93,11 +93,6 @@ public class OpenSearchDocumentSink implements DocumentSink {
     }
 
     @Override
-    public boolean requiresOrderedWrites() {
-        return client.isLargeDocumentSplittingEnabled();
-    }
-
-    @Override
     public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
         long bytesInBatch = batch.stream()
             .mapToLong(Document::sourceLength)

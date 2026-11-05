@@ -81,8 +81,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Real OpenSearch, the production bootstrap/checkpoint path, real gzip failed-document files, and
  * controlled network failures. Each restart constructs a new client, sink, source and bootstrap
- * using the checkpoint persisted by its predecessor. Source ordering is deliberately not requested:
- * the splitting sink must enforce it even when the configured batch concurrency is eight.
+ * using the checkpoint persisted by its predecessor. This source emits dependent index/delete
+ * operations and requests ordering through the same source contract as delta snapshots.
  */
 @Tag("isolatedTest")
 class RfsSplitRecoveryEndToEndTest {
@@ -486,7 +486,6 @@ class RfsSplitRecoveryEndToEndTest {
         var source = new RestartableSource(index, documents);
         var sink = new OpenSearchDocumentSink(client, transform == null ? null : () -> transform,
             false, DocumentExceptionAllowlist.empty(), null);
-        assertTrue(sink.requiresOrderedWrites());
         var cursor = new AtomicReference<WorkItemCursor>();
         var bootstrap = DocumentMigrationBootstrap.builder().documentSource(source).targetClient(client)
             .maxDocsPerBatch(batchSize).maxBytesPerBatch(Long.MAX_VALUE).batchConcurrency(8)
@@ -527,6 +526,7 @@ class RfsSplitRecoveryEndToEndTest {
         @Override public List<String> listCollections() { return List.of(index); }
         @Override public List<Partition> listPartitions(String collection) { return List.of(new EsShardPartition("snapshot", index, 0)); }
         @Override public CollectionMetadata readCollectionMetadata(String collection) { throw new UnsupportedOperationException(); }
+        @Override public boolean requiresOrderedWrites() { return true; }
         @Override public Flux<Document> readDocuments(Partition partition, long offset) {
             return Flux.defer(() -> {
                 readOffsets.add(offset);
