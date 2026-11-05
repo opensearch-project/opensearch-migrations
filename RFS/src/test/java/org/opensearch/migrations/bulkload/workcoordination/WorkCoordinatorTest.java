@@ -353,7 +353,8 @@ public class WorkCoordinatorTest {
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, blockedOutcome);
             }
 
-            workerA.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+            workerA.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                testContext::createReleaseWorkItemContext);
         }
 
         // workerB should now be able to immediately re-acquire the same work item.
@@ -366,7 +367,7 @@ public class WorkCoordinatorTest {
 
     @ParameterizedTest
     @MethodSource("containerVersions")
-    public void testLeaseGrowthSaturatesAcrossRepeatedReleases(SearchClusterContainer.ContainerVersion version) throws Exception {
+    public void testLeaseGrowthSaturatesAcrossTimeoutReleases(SearchClusterContainer.ContainerVersion version) throws Exception {
         setupOpenSearchContainer(version);
         var context = WorkCoordinationTestContext.factory().noOtelTracking();
         var workItemId = workId("repeated-release", 0, 0L);
@@ -390,7 +391,8 @@ public class WorkCoordinatorTest {
                 var document = readWorkDocument(worker, workItemId);
                 Assertions.assertTrue(document.path("nextAcquisitionLeaseExponent").asLong()
                     <= OpenSearchWorkCoordinator.MAX_LEASE_EXPONENT);
-                worker.releaseWorkItem(workItemId, context::createReleaseWorkItemContext);
+                worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.LEASE_TIMEOUT,
+                    context::createReleaseWorkItemContext);
                 Assertions.assertEquals(0, readWorkDocument(worker, workItemId).path("expiration").asLong());
             }
         }
@@ -424,7 +426,10 @@ public class WorkCoordinatorTest {
                     Assertions.assertTrue(acquired.leaseExpirationTime.getEpochSecond()
                         <= Instant.now().getEpochSecond() + OpenSearchWorkCoordinator.MAX_LEASE_DURATION_SECONDS);
                     Assertions.assertDoesNotThrow(duration::toNanos);
-                    worker.releaseWorkItem(workItemId, context::createReleaseWorkItemContext);
+                    worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                        context::createReleaseWorkItemContext);
+                    Assertions.assertEquals(Math.max(0, Math.min(OpenSearchWorkCoordinator.MAX_LEASE_EXPONENT, exponent)),
+                        readWorkDocument(worker, workItemId).path("nextAcquisitionLeaseExponent").asLong());
                 }
             }
             // The CREATED response must use the same cap as the server-side upsert.
@@ -443,6 +448,50 @@ public class WorkCoordinatorTest {
     private JsonNode readWorkDocument(OpenSearchWorkCoordinator worker, String workItemId) throws IOException {
         var response = httpClientSupplier.get().makeJsonRequest("GET", worker.getPathForGets(workItemId), null, null);
         return new ObjectMapper().readTree(response.getPayloadBytes()).path("_source");
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testEarlyReleasePreservesExponentAcrossRetries(SearchClusterContainer.ContainerVersion version) throws Exception {
+        setupOpenSearchContainer(version);
+        var context = WorkCoordinationTestContext.factory().noOtelTracking();
+        var workItemId = workId("early-release", 0, 0L);
+        try (var worker = factory.get(httpClientSupplier.get(), 15, "worker")) {
+            // Preserve a duration learned from prior timeouts, rather than resetting to the base lease.
+            worker.createUnassignedWorkItem(workItemId, context::createUnassignedWorkContext);
+            Assertions.assertEquals(200, httpClientSupplier.get().makeJsonRequest(
+                "POST", worker.getPathForUpdates(workItemId), null,
+                "{\"doc\":{\"nextAcquisitionLeaseExponent\":4}}").getStatusCode());
+            var lease = Duration.ofMinutes(10);
+            for (int acquisition = 0; acquisition < 70; acquisition++) {
+                var before = Instant.now();
+                var outcome = acquisition % 2 == 0
+                    ? worker.acquireNextWorkItem(lease, context::createAcquireNextItemContext)
+                    : worker.createOrUpdateLeaseForWorkItem(workItemId, lease, context::createAcquireSpecificItemContext);
+                var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+                Assertions.assertTrue(acquired.leaseExpirationTime.getEpochSecond() >= before.getEpochSecond() + 9600);
+                Assertions.assertTrue(acquired.leaseExpirationTime.getEpochSecond() <= Instant.now().getEpochSecond() + 9600);
+                Assertions.assertEquals(5, readWorkDocument(worker, workItemId).path("nextAcquisitionLeaseExponent").asInt());
+                worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                    context::createReleaseWorkItemContext);
+                var released = readWorkDocument(worker, workItemId);
+                Assertions.assertEquals(4, released.path("nextAcquisitionLeaseExponent").asInt());
+                Assertions.assertEquals(0, released.path("expiration").asLong());
+                Assertions.assertTrue(released.path("leaseHolderId").isNull());
+                // Model retrying a release after losing its successful response.
+                worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                    context::createReleaseWorkItemContext);
+                Assertions.assertEquals(released, readWorkDocument(worker, workItemId));
+            }
+
+            // A shutdown hook arriving after actual expiration must retain the timeout increase.
+            worker.acquireNextWorkItem(lease, context::createAcquireNextItemContext);
+            Assertions.assertEquals(200, httpClientSupplier.get().makeJsonRequest(
+                "POST", worker.getPathForUpdates(workItemId), null, "{\"doc\":{\"expiration\":1}}").getStatusCode());
+            worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                context::createReleaseWorkItemContext);
+            Assertions.assertEquals(5, readWorkDocument(worker, workItemId).path("nextAcquisitionLeaseExponent").asInt());
+        }
     }
 
     @ParameterizedTest
@@ -471,7 +520,10 @@ public class WorkCoordinatorTest {
                 Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, bOutcome);
 
                 // workerA finally tries to release the item it had; should be a no-op.
-                workerA.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+                var beforeRelease = readWorkDocument(workerB, workItemId);
+                workerA.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                    testContext::createReleaseWorkItemContext);
+                Assertions.assertEquals(beforeRelease, readWorkDocument(workerB, workItemId));
 
                 // A third worker must not be able to acquire — workerB still owns it.
                 try (var workerC = factory.get(httpClientSupplier.get(), 3600, "workerC")) {
@@ -499,7 +551,10 @@ public class WorkCoordinatorTest {
             worker.acquireNextWorkItem(Duration.ofSeconds(600), testContext::createAcquireNextItemContext);
             worker.completeWorkItem(workItemId, testContext::createCompleteWorkContext);
             // Release after completion — should be a no-op.
-            worker.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+            var beforeRelease = readWorkDocument(worker, workItemId);
+            worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                testContext::createReleaseWorkItemContext);
+            Assertions.assertEquals(beforeRelease, readWorkDocument(worker, workItemId));
             Assertions.assertFalse(worker.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
     }

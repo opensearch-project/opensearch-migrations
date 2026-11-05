@@ -56,7 +56,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "L ? " + MAX_LEASE_DURATION_SECONDS + "L : leaseSeconds;"
             + "      long newExpiration = params.clientTimestamp + leaseSeconds;";
     private static final String INCREMENT_LEASE_EXPONENT_SCRIPT =
-        "          ctx._source.nextAcquisitionLeaseExponent = leaseExponent < "
+        "          ctx._source.acquisitionLeaseExponent = leaseExponent;"
+            + "          ctx._source.nextAcquisitionLeaseExponent = leaseExponent < "
             + MAX_LEASE_EXPONENT + " ? leaseExponent + 1 : leaseExponent;";
     public static final int MAX_REFRESH_RETRIES = 6;
     public static final int MAX_SETUP_RETRIES = 6;
@@ -802,6 +803,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     @Override
     public void releaseWorkItem(
         String workItemId,
+        LeaseReleaseReason reason,
         Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> contextSupplier
     ) throws InterruptedException {
         try (var ctx = contextSupplier.get()) {
@@ -810,7 +812,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             // retry fails — the lease will still expire naturally.  Using the same retry shape
             // as completeWorkItem keeps behavior consistent under coordinator-side load.
             retryWithExponentialBackoff(
-                () -> releaseWorkItemWithoutRetry(workItemId),
+                () -> releaseWorkItemWithoutRetry(workItemId, reason),
                 completionRetryConfig.maxRetries(),
                 completionRetryConfig.initialDelayMs(),
                 completionRetryConfig.maxDelayMs(),
@@ -825,19 +827,21 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private void releaseWorkItemWithoutRetry(String workItemId) throws IOException {
+    private void releaseWorkItemWithoutRetry(String workItemId, LeaseReleaseReason reason) throws IOException {
         // Painless script:
         //   - throws on scriptVersion mismatch (matches the rest of the coordinator contract)
         //   - no-op when the work is already completed (don't clobber a completion)
         //   - no-op when the lease has rolled to another worker (don't clobber the new owner)
         //   - otherwise: clear expiration to 0 and leaseHolderId to null so the next
-        //     acquireNextWorkItem call can pick this item up immediately.  We intentionally
-        //     leave nextAcquisitionLeaseExponent as-is — releasing the lease means the work
-        //     hasn't been done, so any prior bump in the exponent is still meaningful.
+        //     acquireNextWorkItem call can pick this item up immediately.
+        // Restore the acquisition's exponent only on an early exit before expiration. Storing
+        // it explicitly preserves prior timeout increases, including at the saturation boundary.
+        // The ownership check makes a repeated release a no-op after the first clears the owner.
         final var releaseLeaseBodyTemplate = "{\n"
             + "  \"script\": {\n"
             + "    \"lang\": \"painless\",\n"
             + "    \"params\": { \n"
+            + "      \"earlyExit\": " + (reason == LeaseReleaseReason.EARLY_EXIT) + ",\n"
             + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
             + "    },\n"
             + "    \"source\": \""
@@ -849,6 +853,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      } else if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
             + "        ctx.op = \\\"noop\\\";"
             + "      } else {"
+            + "        if (params.earlyExit && ctx._source." + EXPIRATION_FIELD_NAME + " > System.currentTimeMillis() / 1000"
+            + "            && ctx._source.acquisitionLeaseExponent != null) {"
+            + "          ctx._source.nextAcquisitionLeaseExponent = ctx._source.acquisitionLeaseExponent;"
+            + "        }"
             + "        ctx._source." + EXPIRATION_FIELD_NAME + " = 0;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = null;"
             + "      }"
