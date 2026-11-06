@@ -224,6 +224,173 @@ class DocumentMigrationPipelineBatchingTest {
     }
 
     @Test
+    void reportsPipelineBoundariesOncePerChunkBatchAndRequestGroup() {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = Stream.iterate(0, i -> i + 1)
+            .limit(6)
+            .map(i -> new Document("doc-" + i, new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()))
+            .toList();
+        var preparedSizes = List.of(4L, 4L, 4L, 11L, 4L, 4L);
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+
+        class InstrumentedSink implements GroupedDocumentSink<String> {
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped path must be used");
+            }
+
+            @Override
+            public int preferredSourceBatchGroupSize() {
+                return 8;
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                int index = Integer.parseInt(document.id().substring("doc-".length()));
+                return new PreparedDocument<>(document, preparedSizes.get(index), "prepared-" + document.id());
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatchGroup(
+                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
+            ) {
+                throw new AssertionError("The prepared grouped path must be used");
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                long count = sourceBatches.stream().mapToLong(List::size).sum();
+                return Mono.just(new BatchResult(count, count));
+            }
+        }
+
+        class RecordingMetrics implements PipelineMetrics {
+            final AtomicInteger configured = new AtomicInteger();
+            final AtomicInteger chunksQueued = new AtomicInteger();
+            final AtomicInteger chunksStarted = new AtomicInteger();
+            final AtomicInteger chunksFinished = new AtomicInteger();
+            final AtomicInteger chunksReleased = new AtomicInteger();
+            final AtomicInteger packingCalls = new AtomicInteger();
+            final AtomicInteger batchesPacked = new AtomicInteger();
+            final AtomicInteger requestGroupsStarted = new AtomicInteger();
+            final AtomicInteger requestGroupsFinished = new AtomicInteger();
+            final AtomicInteger checkpointedDocuments = new AtomicInteger();
+            final AtomicInteger packedDocuments = new AtomicInteger();
+
+            @Override
+            public void onConfigured(
+                long maxBatchDocuments,
+                long maxBatchBytes,
+                long batchConcurrency,
+                long preparationConcurrency,
+                long preparationChunkDocuments,
+                long preparationReservoirChunks,
+                long sourceBatchGroupSize
+            ) {
+                Assertions.assertEquals(10, maxBatchDocuments);
+                Assertions.assertEquals(10, maxBatchBytes);
+                Assertions.assertEquals(8, batchConcurrency);
+                Assertions.assertTrue(preparationConcurrency >= 1);
+                Assertions.assertEquals(3, preparationChunkDocuments);
+                Assertions.assertEquals(preparationConcurrency * 3, preparationReservoirChunks);
+                Assertions.assertEquals(8, sourceBatchGroupSize);
+                configured.incrementAndGet();
+            }
+
+            @Override
+            public void onPreparationChunkQueued(long count, long sourceBytes) {
+                chunksQueued.incrementAndGet();
+            }
+
+            @Override
+            public void onPreparationChunkStarted(long count, long sourceBytes, double queueMillis) {
+                Assertions.assertTrue(queueMillis >= 0);
+                chunksStarted.incrementAndGet();
+            }
+
+            @Override
+            public void onPreparationChunkFinished(
+                long count, long sourceBytes, long preparedBytes, double durationMillis, boolean successful
+            ) {
+                Assertions.assertTrue(successful);
+                Assertions.assertTrue(durationMillis >= 0);
+                chunksFinished.incrementAndGet();
+            }
+
+            @Override
+            public void onPreparationChunkReleased(long count, long preparedBytes, double orderedWaitMillis) {
+                Assertions.assertTrue(orderedWaitMillis >= 0);
+                chunksReleased.incrementAndGet();
+            }
+
+            @Override
+            public void onPackingChunk(long count, double durationMillis) {
+                Assertions.assertTrue(durationMillis >= 0);
+                packingCalls.incrementAndGet();
+            }
+
+            @Override
+            public void onBatchPacked(
+                long count, long preparedBytes, double documentFillPercent, double byteFillPercent
+            ) {
+                batchesPacked.incrementAndGet();
+                packedDocuments.addAndGet(Math.toIntExact(count));
+            }
+
+            @Override
+            public void onRequestGroupStarted(
+                long batches, long count, long preparedBytes, double oldestReadyMillis
+            ) {
+                Assertions.assertEquals(4, batches);
+                Assertions.assertEquals(6, count);
+                Assertions.assertTrue(oldestReadyMillis >= 0);
+                requestGroupsStarted.incrementAndGet();
+            }
+
+            @Override
+            public void onRequestGroupFinished(
+                long count, long preparedBytes, double durationMillis, boolean successful
+            ) {
+                Assertions.assertTrue(successful);
+                Assertions.assertTrue(durationMillis >= 0);
+                requestGroupsFinished.incrementAndGet();
+            }
+
+            @Override
+            public void onCheckpoint(long count, long sourceBytes) {
+                checkpointedDocuments.addAndGet(Math.toIntExact(count));
+            }
+        }
+
+        var metrics = new RecordingMetrics();
+        new DocumentMigrationPipeline(source, new InstrumentedSink(), 10, 10, 1, 8, metrics)
+            .migratePartition(partition, "index", 0)
+            .blockLast(Duration.ofSeconds(10));
+
+        Assertions.assertEquals(1, metrics.configured.get());
+        Assertions.assertEquals(2, metrics.chunksQueued.get());
+        Assertions.assertEquals(2, metrics.chunksStarted.get());
+        Assertions.assertEquals(2, metrics.chunksFinished.get());
+        Assertions.assertEquals(2, metrics.chunksReleased.get());
+        Assertions.assertEquals(2, metrics.packingCalls.get());
+        Assertions.assertEquals(4, metrics.batchesPacked.get());
+        Assertions.assertEquals(6, metrics.packedDocuments.get());
+        Assertions.assertEquals(1, metrics.requestGroupsStarted.get());
+        Assertions.assertEquals(1, metrics.requestGroupsFinished.get());
+        Assertions.assertEquals(6, metrics.checkpointedDocuments.get());
+    }
+
+    @Test
     void preparesSourceBatchesInParallelWithoutReorderingThem() throws Exception {
         var partition = new EsShardPartition("snapshot", "index", 0);
         var documents = Stream.iterate(0, i -> i + 1)

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.reindexer.tracing;
 
+import org.opensearch.migrations.bulkload.pipeline.PipelineMetrics;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
@@ -187,6 +188,11 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         @Override
         public void recordPipelineError() {
             meterIncrementEvent(getMetrics().pipelineErrors);
+        }
+
+        @Override
+        public PipelineMetrics getPipelineMetrics() {
+            return rootInstrumentationScope.pipelineInstruments;
         }
 
         @Override
