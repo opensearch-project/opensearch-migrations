@@ -1150,7 +1150,7 @@
             "width": 24,
             "height": 1,
             "properties": {
-                "markdown": "## Target domain",
+                "markdown": "## Pipeline performance diagnosis",
                 "background": "transparent"
             }
         },
@@ -1158,6 +1158,1078 @@
             "type": "metric",
             "x": 0,
             "y": 37,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Documents per second through pipeline stages",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageDocuments\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"source\"', 'Sum', 60)) / 60",
+                            "label": "Source",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageDocuments\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"prepared\"', 'Sum', 60)) / 60",
+                            "label": "Prepared",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageDocuments\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"ordered_prepared\"', 'Sum', 60)) / 60",
+                            "label": "Ordered prep",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageDocuments\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"packed\"', 'Sum', 60)) / 60",
+                            "label": "Packed",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageDocuments\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"request_started\"', 'Sum', 60)) / 60",
+                            "label": "Request started",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageDocuments\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"request_completed\"', 'Sum', 60)) / 60",
+                            "label": "Request finished",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageDocuments\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"checkpointed\"', 'Sum', 60)) / 60",
+                            "label": "Checkpointed",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "docs/s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 37,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Documents buffered between stages",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationQueuedDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / PERIOD(m1)",
+                            "label": "Waiting for preparation",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationOrderedDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3 / PERIOD(m3)",
+                            "label": "Blocked at ordered prep fan-in",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineRequestReadyDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m5 / PERIOD(m5)",
+                            "label": "Packed and request-ready",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "docs",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 37,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Time waiting between pipeline stages (ms)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationQueueWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationQueueWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / m2",
+                            "label": "Preparation queue",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationOrderedWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m4",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationOrderedWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m4 / m5",
+                            "label": "Ordered prep fan-in",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineRequestQueueWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m7",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineRequestQueueWait",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m8",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m7 / m8",
+                            "label": "Packed-to-request",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ms",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 43,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "MiB per second through pipeline stages",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageBytes\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"source\"', 'Sum', 60)) / 60 * 9.53674e-07",
+                            "label": "Source",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageBytes\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"prepared\"', 'Sum', 60)) / 60 * 9.53674e-07",
+                            "label": "Prepared",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageBytes\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"packed\"', 'Sum', 60)) / 60 * 9.53674e-07",
+                            "label": "Packed",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageBytes\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"request_started\"', 'Sum', 60)) / 60 * 9.53674e-07",
+                            "label": "Request started",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,stage,qualifier} MetricName=\"pipelineStageBytes\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" stage=\"checkpointed\"', 'Sum', 60)) / 60 * 9.53674e-07",
+                            "label": "Checkpointed source",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "MiB/s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 43,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "MiB buffered between stages",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationQueuedBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / PERIOD(m1) / 1048576",
+                            "label": "Waiting for preparation",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationOrderedBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3 / PERIOD(m3) / 1048576",
+                            "label": "Blocked at ordered prep fan-in",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineRequestReadyBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m5 / PERIOD(m5) / 1048576",
+                            "label": "Packed and request-ready",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "MiB",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 43,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Active and queued pipeline work",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationQueuedChunks",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / PERIOD(m1)",
+                            "label": "Prep chunks queued",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationActiveChunks",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3 / PERIOD(m3)",
+                            "label": "Prep chunks active",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationOrderedChunks",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m5 / PERIOD(m5)",
+                            "label": "Prep chunks ordered-blocked",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineRequestReadyBatches",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m7",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m7 / PERIOD(m7)",
+                            "label": "Request-ready batches",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineRequestActiveGroups",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m9",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m9 / PERIOD(m9)",
+                            "label": "Request groups active",
+                            "id": "e10",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 49,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Pipeline service time (ms)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"pipelinePreparationDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"success\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"pipelinePreparationDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"success\"', 'SampleCount', 60))",
+                            "label": "Prepare chunk",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePackingDuration",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePackingDuration",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m2 / m3",
+                            "label": "Exact packer",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"pipelineRequestGroupDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"success\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"pipelineRequestGroupDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" outcome=\"success\"', 'SampleCount', 60))",
+                            "label": "Request group",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ms",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 49,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Packed target-batch shape",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePackedBatchDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePackedBatchDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m2",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / m2",
+                            "label": "Documents",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePackedBatchBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m4",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePackedBatchBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "SampleCount",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m4 / m5 / 1048576",
+                            "label": "MiB",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,limit,qualifier} MetricName=\"pipelinePackedBatchFill\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" limit=\"documents\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,limit,qualifier} MetricName=\"pipelinePackedBatchFill\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" limit=\"documents\"', 'SampleCount', 60))",
+                            "label": "Document-limit fill (%)",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,limit,qualifier} MetricName=\"pipelinePackedBatchFill\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" limit=\"bytes\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,limit,qualifier} MetricName=\"pipelinePackedBatchFill\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" limit=\"bytes\"', 'SampleCount', 60))",
+                            "label": "Byte-limit fill (%)",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "short",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 49,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Client preparation and response handling (ms)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,path,qualifier} MetricName=\"bulkBatchPreparationDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,path,qualifier} MetricName=\"bulkBatchPreparationDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
+                            "label": "Client repacking",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,qualifier} MetricName=\"bulkRequestStartGap\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,qualifier} MetricName=\"bulkRequestStartGap\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
+                            "label": "Gap between request starts",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,qualifier} MetricName=\"bulkRequestAssemblyDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,qualifier} MetricName=\"bulkRequestAssemblyDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
+                            "label": "Request assembly",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,qualifier} MetricName=\"bulkRequestCompressionDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,qualifier} MetricName=\"bulkRequestCompressionDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
+                            "label": "Gzip",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,result,qualifier} MetricName=\"bulkResponseClassificationDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" result=\"response\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,result,qualifier} MetricName=\"bulkResponseClassificationDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" result=\"response\"', 'SampleCount', 60))",
+                            "label": "Classify response",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,result,qualifier} MetricName=\"bulkResponseClassificationDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" result=\"no_response\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,result,qualifier} MetricName=\"bulkResponseClassificationDuration\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" result=\"no_response\"', 'SampleCount', 60))",
+                            "label": "Classify no response",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ms",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 55,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "RFS CPU throttled periods (%)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_cfs_throttled_periods_total\" container=\"bulk-loader\" namespace=\"ma\"', 'Sum', 60))) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_cfs_periods_total\" container=\"bulk-loader\" namespace=\"ma\"', 'Sum', 60)))",
+                            "label": "% throttled periods",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "percent",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 55,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Effective pipeline configuration",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineMaxBatchDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m1",
+                            "stat": "Average",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1",
+                            "label": "Max documents per target batch",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineMaxBatchBytes",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m3",
+                            "stat": "Average",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3 / 1048576",
+                            "label": "Max target-batch MiB",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelineBatchConcurrency",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m5",
+                            "stat": "Average",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m5",
+                            "label": "Request concurrency ceiling",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationConcurrency",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m7",
+                            "stat": "Average",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m7",
+                            "label": "Preparation rails",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "pipelinePreparationChunkDocuments",
+                        "OTelLib",
+                        "documentMigration",
+                        "qualifier",
+                        "MA_QUALIFIER",
+                        {
+                            "id": "m9",
+                            "stat": "Average",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m9",
+                            "label": "Documents per preparation chunk",
+                            "id": "e10",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "short",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 61,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Target domain",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 62,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1236,7 +2308,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 37,
+            "y": 62,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1292,7 +2364,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 37,
+            "y": 62,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1371,7 +2443,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 43,
+            "y": 68,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1451,7 +2523,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 49,
+            "y": 74,
             "width": 24,
             "height": 1,
             "properties": {
@@ -1462,7 +2534,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 50,
+            "y": 75,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1523,7 +2595,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 50,
+            "y": 75,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1556,7 +2628,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 50,
+            "y": 75,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1589,7 +2661,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 56,
+            "y": 81,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1673,7 +2745,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 56,
+            "y": 81,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1772,7 +2844,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 62,
+            "y": 87,
             "width": 24,
             "height": 1,
             "properties": {
@@ -1783,7 +2855,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 63,
+            "y": 88,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1816,7 +2888,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 63,
+            "y": 88,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1858,7 +2930,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 69,
+            "y": 94,
             "width": 24,
             "height": 1,
             "properties": {
@@ -1869,7 +2941,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 70,
+            "y": 95,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1902,7 +2974,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 70,
+            "y": 95,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1995,7 +3067,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 70,
+            "y": 95,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2108,7 +3180,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 76,
+            "y": 101,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2215,7 +3287,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 76,
+            "y": 101,
             "width": 8,
             "height": 6,
             "properties": {

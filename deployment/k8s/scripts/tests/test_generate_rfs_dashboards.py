@@ -112,6 +112,7 @@ class GeneratedDashboardTest(unittest.TestCase):
             [
                 "Operator overview",
                 "Throughput and request shape",
+                "Pipeline performance diagnosis",
                 "Target domain",
                 "Retry and recovery",
                 "Failure diagnosis",
@@ -259,6 +260,90 @@ class GeneratedDashboardTest(unittest.TestCase):
             [target["legendFormat"] for target in grafana["targets"]],
         )
         self.assertIn("CloudWatch cannot calculate the hottest pod", grafana["description"])
+
+    def test_pipeline_diagnostics_expose_boundaries_and_hidden_client_timings(self):
+        stages = self.grafana_panel("Documents per second through pipeline stages")
+        self.assertIsNotNone(stages)
+        self.assertEqual(
+            [
+                "Source",
+                "Prepared",
+                "Ordered prep",
+                "Packed",
+                "Request started",
+                "Request finished",
+                "Checkpointed",
+            ],
+            [target["legendFormat"] for target in stages["targets"]],
+        )
+        stage_expressions = "\n".join(target["expr"] for target in stages["targets"])
+        for stage in (
+            "source",
+            "prepared",
+            "ordered_prepared",
+            "packed",
+            "request_started",
+            "request_completed",
+            "checkpointed",
+        ):
+            self.assertIn(f'stage="{stage}"', stage_expressions)
+
+        buffered = self.grafana_panel("Documents buffered between stages")
+        self.assertIsNotNone(buffered)
+        self.assertEqual(
+            ["Waiting for preparation", "Blocked at ordered prep fan-in", "Packed and request-ready"],
+            [target["legendFormat"] for target in buffered["targets"]],
+        )
+
+        client = self.grafana_panel("Client preparation and response handling (ms)")
+        self.assertIsNotNone(client)
+        self.assertIn("process-wide", client["description"])
+        self.assertIn("not per-request or per-connection latency", client["description"])
+        expressions = "\n".join(target["expr"] for target in client["targets"])
+        for metric in (
+            "bulkBatchPreparationDuration",
+            "bulkRequestAssemblyDuration",
+            "bulkRequestCompressionDuration",
+            "bulkResponseClassificationDuration",
+        ):
+            self.assertIn(metric, expressions)
+        self.assertEqual(
+            ["Classify response", "Classify no response"],
+            [
+                target["legendFormat"]
+                for target in client["targets"]
+                if "bulkResponseClassificationDuration" in target["expr"]
+            ],
+        )
+
+        config = self.grafana_panel("Effective pipeline configuration")
+        self.assertIsNotNone(config)
+        config_expressions = "\n".join(target["expr"] for target in config["targets"])
+        for metric in (
+            "pipelineMaxBatchDocuments",
+            "pipelineMaxBatchBytes",
+            "pipelineBatchConcurrency",
+            "pipelinePreparationConcurrency",
+            "pipelinePreparationChunkDocuments",
+        ):
+            self.assertIn(metric, config_expressions)
+
+    def test_cpu_throttling_is_available_in_both_dashboards(self):
+        title = "RFS CPU throttled periods (%)"
+        cloudwatch = self.cloudwatch_widget(title)
+        self.assertIsNotNone(cloudwatch)
+        cloudwatch_expressions = "\n".join(
+            row[-1].get("expression", "")
+            for row in cloudwatch["properties"]["metrics"]
+            if isinstance(row[-1], dict)
+        )
+        self.assertIn("container_cpu_cfs_throttled_periods_total", cloudwatch_expressions)
+        self.assertIn("container_cpu_cfs_periods_total", cloudwatch_expressions)
+
+        grafana = self.grafana_panel(title)
+        self.assertIsNotNone(grafana)
+        self.assertIn("container_cpu_cfs_throttled_periods_total", grafana["targets"][0]["expr"])
+        self.assertIn("container_cpu_cfs_periods_total", grafana["targets"][0]["expr"])
 
     def test_prometheus_bulk_gauges_ignore_completed_worker_processes(self):
         for metric in (
