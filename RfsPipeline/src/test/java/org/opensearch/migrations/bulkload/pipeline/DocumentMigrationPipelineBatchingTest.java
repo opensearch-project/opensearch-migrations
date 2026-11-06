@@ -115,11 +115,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public int preferredSourceBatchGroupSize() {
-                return 2;
-            }
-
-            @Override
             public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
                 return new PreparedDocument<>(document, 6, "prepared-" + document.id());
             }
@@ -185,11 +180,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public int preferredSourceBatchGroupSize() {
-                return 8;
-            }
-
-            @Override
             public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
                 int index = Integer.parseInt(document.id().substring("doc-".length()));
                 return new PreparedDocument<>(document, preparedSizes.get(index), "prepared-" + document.id());
@@ -250,11 +240,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public int preferredSourceBatchGroupSize() {
-                return 8;
-            }
-
-            @Override
             public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
                 int index = Integer.parseInt(document.id().substring("doc-".length()));
                 return new PreparedDocument<>(document, preparedSizes.get(index), "prepared-" + document.id());
@@ -299,17 +284,13 @@ class DocumentMigrationPipelineBatchingTest {
                 long maxBatchBytes,
                 long batchConcurrency,
                 long preparationConcurrency,
-                long preparationChunkDocuments,
-                long preparationReservoirChunks,
-                long sourceBatchGroupSize
+                long preparationChunkDocuments
             ) {
                 Assertions.assertEquals(10, maxBatchDocuments);
                 Assertions.assertEquals(10, maxBatchBytes);
                 Assertions.assertEquals(8, batchConcurrency);
                 Assertions.assertTrue(preparationConcurrency >= 1);
                 Assertions.assertEquals(3, preparationChunkDocuments);
-                Assertions.assertEquals(preparationConcurrency * 3, preparationReservoirChunks);
-                Assertions.assertEquals(8, sourceBatchGroupSize);
                 configured.incrementAndGet();
             }
 
@@ -391,8 +372,8 @@ class DocumentMigrationPipelineBatchingTest {
         Assertions.assertEquals(2, metrics.packingCalls.get());
         Assertions.assertEquals(4, metrics.batchesPacked.get());
         Assertions.assertEquals(6, metrics.packedDocuments.get());
-        Assertions.assertEquals(1, metrics.requestGroupsStarted.get());
-        Assertions.assertEquals(1, metrics.requestGroupsFinished.get());
+        Assertions.assertEquals(4, metrics.requestGroupsStarted.get());
+        Assertions.assertEquals(4, metrics.requestGroupsFinished.get());
         Assertions.assertEquals(4, metrics.requestGroupBatches.get());
         Assertions.assertEquals(6, metrics.requestGroupDocuments.get());
         Assertions.assertEquals(6, metrics.checkpointedDocuments.get());
@@ -423,11 +404,6 @@ class DocumentMigrationPipelineBatchingTest {
             @Override
             public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
                 throw new AssertionError("The grouped path must be used");
-            }
-
-            @Override
-            public int preferredSourceBatchGroupSize() {
-                return 1;
             }
 
             @Override
@@ -516,11 +492,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public int preferredSourceBatchGroupSize() {
-                return 1;
-            }
-
-            @Override
             public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
                 preparationThreads.put(document.id(), Thread.currentThread().getName());
                 return new PreparedDocument<>(document, 1, "prepared-" + document.id());
@@ -583,11 +554,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public int preferredSourceBatchGroupSize() {
-                return 1;
-            }
-
-            @Override
             public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
                 return new PreparedDocument<>(document, 6, "prepared-" + document.id());
             }
@@ -634,6 +600,65 @@ class DocumentMigrationPipelineBatchingTest {
     }
 
     @Test
+    void submitsPersistentLaneBatchesDirectlyWithoutRegrouping() {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = Stream.iterate(0, i -> i + 1)
+            .limit(8)
+            .map(i -> new Document("doc-" + i, new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()))
+            .toList();
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+
+        class DirectSubmissionSink implements GroupedDocumentSink<String> {
+            final List<Integer> sourceBatchesPerCall = new CopyOnWriteArrayList<>();
+            final List<Integer> requestConcurrencies = new CopyOnWriteArrayList<>();
+
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped path must be used");
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                return new PreparedDocument<>(document, 1, "prepared-" + document.id());
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatchGroup(
+                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
+            ) {
+                throw new AssertionError("The prepared grouped path must be used");
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                sourceBatchesPerCall.add(sourceBatches.size());
+                requestConcurrencies.add(requestConcurrency);
+                long count = sourceBatches.stream().mapToLong(List::size).sum();
+                return Mono.just(new BatchResult(count, count));
+            }
+        }
+
+        var sink = new DirectSubmissionSink();
+        new DocumentMigrationPipeline(source, sink, 1, 100, 1, 4)
+            .migratePartition(partition, "index", 0)
+            .blockLast(Duration.ofSeconds(10));
+
+        Assertions.assertEquals(8, sink.sourceBatchesPerCall.size());
+        Assertions.assertTrue(sink.sourceBatchesPerCall.stream().allMatch(count -> count == 1));
+        Assertions.assertTrue(sink.requestConcurrencies.stream().allMatch(concurrency -> concurrency == 1));
+    }
+
+    @Test
     void keepsSeveralPreparationChunksInFlightWhenTheTargetBatchIsLarge() throws Exception {
         var partition = new EsShardPartition("snapshot", "index", 0);
         var documents = Stream.iterate(0, i -> i + 1)
@@ -657,11 +682,6 @@ class DocumentMigrationPipelineBatchingTest {
             @Override
             public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
                 throw new AssertionError("The grouped path must be used");
-            }
-
-            @Override
-            public int preferredSourceBatchGroupSize() {
-                return 1;
             }
 
             @Override

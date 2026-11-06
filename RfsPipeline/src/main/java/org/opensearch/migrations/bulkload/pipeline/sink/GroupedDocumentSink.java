@@ -26,11 +26,6 @@ public interface GroupedDocumentSink<P> extends DocumentSink {
     }
 
     /**
-     * The number of source batches that the pipeline should offer to one sink write.
-     */
-    int preferredSourceBatchGroupSize();
-
-    /**
      * Size one source document for the pipeline's first batching pass.
      *
      * <p>The default preserves source-oriented batching. A sink may return its exact encoded size when that is
