@@ -41,6 +41,38 @@ METRICS = {
     "bulkRequestDocuments": ("count", "histogram", RFS, ()),
     "bulkRequestBytes": ("bytes", "histogram", RFS, ()),
     "bulkRequestSentBytes": ("bytes", "histogram", RFS, ()),
+    "bulkBatchPreparationDuration": ("milliseconds", "histogram", RFS, ("path",)),
+    "bulkRequestAssemblyDuration": ("milliseconds", "histogram", RFS, ("attempt",)),
+    "bulkRequestCompressionDuration": ("milliseconds", "histogram", RFS, ("attempt",)),
+    "bulkRequestStartGap": ("milliseconds", "histogram", RFS, ("attempt",)),
+    "bulkResponseClassificationDuration": ("milliseconds", "histogram", RFS, ("result",)),
+    "pipelineStageDocuments": ("count", "counter", RFS, ("stage",)),
+    "pipelineStageBytes": ("bytes", "counter", RFS, ("stage",)),
+    "pipelinePreparationQueueWait": ("milliseconds", "histogram", RFS, ()),
+    "pipelinePreparationDuration": ("milliseconds", "histogram", RFS, ("outcome",)),
+    "pipelinePreparationOrderedWait": ("milliseconds", "histogram", RFS, ()),
+    "pipelinePackingDuration": ("milliseconds", "histogram", RFS, ()),
+    "pipelineRequestQueueWait": ("milliseconds", "histogram", RFS, ()),
+    "pipelineRequestGroupDuration": ("milliseconds", "histogram", RFS, ("outcome",)),
+    "pipelinePackedBatchDocuments": ("count", "histogram", RFS, ()),
+    "pipelinePackedBatchBytes": ("bytes", "histogram", RFS, ()),
+    "pipelinePackedBatchFill": ("percent", "histogram", RFS, ("limit",)),
+    "pipelinePreparationQueuedChunks": ("count", "gauge", RFS, ()),
+    "pipelinePreparationQueuedDocuments": ("count", "gauge", RFS, ()),
+    "pipelinePreparationQueuedBytes": ("bytes", "gauge", RFS, ()),
+    "pipelinePreparationActiveChunks": ("count", "gauge", RFS, ()),
+    "pipelinePreparationOrderedChunks": ("count", "gauge", RFS, ()),
+    "pipelinePreparationOrderedDocuments": ("count", "gauge", RFS, ()),
+    "pipelinePreparationOrderedBytes": ("bytes", "gauge", RFS, ()),
+    "pipelineRequestReadyBatches": ("count", "gauge", RFS, ()),
+    "pipelineRequestReadyDocuments": ("count", "gauge", RFS, ()),
+    "pipelineRequestReadyBytes": ("bytes", "gauge", RFS, ()),
+    "pipelineRequestActiveGroups": ("count", "gauge", RFS, ()),
+    "pipelineMaxBatchDocuments": ("count", "gauge", RFS, ()),
+    "pipelineMaxBatchBytes": ("bytes", "gauge", RFS, ()),
+    "pipelineBatchConcurrency": ("count", "gauge", RFS, ()),
+    "pipelinePreparationConcurrency": ("count", "gauge", RFS, ()),
+    "pipelinePreparationChunkDocuments": ("count", "gauge", RFS, ()),
     "bulkRetries": ("count", "counter", RFS, ("errorClass",)),
     "bulkRetryDelay": ("milliseconds", "histogram", RFS, ("errorClass",)),
     "bulkDocsGaveUp": ("count", "counter", RFS, ("reason",)),
@@ -489,6 +521,30 @@ class ContainerUtilization:
         return [w.e(f"100 * ({usage}) / ({limit})", label)]
 
 
+class ContainerCpuThrottling:
+    """Percentage of the RFS containers' CFS scheduling periods in which their CPU quota throttled them."""
+
+    def prom(self):
+        s = (f'{{job="otel-collector",exported_job=~"cadvisor|kubelet-cadvisor",namespace="$namespace",'
+             f'container="{CONTAINER}",container!="POD",image!=""}}')
+        throttled = f"sum(rate(container_cpu_cfs_throttled_periods_total{s}[{RI}]))"
+        periods = f"sum(rate(container_cpu_cfs_periods_total{s}[{RI}]))"
+        return [(f"100 * ({throttled}) / ({periods})", "% throttled periods")]
+
+    def cw(self, w):
+        dimensions = f"{{{NS},container,namespace,pod}}"
+        common = f'container="{CONTAINER}" namespace="ma"'
+        throttled = (
+            f"SUM(SEARCH('{dimensions} MetricName=\"container_cpu_cfs_throttled_periods_total\" "
+            f"{common}', 'Sum', 60))"
+        )
+        periods = (
+            f"SUM(SEARCH('{dimensions} MetricName=\"container_cpu_cfs_periods_total\" "
+            f"{common}', 'Sum', 60))"
+        )
+        return [w.e(f"100 * ({throttled}) / ({periods})", "% throttled periods")]
+
+
 class Domain:
     """An AWS/ES metric for the target domain; CloudWatch-only."""
 
@@ -660,6 +716,124 @@ SECTIONS = [
               "Bulk-loader working-set memory divided by its configured memory limit: fleet capacity and hottest "
               "pod. It is vertically aligned with RFS CPU and the request allowance panel above.",
               "percent", [ContainerUtilization("mem", "sum"), ContainerUtilization("mem", "max")]),
+    ]),
+    ("Pipeline performance diagnosis", False, [
+        Panel("Documents per second through pipeline stages",
+              "The same source documents counted at successive bounded pipeline boundaries. Source is chunked for "
+              "preparation; prepared has completed validation/encoding; ordered prep has cleared the ordered "
+              "fan-in; packed has entered an exact target batch; request started/finished bracket the sink call; "
+              "checkpointed can advance source progress. A sustained rate drop between adjacent lines locates the "
+              "stage that is not feeding its consumer.",
+              "docs/s", [
+                  Rate("pipelineStageDocuments", "Source", where={"stage": "source"}),
+                  Rate("pipelineStageDocuments", "Prepared", where={"stage": "prepared"}),
+                  Rate("pipelineStageDocuments", "Ordered prep", where={"stage": "ordered_prepared"}),
+                  Rate("pipelineStageDocuments", "Packed", where={"stage": "packed"}),
+                  Rate("pipelineStageDocuments", "Request started", where={"stage": "request_started"}),
+                  Rate("pipelineStageDocuments", "Request finished", where={"stage": "request_completed"}),
+                  Rate("pipelineStageDocuments", "Checkpointed", where={"stage": "checkpointed"}),
+              ]),
+        Panel("Documents buffered between stages",
+              "Current source documents waiting for a preparation rail, completed prepared documents held behind "
+              "an earlier chunk by ordered fan-in, and packed documents ready for the request fan-out. Ordered-prep "
+              "growth exposes head-of-line blocking; ready-document growth with low HTTP in-flight work points to "
+              "request-fan-out scheduling or sink work.",
+              "docs", [
+                  Gauge("pipelinePreparationQueuedDocuments", "Waiting for preparation"),
+                  Gauge("pipelinePreparationOrderedDocuments", "Blocked at ordered prep fan-in"),
+                  Gauge("pipelineRequestReadyDocuments", "Packed and request-ready"),
+              ]),
+        Panel("Time waiting between pipeline stages (ms)",
+              "Mean queue residence per chunk or batch: waiting for a preparation rail, waiting after preparation "
+              "for ordered fan-in, and waiting after exact packing for the request fan-out. These are boundary "
+              "waits, not target response time.",
+              "ms", [
+                  Mean("pipelinePreparationQueueWait", "Preparation queue"),
+                  Mean("pipelinePreparationOrderedWait", "Ordered prep fan-in"),
+                  Mean("pipelineRequestQueueWait", "Packed-to-request"),
+              ]),
+        Panel("MiB per second through pipeline stages",
+              "Bytes crossing selected pipeline boundaries. Source and checkpointed bytes are original document "
+              "source. Prepared, packed, and request-started bytes are exact encoded NDJSON operations including "
+              "action metadata and framing. The change from source to prepared quantifies bulk-format overhead.",
+              "MiB/s", [
+                  Rate("pipelineStageBytes", "Source", where={"stage": "source"}, scale=MIB),
+                  Rate("pipelineStageBytes", "Prepared", where={"stage": "prepared"}, scale=MIB),
+                  Rate("pipelineStageBytes", "Packed", where={"stage": "packed"}, scale=MIB),
+                  Rate("pipelineStageBytes", "Request started", where={"stage": "request_started"}, scale=MIB),
+                  Rate("pipelineStageBytes", "Checkpointed source", where={"stage": "checkpointed"}, scale=MIB),
+              ]),
+        Panel("MiB buffered between stages",
+              "Current source bytes waiting for preparation, exact encoded bytes held by the ordered preparation "
+              "fan-in, and exact encoded bytes packed and ready for requests. A persistent reservoir shows where "
+              "memory is being used and which downstream boundary is not draining.",
+              "MiB", [
+                  Gauge("pipelinePreparationQueuedBytes", "Waiting for preparation", scale=MIB),
+                  Gauge("pipelinePreparationOrderedBytes", "Blocked at ordered prep fan-in", scale=MIB),
+                  Gauge("pipelineRequestReadyBytes", "Packed and request-ready", scale=MIB),
+              ]),
+        Panel("Active and queued pipeline work",
+              "Counts of chunks or request groups at the main concurrency boundaries. Preparation active is work "
+              "on CPU rails. Ordered chunks completed out of order and are waiting to be released. Request-ready "
+              "batches are packed but not subscribed; active request groups are executing sink work.",
+              "count", [
+                  Gauge("pipelinePreparationQueuedChunks", "Prep chunks queued"),
+                  Gauge("pipelinePreparationActiveChunks", "Prep chunks active"),
+                  Gauge("pipelinePreparationOrderedChunks", "Prep chunks ordered-blocked"),
+                  Gauge("pipelineRequestReadyBatches", "Request-ready batches"),
+                  Gauge("pipelineRequestActiveGroups", "Request groups active"),
+              ]),
+        Panel("Pipeline service time (ms)",
+              "Mean CPU preparation time per chunk, serial exact-packer time per chunk, and complete sink-call time "
+              "per successful request group. Request-group duration includes target requests and their response "
+              "handling, so compare it with Bulk attempt duration and the client-side timings.",
+              "ms", [
+                  Mean("pipelinePreparationDuration", "Prepare chunk", where={"outcome": "success"}),
+                  Mean("pipelinePackingDuration", "Exact packer"),
+                  Mean("pipelineRequestGroupDuration", "Request group", where={"outcome": "success"}),
+              ]),
+        Panel("Packed target-batch shape",
+              "Mean exact documents and MiB per target batch, plus utilization of the configured document and byte "
+              "limits. A batch may be near one limit and far below the other. Values above 100% identify a single "
+              "oversized operation that must be isolated.",
+              "short", [
+                  Mean("pipelinePackedBatchDocuments", "Documents"),
+                  Mean("pipelinePackedBatchBytes", "MiB", scale=MIB),
+                  Mean("pipelinePackedBatchFill", "Document-limit fill (%)", where={"limit": "documents"}),
+                  Mean("pipelinePackedBatchFill", "Byte-limit fill (%)", where={"limit": "bytes"}),
+              ]),
+        Panel("Client preparation and response handling (ms)",
+              "Client-side work after a request group reaches OpenSearchClient: final client repacking, contiguous "
+              "NDJSON assembly, gzip, and response classification/compaction. Gap between starts is process-wide "
+              "request pacing, not per-request or per-connection latency. The client repacking timer does not "
+              "include the upstream preparation and ordered packing shown elsewhere in this section.",
+              "ms", [
+                  Mean("bulkBatchPreparationDuration", "Client repacking"),
+                  Mean("bulkRequestStartGap", "Gap between request starts"),
+                  Mean("bulkRequestAssemblyDuration", "Request assembly"),
+                  Mean("bulkRequestCompressionDuration", "Gzip"),
+                  Mean("bulkResponseClassificationDuration", "Classify response",
+                       where={"result": "response"}),
+                  Mean("bulkResponseClassificationDuration", "Classify no response",
+                       where={"result": "no_response"}),
+              ]),
+        Panel("RFS CPU throttled periods (%)",
+              "Percentage of Linux CFS scheduling periods in which bulk-loader containers wanted more CPU than "
+              "their configured limits allowed. High CPU utilization without throttled periods means workers are "
+              "using their allocation; sustained throttling means preparation, packing, compression, or response "
+              "work is being delayed by the pod CPU limit.",
+              "percent", [ContainerCpuThrottling()]),
+        Panel("Effective pipeline configuration",
+              "Mean process configuration reported by the running workers. These values make benchmark graphs "
+              "self-describing when lanes use different images or tuning combinations. Batch bytes are shown in "
+              "MiB; the other lines are document, chunk, group, or concurrency counts as named.",
+              "short", [
+                  Gauge("pipelineMaxBatchDocuments", "Max documents per target batch", "avg"),
+                  Gauge("pipelineMaxBatchBytes", "Max target-batch MiB", "avg", scale=MIB),
+                  Gauge("pipelineBatchConcurrency", "Request concurrency ceiling", "avg"),
+                  Gauge("pipelinePreparationConcurrency", "Preparation rails", "avg"),
+                  Gauge("pipelinePreparationChunkDocuments", "Documents per preparation chunk", "avg"),
+              ]),
     ]),
     ("Target domain", True, [
         Panel("Target indexing rate and write queue",
