@@ -1,9 +1,14 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -20,6 +25,7 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -203,7 +209,7 @@ public class DocumentMigrationPipeline {
             var completedBatches = writePhases(documents)
                 .concatMap(phase -> groupedSink == null
                     ? migrateDocumentBatches(phase, collectionName)
-                    : migratePreparedBatches(groupedSink, phase, collectionName), 1);
+                    : migratePersistentLaneBatches(groupedSink, phase, collectionName), 1);
             return completedBatches
                 // Advance checkpoints in emission order; writes may complete out of order.
                 .scan(new ProgressCursor(partition, startingPosition, 0, 0, MigrationMetrics.ZERO), (previous, batch) -> {
@@ -244,92 +250,212 @@ public class DocumentMigrationPipeline {
             }, batchConcurrency, 1);
     }
 
-    private <P> Flux<CompletedBatch> migratePreparedBatches(
-        GroupedDocumentSink<P> preparedSink,
-        Flux<Document> documents,
-        String collectionName
-    ) {
-        return prepareAndPackBatches(preparedSink, documents, collectionName)
-            .buffer(sourceBatchGroupSize)
-            .flatMapSequential(packedBatches -> {
-                activeBatches.incrementAndGet();
-                // Preserve source positions and transform-batch boundaries while allowing the sink to repack
-                // transformed output into exact target requests across this bounded checkpoint window.
-                var sourceBatches = packedBatches.stream().map(PackedBatch::documents).toList();
-                var lastBatch = sourceBatches.get(sourceBatches.size() - 1);
-                var lastPosition = lastBatch.get(lastBatch.size() - 1).document().position();
-                var sourceMetrics = sourceBatches.stream()
-                    .map(DocumentMigrationPipeline::sourceMetrics)
-                    .reduce(MigrationMetrics.Operations.ZERO, MigrationMetrics.Operations::plus);
-                long preparedBytes = packedBatches.stream().mapToLong(PackedBatch::preparedBytes).sum();
-                long oldestReadyNanos = packedBatches.stream().mapToLong(PackedBatch::readyNanos).min().orElseThrow();
-                return Mono.defer(() -> {
-                    long startedNanos = System.nanoTime();
-                    pipelineMetrics.onRequestGroupStarted(
-                        sourceBatches.size(),
-                        sourceMetrics.upserts() + sourceMetrics.deletes(),
-                        preparedBytes,
-                        nanosToMillis(startedNanos - oldestReadyNanos)
-                    );
-                    return preparedSink.writePreparedBatchGroup(
-                            collectionName,
-                            sourceBatches,
-                            Math.min(requestConcurrencyPerGroup, sourceBatches.size())
-                        )
-                    .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
-                    .doFinally(signal -> pipelineMetrics.onRequestGroupFinished(
-                        sourceMetrics.upserts() + sourceMetrics.deletes(),
-                        preparedBytes,
-                        nanosToMillis(System.nanoTime() - startedNanos),
-                        signal == reactor.core.publisher.SignalType.ON_COMPLETE
-                    ));
-                })
-                    .doFinally(s -> activeBatches.decrementAndGet());
-            }, batchGroupConcurrency, 1);
-    }
-
-    private <P> Flux<PackedBatch<P>> prepareAndPackBatches(
+    /**
+     * Split a source phase into stable CPU lanes. Each lane owns preparation and exact packing state for its
+     * lifetime. Their packed batches merge into one shared asynchronous request dispatcher, so a slow preparation
+     * lane cannot strand a fixed share of the HTTP concurrency. Completed source chunks are merged back into source
+     * order only where checkpoints advance.
+     */
+    private <P> Flux<CompletedBatch> migratePersistentLaneBatches(
         GroupedDocumentSink<P> preparedSink,
         Flux<Document> documents,
         String collectionName
     ) {
         return Flux.defer(() -> {
-            var packer = new PreparedBatchPacker<P>(maxDocsPerBatch, maxBytesPerBatch);
-            var preparedChunks = documents
-                // Document count determines normal fan-out granularity. The byte cap is a secondary memory
-                // bound for unusually large source documents.
+            int laneCount = preparationConcurrency;
+            var laneSchedulers = new ArrayList<Scheduler>(laneCount);
+            for (int lane = 0; lane < laneCount; lane++) {
+                laneSchedulers.add(Schedulers.newSingle("rfs-preparation-lane-" + lane));
+            }
+            var nextSequence = new AtomicLong();
+
+            var sourceChunks = documents
                 .bufferUntil(new BatchSizePredicate<>(
                     preparationChunkDocuments,
                     maxBytesPerBatch,
                     Document::sourceLength
                 ), true)
-                .map(sourceChunk -> {
-                    long sourceBytes = 0;
-                    for (var document : sourceChunk) {
-                        sourceBytes += document.sourceLength();
-                    }
-                    long queuedNanos = System.nanoTime();
-                    pipelineMetrics.onPreparationChunkQueued(sourceChunk.size(), sourceBytes);
-                    return new SourceChunk(sourceChunk, sourceBytes, queuedNanos);
-                })
-                .flatMapSequential(sourceChunk -> Mono.fromCallable(() -> prepareChunk(
-                        preparedSink,
-                        collectionName,
-                        sourceChunk
-                    ))
-                    .subscribeOn(Schedulers.parallel()), preparationConcurrency, 1);
+                .map(sourceChunk -> newLaneSourceChunk(nextSequence.getAndIncrement(), sourceChunk));
 
-            // Packing is synchronous on whichever preparation rail produced the next ordered chunk. Keeping
-            // prepared documents as block elements avoids a Reactor signal per document and avoids a publishOn
-            // handoff merely to obtain buffering. Prefetch keeps several chunks available per preparation rail
-            // while bounding the reservoir by a known number of document- and source-byte-bounded chunks.
-            return preparedChunks
-                .concatMapIterable(
-                    preparedChunk -> releaseAndPack(packer, preparedChunk),
-                    preparationConcurrency * PREPARED_CHUNKS_PER_PREPARATION_RAIL
+            var packedBatches = sourceChunks
+                .groupBy(sourceChunk -> (int) (sourceChunk.state().sequence() % laneCount), laneCount)
+                .flatMap(
+                    lane -> preparePersistentLane(
+                        preparedSink,
+                        lane,
+                        collectionName,
+                        laneSchedulers.get(lane.key())
+                    ),
+                    laneCount,
+                    1
+                );
+
+            var unorderedCompletions = packedBatches
+                .buffer(sourceBatchGroupSize)
+                .flatMap(
+                    packedGroup -> writeLaneRequestGroup(preparedSink, collectionName, packedGroup),
+                    batchGroupConcurrency,
+                    1
                 )
-                .concatWith(Flux.defer(() -> Flux.fromIterable(toPackedBatches(packer.finish()))));
+                .concatMapIterable(completed -> completed);
+
+            return restoreSourceOrder(unorderedCompletions)
+                .doFinally(signal -> laneSchedulers.forEach(Scheduler::dispose));
         });
+    }
+
+    private LaneSourceChunk newLaneSourceChunk(long sequence, List<Document> documents) {
+        long sourceBytes = documents.stream().mapToLong(Document::sourceLength).sum();
+        long queuedNanos = System.nanoTime();
+        pipelineMetrics.onPreparationChunkQueued(documents.size(), sourceBytes);
+        var lastPosition = documents.get(documents.size() - 1).position();
+        var state = new LaneChunkState(
+            sequence,
+            lastPosition,
+            MigrationMetrics.Operations.fromDocuments(documents),
+            documents.size(),
+            sourceBytes
+        );
+        return new LaneSourceChunk(state, new SourceChunk(documents, sourceBytes, queuedNanos));
+    }
+
+    private <P> Flux<LanePackedBatch<P>> preparePersistentLane(
+        GroupedDocumentSink<P> preparedSink,
+        Flux<LaneSourceChunk> sourceChunks,
+        String collectionName,
+        Scheduler laneScheduler
+    ) {
+        return Flux.defer(() -> {
+            var packer = new LanePreparedBatchPacker<P>(maxDocsPerBatch, maxBytesPerBatch);
+            return sourceChunks
+                .concatMap(sourceChunk -> Mono.fromCallable(
+                    () -> prepareLaneChunk(preparedSink, collectionName, sourceChunk)
+                ).subscribeOn(laneScheduler), 1)
+                .concatMapIterable(preparedChunk -> releaseAndPack(packer, preparedChunk), 1)
+                .concatWith(Flux.defer(() -> Flux.fromIterable(toLanePackedBatches(packer.finish()))));
+        });
+    }
+
+    private <P> LanePreparedChunk<P> prepareLaneChunk(
+        GroupedDocumentSink<P> preparedSink,
+        String collectionName,
+        LaneSourceChunk sourceChunk
+    ) {
+        var preparedChunk = prepareChunk(preparedSink, collectionName, sourceChunk.source());
+        var prepared = preparedChunk.documents().stream()
+            .map(document -> new LanePreparedDocument<>(sourceChunk.state(), document))
+            .toList();
+        return new LanePreparedChunk<>(
+            prepared,
+            preparedChunk.preparedBytes(),
+            preparedChunk.completedNanos()
+        );
+    }
+
+    private <P> List<LanePackedBatch<P>> releaseAndPack(
+        LanePreparedBatchPacker<P> packer,
+        LanePreparedChunk<P> preparedChunk
+    ) {
+        long releasedNanos = System.nanoTime();
+        pipelineMetrics.onPreparationChunkReleased(
+            preparedChunk.documents().size(),
+            preparedChunk.preparedBytes(),
+            nanosToMillis(releasedNanos - preparedChunk.completedNanos())
+        );
+        long packingStartedNanos = System.nanoTime();
+        var completed = packer.add(preparedChunk.documents());
+        pipelineMetrics.onPackingChunk(
+            preparedChunk.documents().size(),
+            nanosToMillis(System.nanoTime() - packingStartedNanos)
+        );
+        return toLanePackedBatches(completed);
+    }
+
+    private <P> List<LanePackedBatch<P>> toLanePackedBatches(
+        List<LanePreparedBatch<P>> batches
+    ) {
+        return batches.stream().map(batch -> {
+            pipelineMetrics.onBatchPacked(
+                batch.documents().size(),
+                batch.preparedBytes(),
+                100.0 * batch.documents().size() / maxDocsPerBatch,
+                100.0 * batch.preparedBytes() / maxBytesPerBatch
+            );
+            return new LanePackedBatch<>(batch.documents(), batch.preparedBytes(), System.nanoTime());
+        }).toList();
+    }
+
+    private <P> Mono<List<CompletedBatch>> writeLaneRequestGroup(
+        GroupedDocumentSink<P> preparedSink,
+        String collectionName,
+        List<LanePackedBatch<P>> packedBatches
+    ) {
+        activeBatches.incrementAndGet();
+        var sourceBatches = packedBatches.stream()
+            .map(batch -> batch.documents().stream().map(LanePreparedDocument::document).toList())
+            .toList();
+        long preparedBytes = packedBatches.stream().mapToLong(LanePackedBatch::preparedBytes).sum();
+        long oldestReadyNanos = packedBatches.stream().mapToLong(LanePackedBatch::readyNanos).min().orElseThrow();
+        long documentCount = sourceBatches.stream().mapToLong(List::size).sum();
+
+        return Mono.defer(() -> {
+            long startedNanos = System.nanoTime();
+            pipelineMetrics.onRequestGroupStarted(
+                sourceBatches.size(),
+                documentCount,
+                preparedBytes,
+                nanosToMillis(startedNanos - oldestReadyNanos)
+            );
+            return preparedSink.writePreparedBatchGroup(
+                    collectionName,
+                    sourceBatches,
+                    Math.min(requestConcurrencyPerGroup, sourceBatches.size())
+                )
+                .map(result -> completeLaneDocuments(packedBatches, result))
+                .doFinally(signal -> pipelineMetrics.onRequestGroupFinished(
+                    documentCount,
+                    preparedBytes,
+                    nanosToMillis(System.nanoTime() - startedNanos),
+                    signal == reactor.core.publisher.SignalType.ON_COMPLETE
+                ));
+        }).doFinally(signal -> activeBatches.decrementAndGet());
+    }
+
+    private static <P> List<CompletedBatch> completeLaneDocuments(
+        List<LanePackedBatch<P>> packedBatches,
+        BatchResult result
+    ) {
+        var completedByChunk = new IdentityHashMap<LaneChunkState, Integer>();
+        for (var batch : packedBatches) {
+            for (var document : batch.documents()) {
+                completedByChunk.merge(document.chunk(), 1, Integer::sum);
+            }
+        }
+        var metricOwner = completedByChunk.keySet().stream()
+            .max(Comparator.comparingLong(LaneChunkState::sequence))
+            .orElseThrow();
+        var completed = new ArrayList<CompletedBatch>();
+        completedByChunk.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey(Comparator.comparingLong(LaneChunkState::sequence)))
+            .forEach(entry -> {
+                var chunk = entry.getKey();
+                var contribution = chunk == metricOwner ? result : new BatchResult(0, 0);
+                chunk.completeDocuments(entry.getValue(), contribution).ifPresent(completed::add);
+            });
+        return completed;
+    }
+
+    private static Flux<CompletedBatch> restoreSourceOrder(Flux<CompletedBatch> unordered) {
+        return unordered
+            .scanWith(
+                () -> new ReorderEmission(new CompletionReorderBuffer(), List.of()),
+                (previous, completed) -> new ReorderEmission(
+                    previous.buffer(),
+                    previous.buffer().accept(completed)
+                )
+            )
+            .skip(1)
+            .concatMapIterable(ReorderEmission::ready);
     }
 
     private <P> PreparedChunk<P> prepareChunk(
@@ -372,39 +498,6 @@ public class DocumentMigrationPipeline {
         }
     }
 
-    private <P> List<PackedBatch<P>> releaseAndPack(
-        PreparedBatchPacker<P> packer,
-        PreparedChunk<P> preparedChunk
-    ) {
-        long releasedNanos = System.nanoTime();
-        pipelineMetrics.onPreparationChunkReleased(
-            preparedChunk.documents().size(),
-            preparedChunk.preparedBytes(),
-            nanosToMillis(releasedNanos - preparedChunk.completedNanos())
-        );
-        long packingStartedNanos = System.nanoTime();
-        var completed = packer.add(preparedChunk.documents());
-        pipelineMetrics.onPackingChunk(
-            preparedChunk.documents().size(),
-            nanosToMillis(System.nanoTime() - packingStartedNanos)
-        );
-        return toPackedBatches(completed);
-    }
-
-    private <P> List<PackedBatch<P>> toPackedBatches(
-        List<PreparedBatch<P>> batches
-    ) {
-        return batches.stream().map(batch -> {
-            pipelineMetrics.onBatchPacked(
-                batch.documents().size(),
-                batch.preparedBytes(),
-                100.0 * batch.documents().size() / maxDocsPerBatch,
-                100.0 * batch.preparedBytes() / maxBytesPerBatch
-            );
-            return new PackedBatch<>(batch.documents(), batch.preparedBytes(), System.nanoTime());
-        }).toList();
-    }
-
     private static double nanosToMillis(long nanos) {
         return nanos / 1_000_000.0;
     }
@@ -426,54 +519,37 @@ public class DocumentMigrationPipeline {
         });
     }
 
-    private static MigrationMetrics.Operations sourceMetrics(
-        List<? extends GroupedDocumentSink.PreparedDocument<?>> batch
-    ) {
-        long upserts = 0;
-        long bytes = 0;
-        for (var preparedDocument : batch) {
-            var document = preparedDocument.document();
-            if (document.operation() == Document.Operation.UPSERT) {
-                upserts++;
-                bytes += document.sourceLength();
-            }
-        }
-        return new MigrationMetrics.Operations(upserts, batch.size() - upserts, bytes);
-    }
-
-    private static final class PreparedBatchPacker<P> {
-        private final BatchSizePredicate<GroupedDocumentSink.PreparedDocument<P>> startsNewBatch;
-        private List<GroupedDocumentSink.PreparedDocument<P>> pending = new ArrayList<>();
+    private static final class LanePreparedBatchPacker<P> {
+        private final BatchSizePredicate<LanePreparedDocument<P>> startsNewBatch;
+        private List<LanePreparedDocument<P>> pending = new ArrayList<>();
         private long pendingBytes;
 
-        private PreparedBatchPacker(int maxDocuments, long maxBytes) {
+        private LanePreparedBatchPacker(int maxDocuments, long maxBytes) {
             startsNewBatch = new BatchSizePredicate<>(
                 maxDocuments,
                 maxBytes,
-                GroupedDocumentSink.PreparedDocument::sizeBytes
+                document -> document.document().sizeBytes()
             );
         }
 
-        private List<PreparedBatch<P>> add(
-            List<GroupedDocumentSink.PreparedDocument<P>> preparedChunk
-        ) {
-            List<PreparedBatch<P>> completed = null;
+        private List<LanePreparedBatch<P>> add(List<LanePreparedDocument<P>> preparedChunk) {
+            List<LanePreparedBatch<P>> completed = null;
             for (var document : preparedChunk) {
                 if (startsNewBatch.test(document)) {
                     if (completed == null) {
                         completed = new ArrayList<>();
                     }
-                    completed.add(new PreparedBatch<>(pending, pendingBytes));
+                    completed.add(new LanePreparedBatch<>(pending, pendingBytes));
                     pending = new ArrayList<>();
                     pendingBytes = 0;
                 }
                 pending.add(document);
-                pendingBytes += document.sizeBytes();
+                pendingBytes += document.document().sizeBytes();
             }
             return completed == null ? List.of() : completed;
         }
 
-        private List<PreparedBatch<P>> finish() {
+        private List<LanePreparedBatch<P>> finish() {
             if (pending.isEmpty()) {
                 return List.of();
             }
@@ -481,17 +557,102 @@ public class DocumentMigrationPipeline {
             long finalBytes = pendingBytes;
             pending = new ArrayList<>();
             pendingBytes = 0;
-            return List.of(new PreparedBatch<>(finalBatch, finalBytes));
+            return List.of(new LanePreparedBatch<>(finalBatch, finalBytes));
+        }
+    }
+
+    private static final class LaneChunkState {
+        private final long sequence;
+        private final OptionalLong lastPosition;
+        private final MigrationMetrics.Operations sourceMetrics;
+        private final long sourceDocuments;
+        private final long sourceBytes;
+        private int remainingDocuments;
+        private MigrationMetrics.Operations target = MigrationMetrics.Operations.ZERO;
+        private MigrationMetrics.Requests requests = MigrationMetrics.Requests.ZERO;
+        private MigrationMetrics.Failures failures = MigrationMetrics.Failures.ZERO;
+
+        private LaneChunkState(
+            long sequence,
+            OptionalLong lastPosition,
+            MigrationMetrics.Operations sourceMetrics,
+            int sourceDocuments,
+            long sourceBytes
+        ) {
+            this.sequence = sequence;
+            this.lastPosition = lastPosition;
+            this.sourceMetrics = sourceMetrics;
+            this.sourceDocuments = sourceDocuments;
+            this.sourceBytes = sourceBytes;
+            this.remainingDocuments = sourceDocuments;
+        }
+
+        private long sequence() {
+            return sequence;
+        }
+
+        private synchronized Optional<CompletedBatch> completeDocuments(int count, BatchResult result) {
+            target = target.plus(result.target());
+            requests = requests.plus(result.requests());
+            failures = failures.plus(result.failures());
+            remainingDocuments -= count;
+            if (remainingDocuments < 0) {
+                throw new IllegalStateException(
+                    "Persistent lane completed more documents than source chunk " + sequence + " contains"
+                );
+            }
+            if (remainingDocuments > 0) {
+                return Optional.empty();
+            }
+            return Optional.of(new CompletedBatch(
+                sequence,
+                lastPosition,
+                sourceMetrics,
+                new BatchResult(sourceDocuments, sourceBytes, target, requests, failures)
+            ));
+        }
+    }
+
+    private static final class CompletionReorderBuffer {
+        private final TreeMap<Long, CompletedBatch> pending = new TreeMap<>();
+        private long nextSequence;
+
+        private List<CompletedBatch> accept(CompletedBatch completed) {
+            var previous = pending.put(completed.sequence(), completed);
+            if (previous != null) {
+                throw new IllegalStateException("Duplicate persistent-lane completion " + completed.sequence());
+            }
+            List<CompletedBatch> ready = null;
+            while (true) {
+                var next = pending.remove(nextSequence);
+                if (next == null) {
+                    break;
+                }
+                if (ready == null) {
+                    ready = new ArrayList<>();
+                }
+                ready.add(next);
+                nextSequence++;
+            }
+            return ready == null ? List.of() : ready;
         }
     }
 
     // Sonar flags the compiler-generated record constructor parameters as unused.
     @SuppressWarnings("java:S1172")
     private record CompletedBatch(
-        OptionalLong lastPosition, MigrationMetrics.Operations sourceMetrics, BatchResult result
-    ) {}
+        long sequence, OptionalLong lastPosition, MigrationMetrics.Operations sourceMetrics, BatchResult result
+    ) {
+        private CompletedBatch(
+            OptionalLong lastPosition, MigrationMetrics.Operations sourceMetrics, BatchResult result
+        ) {
+            this(-1, lastPosition, sourceMetrics, result);
+        }
+    }
 
     private record SourceChunk(List<Document> documents, long sourceBytes, long queuedNanos) {}
+
+    private record LaneSourceChunk(LaneChunkState state, SourceChunk source) {}
 
     private record PreparedChunk<P>(
         List<GroupedDocumentSink.PreparedDocument<P>> documents,
@@ -499,15 +660,31 @@ public class DocumentMigrationPipeline {
         long completedNanos
     ) {}
 
-    private record PreparedBatch<P>(
-        List<GroupedDocumentSink.PreparedDocument<P>> documents,
+    private record LanePreparedDocument<P>(
+        LaneChunkState chunk,
+        GroupedDocumentSink.PreparedDocument<P> document
+    ) {}
+
+    private record LanePreparedChunk<P>(
+        List<LanePreparedDocument<P>> documents,
+        long preparedBytes,
+        long completedNanos
+    ) {}
+
+    private record LanePreparedBatch<P>(
+        List<LanePreparedDocument<P>> documents,
         long preparedBytes
     ) {}
 
-    private record PackedBatch<P>(
-        List<GroupedDocumentSink.PreparedDocument<P>> documents,
+    private record LanePackedBatch<P>(
+        List<LanePreparedDocument<P>> documents,
         long preparedBytes,
         long readyNanos
+    ) {}
+
+    private record ReorderEmission(
+        CompletionReorderBuffer buffer,
+        List<CompletedBatch> ready
     ) {}
 
     /**

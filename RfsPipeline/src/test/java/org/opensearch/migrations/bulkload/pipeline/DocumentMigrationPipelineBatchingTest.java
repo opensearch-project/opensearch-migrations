@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -15,6 +17,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.sink.GroupedDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
@@ -27,6 +30,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mockito;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 class DocumentMigrationPipelineBatchingTest {
     private static final int MIB = 1024 * 1024;
@@ -218,8 +222,8 @@ class DocumentMigrationPipelineBatchingTest {
             .blockLast(Duration.ofSeconds(10));
 
         Assertions.assertEquals(
-            List.of(List.of("doc-0", "doc-1"), List.of("doc-2"), List.of("doc-3"), List.of("doc-4", "doc-5")),
-            sink.receivedBatches
+            List.of("doc-0,doc-1", "doc-2", "doc-3", "doc-4,doc-5"),
+            sink.receivedBatches.stream().map(batch -> String.join(",", batch)).sorted().toList()
         );
     }
 
@@ -284,6 +288,8 @@ class DocumentMigrationPipelineBatchingTest {
             final AtomicInteger batchesPacked = new AtomicInteger();
             final AtomicInteger requestGroupsStarted = new AtomicInteger();
             final AtomicInteger requestGroupsFinished = new AtomicInteger();
+            final AtomicInteger requestGroupBatches = new AtomicInteger();
+            final AtomicInteger requestGroupDocuments = new AtomicInteger();
             final AtomicInteger checkpointedDocuments = new AtomicInteger();
             final AtomicInteger packedDocuments = new AtomicInteger();
 
@@ -351,9 +357,9 @@ class DocumentMigrationPipelineBatchingTest {
             public void onRequestGroupStarted(
                 long batches, long count, long preparedBytes, double oldestReadyMillis
             ) {
-                Assertions.assertEquals(4, batches);
-                Assertions.assertEquals(6, count);
                 Assertions.assertTrue(oldestReadyMillis >= 0);
+                requestGroupBatches.addAndGet(Math.toIntExact(batches));
+                requestGroupDocuments.addAndGet(Math.toIntExact(count));
                 requestGroupsStarted.incrementAndGet();
             }
 
@@ -387,11 +393,13 @@ class DocumentMigrationPipelineBatchingTest {
         Assertions.assertEquals(6, metrics.packedDocuments.get());
         Assertions.assertEquals(1, metrics.requestGroupsStarted.get());
         Assertions.assertEquals(1, metrics.requestGroupsFinished.get());
+        Assertions.assertEquals(4, metrics.requestGroupBatches.get());
+        Assertions.assertEquals(6, metrics.requestGroupDocuments.get());
         Assertions.assertEquals(6, metrics.checkpointedDocuments.get());
     }
 
     @Test
-    void preparesSourceBatchesInParallelWithoutReorderingThem() throws Exception {
+    void preparesSourceBatchesInParallelAndCheckpointsInOrder() throws Exception {
         var partition = new EsShardPartition("snapshot", "index", 0);
         var documents = Stream.iterate(0, i -> i + 1)
             .limit(4)
@@ -474,7 +482,155 @@ class DocumentMigrationPipelineBatchingTest {
 
         Assertions.assertTrue(preparationsOverlapped);
         Assertions.assertTrue(sink.maxActivePreparations.get() >= 2);
-        Assertions.assertEquals(documents.stream().map(Document::id).toList(), sink.received);
+        Assertions.assertEquals(
+            documents.stream().map(Document::id).sorted().toList(),
+            sink.received.stream().sorted().toList()
+        );
+        Assertions.assertEquals(
+            List.of(1L, 2L, 3L, 4L),
+            future.get().stream().map(cursor -> cursor.nextPosition()).toList()
+        );
+    }
+
+    @Test
+    void keepsPreparationOnStablePersistentLanes() {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = Stream.iterate(0, i -> i + 1)
+            .limit(8)
+            .map(i -> new Document("doc-" + i, new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()))
+            .toList();
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+
+        class LaneRecordingSink implements GroupedDocumentSink<String> {
+            final Map<String, String> preparationThreads = new ConcurrentHashMap<>();
+
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped path must be used");
+            }
+
+            @Override
+            public int preferredSourceBatchGroupSize() {
+                return 1;
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                preparationThreads.put(document.id(), Thread.currentThread().getName());
+                return new PreparedDocument<>(document, 1, "prepared-" + document.id());
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatchGroup(
+                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
+            ) {
+                throw new AssertionError("The prepared grouped path must be used");
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                long count = sourceBatches.stream().mapToLong(List::size).sum();
+                return Mono.just(new BatchResult(count, count));
+            }
+        }
+
+        var sink = new LaneRecordingSink();
+        new DocumentMigrationPipeline(source, sink, 1, 100, 1, 4)
+            .migratePartition(partition, "index", 0)
+            .blockLast(Duration.ofSeconds(10));
+
+        Assertions.assertTrue(sink.preparationThreads.values().stream().distinct().count() >= 2);
+        for (int lane = 0; lane < 4; lane++) {
+            Assertions.assertEquals(
+                sink.preparationThreads.get("doc-" + lane),
+                sink.preparationThreads.get("doc-" + (lane + 4))
+            );
+        }
+    }
+
+    @Test
+    void combinesConcurrentRequestResultsForOneSourceChunk() throws Exception {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = List.of(
+            new Document("doc-0", new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("doc-1", new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of())
+        );
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+        var started = new CountDownLatch(2);
+        var completions = new ConcurrentHashMap<String, Sinks.One<BatchResult>>();
+        documents.forEach(document -> completions.put(document.id(), Sinks.one()));
+
+        class ConcurrentResultSink implements GroupedDocumentSink<String> {
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped path must be used");
+            }
+
+            @Override
+            public int preferredSourceBatchGroupSize() {
+                return 1;
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                return new PreparedDocument<>(document, 6, "prepared-" + document.id());
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatchGroup(
+                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
+            ) {
+                throw new AssertionError("The prepared grouped path must be used");
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                var id = sourceBatches.get(0).get(0).document().id();
+                started.countDown();
+                return completions.get(id).asMono();
+            }
+        }
+
+        var future = new DocumentMigrationPipeline(source, new ConcurrentResultSink(), 8, 10, 1, 2)
+            .migratePartition(partition, "index", 0)
+            .collectList()
+            .toFuture();
+        Assertions.assertTrue(started.await(10, TimeUnit.SECONDS));
+        var target = new MigrationMetrics.Operations(1, 0, 1);
+        var request = new MigrationMetrics.Requests(1, 1, 0, 6, 1);
+        CompletableFuture.allOf(
+            CompletableFuture.runAsync(() ->
+                completions.get("doc-0").tryEmitValue(new BatchResult(1, 1, target, request))),
+            CompletableFuture.runAsync(() ->
+                completions.get("doc-1").tryEmitValue(new BatchResult(1, 1, target, request)))
+        ).get(10, TimeUnit.SECONDS);
+
+        var cursors = future.get(10, TimeUnit.SECONDS);
+        Assertions.assertEquals(1, cursors.size());
+        var metrics = cursors.get(0).metrics();
+        Assertions.assertEquals(2, metrics.target().upserts());
+        Assertions.assertEquals(2, metrics.requests().total());
+        Assertions.assertEquals(12, metrics.requests().bytes());
     }
 
     @Test
