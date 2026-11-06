@@ -61,6 +61,37 @@ class SplitDocumentWriterTest {
     private static final String TARGET_INDEX = "{\"target\":{\"mappings\":{},\"settings\":{}}}";
 
     @ParameterizedTest
+    @ValueSource(strings = {"unset", "true", "false"})
+    void preservesRootMappingEnabledWhenPreparingAnAliasTarget(String enabled) {
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var transport = mock(RestClient.class);
+        var sequence = new AtomicInteger();
+        when(transport.asyncRequestBytesWithoutRetry(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            String path = call.getArgument(1);
+            HttpMethod method = call.getArgument(0);
+            if (path.equals("alias")) {
+                return Mono.just(response(200, "{\"target\":{\"aliases\":{\"alias\":{}},\"settings\":{},\"mappings\":{"
+                    + (enabled.equals("unset") ? "" : "\"enabled\":" + enabled) + "}}}"));
+            }
+            if (path.endsWith("/_mapping")) {
+                assertEquals("target/_mapping", path);
+                var mapping = mapper.readTree(call.<byte[]>getArgument(2));
+                assertEquals(enabled.equals("unset") ? null : mapper.getNodeFactory().booleanNode(Boolean.parseBoolean(enabled)),
+                    mapping.get("enabled"));
+                assertEquals(mapper.getNodeFactory().booleanNode(false),
+                    mapping.path("properties").path("_rfs_large_document").path("enabled"));
+                return Mono.just(response(200, "{\"acknowledged\":true}"));
+            }
+            if (method.equals(HttpMethod.GET)) return Mono.just(response(404, "{\"found\":false}"));
+            return Mono.just(response(200,
+                "{\"_seq_no\":" + sequence.getAndIncrement() + ",\"_primary_term\":1,\"result\":\"updated\"}"));
+        });
+        var operation = BulkNdjson.encode(IndexOp.builder()
+            .operation(IndexOperationMeta.builder().index("alias").id("id").build()).document(Map.of("n", 1)).build(), mapper);
+        new SplitDocumentWriter(transport, 4096).write("target", operation, null).block();
+    }
+
+    @ParameterizedTest
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
     void independentWritesStayConcurrentWithoutCheckpointingAnIncompleteSplit(
         boolean separatePartitions, boolean failBlockedPart

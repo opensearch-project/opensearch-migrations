@@ -103,6 +103,23 @@ async function transformAndResolve(config: z.infer<typeof OVERALL_MIGRATION_CONF
 }
 
 describe("resolved migration resources", () => {
+    it("carries document size controls from migration config into the RFS resource", async () => {
+        const config = sampleConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            ...config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig!,
+            documentsSizePerBulkRequest: 1048576,
+            maxDocumentSizeBytes: "9223372036854775807",
+            splitLargeDocuments: true,
+        };
+        const {singleResource, workflowConfig} = await transformAndResolve(config);
+        expect(singleResource("SnapshotMigration").parameters).toMatchObject({
+            documentBackfillDocumentsSizePerBulkRequest: 1048576,
+            documentBackfillMaxDocumentSizeBytes: "9223372036854775807",
+            documentBackfillSplitLargeDocuments: true,
+        });
+        expect(JSON.stringify(workflowConfig)).toContain('"maxDocumentSizeBytes":"9223372036854775807"');
+    });
+
     it("extracts resolved resource parameters from transformed workflow config", async () => {
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(sampleConfig());
         const resolvedMigrationResources = buildResolvedMigrationResources(workflowConfig, "workflow-a");

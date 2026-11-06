@@ -2323,6 +2323,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 10485760
                     },
+                    "maxDocumentSizeBytes": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,18}$",
+                      "default": "9223372036854775807"
+                    },
+                    "splitLargeDocuments": {
+                      "type": "boolean",
+                      "default": false
+                    },
                     "initialLeaseDuration": {
                       "type": "string",
                       "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
@@ -5292,6 +5301,19 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "number",
                         "default": 10485760,
                         "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."
+                      },
+                      "maxDocumentSizeBytes": {
+                        "type": "string",
+                        "pattern": "^[1-9][0-9]{0,18}$",
+                        "default": "9223372036854775807",
+                        "description": "Maximum size of one encoded operation after transformations, including metadata and newlines. Use a quoted decimal string to preserve 64-bit precision in YAML/JSON. Defaults to Long.MAX_VALUE. Applies even with splitting enabled.",
+                        "changeRestriction": "gated"
+                      },
+                      "splitLargeDocuments": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Split oversized plain index operations into bounded requests after transformations. Requires explicit IDs, complete stored source, no ingest pipelines or version conditions, and permission to add an assembly mapping. Partial documents remain visible until completion. Independent batches retain concurrency; numeric literals must fit whole in a request.",
+                        "changeRestriction": "gated"
                       },
                       "initialLeaseDuration": {
                         "type": "string",

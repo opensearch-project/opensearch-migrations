@@ -28,6 +28,22 @@ rejects oversized operations without enabling splitting.
 
 ## Direct index and ordered updates
 
+For EKS, set the same controls in a snapshot migration's `documentBackfillConfig`:
+
+```yaml
+documentBackfillConfig:
+  documentsSizePerBulkRequest: 10485760
+  maxDocumentSizeBytes: "52428800"
+  splitLargeDocuments: true
+```
+
+The document ceiling is a quoted decimal string so the configuration processor
+preserves 64-bit values exactly. Its default is `"9223372036854775807"`
+(`Long.MAX_VALUE`); splitting defaults to `false`. These settings are carried
+through the `SnapshotMigration` resource into the worker's JSON configuration.
+Changes to the ceiling or splitting option use the existing gated configuration
+update policy.
+
 The splitter uses the destination document itself. It creates no staging index,
 recovery journal, reindex task, or separate payload document.
 

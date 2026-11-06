@@ -305,6 +305,10 @@ class RfsMigrateDocumentsHelpersTest {
         JsonCommandLineParser.newBuilder().addObject(args).build()
             .parse(new String[]{"---INLINE-JSON", "{\"maxDocumentSizeBytes\":4294967296}"});
         assertThat(args.maxDocumentSizeBytes, equalTo(4294967296L));
+        JsonCommandLineParser.newBuilder().addObject(args).build().parse(new String[]{
+            "---INLINE-JSON", "{\"maxDocumentSizeBytes\":\"9223372036854775807\",\"splitLargeDocuments\":true}"});
+        assertThat(args.maxDocumentSizeBytes, equalTo(Long.MAX_VALUE));
+        assertThat(args.splitLargeDocuments, equalTo(true));
     }
 
     @Test

@@ -126,7 +126,8 @@ class RfsSplitRecoveryEndToEndTest {
             var cluster = new ClusterOperations(target);
             resumesLaterChunkFailureAndFlushesWholeDocument(target, cluster);
             for (String phase : List.of("INDEX", "PART", "COMPLETE")) {
-                fencesDelayedPredecessor(target, cluster, phase);
+                fencesDelayedPredecessor(target, cluster, phase, false);
+                fencesDelayedPredecessor(target, cluster, phase, true);
             }
             resumesAfterLostCompletionAcknowledgement(target, cluster);
             recordsRealLateFieldMappingFailure(target, cluster);
@@ -227,11 +228,15 @@ class RfsSplitRecoveryEndToEndTest {
         }
     }
 
-    private void fencesDelayedPredecessor(SearchClusterContainer target, ClusterOperations cluster, String phase) throws Exception {
-        String index = "fence-" + phase.toLowerCase(java.util.Locale.ROOT);
+    private void fencesDelayedPredecessor(
+        SearchClusterContainer target, ClusterOperations cluster, String phase, boolean deleteAfter
+    ) throws Exception {
+        String index = "fence-" + phase.toLowerCase(java.util.Locale.ROOT) + (deleteAfter ? "-deleted" : "-present");
         createIndex(cluster, index);
         assertEquals(201, cluster.put("/" + index + "/_doc/same", "{\"obsolete\":true}").getKey());
-        var documents = List.of(doc("same", LARGE, 0), delete("same", 1), doc("later", "{\"value\":2}", 2));
+        var documents = deleteAfter
+            ? List.of(doc("same", LARGE, 0), delete("same", 1), doc("later", "{\"value\":2}", 2))
+            : List.of(doc("same", LARGE, 0), doc("later", "{\"value\":2}", 1));
         var checkpoint = checkpoint(index);
         try (var firstProxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
              var secondProxy = new SizeLimitingProxy(target.getUrl(), LIMIT);
@@ -259,18 +264,23 @@ class RfsSplitRecoveryEndToEndTest {
                 assertEquals(0, readCheckpoint(checkpoint));
                 var successor = worker(target, secondProxy, index, documents, checkpoint, null, new FailedRequestsLogger(), failures);
                 assertEquals(CompletionStatus.WORK_COMPLETED, successor.run());
-                assertEquals(3, readCheckpoint(checkpoint));
-                assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey());
+                assertEquals(documents.size(), readCheckpoint(checkpoint));
+                assertEquals(deleteAfter ? 404 : 200, cluster.get("/" + index + "/_doc/same").getKey());
             } finally {
                 release.countDown();
             }
             assertThrows(java.util.concurrent.ExecutionException.class, () -> predecessorRun.get(30, TimeUnit.SECONDS));
             assertTrue(held.get().path().contains("if_seq_no="));
+            int rejectionStatus = deleteAfter && !phase.equals("INDEX") ? 404 : 409;
             assertTrue(firstProxy.completedRequests.stream().anyMatch(r -> r.request().equals(held.get())
-                && r.response().status() == 409), "The real primary must reject the stale conditional request");
-            assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey(), "A late predecessor cannot resurrect the successor's delete");
+                && r.response().status() == rejectionStatus), "Reject stale writes: updates to deleted documents return 404; revision conflicts return 409");
+            if (deleteAfter) {
+                assertEquals(404, cluster.get("/" + index + "/_doc/same").getKey(), "A late predecessor cannot resurrect the successor's delete");
+            } else {
+                assertEquals(tree(LARGE), source(cluster, index, "same"), "A late predecessor cannot change the successor's complete source");
+            }
             assertEquals(tree("{\"value\":2}"), source(cluster, index, "later"));
-            assertEquals(3, readCheckpoint(checkpoint));
+            assertEquals(documents.size(), readCheckpoint(checkpoint));
             assertEquals(phase, failures.records().get(0).path("splitFailure").path("stage").asText());
             assertBounds(firstProxy);
             assertBounds(secondProxy);

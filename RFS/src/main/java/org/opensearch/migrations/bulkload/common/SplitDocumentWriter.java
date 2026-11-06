@@ -217,8 +217,13 @@ final class SplitDocumentWriter {
                 return Mono.error(new IllegalArgumentException("Splitting requires an existing concrete index or write alias"));
             }
             var target = selected;
-            var mapping = json(Map.of("properties", Map.of(STATE_FIELD, Map.of("type", OBJECT, ENABLED, false))));
-            return send(null, HttpMethod.PUT, encode(target.index) + "/_mapping", mapping).retryWhen(RETRY).thenReturn(target);
+            var mapping = MAPPER.valueToTree(Map.of("properties", Map.of(STATE_FIELD, Map.of("type", OBJECT, ENABLED, false))));
+            var rootEnabled = indices.path(target.index).path("mappings").get(ENABLED);
+            if (rootEnabled != null) {
+                // Omitting enabled on a disabled root makes OpenSearch try to merge its default (true).
+                ((ObjectNode) mapping).set(ENABLED, rootEnabled);
+            }
+            return send(null, HttpMethod.PUT, encode(target.index) + "/_mapping", json(mapping)).retryWhen(RETRY).thenReturn(target);
         });
     }
 

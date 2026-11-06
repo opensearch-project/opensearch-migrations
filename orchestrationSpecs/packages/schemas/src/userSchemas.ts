@@ -1084,6 +1084,18 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
         .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."),
+    maxDocumentSizeBytes: z.string().regex(/^[1-9][0-9]{0,18}$/)
+        .refine(value => value.length < 19 || (value.length === 19 && value <= "9223372036854775807"),
+            "Must not exceed Java Long.MAX_VALUE")
+        .default("9223372036854775807").optional()
+        .describe("Maximum size of one encoded operation after transformations, including metadata and newlines. " +
+            "Use a quoted decimal string to preserve 64-bit precision in YAML/JSON. Defaults to Long.MAX_VALUE. Applies even with splitting enabled.")
+        .changeRestriction('gated'),
+    splitLargeDocuments: z.boolean().default(false).optional()
+        .describe("Split oversized plain index operations into bounded requests after transformations. " +
+            "Requires explicit IDs, complete stored source, no ingest pipelines or version conditions, and permission to add an assembly mapping. " +
+            "Partial documents remain visible until completion. Independent batches retain concurrency; numeric literals must fit whole in a request.")
+        .changeRestriction('gated'),
     initialLeaseDuration: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
         .default("PT1H").optional()
