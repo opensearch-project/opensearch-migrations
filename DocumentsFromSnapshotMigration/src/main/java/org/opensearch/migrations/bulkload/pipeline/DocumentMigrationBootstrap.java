@@ -163,7 +163,7 @@ public class DocumentMigrationBootstrap {
         var pipeline = new DocumentMigrationPipeline(
             pipelineConfig.source(), pipelineConfig.sink(),
             pipelineConfig.maxDocsPerBatch(), pipelineConfig.maxBytesPerBatch(),
-            1, pipelineConfig.batchConcurrency()
+            1, pipelineConfig.batchConcurrency(), context.getPipelineMetrics()
         );
         var progressMonitor = new PipelineProgressMonitor(pipeline);
         progressMonitor.start();
@@ -255,6 +255,7 @@ public class DocumentMigrationBootstrap {
             throw new RfsException("Partition migration interrupted", e);
         } finally {
             progressMonitor.close();
+            context.getPipelineMetrics().onPipelineClosed();
         }
     }
 

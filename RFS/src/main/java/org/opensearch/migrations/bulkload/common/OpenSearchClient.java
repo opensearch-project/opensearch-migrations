@@ -974,9 +974,22 @@ public abstract class OpenSearchClient {
                     })
                     .onErrorMap(error -> new NoResponseException(error, Duration.ofNanos(System.nanoTime() - start)));
             })
-                .flatMap(assessed -> classifyResponse(
-                    indexName, pendingOps, totals, assessed.response(), assessed.errorClass(), context, allowlist))
-                .onErrorResume(NoResponseException.class, error -> classifyNoResponse(indexName, pendingOps, totals, error));
+                .flatMap(assessed -> classifyWithMetrics(
+                    true,
+                    () -> classifyResponse(
+                        indexName,
+                        pendingOps,
+                        totals,
+                        assessed.response(),
+                        assessed.errorClass(),
+                        context,
+                        allowlist
+                    )
+                ))
+                .onErrorResume(NoResponseException.class, error -> classifyWithMetrics(
+                    false,
+                    () -> classifyNoResponse(indexName, pendingOps, totals, error)
+                ));
         })
         .retryWhen(getBulkRetryStrategy(retryState))
         // Only a test's limited schedule runs out; credentials the target refuses stop the worker.
@@ -1003,6 +1016,19 @@ public abstract class OpenSearchClient {
                 new OperationFailed(rejected.response().getFailureMessage(), rejected.response()), null);
             case AttemptOutcome.Exhausted exhausted -> finishWithTerminalFailure(indexName, pendingOps, totals, context,
                 FailureClass.RETRYABLE_EXHAUSTED, exhausted.error(), exhausted.reason());
+        });
+    }
+
+    private Mono<AttemptOutcome> classifyWithMetrics(
+        boolean responseReceived,
+        Supplier<Mono<AttemptOutcome>> classification
+    ) {
+        return Mono.defer(() -> {
+            long startedNanos = System.nanoTime();
+            return classification.get().doFinally(signal -> bulkFlowMetrics.onResponseClassified(
+                responseReceived,
+                (System.nanoTime() - startedNanos) / 1_000_000.0
+            ));
         });
     }
 

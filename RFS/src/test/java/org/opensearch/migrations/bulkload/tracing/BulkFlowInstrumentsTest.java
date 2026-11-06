@@ -180,7 +180,8 @@ class BulkFlowInstrumentsTest {
             "bulkBatchPreparationDuration",
             "bulkRequestAssemblyDuration",
             "bulkRequestCompressionDuration",
-            "bulkRequestStartGap"
+            "bulkRequestStartGap",
+            "bulkResponseClassificationDuration"
         )), "reported: " + names);
     }
 
