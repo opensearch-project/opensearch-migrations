@@ -138,6 +138,63 @@ bounded design. The other three runs occupy a 1.38-percentage-point rate band.
 That band is smaller than the 3.24% completion spread measured between two
 identical P4-IM runs elsewhere in the experiment.
 
+## Matched steady-state process resources
+
+The process comparison uses a trailing five-minute window ending at elapsed
+minute 25 of each run. That holds the migration phase approximately constant
+and avoids both initial shard download and final worker retirement. CPU and
+memory come from Kubernetes container metrics, so they are available for
+RFS 3.4.0 even though that image lacks the newer application counters.
+
+The table keeps the resource measurements adjacent to the accepted rate so
+that higher CPU use, scheduling pressure, and memory cost can be evaluated
+without relying on a separate chart.
+
+| Process measure | RFS 3.4.0 baseline | Serial exact preparation | Bounded split and merge | Latest minimal splitting |
+|---|---:|---:|---:|---:|
+| Five-minute window ends, UTC | 14:48:32 | 14:43:28 | 14:26:51 | 15:49:39 |
+| Fleet CPU | 50.34 cores | 57.82 cores | **66.19 cores** | 65.72 cores |
+| Mean CPU/worker | 2.10 cores | 2.41 cores | **2.76 cores** | 2.74 cores |
+| CPU limit in use | 63.6% | 73.0% | **83.6%** | 83.0% |
+| CFS-throttled scheduling periods | 1.7% | 8.4% | 20.9% | **23.7%** |
+| Fleet memory working set | **113.5 GiB** | 89.5 GiB | 94.0 GiB | 88.1 GiB |
+| Mean working set/worker | **4.73 GiB** | 3.73 GiB | 3.92 GiB | 3.67 GiB |
+| Memory limit in use | **69.2%** | 54.5% | 57.3% | 53.7% |
+| Fleet RSS | **72.0 GiB** | 46.7 GiB | 55.4 GiB | 52.6 GiB |
+| Mean RSS/worker | **3.00 GiB** | 1.95 GiB | 2.31 GiB | 2.19 GiB |
+| Accepted documents/s | Unavailable | 861,498 | **884,091** | 860,748 |
+| Documents/CPU-second | Unavailable | **14,899** | 13,358 | 13,098 |
+| Bulk attempts/s | Unavailable | 80.98 | **83.05** | 80.90 |
+| Mean HTTP attempt | Unavailable | **3.470 s** | 3.522 s | 3.523 s |
+| Mean documents/request | Unavailable | 10,640 | **10,641** | 10,640 |
+| Mean uncompressed request | Unavailable | 10.00 MiB | 10.00 MiB | 10.00 MiB |
+
+The bounded and direct modern shapes used essentially the same CPU: P4-DJ
+used 0.7% fewer cores. P4-DJ used 6.3% less working-set memory and 5.0% less
+RSS than the bounded split-and-merge shape. That makes the direct lanes the
+lowest-working-set selected implementation without sacrificing materially
+different full-run performance.
+
+RFS 3.4.0 has the opposite resource profile: it used the least CPU but the
+most memory. Its working set was 28.9% above P4-DJ and its RSS was 36.8%
+above P4-DJ. The old image does not expose a matched application document
+rate, request rate, or request-size series, so its documents/CPU-second cannot
+be calculated for this exact window. The comparison establishes that it
+retained more memory; it does not isolate how much came from its approximate
+batching, larger effective requests, buffering, or other old-code differences.
+
+The serial shape used 12.0% fewer CPU cores than P4-DJ and achieved the best
+measured documents/CPU-second among the instrumented runs, but it also fed
+fewer documents per second and took 3m37s longer to finish. Its lower CPU is
+therefore evidence of underutilized preparation parallelism, not a
+user-visible performance win.
+
+Container working set includes JVM heap, native/direct allocations, thread
+stacks, and non-reclaimable cache. RSS is the narrower resident-process
+measure; neither value is a heap-only measurement. CFS-throttled periods mean
+that at least one runnable thread encountered the CPU quota during that
+scheduling period. They are not the percentage of CPU time lost.
+
 ## What the new stage metrics add
 
 The stage counters provide a conservation chain:
