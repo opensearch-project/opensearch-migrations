@@ -10,12 +10,16 @@ export interface FieldMeta {
     checksumFor?: ChecksumDependency[];
     /** Change restriction category for VAP generation. Omit for 'safe'. */
     changeRestriction?: 'impossible' | 'gated';
+    /** With changeRestriction 'gated': only an increase needs approval; a decrease applies immediately. */
+    gatedOnIncreaseOnly?: boolean;
 }
 
 declare module "zod" {
     interface ZodType {
         checksumFor(...deps: ChecksumDependency[]): this;
         changeRestriction(restriction: 'impossible' | 'gated'): this;
+        /** Gated, but only for an increase; decreasing the (numeric) value is safe. */
+        gatedOnIncrease(): this;
     }
 }
 
@@ -27,6 +31,11 @@ z.ZodType.prototype.checksumFor = function(...deps: ChecksumDependency[]) {
 z.ZodType.prototype.changeRestriction = function(restriction: 'impossible' | 'gated') {
     const existing = (this.meta() ?? {}) as FieldMeta;
     return this.meta({ ...existing, changeRestriction: restriction });
+};
+
+z.ZodType.prototype.gatedOnIncrease = function() {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, changeRestriction: 'gated', gatedOnIncreaseOnly: true });
 };
 
 const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
@@ -165,6 +174,10 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
 
+// An assumable IAM role ARN in any partition (aws, aws-cn, aws-us-gov, aws-iso-b, ...), with an optional
+// IAM path (role/service-role/Name). Only roles can be assumed, so users, groups, and policies are rejected.
+export const S3_ROLE_ARN_PATTERN = /^(arn:aws(-[a-z]+)*:iam::\d{12}:role(\/[\w+=,.@-]+)*\/[\w+=,.@-]+)?$/;
+
 // Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
 // S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
 export const REPO_CONFIG = z.object({
@@ -178,8 +191,9 @@ export const REPO_CONFIG = z.object({
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
             "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
-    s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
-        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
+    s3RoleArn: z.string().regex(S3_ROLE_ARN_PATTERN).default("").optional()
+        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3 " +
+            "(e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). " +
             "Used for s3:// URIs only; ignored for gs://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
@@ -981,12 +995,20 @@ export const USER_METADATA_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     ...OTEL_EXPORT_OPTIONS,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
+    // Same restriction as metadataTransforms, which config lowering turns into these fields: they are what reaches
+    // the SnapshotMigration resource, so they carry the restriction the admission policy enforces.
     transformerConfigBase64: z.string().default("").optional()
-        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX),
+        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     transformerConfig: z.string().optional()
-        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX),
+        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     transformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     metadataTransforms: TRANSFORM_PIPELINE.optional()
         .describe("Metadata transform pipeline. Generates the existing transformerConfig inline JSON option.")
         .checksumFor('snapshot', 'replayer')
@@ -1089,11 +1111,12 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .default("PT1H").optional()
         .describe("[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). " +
             "If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. " +
-            "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.")
-        .changeRestriction('gated'),
+            "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration. " +
+            "Safe to change on a running migration: it only affects leases granted after the change."),
     maxConnections: z.number().default(10).optional()
-        .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.")
-        .changeRestriction('gated'),
+        .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing. " +
+            "On a running migration, lowering it applies immediately; raising it adds load to the target and needs approval.")
+        .gatedOnIncrease(),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),

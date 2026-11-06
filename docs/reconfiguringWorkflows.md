@@ -165,7 +165,10 @@ non-`.vapretry` milestone checkpoints) are described in
 Changes to resources fall into three categories.
 
 1. **Impossible:** Cannot be done — the user must explicitly delete & recreate the resource. This branch of the workflow cannot be advanced without .
-2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed.
+2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed. A numeric field
+   can be **gated on increase** (`.gatedOnIncrease()` in the schema): lowering it applies immediately, and only
+   raising it needs approval. RFS `maxConnections` works this way, since fewer connections can only reduce the
+   load on the target.
 3. **Safe:** Low-risk, allowed dynamically without approval. Safe fields require no VAP expressions — they are included in the classification tables for coverage tracking only.
 
 For terminal resources in `Completed` state, the [Lock-on-Complete](#the-lock-on-complete-pattern-terminal-resources-only) pattern overrides all categories — every spec change becomes Impossible.
@@ -361,22 +364,46 @@ in-progress, they would need to delete the existing snapshot and redrive.
 
 **Document backfill (RFS) fields:**
 
+Every field of `documentBackfillConfig` is listed here; a test in `orchestrationSpecs/packages/schemas` fails when this table and the schema disagree. **Gated on increase** applies a decrease immediately and needs approval only for an increase.
+
 | Field | Category   | Rationale | In Checksum For: Replayer |
 | --- |------------| --- | --- |
-| `spec.documentBackfillConfig.indexAllowlist` | Impossible | | ✅ |
-| `spec.documentBackfillConfig.podReplicas` | Safe       | | ❌ |
-| `spec.documentBackfillConfig.allowLooseVersionMatching` | Impossible | | ✅ |
-| `spec.documentBackfillConfig.docTransformerConfigBase64` | Impossible | | ✅ |
-| `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe       | | ❌ |
-| `spec.documentBackfillConfig.initialLeaseDuration` | Gated      | | ❌ |
-| `spec.documentBackfillConfig.maxConnections` | Gated      | | ❌ |
-| `spec.documentBackfillConfig.maxShardSizeBytes` | Gated      | | ❌ |
-| `spec.documentBackfillConfig.otelTraceCollectorEndpoint` | Safe       | Trace export config | ❌ |
-| `spec.documentBackfillConfig.otelMetricsCollectorEndpoint` | Safe       | Metrics export config | ❌ |
-| `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` |  Safe          | | ❌ |
-| `spec.documentBackfillConfig.jvmArgs` |  Safe          | | ❌ |
-| `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` |   Safe         | | ❌ |
-| `spec.documentBackfillConfig.resources` |    Safe        | | ❌ |
+| `spec.documentBackfillConfig.podReplicas` | Safe | Throughput only | ❌ |
+| `spec.documentBackfillConfig.minPodReplicas` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.jvmArgs` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.skipApproval` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.resources` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.indexAllowlist` | Impossible | Changes which documents migrate | ✅ |
+| `spec.documentBackfillConfig.allowLooseVersionMatching` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.docTransformerConfigBase64` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.docTransformerConfig` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.docTransformerConfigFile` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.documentTransforms` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe | Bigger bulks don't add concurrency; the target sees the same parallelism | ❌ |
+| `spec.documentBackfillConfig.documentsSizePerBulkRequest` | Safe | Same as documentsPerBulkRequest | ❌ |
+| `spec.documentBackfillConfig.initialLeaseDuration` | Safe | Only schedules leases granted after the change | ❌ |
+| `spec.documentBackfillConfig.maxConnections` | Gated on increase | Lowering only reduces load on the target; raising adds load, so it needs approval | ❌ |
+| `spec.documentBackfillConfig.maxShardSizeBytes` | Gated | Drives ephemeral-storage sizing for the worker pods | ❌ |
+| `spec.documentBackfillConfig.otelTraceExportEnabled` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.otelTraceCollectorEndpoint` | Safe | Trace export config | ❌ |
+| `spec.documentBackfillConfig.otelMetricsExportEnabled` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.otelMetricsCollectorEndpoint` | Safe | Metrics export config | ❌ |
+| `spec.documentBackfillConfig.serverGeneratedIds` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.emitDocType` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.allowedDocExceptionTypes` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.coordinatorRetryMaxRetries` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.coordinatorRetryInitialDelayMs` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.coordinatorRetryMaxDelayMs` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.enableSourcelessMigrations` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.useRecoverySource` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Prefix` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Bucket` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Region` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Endpoint` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamMaxBufferBytes` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.positionGapStopword` | Impossible |  | ✅ |
 
 ---
 

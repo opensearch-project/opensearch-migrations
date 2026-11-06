@@ -452,6 +452,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("workloadIdentityChecksum", typeToken<string>())
+        // The session name recorded on the SnapshotMigration when its backfill first started, or empty.
+        .addOptionalInput("recordedRfsSessionName", c => "")
         .addRequiredInput("groupName_view", typeToken<string>())
         .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
@@ -461,7 +463,16 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b => b
+        .addSteps(b => {
+            // A recorded session wins. Without an override the VAP keeps the workload identity fields fixed, so
+            // the two only differ after an overridden change, which must keep the existing fleet and its progress.
+            const computedSessionName = expr.concat(expr.literal("rfs-"), b.inputs.workloadIdentityChecksum);
+            const sessionName = expr.ternary(
+                expr.isEmpty(b.inputs.recordedRfsSessionName),
+                computedSessionName,
+                b.inputs.recordedRfsSessionName);
+            const hasBackfill = expr.not(expr.isEmpty(b.inputs.documentBackfillConfig));
+            return b
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
@@ -472,10 +483,17 @@ export const FullMigration = WorkflowBuilder.create({
                 },
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig))}}
             )
+            .addStep("recordRfsSessionName", ResourceManagement, "patchSnapshotMigrationRfsSessionName", c =>
+                    c.register({
+                        resourceName: b.inputs.crdName,
+                        rfsSessionName: computedSessionName,
+                    }),
+                {when: {templateExp: expr.and(hasBackfill, expr.isEmpty(b.inputs.recordedRfsSessionName))}}
+            )
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>
                     c.register({
                         ...(selectInputsForRegister(b, c)),
-                        sessionName: expr.concat(expr.literal("rfs-"), b.inputs.workloadIdentityChecksum),
+                        sessionName,
                         sourceVersion: b.inputs.sourceVersion,
                         sourceLabel: b.inputs.sourceLabel,
                         crdName: b.inputs.crdName,
@@ -496,8 +514,8 @@ export const FullMigration = WorkflowBuilder.create({
                         "skipApproval"
                     ))
                 )}}
-            )
-        )
+            );
+        })
     )
 
 
@@ -614,7 +632,8 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
                         checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
-                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
+                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum"),
+                        recordedRfsSessionName: c.steps.reconcileSnapshotMigrationResource.outputs.rfsSessionName,
                     });
                 }, {
                     when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),

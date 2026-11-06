@@ -1,4 +1,7 @@
 import {
+    CHANGE_RESTRICTION_OVERRIDE_ALL_FIELDS_ANNOTATION,
+    CHANGE_RESTRICTION_OVERRIDE_FIELD_ANNOTATION_PREFIX,
+    changeRestrictionOverrideFieldAnnotation,
     generateMigrationCrdsYaml,
     generateValidatingAdmissionPoliciesYaml,
     main as generateMigrationResourcesMain,
@@ -12,6 +15,18 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 describe("generated migration resources", () => {
+    test("uses the same override annotation keys as the console command that writes them", () => {
+        // The VAPs are generated here and the annotations are written by the console's
+        // `workflow approve ... --override-change-restrictions`; a mismatch would make the command silently ineffective.
+        const consoleModule = fs.readFileSync(path.resolve(__dirname,
+            "../../../../migrationConsole/lib/console_link/console_link/workflow/commands/change_restriction_override.py"),
+            "utf-8");
+        const pythonConstant = (name: string) =>
+            new RegExp(`^${name} = '([^']*)'$`, "m").exec(consoleModule)?.[1];
+        expect(pythonConstant("FIELD_ANNOTATION_PREFIX")).toBe(CHANGE_RESTRICTION_OVERRIDE_FIELD_ANNOTATION_PREFIX);
+        expect(pythonConstant("ALL_FIELDS_ANNOTATION")).toBe(CHANGE_RESTRICTION_OVERRIDE_ALL_FIELDS_ANNOTATION);
+    });
+
     const crds = generateMigrationCrdsYaml();
     const vaps = generateValidatingAdmissionPoliciesYaml();
 
@@ -53,6 +68,43 @@ describe("generated migration resources", () => {
             .find(document => document.includes("name: approvalgates.migrations.opensearch.org"));
         expect(approvalGateCrd).toBeDefined();
         expect(approvalGateCrd).not.toContain("dependsOn:");
+    });
+
+    test("gates RFS maxConnections only on increase and leaves the other throughput knobs safe", () => {
+        expect(vaps).toContain("object.spec.documentBackfillMaxConnections <= oldObject.spec.documentBackfillMaxConnections");
+        expect(vaps).toContain("documentBackfillMaxConnections (increase)");
+        for (const safeField of [
+            "documentBackfillInitialLeaseDuration",
+            "documentBackfillDocumentsPerBulkRequest",
+            "documentBackfillDocumentsSizePerBulkRequest",
+            "documentBackfillMaxLeaseDuration",
+            "documentBackfillBulkMaxRetries",
+        ]) {
+            expect(vaps).not.toContain(safeField);
+        }
+    });
+
+    test("lets every restricted field rule pass on its override annotation or the resource-wide one", () => {
+        for (const field of collectRestrictedProjectedFields()) {
+            expect(vaps).toContain(`'${changeRestrictionOverrideFieldAnnotation(field)}' in object.metadata.annotations`);
+        }
+        expect(vaps).toContain(`'${CHANGE_RESTRICTION_OVERRIDE_ALL_FIELDS_ANNOTATION}' in object.metadata.annotations`);
+    });
+
+    test.each(["lock-on-complete", "deleting-phase-guard", "migrationrun-immutability"])(
+        "keeps the override out of the %s policy", (policy) => {
+            const document = vaps.split("\n---\n").find(doc => doc.includes(`name: migrations-${policy}-policy`));
+            expect(document).toBeDefined();
+            expect(document).not.toContain("change-restriction-override");
+        });
+
+    test("rejects spec paths that can't be annotation names", () => {
+        expect(changeRestrictionOverrideFieldAnnotation({specPath: ["documentBackfillDocTransformerConfig"]}))
+            .toBe("change-restriction-override.migrations.opensearch.org/documentBackfillDocTransformerConfig");
+        expect(() => changeRestrictionOverrideFieldAnnotation({specPath: ["x".repeat(64)]})).toThrow("63");
+        for (const field of collectRestrictedProjectedFields()) {
+            expect(() => changeRestrictionOverrideFieldAnnotation(field)).not.toThrow();
+        }
     });
 
     test("generates VAP checks for every restricted projected field", () => {

@@ -403,6 +403,29 @@ describe("resolved migration resources", () => {
         }));
     });
 
+    it("dry-runs RFS maxConnections as gated only on increase and initialLeaseDuration as safe", () => {
+        const before: ResolvedMigrationResource = {
+            apiVersion: "migrations.opensearch.org/v1alpha1",
+            kind: "SnapshotMigration",
+            name: "migration",
+            parameters: {documentBackfillMaxConnections: 10, documentBackfillInitialLeaseDuration: "PT1H"},
+            parameterPolicies: [],
+        };
+        const withParameters = (parameters: Record<string, unknown>) =>
+            ({...before, parameters: {...before.parameters, ...parameters}});
+
+        expect(dryRunResourcePolicy(before, withParameters({documentBackfillMaxConnections: 5})).allowed).toBe(true);
+        expect(dryRunResourcePolicy(before, withParameters({documentBackfillInitialLeaseDuration: "PT2H"})).allowed)
+            .toBe(true);
+        const raised = dryRunResourcePolicy(before, withParameters({documentBackfillMaxConnections: 20}));
+        expect(raised.changes).toContainEqual(expect.objectContaining({
+            path: "documentBackfillMaxConnections",
+            result: "approval-required",
+        }));
+        expect(dryRunResourcePolicy(before, withParameters({documentBackfillMaxConnections: 20}), {approved: true})
+            .allowed).toBe(true);
+    });
+
     it("does not report legacy source auth fields as CaptureProxy or SnapshotMigration blockers", () => {
         for (const kind of ["CaptureProxy", "SnapshotMigration"]) {
             const before: ResolvedMigrationResource = {
