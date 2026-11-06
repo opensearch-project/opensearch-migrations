@@ -15,9 +15,7 @@ public interface PipelineMetrics {
         long maxBatchBytes,
         long batchConcurrency,
         long preparationConcurrency,
-        long preparationChunkDocuments,
-        long preparationReservoirChunks,
-        long sourceBatchGroupSize
+        long preparationChunkDocuments
     ) {}
 
     /** Source documents have been collected into a chunk and are waiting for a preparation rail. */

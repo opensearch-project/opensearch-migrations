@@ -16,7 +16,7 @@ class PipelineInstrumentsTest {
         var context = DocumentMigrationTestContext.factory().withAllTracking();
         var metrics = context.pipelineInstruments;
 
-        metrics.onConfigured(20_000, 10_000_000, 60, 4, 4_096, 12, 1);
+        metrics.onConfigured(20_000, 10_000_000, 60, 4, 4_096);
         metrics.onPreparationChunkQueued(10, 1_000);
         metrics.onPreparationChunkStarted(10, 1_000, 2);
         metrics.onPreparationChunkFinished(10, 1_000, 1_200, 3, true);
