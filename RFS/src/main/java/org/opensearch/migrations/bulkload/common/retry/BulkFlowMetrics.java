@@ -62,6 +62,9 @@ public interface BulkFlowMetrics {
     /** Time since the preceding request preparation started in this client process. */
     default void onRequestStartGap(boolean retry, double millis) {}
 
+    /** Time spent classifying a response, or deciding how to handle a request that got no response. */
+    default void onResponseClassified(boolean responseReceived, double durationMillis) {}
+
     /** A batch (one request chain, including its retries) finished after this many attempts. */
     default void onBatchFinished(long attempts) {}
 
@@ -130,6 +133,7 @@ public interface BulkFlowMetrics {
             @Override public void onBatchPrepared(String p, int d, double m) { first.onBatchPrepared(p, d, m); second.onBatchPrepared(p, d, m); }
             @Override public void onRequestPrepared(boolean r, double a, double c) { first.onRequestPrepared(r, a, c); second.onRequestPrepared(r, a, c); }
             @Override public void onRequestStartGap(boolean r, double m) { first.onRequestStartGap(r, m); second.onRequestStartGap(r, m); }
+            @Override public void onResponseClassified(boolean r, double m) { first.onResponseClassified(r, m); second.onResponseClassified(r, m); }
             @Override public void onBatchFinished(long a) { first.onBatchFinished(a); second.onBatchFinished(a); }
             @Override public void onDocumentsResent(long d) { first.onDocumentsResent(d); second.onDocumentsResent(d); }
             @Override public void onItemErrors(String t, boolean r, long c) { first.onItemErrors(t, r, c); second.onItemErrors(t, r, c); }

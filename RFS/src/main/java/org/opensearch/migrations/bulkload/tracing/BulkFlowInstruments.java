@@ -65,6 +65,7 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     public static final String BULK_REQUEST_ASSEMBLY_DURATION = "bulkRequestAssemblyDuration";
     public static final String BULK_REQUEST_COMPRESSION_DURATION = "bulkRequestCompressionDuration";
     public static final String BULK_REQUEST_START_GAP = "bulkRequestStartGap";
+    public static final String BULK_RESPONSE_CLASSIFICATION_DURATION = "bulkResponseClassificationDuration";
 
     public static final AttributeKey<String> OUTCOME = AttributeKey.stringKey("outcome");
     public static final AttributeKey<String> ATTEMPT = AttributeKey.stringKey("attempt");
@@ -142,6 +143,7 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     private final DoubleHistogram requestAssemblyDuration;
     private final DoubleHistogram requestCompressionDuration;
     private final DoubleHistogram requestStartGap;
+    private final DoubleHistogram responseClassificationDuration;
     // The SDK holds the callbacks; the references keep them reachable alongside this object.
     @SuppressWarnings("unused")
     private final List<AutoCloseable> gauges;
@@ -208,6 +210,8 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
             .setExplicitBucketBoundariesAdvice(REQUEST_PREPARATION_BUCKETS_MS).build();
         requestStartGap = meter.histogramBuilder(BULK_REQUEST_START_GAP).setUnit(MS)
             .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS).build();
+        responseClassificationDuration = meter.histogramBuilder(BULK_RESPONSE_CLASSIFICATION_DURATION).setUnit(MS)
+            .setExplicitBucketBoundariesAdvice(REQUEST_PREPARATION_BUCKETS_MS).build();
 
         var registered = new ArrayList<AutoCloseable>();
         registered.add(meter.gaugeBuilder(BULK_OLDEST_OPEN_BATCH_AGE).setUnit(MS).ofLongs()
@@ -296,6 +300,14 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     @Override
     public void onRequestStartGap(boolean retry, double millis) {
         requestStartGap.record(millis, Attributes.of(ATTEMPT, attemptLabel(retry)));
+    }
+
+    @Override
+    public void onResponseClassified(boolean responseReceived, double durationMillis) {
+        responseClassificationDuration.record(
+            durationMillis,
+            Attributes.of(RESULT, responseReceived ? "response" : "no_response")
+        );
     }
 
     @Override
