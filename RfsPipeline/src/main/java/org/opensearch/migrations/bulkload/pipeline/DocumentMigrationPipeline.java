@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
@@ -25,6 +26,7 @@ import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.MonoSink;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
@@ -53,7 +55,6 @@ import reactor.core.scheduler.Schedulers;
 public class DocumentMigrationPipeline {
 
     private static final int MAX_PREPARATION_CHUNK_DOCUMENTS = 4 * 1024;
-    private static final int PREPARED_CHUNKS_PER_PREPARATION_RAIL = 3;
 
     private final DocumentSource source;
     private final DocumentSink sink;
@@ -65,9 +66,6 @@ public class DocumentMigrationPipeline {
     private final int preparationChunkDocuments;
     private final boolean requiresOrderedWrites;
     private final GroupedDocumentSink<?> groupedSink;
-    private final int sourceBatchGroupSize;
-    private final int requestConcurrencyPerGroup;
-    private final int batchGroupConcurrency;
     private final PipelineMetrics pipelineMetrics;
 
     // Observable state — polled by PipelineProgressMonitor
@@ -153,23 +151,12 @@ public class DocumentMigrationPipeline {
         );
         this.requiresOrderedWrites = source.requiresOrderedWrites();
         this.groupedSink = sink instanceof GroupedDocumentSink<?> grouped ? grouped : null;
-        this.sourceBatchGroupSize = groupedSink != null ? groupedSink.preferredSourceBatchGroupSize() : 1;
-        if (sourceBatchGroupSize < 1) {
-            throw new IllegalArgumentException(
-                "GroupedDocumentSink.preferredSourceBatchGroupSize() must be >= 1, got " + sourceBatchGroupSize
-            );
-        }
-        this.requestConcurrencyPerGroup = Math.min(this.batchConcurrency, sourceBatchGroupSize);
-        this.batchGroupConcurrency =
-            (this.batchConcurrency + requestConcurrencyPerGroup - 1) / requestConcurrencyPerGroup;
         pipelineMetrics.onConfigured(
             maxDocsPerBatch,
             maxBytesPerBatch,
             batchConcurrency,
             preparationConcurrency,
-            preparationChunkDocuments,
-            (long) preparationConcurrency * PREPARED_CHUNKS_PER_PREPARATION_RAIL,
-            sourceBatchGroupSize
+            preparationChunkDocuments
         );
     }
 
@@ -251,10 +238,12 @@ public class DocumentMigrationPipeline {
     }
 
     /**
-     * Split a source phase into stable CPU lanes. Each lane owns preparation and exact packing state for its
-     * lifetime. Their packed batches merge into one shared asynchronous request dispatcher, so a slow preparation
-     * lane cannot strand a fixed share of the HTTP concurrency. Completed source chunks are merged back into source
-     * order only where checkpoints advance.
+     * Split a source phase into stable CPU lanes. Each lane owns preparation, exact packing, and asynchronous
+     * request submission for its lifetime. Lane data does not merge or regroup before the sink submits it to
+     * Netty. A shared asynchronous permit gate bounds the number of outstanding batches without taking ownership
+     * of or regrouping lane data; any lane can use any free permit. The sink's process-wide adaptive limiter remains
+     * shared across every lane and every HTTP attempt. Completed source chunks merge back into source order only
+     * where checkpoints advance.
      */
     private <P> Flux<CompletedBatch> migratePersistentLaneBatches(
         GroupedDocumentSink<P> preparedSink,
@@ -268,6 +257,7 @@ public class DocumentMigrationPipeline {
                 laneSchedulers.add(Schedulers.newSingle("rfs-preparation-lane-" + lane));
             }
             var nextSequence = new AtomicLong();
+            var requestGate = new RequestConcurrencyGate(batchConcurrency);
 
             var sourceChunks = documents
                 .bufferUntil(new BatchSizePredicate<>(
@@ -277,27 +267,19 @@ public class DocumentMigrationPipeline {
                 ), true)
                 .map(sourceChunk -> newLaneSourceChunk(nextSequence.getAndIncrement(), sourceChunk));
 
-            var packedBatches = sourceChunks
+            var unorderedCompletions = sourceChunks
                 .groupBy(sourceChunk -> (int) (sourceChunk.state().sequence() % laneCount), laneCount)
                 .flatMap(
-                    lane -> preparePersistentLane(
+                    lane -> migratePersistentLane(
                         preparedSink,
                         lane,
                         collectionName,
-                        laneSchedulers.get(lane.key())
+                        laneSchedulers.get(lane.key()),
+                        requestGate
                     ),
                     laneCount,
                     1
                 );
-
-            var unorderedCompletions = packedBatches
-                .buffer(sourceBatchGroupSize)
-                .flatMap(
-                    packedGroup -> writeLaneRequestGroup(preparedSink, collectionName, packedGroup),
-                    batchGroupConcurrency,
-                    1
-                )
-                .concatMapIterable(completed -> completed);
 
             return restoreSourceOrder(unorderedCompletions)
                 .doFinally(signal -> laneSchedulers.forEach(Scheduler::dispose));
@@ -319,11 +301,12 @@ public class DocumentMigrationPipeline {
         return new LaneSourceChunk(state, new SourceChunk(documents, sourceBytes, queuedNanos));
     }
 
-    private <P> Flux<LanePackedBatch<P>> preparePersistentLane(
+    private <P> Flux<CompletedBatch> migratePersistentLane(
         GroupedDocumentSink<P> preparedSink,
         Flux<LaneSourceChunk> sourceChunks,
         String collectionName,
-        Scheduler laneScheduler
+        Scheduler laneScheduler,
+        RequestConcurrencyGate requestGate
     ) {
         return Flux.defer(() -> {
             var packer = new LanePreparedBatchPacker<P>(maxDocsPerBatch, maxBytesPerBatch);
@@ -332,7 +315,21 @@ public class DocumentMigrationPipeline {
                     () -> prepareLaneChunk(preparedSink, collectionName, sourceChunk)
                 ).subscribeOn(laneScheduler), 1)
                 .concatMapIterable(preparedChunk -> releaseAndPack(packer, preparedChunk), 1)
-                .concatWith(Flux.defer(() -> Flux.fromIterable(toLanePackedBatches(packer.finish()))));
+                .concatWith(Flux.defer(() -> Flux.fromIterable(toLanePackedBatches(packer.finish()))))
+                // Acquire before subscribing to the request Mono. With concatMap, each lane retains at most one
+                // packed batch while waiting, but a productive lane can consume every otherwise-idle permit.
+                .concatMap(
+                    packedBatch -> requestGate.acquire()
+                        .map(permit -> new PermittedLanePackedBatch<>(packedBatch, permit)),
+                    1
+                )
+                .flatMap(
+                    permittedBatch -> writeLaneRequest(preparedSink, collectionName, permittedBatch.batch())
+                        .doFinally(signal -> permittedBatch.permit().release()),
+                    batchConcurrency,
+                    1
+                )
+                .concatMapIterable(completed -> completed);
         });
     }
 
@@ -385,33 +382,32 @@ public class DocumentMigrationPipeline {
         }).toList();
     }
 
-    private <P> Mono<List<CompletedBatch>> writeLaneRequestGroup(
+    private <P> Mono<List<CompletedBatch>> writeLaneRequest(
         GroupedDocumentSink<P> preparedSink,
         String collectionName,
-        List<LanePackedBatch<P>> packedBatches
+        LanePackedBatch<P> packedBatch
     ) {
         activeBatches.incrementAndGet();
-        var sourceBatches = packedBatches.stream()
-            .map(batch -> batch.documents().stream().map(LanePreparedDocument::document).toList())
+        var sourceBatch = packedBatch.documents().stream()
+            .map(LanePreparedDocument::document)
             .toList();
-        long preparedBytes = packedBatches.stream().mapToLong(LanePackedBatch::preparedBytes).sum();
-        long oldestReadyNanos = packedBatches.stream().mapToLong(LanePackedBatch::readyNanos).min().orElseThrow();
-        long documentCount = sourceBatches.stream().mapToLong(List::size).sum();
+        long preparedBytes = packedBatch.preparedBytes();
+        long documentCount = sourceBatch.size();
 
         return Mono.defer(() -> {
             long startedNanos = System.nanoTime();
             pipelineMetrics.onRequestGroupStarted(
-                sourceBatches.size(),
+                1,
                 documentCount,
                 preparedBytes,
-                nanosToMillis(startedNanos - oldestReadyNanos)
+                nanosToMillis(startedNanos - packedBatch.readyNanos())
             );
             return preparedSink.writePreparedBatchGroup(
                     collectionName,
-                    sourceBatches,
-                    Math.min(requestConcurrencyPerGroup, sourceBatches.size())
+                    List.of(sourceBatch),
+                    1
                 )
-                .map(result -> completeLaneDocuments(packedBatches, result))
+                .map(result -> completeLaneDocuments(List.of(packedBatch), result))
                 .doFinally(signal -> pipelineMetrics.onRequestGroupFinished(
                     documentCount,
                     preparedBytes,
@@ -682,10 +678,82 @@ public class DocumentMigrationPipeline {
         long readyNanos
     ) {}
 
+    private record PermittedLanePackedBatch<P>(
+        LanePackedBatch<P> batch,
+        RequestPermit permit
+    ) {}
+
     private record ReorderEmission(
         CompletionReorderBuffer buffer,
         List<CompletedBatch> ready
     ) {}
+
+    /**
+     * A fixed asynchronous concurrency gate shared by every persistent lane. It queues only lane-local subscription
+     * continuations, never document or request data, and does not impose ordering on the requests that acquire it.
+     */
+    private static final class RequestConcurrencyGate {
+        private final ArrayDeque<MonoSink<RequestPermit>> waiters = new ArrayDeque<>();
+        private int available;
+
+        private RequestConcurrencyGate(int permits) {
+            available = permits;
+        }
+
+        private Mono<RequestPermit> acquire() {
+            return Mono.create(sink -> {
+                RequestPermit permit = null;
+                synchronized (this) {
+                    if (available > 0) {
+                        available--;
+                        permit = new RequestPermit(this);
+                    } else {
+                        waiters.addLast(sink);
+                    }
+                }
+                if (permit != null) {
+                    sink.success(permit);
+                } else {
+                    sink.onCancel(() -> cancel(sink));
+                }
+            });
+        }
+
+        private synchronized void cancel(MonoSink<RequestPermit> waiter) {
+            waiters.remove(waiter);
+        }
+
+        private void release() {
+            MonoSink<RequestPermit> waiter;
+            synchronized (this) {
+                waiter = waiters.pollFirst();
+                if (waiter == null) {
+                    available++;
+                    return;
+                }
+            }
+            waiter.success(new RequestPermit(this));
+        }
+    }
+
+    private static final class RequestPermit {
+        private final RequestConcurrencyGate gate;
+        private boolean released;
+
+        private RequestPermit(RequestConcurrencyGate gate) {
+            this.gate = gate;
+        }
+
+        private void release() {
+            synchronized (this) {
+                if (released) {
+                    return;
+                }
+                released = true;
+            }
+            gate.release();
+        }
+    }
 
     /**
      * Migrate all partitions for a collection. Creates the collection first, then migrates

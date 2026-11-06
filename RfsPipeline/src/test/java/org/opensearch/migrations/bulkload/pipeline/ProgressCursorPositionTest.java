@@ -346,11 +346,6 @@ class ProgressCursorPositionTest {
         }
 
         @Override
-        public int preferredSourceBatchGroupSize() {
-            return 1;
-        }
-
-        @Override
         public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
             return new PreparedDocument<>(document, 1, "prepared-" + document.id());
         }

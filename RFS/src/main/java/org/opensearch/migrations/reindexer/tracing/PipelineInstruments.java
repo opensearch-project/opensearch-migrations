@@ -47,8 +47,6 @@ public class PipelineInstruments implements PipelineMetrics {
     public static final String PIPELINE_BATCH_CONCURRENCY = "pipelineBatchConcurrency";
     public static final String PIPELINE_PREPARATION_CONCURRENCY = "pipelinePreparationConcurrency";
     public static final String PIPELINE_PREPARATION_CHUNK_DOCUMENTS = "pipelinePreparationChunkDocuments";
-    public static final String PIPELINE_PREPARATION_RESERVOIR_CHUNKS = "pipelinePreparationReservoirChunks";
-    public static final String PIPELINE_SOURCE_BATCH_GROUP_SIZE = "pipelineSourceBatchGroupSize";
 
     public static final AttributeKey<String> STAGE = AttributeKey.stringKey("stage");
     public static final AttributeKey<String> LIMIT = AttributeKey.stringKey("limit");
@@ -98,8 +96,6 @@ public class PipelineInstruments implements PipelineMetrics {
     private final AtomicLong batchConcurrency = new AtomicLong();
     private final AtomicLong preparationConcurrency = new AtomicLong();
     private final AtomicLong preparationChunkDocuments = new AtomicLong();
-    private final AtomicLong preparationReservoirChunks = new AtomicLong();
-    private final AtomicLong sourceBatchGroupSize = new AtomicLong();
 
     // The SDK owns the callbacks; retaining the handles keeps their lifecycle tied to this process instrument set.
     @SuppressWarnings("unused")
@@ -146,9 +142,6 @@ public class PipelineInstruments implements PipelineMetrics {
         registerGauge(meter, registered, PIPELINE_PREPARATION_CONCURRENCY, "count", preparationConcurrency);
         registerGauge(meter, registered, PIPELINE_PREPARATION_CHUNK_DOCUMENTS, "count",
             preparationChunkDocuments);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_RESERVOIR_CHUNKS, "count",
-            preparationReservoirChunks);
-        registerGauge(meter, registered, PIPELINE_SOURCE_BATCH_GROUP_SIZE, "count", sourceBatchGroupSize);
         gauges = List.copyOf(registered);
     }
 
@@ -188,17 +181,13 @@ public class PipelineInstruments implements PipelineMetrics {
         long configuredMaxBatchBytes,
         long configuredBatchConcurrency,
         long configuredPreparationConcurrency,
-        long configuredPreparationChunkDocuments,
-        long configuredPreparationReservoirChunks,
-        long configuredSourceBatchGroupSize
+        long configuredPreparationChunkDocuments
     ) {
         maxBatchDocuments.set(configuredMaxBatchDocuments);
         maxBatchBytes.set(configuredMaxBatchBytes);
         batchConcurrency.set(configuredBatchConcurrency);
         preparationConcurrency.set(configuredPreparationConcurrency);
         preparationChunkDocuments.set(configuredPreparationChunkDocuments);
-        preparationReservoirChunks.set(configuredPreparationReservoirChunks);
-        sourceBatchGroupSize.set(configuredSourceBatchGroupSize);
     }
 
     @Override
