@@ -245,9 +245,26 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
-            description = "Optional. The maximum bulk request body size in bytes, including action metadata and newlines. " +
-                "A document that exceeds the limit by itself is sent alone. Default 10 MiB")
+            description = "Optional. Bulk request batching target in bytes, including action metadata and newlines, " +
+                "measured after transformations. A single larger operation is sent on its own unless splitting is enabled. " +
+                "Default 10 MiB")
         long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
+
+        @Parameter(required = false,
+            names = { "--max-document-size-bytes" },
+            description = "Optional. Reject a single encoded operation above this size after transformations and ID handling, " +
+                "including action metadata and newlines. Applies even with splitting enabled. Must be positive. " +
+                "Default " + Long.MAX_VALUE + " (effectively unlimited).")
+        long maxDocumentSizeBytes = Long.MAX_VALUE;
+
+        @Parameter(required = false,
+            names = { "--split-large-documents" },
+            description = "Optional. Split oversized plain index operations into bounded, ordered requests " +
+                "on the destination document. Requires explicit IDs, complete _source, no ingest pipelines or version conditions, " +
+                "and permission to add an unmapped temporary assembly field. Partial documents remain visible until completion. " +
+                "Sequences each document's parts while retaining independent batch concurrency. Numeric literals must fit whole " +
+                "within --documents-size-per-bulk-request, including the assembly envelope. Disabled by default.")
+        boolean splitLargeDocuments;
 
         @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
@@ -470,6 +487,9 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
+        if (args.maxDocumentSizeBytes < 1) {
+            throw new ParameterException("--max-document-size-bytes must be positive.");
+        }
         // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.repoUri == null) {
@@ -612,6 +632,8 @@ public class RfsMigrateDocuments {
         var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate(
             arguments.numDocsPerBulkRequest, arguments.numBytesPerBulkRequest);
+        targetClient.setMaxDocumentSizeBytes(arguments.maxDocumentSizeBytes);
+        targetClient.setSplitLargeDocuments(arguments.splitLargeDocuments);
         var targetVersion = targetClient.getClusterVersion();
 
         // Build the failed document stream sink and attach it to the target client. The sink is closed in

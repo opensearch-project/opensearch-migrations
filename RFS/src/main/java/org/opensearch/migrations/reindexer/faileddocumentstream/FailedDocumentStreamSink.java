@@ -8,7 +8,7 @@ import reactor.core.publisher.Mono;
  * <p>Contract:
  * <ul>
  *   <li>{@link #write(FailedDocumentStreamRecord)} may buffer; the returned {@link Mono} completes when
- *       the record is durably accepted by the underlying store (post-flush).</li>
+ *       the record is accepted into its buffer. Durability is gated by {@link #flush()}.</li>
  *   <li>{@link #flush()} blocks-equivalent in Reactor terms: completes once all
  *       previously-written records are durable. Must be awaited before the RFS work
  *       coordinator marks the corresponding work item complete.</li>
@@ -23,7 +23,7 @@ import reactor.core.publisher.Mono;
  */
 public interface FailedDocumentStreamSink extends AutoCloseable {
 
-    /** Buffer a record. Returned Mono completes only after flush durability. */
+    /** Buffer a record. Await this Mono and then flush() to require durability. */
     Mono<Void> write(FailedDocumentStreamRecord failedDocumentStreamRecord);
 
     /** Force all buffered records durable. Safe to call repeatedly. */

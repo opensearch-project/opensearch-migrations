@@ -142,6 +142,21 @@ public class RestClient {
 
     public Mono<HttpResponse> asyncRequestBytes(HttpMethod method, String path, byte[] body, Map<String, List<String>> additionalHeaders,
                                                 @Nullable IRfsContexts.IRequestContext context) {
+        return asyncRequestBytes(method, path, body, additionalHeaders, context, client);
+    }
+
+    /** A single transport attempt, including on a connection reset after the server accepted a write. */
+    public Mono<HttpResponse> asyncRequestBytesWithoutRetry(
+        HttpMethod method, String path, byte[] body, Map<String, List<String>> additionalHeaders,
+        @Nullable IRfsContexts.IRequestContext context
+    ) {
+        return asyncRequestBytes(method, path, body, additionalHeaders, context, client.disableRetry(true));
+    }
+
+    private Mono<HttpResponse> asyncRequestBytes(
+        HttpMethod method, String path, byte[] body, Map<String, List<String>> additionalHeaders,
+        @Nullable IRfsContexts.IRequestContext context, HttpClient requestClient
+    ) {
         assert connectionContext.getUri() != null;
         Map<String, List<String>> headers = new HashMap<>();
         headers.put(USER_AGENT_HEADER_NAME, List.of(USER_AGENT));
@@ -168,7 +183,7 @@ public class RestClient {
                 .map(ByteBuffer::wrap)
             )
             .flatMap(transformedRequest ->
-                client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
+                requestClient.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
                 .headers(h -> transformedRequest.getHeaders().forEach(h::add))
                 .compress(hasGzipResponseHeaders(transformedRequest.getHeaders()))
                 .request(method)

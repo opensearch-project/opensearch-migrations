@@ -18,6 +18,17 @@ It is recommended to refer to the respective README of the tool you want to use 
 
 ## Native bulk transformations
 
+RFS batches encoded operations after transformations and ID handling. The configured
+batch byte target continues to allow a larger single operation in its own request.
+Use `--max-document-size-bytes` to opt into rejecting larger operations; its default
+is `Long.MAX_VALUE`. The
+opt-in `--split-large-documents` option indexes initial state directly into
+the destination document, streams bounded conditional updates, and acknowledges
+the document only after the final update. It creates no staging index. Partial
+documents are visible until completion, and replay starts with an indexing replacement.
+See [bounded requests and large documents](docs/bounded-document-requests.md) for the
+reserved temporary field, supported operations, end-to-end tests, and recovery limits.
+
 Java document providers can implement the functional interface
 [`BulkOperationTransformer`](src/main/java/org/opensearch/migrations/bulkload/transformers/BulkOperationTransformer.java)
 and return it through the existing `IJsonTransformerProvider` service interface.

@@ -44,7 +44,7 @@ public record MigrationMetrics(Operations source, Operations target, Requests re
         }
     }
 
-    /** HTTP attempts for completed logical batches, including retries; bytes are uncompressed NDJSON. */
+    /** HTTP attempts for completed logical batches, including retries; bytes are uncompressed request bodies. */
     public record Requests(long batches, long total, long retries, long bytes, long durationMillis) {
         public static final Requests ZERO = new Requests(0, 0, 0, 0, 0);
 

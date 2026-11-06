@@ -1,0 +1,43 @@
+def state = ctx._source._rfs_large_document;
+if (state.next != params.seq) {
+    throw new IllegalStateException('Out of order document chunk');
+}
+def stack = state.stack;
+for (def event : params.events) {
+    def kind = event[0];
+    def value = event.size() == 2 ? event[1] : null;
+    if (kind == 'object' || kind == 'array' || kind == 'string') {
+        stack.add(['value': kind == 'object' ? [:] : kind == 'array' ? [] : value,
+                   'key': '']);
+    } else if (kind == 'key') {
+        stack[stack.size() - 1].key = value;
+    } else if (kind == 'key+') {
+        stack[stack.size() - 1].key += value;
+    } else if (kind == 'string+') {
+        stack[stack.size() - 1].value += value;
+    } else {
+        if (kind == 'end') {
+            value = stack.remove(stack.size() - 1).value;
+        } else if (kind == 'number') {
+            def path = [];
+            for (def ancestor : stack) {
+                path.add(ancestor.value instanceof Map ? ancestor.key : ancestor.value.size());
+            }
+            state.numbers.add(path);
+        } else if (kind != 'value') {
+            throw new IllegalArgumentException('Unknown document event');
+        }
+        if (stack.isEmpty()) {
+            state.document = value;
+        } else {
+            def parent = stack[stack.size() - 1];
+            if (parent.value instanceof Map) {
+                if (parent.value.containsKey(parent.key)) { throw new IllegalArgumentException('Duplicate field'); }
+                parent.value[parent.key] = value;
+            } else {
+                parent.value.add(value);
+            }
+        }
+    }
+}
+state.next++;

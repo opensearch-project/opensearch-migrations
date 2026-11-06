@@ -1,0 +1,27 @@
+def state = ctx._source._rfs_large_document;
+if (!state.stack.isEmpty() || state.next != params.chunks || !(state.document instanceof Map)) {
+    throw new IllegalStateException('Incomplete split document');
+}
+def document = state.document;
+if (document.containsKey('_rfs_large_document')) {
+    throw new IllegalArgumentException('Document uses the reserved _rfs_large_document field');
+}
+for (def path : state.numbers) {
+    def parent = document;
+    for (int i = 0; i < path.size() - 1; i++) {
+        parent = parent[path[i]];
+    }
+    def key = path[path.size() - 1];
+    String value = parent[key];
+    if (value.contains('.') || value.contains('e') || value.contains('E')) {
+        def decimal = new BigDecimal(value);
+        if (decimal.signum() == 0 && value.startsWith('-')) {
+            parent[key] = -0.0;
+        } else {
+            parent[key] = decimal;
+        }
+    } else {
+        parent[key] = new BigInteger(value);
+    }
+}
+ctx._source = document;
