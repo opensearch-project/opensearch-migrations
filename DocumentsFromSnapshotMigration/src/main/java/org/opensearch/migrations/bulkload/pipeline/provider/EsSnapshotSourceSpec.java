@@ -13,7 +13,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 /**
  * Configuration for reading documents out of an Elasticsearch/OpenSearch snapshot repository.
  *
- * @param repoUri                    {@code file://}, {@code s3://} or {@code gs://} repository URI
+ * @param repoUri                    {@code file://}, {@code s3://}, {@code gs://} or {@code azure://} repository URI
  * @param snapshotName               the snapshot to read
  * @param version                    source cluster version, selecting the snapshot format readers
  * @param indexAllowlist             indices to migrate; empty means all

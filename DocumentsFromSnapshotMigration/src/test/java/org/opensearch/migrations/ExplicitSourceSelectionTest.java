@@ -172,6 +172,24 @@ class ExplicitSourceSelectionTest {
     }
 
     @Test
+    void anExplicitAzureSourceIsHeldToTheSameRules() {
+        var config = "{\"repoUri\":\"azure://account/container/path\",\"snapshotName\":\"n\","
+            + "\"version\":\"ES 7.10.2\"}";
+
+        var noLocalDir = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, config);
+        assertThat(assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(noLocalDir)).getMessage(),
+            containsString("--local-dir"));
+
+        var bothCredentials = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, config);
+        bothCredentials.localDir = "/tmp";
+        bothCredentials.azureStorageAccountKey = "key";
+        bothCredentials.azureStorageSasToken = "token";
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(bothCredentials)).getMessage(),
+            containsString("not both"));
+    }
+
+    @Test
     void aGlobalAllowlistIsRejectedRatherThanIgnored() {
         var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_CONFIG);
         args.indexAllowlist = List.of("logs");

@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.common.AzureRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
 import org.opensearch.migrations.bulkload.common.GcsUri;
@@ -67,7 +68,7 @@ public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapsh
     @Override
     public boolean requiresScratchDirectory(EsSnapshotSourceSpec spec) {
         var repo = RepoUri.parse(spec.repoUri());
-        return repo instanceof RepoUri.S3RepoUri || repo instanceof RepoUri.GcsRepoUri;
+        return !(repo instanceof RepoUri.FileRepoUri);
     }
 
     @Override
@@ -79,6 +80,13 @@ public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapsh
             case RepoUri.FileRepoUri f -> new FileSystemRepo(Paths.get(f.path()), finder);
             case RepoUri.GcsRepoUri g -> GcsRepo.create(
                 runtime.scratchDir(), new GcsUri(g.rawUri()), spec.endpoint(), finder);
+            case RepoUri.AzureRepoUri a -> AzureRepo.create(
+                runtime.scratchDir(),
+                a.azureUri(),
+                spec.endpoint(),
+                runtime.secrets().azureStorageAccountKey(),
+                runtime.secrets().azureStorageSasToken(),
+                finder);
             case RepoUri.S3RepoUri s -> S3Repo.create(
                 runtime.scratchDir(),
                 s.s3Uri(),

@@ -47,6 +47,7 @@ import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceRegistry;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceLocation;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
+import org.opensearch.migrations.bulkload.pipeline.spi.SourceSecrets;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -164,8 +165,19 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir" },
             description = ("The absolute path to the directory on local disk to download remote repo files to.  " +
-                "Required for s3:// and gs:// repos."))
+                "Required for s3://, gs://, and azure:// repos."))
         public String localDir = null;
+
+        @Parameter(required = false,
+            names = { ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE },
+            description = "Optional. Storage account key for an azure:// repo. Mutually exclusive with --azure-storage-sas-token. "
+                + "If neither is set, the ambient Azure identity is used.")
+        public String azureStorageAccountKey = null;
+
+        @Parameter(required = false,
+            names = { ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE },
+            description = "Optional. SAS token for an azure:// repo. Mutually exclusive with --azure-storage-account-key.")
+        public String azureStorageSasToken = null;
 
         @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
@@ -364,7 +376,7 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
-            description = (DEPRECATED_SOURCE_FLAG + "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
+            description = (DEPRECATED_SOURCE_FLAG + "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path, azure://account/container/path (or bare absolute path)"))
         public String repoUri = null;
 
         @Parameter(required = false,
@@ -374,7 +386,7 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
-            description = (DEPRECATED_SOURCE_FLAG + "Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+            description = (DEPRECATED_SOURCE_FLAG + "Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS, Azurite for Azure)"))
         public String endpoint = null;
 
         @Parameter(required = false,
@@ -658,6 +670,11 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
+        if (args.azureStorageAccountKey != null && args.azureStorageSasToken != null) {
+            throw new ParameterException(
+                "Supply either --azure-storage-account-key or --azure-storage-sas-token, not both."
+            );
+        }
         var provider = validateSourceSelection(args);
         if (provider != null) {
             // The provider validates its own config; only the runtime requirements are ours to check.
@@ -688,6 +705,9 @@ public class RfsMigrateDocuments {
                 // else here rather than in buildSolrSourceFactory, which fails after the
                 // migration has already started.
                 case RepoUri.GcsRepoUri g -> throw new ParameterException(
+                    "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
+                );
+                case RepoUri.AzureRepoUri a -> throw new ParameterException(
                     "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
                 );
             }
@@ -726,6 +746,13 @@ public class RfsMigrateDocuments {
                 if (args.localDir == null) {
                     throw new ParameterException(
                         "If a GCS repo is being used, --local-dir must be set."
+                    );
+                }
+            }
+            case RepoUri.AzureRepoUri a -> {
+                if (args.localDir == null) {
+                    throw new ParameterException(
+                        "If an Azure repo is being used, --local-dir must be set."
                     );
                 }
             }
@@ -1072,7 +1099,8 @@ public class RfsMigrateDocuments {
             resolveWorkingDir(arguments.localDir, arguments.luceneDir),
             resolveWorkingDir(arguments.luceneDir, arguments.localDir),
             () -> new RfsContexts.DeltaStreamContext(context, null),
-            hasDocTransformer);
+            hasDocTransformer,
+            new SourceSecrets(arguments.azureStorageAccountKey, arguments.azureStorageSasToken));
     }
 
     /**

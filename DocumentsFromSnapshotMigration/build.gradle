@@ -10,6 +10,7 @@ dependencies {
     implementation project(":RFS")
     implementation project(":SnapshotReader")
     implementation project(":SnapshotReaderGcs")
+    implementation project(":SnapshotReaderAzure")
     implementation project(":RfsPipeline")
     implementation project(":RfsSourceSpi")
     implementation project(":SolrReader")
@@ -55,6 +56,7 @@ dependencies {
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter
     testImplementation libs.json
+    testImplementation testFixtures(project(':SnapshotReaderAzure'))
 
     testRuntimeOnly libs.junit.jupiter.engine
 

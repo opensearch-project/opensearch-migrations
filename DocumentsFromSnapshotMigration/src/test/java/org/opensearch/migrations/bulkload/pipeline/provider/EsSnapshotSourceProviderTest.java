@@ -7,6 +7,7 @@ import java.util.function.Function;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.common.AzureRepo;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
@@ -17,6 +18,7 @@ import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
+import org.opensearch.migrations.bulkload.pipeline.spi.SourceSecrets;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
@@ -28,14 +30,17 @@ import org.mockito.MockedStatic;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -110,7 +115,7 @@ class EsSnapshotSourceProviderTest {
         var legacySpec = new EsSnapshotSourceSpec("file:///snapshots", SNAPSHOT, Version.fromString("ES 6.8.23"),
             List.of(), null, null, true, 1024L, false, EmitDocTypeMode.AUTO, null, null, false);
         var withTransform = new SourceRuntime(Path.of("/tmp/scratch"), Path.of("/tmp/work"),
-            () -> mock(IRfsContexts.IDeltaStreamContext.class), true);
+            () -> mock(IRfsContexts.IDeltaStreamContext.class), true, SourceSecrets.NONE);
 
         try (var h = new Harness()) {
             provider.create(legacySpec, withTransform);
@@ -120,6 +125,34 @@ class EsSnapshotSourceProviderTest {
             provider.create(legacySpec, runtime());
             verify(h.builder).emitDocType(false);
         }
+    }
+
+    @Test
+    void create_azureUri_buildsAnAzureRepoFromTheRuntimesSecrets() throws Exception {
+        var secrets = new SourceRuntime(Path.of("/tmp/scratch"), Path.of("/tmp/work"),
+            () -> mock(IRfsContexts.IDeltaStreamContext.class), false, new SourceSecrets("key", null));
+        var repo = mock(AzureRepo.class);
+
+        try (var h = new Harness(); var azure = mockStatic(AzureRepo.class)) {
+            azure.when(() -> AzureRepo.create(any(), any(), any(), any(), any(), any())).thenReturn(repo);
+
+            provider.create(spec("azure://account/container/path"), secrets);
+
+            azure.verify(() -> AzureRepo.create(eq(Path.of("/tmp/scratch")), any(), eq("http://endpoint:9200"),
+                eq("key"), isNull(), any()));
+            assertThat(h.capturedRepo(), equalTo(repo));
+        }
+    }
+
+    @Test
+    void anAzureRepoNeedsAScratchDirectory() {
+        assertThat(provider.requiresScratchDirectory(spec("azure://account/container/path")), equalTo(true));
+    }
+
+    @Test
+    void secretsAreNotPrinted() {
+        assertThat(new SourceSecrets("key", "token").toString(), not(containsString("key=")));
+        assertThat(new SourceSecrets("key", "token").toString(), not(containsString("token")));
     }
 
     @Test

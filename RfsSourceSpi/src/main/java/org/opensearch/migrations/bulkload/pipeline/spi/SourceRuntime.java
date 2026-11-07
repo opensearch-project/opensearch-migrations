@@ -18,17 +18,20 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
  * @param deltaStreamContextFactory  supplies a tracing context per delta stream; never null,
  *                                   defaults to a no-op when the caller has no tracing
  * @param hasDocTransformer          true when the run applies a user document transform
+ * @param secrets                    source credentials; never null
  */
 public record SourceRuntime(
     Path scratchDir,
     Path workDir,
     Supplier<IRfsContexts.IDeltaStreamContext> deltaStreamContextFactory,
-    boolean hasDocTransformer
+    boolean hasDocTransformer,
+    SourceSecrets secrets
 ) {
     public SourceRuntime {
         Objects.requireNonNull(scratchDir, "scratchDir must not be null");
         Objects.requireNonNull(workDir, "workDir must not be null");
         Objects.requireNonNull(deltaStreamContextFactory, "deltaStreamContextFactory must not be null");
+        Objects.requireNonNull(secrets, "secrets must not be null");
     }
 
     public SourceRuntime(
@@ -36,6 +39,6 @@ public record SourceRuntime(
         Path workDir,
         Supplier<IRfsContexts.IDeltaStreamContext> deltaStreamContextFactory
     ) {
-        this(scratchDir, workDir, deltaStreamContextFactory, false);
+        this(scratchDir, workDir, deltaStreamContextFactory, false, SourceSecrets.NONE);
     }
 }
