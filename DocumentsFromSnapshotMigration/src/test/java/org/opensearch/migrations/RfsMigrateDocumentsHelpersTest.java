@@ -342,29 +342,14 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
-    void validateArgs_rejectsAFailurePercentOutsideZeroToOneHundred() {
-        for (double percent : new double[] {-1, 100.5}) {
-            var args = validEsArgs();
-            args.maxFailurePercentToFailDocuments = percent;
-            assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
-        }
-    }
-
-    @Test
     void expertLimitsHaveTodaysDefaultsAndAreReadFromInlineJson() {
         var defaults = new RfsMigrateDocuments.Args();
         assertThat(defaults.maxLeaseDuration, equalTo(java.time.Duration.ofDays(1)));
-        assertThat(defaults.maxFailurePercentToFailDocuments, is(5.0));
-        // The CLI spells its default out; keep it the same as the client's own.
-        assertThat(defaults.maxFailurePercentToFailDocuments,
-            is(org.opensearch.migrations.bulkload.common.OpenSearchClient.DEFAULT_MAX_FAILURE_PERCENT_TO_FAIL_DOCUMENTS));
 
         var args = new RfsMigrateDocuments.Args();
         JsonCommandLineParser.newBuilder().addObject(args).build()
-            .parse(new String[]{"---INLINE-JSON",
-                "{\"maxLeaseDuration\": \"PT6H\", \"maxFailurePercentToFailDocuments\": 100}"});
+            .parse(new String[]{"---INLINE-JSON", "{\"maxLeaseDuration\": \"PT6H\"}"});
         assertThat(args.maxLeaseDuration, equalTo(java.time.Duration.ofHours(6)));
-        assertThat(args.maxFailurePercentToFailDocuments, is(100.0));
     }
 
     @Test

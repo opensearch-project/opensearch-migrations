@@ -82,8 +82,6 @@ class OpenSearchClientBulkClassificationTest {
                 return Retry.fixedDelay(RETRIES, Duration.ofMillis(1));
             }
         };
-        // A healthy target, unless a test says otherwise: it answers a probe.
-        client.setTargetProbe(() -> Mono.just(true));
     }
 
     /** Answer each bulk request with {@code server}, recording the document ids it carried. */
@@ -446,6 +444,21 @@ class OpenSearchClientBulkClassificationTest {
     }
 
     @Test
+    void anEarlierTransientFailureDoesNotKeepAPoisonDocumentRetrying() {
+        withStream();
+        var flakyAttempts = new java.util.concurrent.atomic.AtomicInteger();
+        serve(ids -> ids.contains("flaky") && flakyAttempts.getAndIncrement() == 0
+            ? status(500, "Internal Server Error")
+            : ids.contains("bad") ? status(500, "Internal Server Error") : allCreated(ids));
+
+        send("flaky").block();
+        send("bad").block();
+
+        assertThat(recordIds(), contains("bad"));
+        assertEquals(FailureClass.RETRYABLE_EXHAUSTED, stream.getRecords().get(0).getFailureClass());
+    }
+
+    @Test
     void anItemThatKeepsFailingForAnotherReasonIsGivenUpAfterItsRetries() {
         withStream();
         // Only "stuck" has an item failure; make it a retryable one that isn't a throttle.
@@ -536,9 +549,9 @@ class OpenSearchClientBulkClassificationTest {
     }
 
     @Test
-    void aBatchsOwnThrottleIsNotEvidenceAgainstItsNextFailure() {
+    void aThrottleResetsTheUnknownFailureStreak() {
         withStream();
-        // The batch's own 429 ends its streak; it isn't another request's throttle, so the 500s after it all count.
+        // The 429 ends the unknown-status streak; the 500s after it start a new streak and eventually give up.
         var answers = new java.util.concurrent.atomic.AtomicInteger();
         serve(ids -> answers.getAndIncrement() == 1 ? status(429, "Too Many Requests")
             : status(500, "Internal Server Error"));
@@ -594,24 +607,6 @@ class OpenSearchClientBulkClassificationTest {
             .block(Duration.ofSeconds(30));
 
         assertThat(requests, hasSize(3));
-        assertThat(stream.getRecords(), empty());
-    }
-
-    @Test
-    void aLoneDocumentsFailureCountsOnlyIfTheTargetAnswersAProbe() {
-        withStream();
-        serve(ids -> status(500, "Internal Server Error"));
-        var probes = new java.util.concurrent.atomic.AtomicInteger();
-        client.setTargetProbe(() -> {
-            probes.incrementAndGet();
-            return Mono.just(false);
-        });
-
-        // No other requests, and the target doesn't answer a probe: it may be the target, so nothing counts.
-        assertThrows(RuntimeException.class, () -> send("bad").block());
-
-        assertThat(requests, hasSize(RETRIES + 1));
-        assertEquals(RETRIES + 1, probes.get());
         assertThat(stream.getRecords(), empty());
     }
 

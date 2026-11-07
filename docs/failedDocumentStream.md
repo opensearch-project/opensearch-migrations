@@ -117,16 +117,15 @@ moves on, but nothing records them: metrics and logs are all that remain.
 | `NON_RETRYABLE`       | an OpenSearch item error type       | The bulk item failed with an error that can't succeed on retry (e.g. `mapper_parsing_exception`): its type, or a type in its `caused_by` chain, is a known deterministic error. A value over the target's xcontent limits (`stream_constraints_exception`) is reported only as a cause, e.g. of a `parse_exception` from an ingest pipeline; `failureType` is the outer type. |
 | `NON_RETRYABLE`       | `http_400`, `http_413`              | The target rejected a one-document bulk request outright. Larger requests rejected this way are split in half, repeatedly, to find the document responsible. |
 | `NON_RETRYABLE`       | `document_too_large`                | The document body after transformation (or the original body when no transform is configured) is bigger than `maxDocumentSizeBytes`, so it was never sent. Action metadata and NDJSON separators are not counted. `responseItem` has its body `size`, the `limit`, and `measured: requestBody`. |
-| `RETRYABLE_EXHAUSTED` | an OpenSearch item error type       | The item failed with an error that is neither a known document error nor about the target, 4 counted times. |
-| `RETRYABLE_EXHAUSTED` | `http_<status>` (e.g. `http_500`)   | A one-document request got that status 4 counted times in a row. Larger requests are split in half to find the document. |
-| `RETRYABLE_EXHAUSTED` | `no_response`                       | A one-document request timed out 6 counted times in a row. Larger requests are split in half to find the document. |
+| `RETRYABLE_EXHAUSTED` | an OpenSearch item error type       | The item failed with an error that is neither a known document error nor about the target 4 times. |
+| `RETRYABLE_EXHAUSTED` | `http_<status>` (e.g. `http_500`)   | A one-document request got that status 4 times in a row. Larger requests are split in half to find the document. |
+| `RETRYABLE_EXHAUSTED` | `no_response`                       | A one-document request timed out 6 times in a row. Larger requests are split in half to find the document. |
 
-A failure is *counted* only when the worker's other recent traffic shows the target handling work (at most
-`maxFailurePercentToFailDocuments` of its other requests failing, or, with no other requests, the target answering a
-probe), so an outage or an overloaded target doesn't send documents to the stream. Throttles (`429`, rejected
-execution, circuit breakers) and an unavailable target (unavailable shards, blocked writes, `503`, refused or reset
-connections) are never recorded: those documents wait. For request-level failures, `responseItem` holds the status
-and the start of the response body, or the transport exception.
+Throttles (`429`, rejected execution, circuit breakers) and an unavailable target (unavailable shards, blocked
+writes, `503`, refused or reset connections) are never recorded: those documents wait. Unknown statuses, response
+timeouts and unknown item errors advance fixed retry thresholds so a poison document cannot block its shard
+indefinitely. For request-level failures, `responseItem` holds the status and the start of the response body, or the
+transport exception.
 
 ## Deleting records
 

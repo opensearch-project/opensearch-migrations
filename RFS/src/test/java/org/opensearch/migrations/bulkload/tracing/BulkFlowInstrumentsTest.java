@@ -129,7 +129,6 @@ class BulkFlowInstrumentsTest {
         missing.removeAll(reported);
         missing.remove(BulkFlowInstruments.BULK_BATCH_SPLITS);         // aSplitAndAGiveUpAreCounted
         missing.remove(BulkFlowInstruments.BULK_DOCS_GAVE_UP);         // aSplitAndAGiveUpAreCounted
-        missing.remove(BulkFlowInstruments.BULK_TARGET_PROBES);        // aProbeIsCounted
         Assertions.assertEquals(Set.of(), missing, "reported: " + reported);
 
         var summary = client.getBulkFlowSummary();
@@ -233,33 +232,4 @@ class BulkFlowInstrumentsTest {
         Assertions.assertTrue(names.contains(BulkFlowInstruments.BULK_LIMIT_QUIET_RESETS), "reported: " + names);
     }
 
-    @Test
-    void aProbeIsCounted() {
-        var context = DocumentMigrationTestContext.factory().withAllTracking();
-        var restClient = mock(RestClient.class);
-        var connection = mock(ConnectionContext.class);
-        when(connection.getUri()).thenReturn(URI.create("http://localhost/"));
-        when(restClient.getConnectionContext()).thenReturn(connection);
-        when(restClient.postAsyncBytes(any(), any(), any(), any()))
-            .thenReturn(Mono.just(new HttpResponse(500, "", Map.of(), "{}")));
-        var client = new OpenSearchClient_OS_2_11(restClient, new FailedRequestsLogger(), Version.fromString("OS 2.11"),
-            CompressionMode.UNCOMPRESSED, 1, 10_000_000) {
-            @Override
-            protected reactor.util.retry.Retry getBulkRetryStrategy(
-                org.opensearch.migrations.bulkload.common.retry.BulkRetryPolicy.Batch batch) {
-                return reactor.util.retry.Retry.fixedDelay(1, Duration.ofMillis(1));
-            }
-        };
-        client.setBulkFlowMetrics(context.makeBulkFlowInstruments(null, null));
-        client.setTargetProbe(() -> Mono.just(true));
-
-        // A lone document: no other requests, so whether its failure counts is asked of the target.
-        client.sendBulkRequestRaw("idx", List.of(new Document("alone", "{}".getBytes(StandardCharsets.UTF_8),
-                Document.Operation.UPSERT, Map.of(), Map.of())), null, false, DocumentExceptionAllowlist.empty())
-            .onErrorResume(e -> Mono.empty()).block(Duration.ofSeconds(30));
-
-        var names = context.inMemoryInstrumentationBundle.getFinishedMetrics().stream().map(MetricData::getName)
-            .collect(Collectors.toSet());
-        Assertions.assertTrue(names.contains(BulkFlowInstruments.BULK_TARGET_PROBES), "reported: " + names);
-    }
 }

@@ -27,7 +27,7 @@ class ProgressCountersStartAtZeroTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"bulkDocsGaveUp", "bulkTargetProbes", "bulkDocsTargetUnavailable", "bulkLimitCuts",
+    @ValueSource(strings = {"bulkDocsGaveUp", "bulkDocsTargetUnavailable", "bulkLimitCuts",
         "bulkBatchSplits", "bulkLimitQuietResets"})
     void rareBulkFlowEventsExistAtZero(String name) {
         var context = DocumentMigrationTestContext.factory().withAllTracking();
