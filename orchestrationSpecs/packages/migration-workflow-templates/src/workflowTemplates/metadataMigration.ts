@@ -27,7 +27,7 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {getAzureStorageCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
 import {COMPONENT_LABEL, COMPONENTS, MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
@@ -92,8 +92,7 @@ const COMMON_METADATA_PARAMETERS = {
 };
 
 // Provider-agnostic repo param dict. The URI scheme in repoPathUri determines the backend.
-// `s3Region`, `s3Endpoint`, and `s3RoleArn` are only emitted when non-empty; the Java tools
-// ignore them for gs:// URIs.
+// Keys keep the s3 prefix to match CLI flag names; the snapshot readers honor s3Endpoint for every scheme.
 export function makeRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof REPO_CONFIG>>,
     includeLocalDir: boolean) {
@@ -240,6 +239,8 @@ function buildMetadataContainer<
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
+        .addEnvVarsFromRecord(getAzureStorageCreds(
+            expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "azureCredentialsSecretName"], "")))
         .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
         .addArgs([
             inputs.commandMode,
