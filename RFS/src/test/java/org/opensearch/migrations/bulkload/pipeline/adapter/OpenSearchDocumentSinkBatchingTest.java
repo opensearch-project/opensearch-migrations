@@ -350,7 +350,7 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
-    void rawPipelineCarriesRequestCapacityAcrossSourceBatchBoundaries() {
+    void rawPipelineKeepsAtMostOnePartialRequestPerPersistentLane() {
         var fixture = rawBatchFixture();
         int totalDocs = fixture.sourceDocsPerBatch() * 16;
         var docs = fixture.documents().subList(0, totalDocs);
@@ -363,9 +363,13 @@ class OpenSearchDocumentSinkBatchingTest {
             .migratePartition(partition, "idx", 0).blockLast(Duration.ofSeconds(20));
 
         var counts = requestCounts();
-        assertTrue(counts.subList(0, counts.size() - 1).stream().allMatch(count -> count == 3),
-            "Only the shard's final request may be partially filled: " + counts);
-        assertEquals(totalDocs % 3 == 0 ? 3 : totalDocs % 3, counts.get(counts.size() - 1));
+        assertEquals(totalDocs, counts.stream().mapToInt(Integer::intValue).sum());
+        assertTrue(counts.stream().allMatch(count -> count >= 1 && count <= 3),
+            "Every request must respect the exact request limit: " + counts);
+        long partiallyFilled = counts.stream().filter(count -> count < 3).count();
+        int persistentLanes = Math.min(10, Math.max(1, Runtime.getRuntime().availableProcessors()));
+        assertTrue(partiallyFilled <= persistentLanes,
+            "Each persistent lane may flush at most one partially filled request: " + counts);
     }
 
     @Test
