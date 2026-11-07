@@ -2,11 +2,16 @@ package org.opensearch.migrations.bulkload.pipeline.provider;
 
 import java.util.List;
 
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.DeltaMode;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
@@ -14,97 +19,101 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/**
- * Pins the absent/null/wrong-type handling the spec parsers rely on. A Jackson {@code NullNode}
- * must read as absent rather than stringifying to {@code "null"}.
- */
+/** Pins the strict binding every provider spec relies on. */
 class SpecJsonTest {
 
-    private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String REQUIRED = "\"repoUri\":\"file:///s\",\"snapshotName\":\"nightly\"";
 
-    @Test
-    void requiredString_returnsTheValueWhenPresent() {
-        var config = NODES.objectNode().put("repoUri", "s3://bucket/path");
-
-        assertThat(SpecJson.requiredString(config, "repoUri"), equalTo("s3://bucket/path"));
+    private static EsSnapshotSourceSpec bindEs(String fields) throws Exception {
+        return SpecJson.bind(JSON.readTree("{" + REQUIRED + fields + "}"), EsSnapshotSourceSpec.class);
     }
 
     @Test
-    void requiredString_rejectsMissingBlankAndExplicitNull() {
-        var missing = NODES.objectNode();
-        var blank = NODES.objectNode().put("repoUri", "   ");
-        var explicitNull = NODES.objectNode();
-        explicitNull.putNull("repoUri");
+    void absentAndExplicitNullFieldsTakeTheirDefaults() throws Exception {
+        var absent = bindEs("");
+        var explicitNull = bindEs(",\"version\":null,\"endpoint\":null,\"indexAllowlist\":null,"
+            + "\"maxShardSizeBytes\":null,\"emitDocType\":null,\"deltaMode\":null");
 
-        for (var config : List.of(missing, blank, explicitNull)) {
+        assertThat(explicitNull, equalTo(absent));
+        assertThat(absent.version(), nullValue());
+        assertThat("a null must not become the string \"null\"", explicitNull.endpoint(), nullValue());
+        assertThat(absent.indexAllowlist(), empty());
+        assertThat(absent.maxShardSizeBytes(), equalTo(0L));
+        assertThat(absent.emitDocType(), is(false));
+    }
+
+    @Test
+    void bindsTypedFields() throws Exception {
+        var spec = bindEs(",\"version\":\"ES 7.10.2\",\"deltaMode\":\"UPDATES_ONLY\",\"emitDocType\":true,"
+            + "\"maxShardSizeBytes\":4242,\"indexAllowlist\":[\"logs\"]");
+
+        assertThat(spec.version(), equalTo(Version.fromString("ES 7.10.2")));
+        assertThat(spec.deltaMode(), equalTo(DeltaMode.UPDATES_ONLY));
+        assertThat(spec.emitDocType(), is(true));
+        assertThat(spec.maxShardSizeBytes(), equalTo(4242L));
+        assertThat(spec.indexAllowlist(), equalTo(List.of("logs")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        ",\"indexAllowList\":[\"logs\"]",
+        ",\"indexAllowlist\":\"logs\"",
+        ",\"indexAllowlist\":[1]",
+        ",\"emitDocType\":\"true\"",
+        ",\"emitDocType\":1",
+        ",\"maxShardSizeBytes\":\"4242\"",
+        ",\"maxShardSizeBytes\":1.5",
+        ",\"endpoint\":1",
+        ",\"endpoint\":true",
+        ",\"deltaMode\":\"NOT_A_MODE\"",
+        ",\"deltaMode\":0",
+        ",\"version\":\"not a version\"",
+        ",\"version\":7"
+    })
+    void rejectsUnknownFieldsAndWrongTypes(String fields) {
+        var thrown = assertThrows(IllegalArgumentException.class, () -> bindEs(fields));
+
+        assertThat(thrown.getMessage(), containsString("Document source config"));
+    }
+
+    @Test
+    void anUnknownFieldIsNamedInTheError() {
+        var thrown = assertThrows(IllegalArgumentException.class, () -> bindEs(",\"indexAllowList\":[]"));
+
+        assertThat(thrown.getMessage(), containsString("indexAllowList"));
+    }
+
+    @Test
+    void rejectsBlankAndNullRequiredFields() throws Exception {
+        for (var config : List.of("{\"repoUri\":\"  \",\"snapshotName\":\"n\"}",
+                "{\"repoUri\":null,\"snapshotName\":\"n\"}", "{\"snapshotName\":\"n\"}")) {
+            JsonNode node = JSON.readTree(config);
             var thrown = assertThrows(IllegalArgumentException.class,
-                () -> SpecJson.requiredString(config, "repoUri"));
+                () -> SpecJson.bind(node, EsSnapshotSourceSpec.class));
             assertThat(thrown.getMessage(), containsString("repoUri"));
         }
     }
 
-    @Test
-    void optionalString_distinguishesPresentFromAbsentAndNullNode() {
-        var present = NODES.objectNode().put("endpoint", "http://localhost:4566");
-        var absent = NODES.objectNode();
-        var explicitNull = NODES.objectNode();
-        explicitNull.putNull("endpoint");
+    @ParameterizedTest
+    @ValueSource(strings = {"[]", "\"text\"", "1", "null"})
+    void rejectsAConfigThatIsNotAnObject(String config) throws Exception {
+        var node = JSON.readTree(config);
 
-        assertThat(SpecJson.optionalString(present, "endpoint"), equalTo("http://localhost:4566"));
-        assertThat(SpecJson.optionalString(absent, "endpoint"), nullValue());
-        assertThat("a NullNode must not become the string \"null\"",
-            SpecJson.optionalString(explicitNull, "endpoint"), nullValue());
+        assertThrows(IllegalArgumentException.class, () -> SpecJson.bind(node, EsSnapshotSourceSpec.class));
     }
 
     @Test
-    void booleanOr_fallsBackWhenAbsentOrNull() {
-        var set = NODES.objectNode().put("flag", true);
-        var absent = NODES.objectNode();
-        var explicitNull = NODES.objectNode();
-        explicitNull.putNull("flag");
-
-        assertThat(SpecJson.booleanOr(set, "flag", false), is(true));
-        assertThat(SpecJson.booleanOr(absent, "flag", true), is(true));
-        assertThat(SpecJson.booleanOr(absent, "flag", false), is(false));
-        assertThat(SpecJson.booleanOr(explicitNull, "flag", true), is(true));
+    void rejectsAMissingConfig() {
+        assertThrows(IllegalArgumentException.class, () -> SpecJson.bind(null, EsSnapshotSourceSpec.class));
     }
 
     @Test
-    void longOr_fallsBackWhenAbsentOrNull() {
-        var set = NODES.objectNode().put("maxShardSizeBytes", 4242L);
-        var absent = NODES.objectNode();
-        var explicitNull = NODES.objectNode();
-        explicitNull.putNull("maxShardSizeBytes");
+    void toJsonOmitsNullsAndKeepsEmptyLists() throws Exception {
+        var node = bindEs("").toJson();
 
-        assertThat(SpecJson.longOr(set, "maxShardSizeBytes", 0L), equalTo(4242L));
-        assertThat(SpecJson.longOr(absent, "maxShardSizeBytes", 7L), equalTo(7L));
-        assertThat(SpecJson.longOr(explicitNull, "maxShardSizeBytes", 7L), equalTo(7L));
-    }
-
-    @Test
-    void stringList_readsArraysAndTreatsAnythingElseAsEmpty() {
-        var withValues = NODES.objectNode();
-        withValues.putArray("indexAllowlist").add("logs").add("metrics");
-        var absent = NODES.objectNode();
-        var explicitNull = NODES.objectNode();
-        explicitNull.putNull("indexAllowlist");
-        var notAnArray = NODES.objectNode().put("indexAllowlist", "logs");
-
-        assertThat(SpecJson.stringList(withValues, "indexAllowlist"), contains("logs", "metrics"));
-        assertThat(SpecJson.stringList(absent, "indexAllowlist"), empty());
-        assertThat(SpecJson.stringList(explicitNull, "indexAllowlist"), empty());
-        assertThat("a scalar is not a list", SpecJson.stringList(notAnArray, "indexAllowlist"), empty());
-    }
-
-    @Test
-    void putIfPresent_writesOnlyNonNullValues() {
-        var node = NODES.objectNode();
-
-        SpecJson.putIfPresent(node, "present", "value");
-        SpecJson.putIfPresent(node, "absent", null);
-
-        assertThat(node.has("present"), is(true));
-        assertThat(node.get("present").asText(), equalTo("value"));
-        assertThat("a null value must leave the field absent, not null", node.has("absent"), is(false));
+        assertThat(node.has("endpoint"), is(false));
+        assertThat(node.has("version"), is(false));
+        assertThat(node.get("indexAllowlist").isArray(), is(true));
     }
 }

@@ -48,7 +48,7 @@ public class FailedDocumentStreamSourceProvider
 
     @Override
     public FailedDocumentStreamSourceSpec parseSpec(JsonNode config) {
-        return FailedDocumentStreamSourceSpec.fromJson(config);
+        return SpecJson.bind(config, FailedDocumentStreamSourceSpec.class);
     }
 
     @Override

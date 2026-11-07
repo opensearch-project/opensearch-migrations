@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * The caller builds a typed spec and hands the JSON to whichever provider the registry resolved, so
- * {@code toJson}/{@code fromJson} round-tripping is the contract between them.
+ * {@code toJson}/{@code parseSpec} round-tripping is the contract between them.
  */
 class ProviderSpecRoundTripTest {
 

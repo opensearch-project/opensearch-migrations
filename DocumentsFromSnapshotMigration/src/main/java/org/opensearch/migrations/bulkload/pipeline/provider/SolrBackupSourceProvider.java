@@ -42,7 +42,7 @@ public class SolrBackupSourceProvider implements DocumentSourceProvider<SolrBack
 
     @Override
     public SolrBackupSourceSpec parseSpec(JsonNode config) {
-        return SolrBackupSourceSpec.fromJson(config);
+        return SpecJson.bind(config, SolrBackupSourceSpec.class);
     }
 
     @Override

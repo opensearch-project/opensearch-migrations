@@ -144,16 +144,17 @@ class FailedDocumentStreamSourceProviderTest {
     void specRoundTripsThroughItsJson() {
         var original = spec(List.of(ORDERS), List.of("NON_RETRYABLE"));
 
-        assertThat(FailedDocumentStreamSourceSpec.fromJson(original.toJson()), equalTo(original));
+        assertThat(SpecJson.bind(original.toJson(), FailedDocumentStreamSourceSpec.class), equalTo(original));
     }
 
     @Test
     void specRequiresAStreamAndASession() {
         var empty = JsonNodeFactory.instance.objectNode();
 
-        assertThrows(IllegalArgumentException.class, () -> FailedDocumentStreamSourceSpec.fromJson(empty));
-        assertThrows(IllegalArgumentException.class, () -> FailedDocumentStreamSourceSpec.fromJson(
-            JsonNodeFactory.instance.objectNode().put("streamUri", STREAM_URI)));
+        assertThrows(IllegalArgumentException.class, () -> SpecJson.bind(empty, FailedDocumentStreamSourceSpec.class));
+        assertThrows(IllegalArgumentException.class, () -> SpecJson.bind(
+            JsonNodeFactory.instance.objectNode().put("streamUri", STREAM_URI),
+            FailedDocumentStreamSourceSpec.class));
     }
 
     /** Delegates everything but {@code close}. */

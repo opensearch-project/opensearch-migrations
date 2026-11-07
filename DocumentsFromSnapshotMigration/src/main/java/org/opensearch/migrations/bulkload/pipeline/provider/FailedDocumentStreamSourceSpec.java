@@ -1,12 +1,9 @@
 package org.opensearch.migrations.bulkload.pipeline.provider;
 
 import java.util.List;
-import java.util.Objects;
 
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
@@ -31,16 +28,9 @@ public record FailedDocumentStreamSourceSpec(
     List<String> failureClasses
 ) implements DocumentSourceSpec {
 
-    static final String FIELD_STREAM_URI = "streamUri";
-    static final String FIELD_SESSION_ID = "sessionId";
-    static final String FIELD_S3_REGION = "s3Region";
-    static final String FIELD_ENDPOINT = "endpoint";
-    static final String FIELD_INDEX_ALLOWLIST = "indexAllowlist";
-    static final String FIELD_FAILURE_CLASSES = "failureClasses";
-
     public FailedDocumentStreamSourceSpec {
-        Objects.requireNonNull(streamUri, "streamUri must not be null");
-        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        SpecJson.requireNonBlank(streamUri, "streamUri");
+        SpecJson.requireNonBlank(sessionId, "sessionId");
         indexAllowlist = indexAllowlist == null ? List.of() : List.copyOf(indexAllowlist);
         failureClasses = failureClasses == null ? List.of() : List.copyOf(failureClasses);
     }
@@ -50,27 +40,8 @@ public record FailedDocumentStreamSourceSpec(
         return FailedDocumentStreamSourceProvider.KIND;
     }
 
-    /** Serializes back to the config {@link #fromJson} parses; see {@code EsSnapshotSourceSpec#toJson}. */
+    /** The config form of this spec, which {@code parseSpec} binds back. */
     public ObjectNode toJson() {
-        var node = JsonNodeFactory.instance.objectNode();
-        node.put(FIELD_STREAM_URI, streamUri);
-        node.put(FIELD_SESSION_ID, sessionId);
-        SpecJson.putIfPresent(node, FIELD_S3_REGION, s3Region);
-        SpecJson.putIfPresent(node, FIELD_ENDPOINT, endpoint);
-        var allowlist = node.putArray(FIELD_INDEX_ALLOWLIST);
-        indexAllowlist.forEach(allowlist::add);
-        var classes = node.putArray(FIELD_FAILURE_CLASSES);
-        failureClasses.forEach(classes::add);
-        return node;
-    }
-
-    static FailedDocumentStreamSourceSpec fromJson(JsonNode config) {
-        return new FailedDocumentStreamSourceSpec(
-            SpecJson.requiredString(config, FIELD_STREAM_URI),
-            SpecJson.requiredString(config, FIELD_SESSION_ID),
-            SpecJson.optionalString(config, FIELD_S3_REGION),
-            SpecJson.optionalString(config, FIELD_ENDPOINT),
-            SpecJson.stringList(config, FIELD_INDEX_ALLOWLIST),
-            SpecJson.stringList(config, FIELD_FAILURE_CLASSES));
+        return SpecJson.toJson(this);
     }
 }

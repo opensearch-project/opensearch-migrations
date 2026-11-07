@@ -40,7 +40,7 @@ public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapsh
 
     @Override
     public EsSnapshotSourceSpec parseSpec(JsonNode config) {
-        return EsSnapshotSourceSpec.fromJson(config);
+        return SpecJson.bind(config, EsSnapshotSourceSpec.class);
     }
 
     @Override
