@@ -38,6 +38,27 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     protected static final Logger log = LoggerFactory.getLogger(OpenSearchWorkCoordinator.class);
 
     public static final String INDEX_BASENAME = ".migrations_working_state";
+    // Cap the duration so millisecond and nanosecond conversions remain representable.
+    public static final long MAX_LEASE_DURATION_SECONDS = Integer.MAX_VALUE;
+    public static final int MAX_LEASE_EXPONENT = 31;
+    private static final Duration MAX_LEASE_DURATION = Duration.ofSeconds(MAX_LEASE_DURATION_SECONDS);
+    // Bound both operands before multiplying. Even at their maxima the product fits in a long.
+    // Clamp existing exponents too, so released work items poisoned by older workers can recover.
+    private static final String LEASE_EXPIRATION_SCRIPT =
+        "      long leaseExponent = (long)ctx._source.nextAcquisitionLeaseExponent;"
+            + "      leaseExponent = leaseExponent < 0 ? 0 : (leaseExponent > "
+            + MAX_LEASE_EXPONENT + " ? " + MAX_LEASE_EXPONENT + " : leaseExponent);"
+            + "      long leaseSeconds = (long)params.expirationWindow;"
+            + "      leaseSeconds = leaseSeconds > " + MAX_LEASE_DURATION_SECONDS
+            + "L ? " + MAX_LEASE_DURATION_SECONDS + "L : leaseSeconds;"
+            + "      leaseSeconds *= 1L << (int)leaseExponent;"
+            + "      leaseSeconds = leaseSeconds > " + MAX_LEASE_DURATION_SECONDS
+            + "L ? " + MAX_LEASE_DURATION_SECONDS + "L : leaseSeconds;"
+            + "      long newExpiration = params.clientTimestamp + leaseSeconds;";
+    private static final String INCREMENT_LEASE_EXPONENT_SCRIPT =
+        "          ctx._source.acquisitionLeaseExponent = leaseExponent;"
+            + "          ctx._source.nextAcquisitionLeaseExponent = leaseExponent < "
+            + MAX_LEASE_EXPONENT + " ? leaseExponent + 1 : leaseExponent;";
     public static final int MAX_REFRESH_RETRIES = 6;
     public static final int MAX_SETUP_RETRIES = 6;
     static final long ACQUIRE_WORK_RETRY_BASE_MS = 10;
@@ -360,6 +381,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         String workItemId,
         long expirationWindowSeconds
     ) throws IOException {
+        if (expirationWindowSeconds < 0) {
+            throw new IllegalArgumentException("Lease duration must not be negative");
+        }
         // Store the plaintext index name alongside the lease metadata so operators can audit
         // the work-coordination index without having to reverse the id encoding.  The id itself
         // encodes the index name as base64url so indices whose names contain the SEPARATOR
@@ -401,7 +425,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
             + "      }"
-            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.nextAcquisitionLeaseExponent)) * params.expirationWindow);"
+            + LEASE_EXPIRATION_SCRIPT
             + "      if (params.expirationWindow > 0 && ctx._source." + COMPLETED_AT_FIELD_NAME + " == null) {"
             +          // work item is not completed, but may be assigned to this or a different worker (or unassigned)
             "          if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && "
@@ -412,7 +436,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "                     ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
             "            ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "          ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
-            + "          ctx._source.nextAcquisitionLeaseExponent += 1;"
+            + INCREMENT_LEASE_EXPONENT_SCRIPT
             + "        } else {"
             + "          ctx.op = \\\"noop\\\";"
             + "        }"
@@ -426,7 +450,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var body = upsertLeaseBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION)
             .replace(WORKER_ID_TEMPLATE, workerId)
-            .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
+            .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().getEpochSecond()))
             .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
             .replace(
                 CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE,
@@ -606,7 +630,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         String workItemId,
         Duration leaseDuration
     ) throws IOException {
-        var startTime = Instant.now();
+        leaseDuration = boundLeaseDuration(leaseDuration);
+        var startTime = clock.instant();
         var updateResponse = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());
         var resultFromUpdate = getResult(updateResponse);
 
@@ -622,7 +647,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             );
             final var responseDoc = objectMapper.readTree(httpResponse.getPayloadBytes()).path(SOURCE_FIELD_NAME);
             if (resultFromUpdate == DocumentModificationResult.UPDATED) {
-                var leaseExpirationTime = Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue());
+                var leaseExpirationTime = Instant.ofEpochSecond(responseDoc.path(EXPIRATION_FIELD_NAME).longValue());
                 return new WorkItemAndDuration(leaseExpirationTime,
                         WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId));
             } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
@@ -778,6 +803,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     @Override
     public void releaseWorkItem(
         String workItemId,
+        LeaseReleaseReason reason,
         Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> contextSupplier
     ) throws InterruptedException {
         try (var ctx = contextSupplier.get()) {
@@ -786,7 +812,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             // retry fails — the lease will still expire naturally.  Using the same retry shape
             // as completeWorkItem keeps behavior consistent under coordinator-side load.
             retryWithExponentialBackoff(
-                () -> releaseWorkItemWithoutRetry(workItemId),
+                () -> releaseWorkItemWithoutRetry(workItemId, reason),
                 completionRetryConfig.maxRetries(),
                 completionRetryConfig.initialDelayMs(),
                 completionRetryConfig.maxDelayMs(),
@@ -801,19 +827,21 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private void releaseWorkItemWithoutRetry(String workItemId) throws IOException {
+    private void releaseWorkItemWithoutRetry(String workItemId, LeaseReleaseReason reason) throws IOException {
         // Painless script:
         //   - throws on scriptVersion mismatch (matches the rest of the coordinator contract)
         //   - no-op when the work is already completed (don't clobber a completion)
         //   - no-op when the lease has rolled to another worker (don't clobber the new owner)
         //   - otherwise: clear expiration to 0 and leaseHolderId to null so the next
-        //     acquireNextWorkItem call can pick this item up immediately.  We intentionally
-        //     leave nextAcquisitionLeaseExponent as-is — releasing the lease means the work
-        //     hasn't been done, so any prior bump in the exponent is still meaningful.
+        //     acquireNextWorkItem call can pick this item up immediately.
+        // Restore the acquisition's exponent only on an early exit before expiration. Storing
+        // it explicitly preserves prior timeout increases, including at the saturation boundary.
+        // The ownership check makes a repeated release a no-op after the first clears the owner.
         final var releaseLeaseBodyTemplate = "{\n"
             + "  \"script\": {\n"
             + "    \"lang\": \"painless\",\n"
             + "    \"params\": { \n"
+            + "      \"earlyExit\": " + (reason == LeaseReleaseReason.EARLY_EXIT) + ",\n"
             + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
             + "    },\n"
             + "    \"source\": \""
@@ -825,6 +853,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      } else if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
             + "        ctx.op = \\\"noop\\\";"
             + "      } else {"
+            + "        if (params.earlyExit && ctx._source." + EXPIRATION_FIELD_NAME + " > System.currentTimeMillis() / 1000"
+            + "            && ctx._source.acquisitionLeaseExponent != null) {"
+            + "          ctx._source.nextAcquisitionLeaseExponent = ctx._source.acquisitionLeaseExponent;"
+            + "        }"
             + "        ctx._source." + EXPIRATION_FIELD_NAME + " = 0;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = null;"
             + "      }"
@@ -927,6 +959,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
      * @throws IOException if the request couldn't be made
      */
     UpdateResult assignOneWorkItem(long expirationWindowSeconds) throws IOException {
+        if (expirationWindowSeconds <= 0) {
+            throw new IllegalArgumentException("Lease duration must be at least one second");
+        }
         // the random_score reduces the number of version conflicts from ~1200 for 40 concurrent requests
         // to acquire 40 units of work to around 800
         final var queryUpdateTemplate = "{\n"
@@ -952,12 +987,12 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
             + "      }"
-            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.nextAcquisitionLeaseExponent)) * params.expirationWindow);"
+            + LEASE_EXPIRATION_SCRIPT
             + "      if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
             "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +        // sanity check
             "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
-            + "        ctx._source.nextAcquisitionLeaseExponent += 1;"
+            + INCREMENT_LEASE_EXPONENT_SCRIPT
             + "      } else {"
             + "        ctx.op = \\\"noop\\\";"
             + "      }"
@@ -967,7 +1002,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             +    // end of script block
             "}";
 
-        final var timestampEpochSeconds = clock.instant().toEpochMilli() / 1000;
+        final var timestampEpochSeconds = clock.instant().getEpochSecond();
         final var body = queryUpdateTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION)
             .replace(WORKER_ID_TEMPLATE, workerId)
             .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(timestampEpochSeconds))
@@ -1052,7 +1087,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
         var resultHitInner = results.path("hits").path("hits").path(0);
         var expiration = resultHitInner.path(SOURCE_FIELD_NAME).path(EXPIRATION_FIELD_NAME).longValue();
-        if (expiration == 0) {
+        if (expiration <= 0) {
             log.atWarn().setMessage("Expiration wasn't found or wasn't set to > 0 for response: {}")
                 .addArgument(response::toDiagnosticString).log();
             throw new MalformedAssignedWorkDocumentException(response);
@@ -1060,7 +1095,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var responseDoc = resultHitInner.get(SOURCE_FIELD_NAME);
         var successorItems = getSuccessorItemsIfPresent(responseDoc);
-        var rval = new WorkItemWithPotentialSuccessors(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000 * expiration), successorItems);
+        var rval = new WorkItemWithPotentialSuccessors(resultHitInner.get("_id").asText(), Instant.ofEpochSecond(expiration), successorItems);
         log.atInfo().setMessage("Returning work item and lease: {}").addArgument(rval).log();
         return rval;
     }
@@ -1176,6 +1211,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     // because it is an expected outcome of this function that sometimes the work item is already created. That function
     // uses `createOrUpdateLease`, whereas this function deliberately never modifies an already-existing work item.
     private void createUnassignedWorkItemsIfNonexistent(List<String> workItemIds, int nextAcquisitionLeaseExponent) throws IOException, IllegalStateException {
+        nextAcquisitionLeaseExponent = Math.max(0, Math.min(MAX_LEASE_EXPONENT, nextAcquisitionLeaseExponent));
         String workItemBodyTemplate = "{\"nextAcquisitionLeaseExponent\":" + nextAcquisitionLeaseExponent + ", \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
             "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
         String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION).replace(WORKER_ID_TEMPLATE, workerId);
@@ -1458,6 +1494,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         Supplier<IWorkCoordinationContexts.IAcquireNextWorkItemContext> contextSupplier)
         throws RetriesExceededException, IOException, InterruptedException
     {
+        leaseDuration = boundLeaseDuration(leaseDuration);
         try (var ctx = contextSupplier.get()) {
             final var leaseChecker = new LeaseChecker(leaseDuration, System.nanoTime());
             int driftRetries = 0;
@@ -1514,5 +1551,12 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 }
             }
         }
+    }
+
+    private static Duration boundLeaseDuration(Duration duration) {
+        if (duration.isNegative()) {
+            throw new IllegalArgumentException("Lease duration must not be negative");
+        }
+        return duration.compareTo(MAX_LEASE_DURATION) > 0 ? MAX_LEASE_DURATION : duration;
     }
 }

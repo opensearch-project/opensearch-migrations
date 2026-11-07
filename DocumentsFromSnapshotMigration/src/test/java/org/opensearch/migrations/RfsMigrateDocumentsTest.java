@@ -6,6 +6,7 @@ import java.util.OptionalInt;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
+import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 
 import org.junit.jupiter.api.Assertions;
@@ -47,6 +48,23 @@ class RfsMigrateDocumentsTest {
             Arguments.of(1, 1, INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD, "Should return existingLeaseExponent when shard prep time is equal to increase threshold for lease duration"),
             Arguments.of(1, 2, INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD + 0.001, "Should return existingLeaseExponent + 1 when shard prep time is greater than increase threshold for lease duration")
         );
+    }
+
+    @Test
+    void testSuccessorLeaseExponentSaturatesForExtremeDurations() {
+        var times = new WorkItemTimeProvider();
+        times.getLeaseAcquisitionTimeRef().set(Instant.EPOCH);
+        times.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plusSeconds(Integer.MAX_VALUE / 2));
+        Assertions.assertEquals(OpenSearchWorkCoordinator.MAX_LEASE_EXPONENT,
+            RfsMigrateDocuments.getSuccessorNextAcquisitionLeaseExponent(
+                times, Duration.ofNanos(1), Instant.EPOCH.plusSeconds(Integer.MAX_VALUE)));
+
+        // Legacy timestamps and caller-provided durations may not fit in milliseconds.
+        times.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plusSeconds(Long.MAX_VALUE / 1000));
+        int exponent = Assertions.assertDoesNotThrow(() ->
+            RfsMigrateDocuments.getSuccessorNextAcquisitionLeaseExponent(
+                times, Duration.ofSeconds(Long.MAX_VALUE), Instant.MAX));
+        Assertions.assertTrue(exponent >= 0 && exponent <= OpenSearchWorkCoordinator.MAX_LEASE_EXPONENT);
     }
 
     @ParameterizedTest
