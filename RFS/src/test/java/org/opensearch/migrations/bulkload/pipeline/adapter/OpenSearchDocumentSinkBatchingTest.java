@@ -338,9 +338,14 @@ class OpenSearchDocumentSinkBatchingTest {
             List.of(doc("d1", "{\"x\":1}")),
             List.of(doc("d2", "{\"x\":1}"))
         );
+        var preparedBatches = batches.stream()
+            .map(batch -> batch.stream()
+                .map(document -> sink.prepareSourceDocument("idx", document))
+                .toList())
+            .toList();
 
         var result = CompletableFuture.supplyAsync(() ->
-            sink.writeBatchGroup("idx", batches, 2).block(Duration.ofSeconds(10)));
+            sink.writePreparedBatchGroup("idx", preparedBatches, 2).block(Duration.ofSeconds(10)));
         boolean transformationsOverlapped = transformationsStarted.await(1, TimeUnit.SECONDS);
         releaseTransformations.countDown();
         assertNotNull(result.get(10, TimeUnit.SECONDS));
@@ -350,7 +355,7 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
-    void rawPipelineCarriesRequestCapacityAcrossSourceBatchBoundaries() {
+    void rawPipelineKeepsAtMostOnePartialRequestPerPersistentLane() {
         var fixture = rawBatchFixture();
         int totalDocs = fixture.sourceDocsPerBatch() * 16;
         var docs = fixture.documents().subList(0, totalDocs);
@@ -363,9 +368,13 @@ class OpenSearchDocumentSinkBatchingTest {
             .migratePartition(partition, "idx", 0).blockLast(Duration.ofSeconds(20));
 
         var counts = requestCounts();
-        assertTrue(counts.subList(0, counts.size() - 1).stream().allMatch(count -> count == 3),
-            "Only the shard's final request may be partially filled: " + counts);
-        assertEquals(totalDocs % 3 == 0 ? 3 : totalDocs % 3, counts.get(counts.size() - 1));
+        assertEquals(totalDocs, counts.stream().mapToInt(Integer::intValue).sum());
+        assertTrue(counts.stream().allMatch(count -> count >= 1 && count <= 3),
+            "Every request must respect the exact request limit: " + counts);
+        long partiallyFilled = counts.stream().filter(count -> count < 3).count();
+        int persistentLanes = Math.min(10, Math.max(1, Runtime.getRuntime().availableProcessors()));
+        assertTrue(partiallyFilled <= persistentLanes,
+            "Each persistent lane may flush at most one partially filled request: " + counts);
     }
 
     @Test

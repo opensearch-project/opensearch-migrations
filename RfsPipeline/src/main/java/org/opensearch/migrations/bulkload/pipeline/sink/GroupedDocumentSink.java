@@ -26,6 +26,23 @@ public interface GroupedDocumentSink<P> extends DocumentSink {
     }
 
     /**
+     * Whether the sink can preserve its semantics when each preparation lane writes independently.
+     *
+     * <p>Sinks whose transformations depend on the source-batch boundary must return {@code false}. The pipeline
+     * will then preserve those boundaries while packing transformed output across a small group of source batches.
+     */
+    default boolean supportsPersistentPreparationLanes() {
+        return true;
+    }
+
+    /**
+     * The number of source batches that the pipeline should offer to one grouped sink write.
+     */
+    default int preferredSourceBatchGroupSize() {
+        return 1;
+    }
+
+    /**
      * Prepare and size one source document for batching.
      *
      * <p>The pipeline carries this value with the document so the sink can reuse preparation performed while

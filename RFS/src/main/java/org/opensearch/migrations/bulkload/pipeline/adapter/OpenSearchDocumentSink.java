@@ -43,6 +43,7 @@ import reactor.core.scheduler.Schedulers;
 public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.EncodedOperation> {
 
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+    private static final int SOURCE_BATCHES_PER_REQUEST_GROUP = 8;
     private final OpenSearchClient client;
     private final Supplier<IJsonTransformer> transformerSupplier;
     private final TransformationMode transformationMode;
@@ -113,6 +114,17 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
         return writePreparedBatchGroup(collectionName, List.of(preparedBatch), 1);
     }
 
+    @Override
+    public boolean supportsPersistentPreparationLanes() {
+        return usesRawFastPath();
+    }
+
+    @Override
+    public int preferredSourceBatchGroupSize() {
+        return usesRawFastPath() ? 1 : SOURCE_BATCHES_PER_REQUEST_GROUP;
+    }
+
+    @Override
     public PreparedDocument<BulkNdjson.EncodedOperation> prepareSourceDocument(
         String collectionName, Document document
     ) {

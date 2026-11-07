@@ -179,13 +179,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public Mono<BatchResult> writeBatchGroup(
-                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
-            ) {
-                throw new AssertionError("The prepared grouped path must be used");
-            }
-
-            @Override
             public Mono<BatchResult> writePreparedBatchGroup(
                 String collectionName,
                 List<List<PreparedDocument<String>>> sourceBatches,
@@ -236,13 +229,6 @@ class DocumentMigrationPipelineBatchingTest {
             public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
                 int index = Integer.parseInt(document.id().substring("doc-".length()));
                 return new PreparedDocument<>(document, preparedSizes.get(index), "prepared-" + document.id());
-            }
-
-            @Override
-            public Mono<BatchResult> writeBatchGroup(
-                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
-            ) {
-                throw new AssertionError("The prepared grouped path must be used");
             }
 
             @Override
@@ -418,13 +404,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public Mono<BatchResult> writeBatchGroup(
-                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
-            ) {
-                throw new AssertionError("The prepared grouped path must be used");
-            }
-
-            @Override
             public Mono<BatchResult> writePreparedBatchGroup(
                 String collectionName,
                 List<List<PreparedDocument<String>>> sourceBatches,
@@ -491,13 +470,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public Mono<BatchResult> writeBatchGroup(
-                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
-            ) {
-                throw new AssertionError("The prepared grouped path must be used");
-            }
-
-            @Override
             public Mono<BatchResult> writePreparedBatchGroup(
                 String collectionName,
                 List<List<PreparedDocument<String>>> sourceBatches,
@@ -549,13 +521,6 @@ class DocumentMigrationPipelineBatchingTest {
             @Override
             public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
                 return new PreparedDocument<>(document, 6, "prepared-" + document.id());
-            }
-
-            @Override
-            public Mono<BatchResult> writeBatchGroup(
-                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
-            ) {
-                throw new AssertionError("The prepared grouped path must be used");
             }
 
             @Override
@@ -619,13 +584,6 @@ class DocumentMigrationPipelineBatchingTest {
             @Override
             public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
                 return new PreparedDocument<>(document, 1, "prepared-" + document.id());
-            }
-
-            @Override
-            public Mono<BatchResult> writeBatchGroup(
-                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
-            ) {
-                throw new AssertionError("The prepared grouped path must be used");
             }
 
             @Override
@@ -693,13 +651,6 @@ class DocumentMigrationPipelineBatchingTest {
                 } finally {
                     activePreparations.decrementAndGet();
                 }
-            }
-
-            @Override
-            public Mono<BatchResult> writeBatchGroup(
-                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
-            ) {
-                throw new AssertionError("The prepared grouped path must be used");
             }
 
             @Override

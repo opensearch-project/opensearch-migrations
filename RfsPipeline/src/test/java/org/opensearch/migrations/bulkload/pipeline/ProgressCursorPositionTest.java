@@ -350,14 +350,6 @@ class ProgressCursorPositionTest {
             return new PreparedDocument<>(document, 1, "prepared-" + document.id());
         }
 
-        @Override
-        public Mono<BatchResult> writeBatchGroup(
-            String collectionName,
-            List<List<Document>> sourceBatches,
-            int requestConcurrency
-        ) {
-            throw new AssertionError("The prepared grouped path must be used");
-        }
     }
 
     /**
