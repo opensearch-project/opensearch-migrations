@@ -1,8 +1,10 @@
 package org.opensearch.migrations.bulkload.pipeline.source;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
@@ -153,6 +155,21 @@ public abstract class DocumentSourceContractTest {
         }
     }
 
+    /** Listing order may differ, but every partition must hold the same documents in the same order. */
+    @Test
+    void everyPartitionReadsTheSameFromAFreshSource() throws Exception {
+        Map<String, Map<String, List<String>>> first;
+        try (var source = newSource()) {
+            first = contentsOf(source);
+        }
+        assertThat(first.keySet(), not(empty()));
+
+        try (var fresh = newSource()) {
+            assertThat("a fresh source must read the same documents in the same order",
+                contentsOf(fresh), equalTo(first));
+        }
+    }
+
     private List<String> collectionsFrom() throws Exception {
         try (var source = newSource()) {
             return source.listCollections();
@@ -178,6 +195,18 @@ public abstract class DocumentSourceContractTest {
     private static List<PositionedDocument> readAll(DocumentSource source, Partition partition, String cursor) {
         var read = source.readDocuments(partition, cursor).collectList().block();
         return read == null ? List.of() : read;
+    }
+
+    private static Map<String, Map<String, List<String>>> contentsOf(DocumentSource source) {
+        var contents = new HashMap<String, Map<String, List<String>>>();
+        for (var collection : source.listCollections()) {
+            var partitions = new HashMap<String, List<String>>();
+            for (var partition : source.listPartitions(collection)) {
+                partitions.put(partition.name(), identitiesOf(readAll(source, partition, null)));
+            }
+            contents.put(collection, partitions);
+        }
+        return contents;
     }
 
     private static List<String> namesOf(List<Partition> partitions) {
