@@ -37,7 +37,6 @@ import org.opensearch.migrations.bulkload.common.retry.BulkFlowMetrics;
 import org.opensearch.migrations.bulkload.common.retry.BulkFlowStats;
 import org.opensearch.migrations.bulkload.common.retry.BulkItemErrorKind;
 import org.opensearch.migrations.bulkload.common.retry.BulkRetryPolicy;
-import org.opensearch.migrations.bulkload.common.retry.EvidenceWindow;
 import org.opensearch.migrations.bulkload.common.retry.RetryBudget;
 import org.opensearch.migrations.bulkload.pipeline.BatchSizePredicate;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -86,9 +85,6 @@ public abstract class OpenSearchClient {
     public static final int MAX_ITEM_FAILURE_RETRIES = 3;
     /** Consecutive whole-request failures (unknown status or no response) after which a batch is halved. */
     static final int FAILED_ATTEMPTS_BEFORE_SPLIT = 2;
-    public static final double DEFAULT_MAX_FAILURE_PERCENT_TO_FAIL_DOCUMENTS = 5;
-    /** How long the probe that asks whether the target answers at all waits for a response. */
-    static final Duration TARGET_PROBE_TIMEOUT = Duration.ofSeconds(10);
     public static final int BULK_TRUNCATED_RESPONSE_MAX_LENGTH = 1500;
 
     /**
@@ -131,12 +127,6 @@ public abstract class OpenSearchClient {
     // Documents bigger than this are not sent (0 = no limit). See rejectOversizedDocument.
     private volatile long maxDocumentSizeBytes;
     private volatile BulkRetryPolicy bulkRetryPolicy = new BulkRetryPolicy(new RetryBudget());
-    // Evidence about the target from this client's bulk attempts in the last two minutes, by request and by document.
-    // See failureCounts and itemFailuresCount.
-    private final EvidenceWindow evidence = new EvidenceWindow();
-    // Asked whether the target answers at all when there is no other evidence; null probes with GET /.
-    private volatile Supplier<Mono<Boolean>> targetProbe;
-    private volatile double maxFailurePercentToFailDocuments = DEFAULT_MAX_FAILURE_PERCENT_TO_FAIL_DOCUMENTS;
     private final AtomicLong nextBatchId = new AtomicLong();
     private volatile AdaptiveLimit bulkInFlightLimit;
     private final BulkFlowStats bulkFlowStats = new BulkFlowStats();
@@ -653,59 +643,6 @@ public abstract class OpenSearchClient {
         this.bulkResponseTimeout = bulkResponseTimeout;
     }
 
-    /**
-     * A transient failure doesn't count against its documents, nor split its batch, if more than {@code percent}
-     * (0-100) of the other batches' requests (for a whole-request failure) or documents (for an item failure) in the
-     * last two minutes failed: the target, not a document, is in trouble. 100 ignores other batches' failures.
-     */
-    public void setMaxFailurePercentToFailDocuments(double percent) {
-        if (!(percent >= 0 && percent <= 100)) {
-            throw new IllegalArgumentException("maxFailurePercentToFailDocuments must be in [0, 100], got " + percent);
-        }
-        this.maxFailurePercentToFailDocuments = percent;
-    }
-
-    /** Replaces the {@code GET /} that asks whether the target answers at all (see {@link #failureCounts}). */
-    public void setTargetProbe(Supplier<Mono<Boolean>> probe) {
-        this.targetProbe = probe;
-    }
-
-    /**
-     * Whether a whole-request failure of this batch (an unknown status, or a response timeout) counts toward its
-     * streaks. The evidence is the other batches' requests (not this one's, nor those of the batches it was split
-     * from) in the last {@link EvidenceWindow#WINDOW}: the failure counts if at most
-     * {@link #setMaxFailurePercentToFailDocuments the percent} of them failed. With no other requests there is no
-     * evidence either way, and the failure counts if {@code noEvidence} says so: for a single document, whether the
-     * target answers a probe.
-     */
-    private Mono<Boolean> failureCounts(RequestTotals totals, Supplier<Mono<Boolean>> noEvidence) {
-        var others = evidence.othersThan(totals.lineage);
-        return others.requests() == 0 ? noEvidence.get()
-            : Mono.just(others.requestsFailedAtMost(maxFailurePercentToFailDocuments));
-    }
-
-    /**
-     * Whether this response's items that failed with an unknown error count against their documents. The evidence
-     * is documents: the other batches' items in the window plus this response's other items. An unknown error that
-     * few other documents see is the document's. The target answered, so with no other documents the failures count.
-     */
-    private boolean itemFailuresCount(RequestTotals totals, long items, long failedItems, long unknownItems) {
-        var others = evidence.othersThan(totals.lineage);
-        long documents = others.documents() + items - unknownItems;
-        long failed = others.failedDocuments() + failedItems - unknownItems;
-        return documents == 0 || failed * 100.0 <= maxFailurePercentToFailDocuments * documents;
-    }
-
-    /** Whether the target answers at all: any HTTP response to the probe within {@link #TARGET_PROBE_TIMEOUT}. */
-    private Mono<Boolean> probeTarget() {
-        var probe = targetProbe;
-        return (probe != null ? Mono.defer(probe) : Mono.defer(() -> client.getAsync("", null)).map(response -> true))
-            .timeout(TARGET_PROBE_TIMEOUT)
-            .onErrorReturn(false)
-            .defaultIfEmpty(false)
-            .doOnNext(answered -> bulkFlowMetrics.onTargetProbe(answered));
-    }
-
     private BulkOperationSpec stripDocumentId(BulkOperationSpec original) {
         if (original instanceof IndexOp indexOp) {
             var metadata = indexOp.getOperation();
@@ -805,7 +742,7 @@ public abstract class OpenSearchClient {
                     (PreparedOperation op) -> op.encoded().size()), true)
                 .doOnNext(batch -> noteOversizedOperation(indexName, batch, path, context))
                 // A split batch completes in source order, before its source checkpoint can advance.
-                .concatMap(batch -> executeBulkWithRetry(indexName, batch, context, allowlist, List.of()), 1)
+                .concatMap(batch -> executeBulkWithRetry(indexName, batch, context, allowlist), 1)
                 .reduce(OpenSearchClient::combine)
                 .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"))
                 .map(response -> response.plusFailures(failuresOf(FailureClass.NON_RETRYABLE, tooLarge[0])));
@@ -873,10 +810,6 @@ public abstract class OpenSearchClient {
      *       operation is given up after {@value #MAX_UNKNOWN_FAILURE_RETRIES} retries that got another status, or
      *       {@value #MAX_NO_RESPONSE_RETRIES} retries that got no response, in a row.</li>
      * </ul>
-     * A failure only counts toward those streaks if other requests since the previous attempt don't show the
-     * target in trouble ({@link #setMaxFailurePercentToFailDocuments}); if they do, the streak starts over. No other
-     * requests at all is not evidence either way, so a batch alone keeps counting. Halves start with no streaks.
-     *
      * <p>Terminal failures are resolved by {@link #finishWithTerminalFailure}.
      *
      * @param indexName         target index
@@ -888,8 +821,7 @@ public abstract class OpenSearchClient {
         String indexName,
         List<PreparedOperation> pendingOps,
         IRfsContexts.IRequestContext context,
-        DocumentExceptionAllowlist allowlist,
-        List<Long> ancestors
+        DocumentExceptionAllowlist allowlist
     ) {
         var totals = new RequestTotals();
         var retryState = new BulkRetryPolicy.Batch();
@@ -897,9 +829,6 @@ public abstract class OpenSearchClient {
             if (totals.batchId == 0) {
                 totals.batchId = nextBatchId.incrementAndGet();
                 totals.openedNanos = System.nanoTime();
-                var lineage = new ArrayList<>(ancestors);
-                lineage.add(totals.batchId);
-                totals.lineage = List.copyOf(lineage);
                 bulkFlowMetrics.onBatchOpened(totals.batchId);
             }
             return withBulkSlot(() -> {
@@ -1097,16 +1026,15 @@ public abstract class OpenSearchClient {
         boolean success = response.statusCode >= 200 && response.statusCode < 300;
         // Any response ends a no-response streak; a 2xx, or a response that blames the target, ends the others.
         totals.consecutiveNoResponses = 0;
-        totals.countedNoResponses = 0;
+        totals.noResponseFailures = 0;
         if (success || errorClass.isTargetState()) {
             totals.consecutiveWholeFailures = 0;
-            totals.countedUnknownFailures = 0;
+            totals.unknownFailures = 0;
         }
         var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
         if (!resp.hasBadStatusCode()) {
             totals.countThrottle(errorClass == BulkErrorClass.THROTTLE);
             if (resp.reportsNoFailedOperations()) {
-                evidence.record(totals.batchId, false, pendingOps.size(), 0);
                 bulkFlowMetrics.onWaitingOnTarget(totals.batchId, 0);
                 return Mono.just(new AttemptOutcome.Completed(resp));
             }
@@ -1134,8 +1062,6 @@ public abstract class OpenSearchClient {
             return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
         }
         if (isNonRetryableRequestStatus(resp.statusCode)) {
-            // Answered: the request, not the target, is the problem. No item results, so no document points.
-            evidence.record(totals.batchId, false, 0, 0);
             log.atWarn()
                 .setMessage("Bulk request attempt {} on index '{}' with {} documents was rejected with status {}; {}. Response: {}")
                 .addArgument(totals.attempts)
@@ -1151,7 +1077,6 @@ public abstract class OpenSearchClient {
                     "status " + resp.statusCode)
                 : new AttemptOutcome.Rejected(resp));
         }
-        evidence.record(totals.batchId, true, 0, 0);
         var failed = new OperationFailed(resp.getFailureMessage(), resp);
         totals.countThrottle(errorClass == BulkErrorClass.THROTTLE);
         bulkFlowMetrics.onWaitingOnTarget(totals.batchId, errorClass.isTargetState() ? pendingOps.size() : 0);
@@ -1191,42 +1116,38 @@ public abstract class OpenSearchClient {
                 .log();
             return Mono.error(new TargetAuthenticationFailed(resp.statusCode, failed));
         }
-        // An unknown status. It only counts against a single document, and a batch is only halved to find the
-        // document responsible, while other batches show the target taking documents. With no other batches, a
-        // batch is halved anyway, and a single document's failure counts if the target answers a probe.
+        // An unknown status is retried a fixed number of times. A multi-document batch is split to isolate a
+        // possible poison document; a single document is eventually recorded and the migration moves on.
         boolean single = pendingOps.size() == 1;
-        return failureCounts(totals, single ? this::probeTarget : () -> Mono.just(true)).flatMap(countable -> {
-            String action;
-            AttemptOutcome outcome = null;
-            if (single) {
-                totals.countedUnknownFailures = countable ? totals.countedUnknownFailures + 1 : 0;
-                if (totals.countedUnknownFailures > MAX_UNKNOWN_FAILURE_RETRIES) {
-                    outcome = new AttemptOutcome.Exhausted(failed, BulkFlowMetrics.GiveUpReason.UNKNOWN_FAILURES);
-                    action = "giving the document up";
-                } else {
-                    action = countable ? "retrying (" + totals.countedUnknownFailures + " of "
-                        + (MAX_UNKNOWN_FAILURE_RETRIES + 1) + " counted failures)"
-                        : "retrying (not counted: other requests show the target failing, or it didn't answer a probe)";
-                }
+        String action;
+        AttemptOutcome outcome = null;
+        if (single) {
+            totals.unknownFailures++;
+            if (totals.unknownFailures > MAX_UNKNOWN_FAILURE_RETRIES) {
+                outcome = new AttemptOutcome.Exhausted(failed, BulkFlowMetrics.GiveUpReason.UNKNOWN_FAILURES);
+                action = "giving the document up";
             } else {
-                totals.consecutiveWholeFailures = countable ? totals.consecutiveWholeFailures + 1 : 0;
-                if (totals.consecutiveWholeFailures >= FAILED_ATTEMPTS_BEFORE_SPLIT) {
-                    outcome = new AttemptOutcome.Split(BulkFlowMetrics.SplitReason.STATUS, "status " + resp.statusCode);
-                    action = "splitting the batch";
-                } else {
-                    action = "retrying all " + pendingOps.size() + " documents";
-                }
+                action = "retrying (" + totals.unknownFailures + " of "
+                    + (MAX_UNKNOWN_FAILURE_RETRIES + 1) + " failures)";
             }
-            log.atWarn()
-                .setMessage("Bulk request attempt {} on index '{}' failed with status {}; {}. Response: {}")
-                .addArgument(totals.attempts)
-                .addArgument(indexName)
-                .addArgument(resp.statusCode)
-                .addArgument(action)
-                .addArgument(() -> truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
-                .log();
-            return outcome != null ? Mono.just(outcome) : Mono.<AttemptOutcome>error(failed);
-        });
+        } else {
+            totals.consecutiveWholeFailures++;
+            if (totals.consecutiveWholeFailures >= FAILED_ATTEMPTS_BEFORE_SPLIT) {
+                outcome = new AttemptOutcome.Split(BulkFlowMetrics.SplitReason.STATUS, "status " + resp.statusCode);
+                action = "splitting the batch";
+            } else {
+                action = "retrying all " + pendingOps.size() + " documents";
+            }
+        }
+        log.atWarn()
+            .setMessage("Bulk request attempt {} on index '{}' failed with status {}; {}. Response: {}")
+            .addArgument(totals.attempts)
+            .addArgument(indexName)
+            .addArgument(resp.statusCode)
+            .addArgument(action)
+            .addArgument(() -> truncateMessageIfNeeded(response.body, BULK_TRUNCATED_RESPONSE_MAX_LENGTH))
+            .log();
+        return outcome != null ? Mono.just(outcome) : Mono.error(failed);
     }
 
     /** 400 and 413 describe the request itself, so resending the same bytes can't succeed. */
@@ -1240,7 +1161,6 @@ public abstract class OpenSearchClient {
         RequestTotals totals,
         NoResponseException error
     ) {
-        evidence.record(totals.batchId, true, 0, 0);
         totals.countThrottle(false);
         if (!error.isResponseTimeout()) {
             // The connection couldn't be made, or was reset or closed: the target, not a document, is the problem.
@@ -1260,37 +1180,33 @@ public abstract class OpenSearchClient {
             return Mono.error(error);
         }
         bulkFlowMetrics.onWaitingOnTarget(totals.batchId, 0);
-        // A response timeout. Other batches' evidence decides whether it counts; with none, a batch is halved anyway,
-        // and a single document's timeout counts if the target answers a probe.
+        // A response timeout is retried a fixed number of times. Split a multi-document batch to isolate a possible
+        // poison document; give up a single document after its retry limit so the migration can move on.
         boolean single = pendingOps.size() == 1;
-        return failureCounts(totals, single ? this::probeTarget : () -> Mono.just(true)).flatMap(countable -> {
-            totals.consecutiveNoResponses = countable ? totals.consecutiveNoResponses + 1 : 0;
-            boolean split = !single && totals.consecutiveNoResponses >= FAILED_ATTEMPTS_BEFORE_SPLIT;
-            totals.countedNoResponses = single && countable ? totals.countedNoResponses + 1 : 0;
-            boolean exhausted = single && totals.countedNoResponses > MAX_NO_RESPONSE_RETRIES;
-            log.atWarn()
-                .setMessage("Bulk request attempt {} on index '{}' with {} documents got no response after {} ms "
-                    + "(timed out{}; {} counted in a row): {}; {}")
-                .addArgument(totals.attempts)
-                .addArgument(indexName)
-                .addArgument(pendingOps::size)
-                .addArgument(error.elapsed::toMillis)
-                .addArgument(() -> Optional.ofNullable(bulkResponseTimeout).map(t -> " at " + t.toMillis() + " ms")
-                    .orElse(""))
-                .addArgument(totals.consecutiveNoResponses)
-                .addArgument(() -> String.valueOf(error.getCause()))
-                .addArgument(split ? "splitting the batch" : exhausted ? "giving the document up"
-                    : countable ? "retrying"
-                    : "retrying (not counted: other requests show the target failing, or it didn't answer a probe)")
-                .log();
-            if (split) {
-                return Mono.just(new AttemptOutcome.Split(BulkFlowMetrics.SplitReason.NO_RESPONSE, "no response"));
-            }
-            if (exhausted) {
-                return Mono.just(new AttemptOutcome.Exhausted(error, BulkFlowMetrics.GiveUpReason.NO_RESPONSE));
-            }
-            return Mono.<AttemptOutcome>error(error);
-        });
+        totals.consecutiveNoResponses++;
+        boolean split = !single && totals.consecutiveNoResponses >= FAILED_ATTEMPTS_BEFORE_SPLIT;
+        totals.noResponseFailures = single ? totals.noResponseFailures + 1 : 0;
+        boolean exhausted = single && totals.noResponseFailures > MAX_NO_RESPONSE_RETRIES;
+        log.atWarn()
+            .setMessage("Bulk request attempt {} on index '{}' with {} documents got no response after {} ms "
+                + "(timed out{}; {} in a row): {}; {}")
+            .addArgument(totals.attempts)
+            .addArgument(indexName)
+            .addArgument(pendingOps::size)
+            .addArgument(error.elapsed::toMillis)
+            .addArgument(() -> Optional.ofNullable(bulkResponseTimeout).map(t -> " at " + t.toMillis() + " ms")
+                .orElse(""))
+            .addArgument(totals.consecutiveNoResponses)
+            .addArgument(() -> String.valueOf(error.getCause()))
+            .addArgument(split ? "splitting the batch" : exhausted ? "giving the document up" : "retrying")
+            .log();
+        if (split) {
+            return Mono.just(new AttemptOutcome.Split(BulkFlowMetrics.SplitReason.NO_RESPONSE, "no response"));
+        }
+        if (exhausted) {
+            return Mono.just(new AttemptOutcome.Exhausted(error, BulkFlowMetrics.GiveUpReason.NO_RESPONSE));
+        }
+        return Mono.error(error);
     }
 
     /**
@@ -1320,7 +1236,7 @@ public abstract class OpenSearchClient {
         var beforeSplit = new MigrationMetrics.Requests(0, totals.attempts, totals.attempts, totals.bytes,
             Duration.ofNanos(totals.durationNanos).toMillis());
         return Flux.fromIterable(halves)
-            .concatMap(half -> executeBulkWithRetry(indexName, half, context, allowlist, totals.lineage), 1)
+            .concatMap(half -> executeBulkWithRetry(indexName, half, context, allowlist), 1)
             .reduce(OpenSearchClient::combine)
             .map(combined -> new BulkResponse(combined.statusCode, combined.statusText, combined.headers,
                 combined.body, combined.target, beforeSplit.plus(combined.requests),
@@ -1339,10 +1255,9 @@ public abstract class OpenSearchClient {
      * replaying the same documents forever. Without a stream there is nowhere to keep them, so the error propagates
      * and the work item fails, as before.
      *
-     * <p>A transient failure (429, 5xx, no response) only counts as this batch's problem if the target accepted
-     * some other bulk request since the caller's batch started (an earlier split, or a concurrent batch).
-     * Otherwise the target is assumed to be unavailable and the error propagates, so an outage fails the work item
-     * instead of filling the stream with every batch.
+     * <p>Recognized target-state failures never reach this method. Unknown statuses, response timeouts, and unknown
+     * item errors reach it only after their fixed retry threshold, so the migration moves past a poison document
+     * instead of retrying it indefinitely.
      */
     private Mono<BulkResponse> finishWithTerminalFailure(
         String indexName,
@@ -1367,9 +1282,8 @@ public abstract class OpenSearchClient {
             () -> new String(assemble(pendingOps).bytes(), StandardCharsets.UTF_8),
             error
         );
-        // Documents are only given up for a counted give-up, which already weighed the evidence (see
-        // failureCounts), or a non-retryable failure. A retry schedule that ran out without one
-        // (only a test's limited schedule can) fails the work item instead.
+        // Documents are only given up after their fixed retry threshold, or for a non-retryable failure. A retry
+        // schedule that runs out before either condition (only a test's limited schedule can) fails the work item.
         boolean targetAccepting = failureClass == FailureClass.NON_RETRYABLE || reason != null;
         if (reason != null) {
             bulkFlowMetrics.onGaveUp(reason, pendingOps.size());
@@ -1377,7 +1291,7 @@ public abstract class OpenSearchClient {
         if (!targetAccepting) {
             log.atError()
                 .setMessage("Bulk request on index '{}' for {} documents stopped after {} attempts without "
-                    + "evidence against them; failing the work item so it is retried later")
+                    + "reaching a document give-up condition; failing the work item so it is retried later")
                 .addArgument(indexName)
                 .addArgument(pendingOps::size)
                 .addArgument(totals.attempts)
@@ -1472,10 +1386,8 @@ public abstract class OpenSearchClient {
         int consecutiveNoResponses;
         // Counting toward giving documents up (see executeBulkWithRetry).
         int consecutiveWholeFailures;
-        int countedUnknownFailures;
-        int countedNoResponses;
-        // This batch and the batches it was split from: their attempts are never evidence for or against it.
-        List<Long> lineage = List.of();
+        int unknownFailures;
+        int noResponseFailures;
         final java.util.Map<PreparedOperation, Integer> itemFailures = new java.util.IdentityHashMap<>();
         int throttleStreak;
         int longestThrottleStreak;
@@ -1611,8 +1523,8 @@ public abstract class OpenSearchClient {
      * <p>Items of kind {@link BulkItemErrorKind#DOCUMENT} are written to the failed document stream immediately and
      * removed from {@code pendingDocs} so the retry loop does not keep hammering them. Items whose error is about the
      * target ({@link BulkItemErrorKind#isTargetState()}) stay until they succeed. An item of kind
-     * {@link BulkItemErrorKind#UNKNOWN} is given up once it has failed {@value #MAX_ITEM_FAILURE_RETRIES} + 1 counted
-     * times; see {@link #itemFailuresCount}.
+     * {@link BulkItemErrorKind#UNKNOWN} is given up once it has failed
+     * {@value #MAX_ITEM_FAILURE_RETRIES} + 1 times.
      *
      * @return number of documents removed because they succeeded (or were allowlisted)
      */
@@ -1627,11 +1539,9 @@ public abstract class OpenSearchClient {
         ItemPartition partition = BulkResponseParser.partitionItems(resp.body, allowlist);
         if (partition == null) {
             // Can't parse response - assume all failed, retry all
-            evidence.record(totals.batchId, true, 0, 0);
             return 0;
         }
         if (partition.itemCount() != pendingDocs.size()) {
-            evidence.record(totals.batchId, true, 0, 0);
             // Items can only be matched to operations by position, so a response that doesn't have exactly one item
             // per operation can't be trusted for any of them. Retry all rather than treat missing items as successes.
             log.atWarn()
@@ -1654,23 +1564,18 @@ public abstract class OpenSearchClient {
         countItemErrors(partition.getNonRetryableFailures(), false);
         countItemErrors(partition.getRetryableFailures(), true);
         var retryableFailures = partition.getRetryableFailures();
-        evidence.record(totals.batchId, retryableFailures.stream().anyMatch(f -> f.getKind().isTargetState()),
-            pendingDocs.size(), retryableFailures.size());
         retryableFailures.stream().filter(f -> f.getKind() == BulkItemErrorKind.UNAVAILABLE)
             .collect(java.util.stream.Collectors.groupingBy(ItemFailure::getErrorType,
                 java.util.stream.Collectors.counting()))
             .forEach(bulkFlowMetrics::onTargetUnavailable);
-        long unknownItems = retryableFailures.stream().filter(f -> f.getKind() == BulkItemErrorKind.UNKNOWN).count();
-        boolean unknownItemsCount = unknownItems > 0
-            && itemFailuresCount(totals, pendingDocs.size(), retryableFailures.size(), unknownItems);
 
         // Keep only retryable failures in pendingDocs, in original order. A document whose item keeps failing with an
-        // unknown error is given up after MAX_ITEM_FAILURE_RETRIES counted retries; target-state errors never count.
+        // unknown error is given up after MAX_ITEM_FAILURE_RETRIES retries; target-state errors never count.
         BitSet keep = new BitSet(pendingDocs.size());
         BitSet givenUp = new BitSet(pendingDocs.size());
         for (ItemFailure failure : retryableFailures) {
             var op = pendingDocs.get(failure.getPosition());
-            if (failure.getKind() == BulkItemErrorKind.UNKNOWN && unknownItemsCount
+            if (failure.getKind() == BulkItemErrorKind.UNKNOWN
                 && totals.itemFailures.merge(op, 1, Integer::sum) > MAX_ITEM_FAILURE_RETRIES) {
                 givenUp.set(failure.getPosition());
             } else {

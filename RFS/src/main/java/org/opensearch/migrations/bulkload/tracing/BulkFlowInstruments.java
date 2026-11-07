@@ -38,7 +38,6 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     public static final String BULK_THROTTLE_STREAK = "bulkThrottleStreak";
     public static final String BULK_DOCS_WAITING_ON_TARGET = "bulkDocsWaitingOnTarget";
     public static final String BULK_DOCS_TARGET_UNAVAILABLE = "bulkDocsTargetUnavailable";
-    public static final String BULK_TARGET_PROBES = "bulkTargetProbes";
     public static final String BULK_ATTEMPT_GAP = "bulkAttemptGap";
     public static final String BULK_ATTEMPTS_PER_BATCH = "bulkAttemptsPerBatch";
     public static final String BULK_ITEM_ERRORS = "bulkItemErrors";
@@ -108,7 +107,6 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     private final DoubleHistogram batchAge;
     private final LongHistogram throttleStreak;
     private final LongCounter docsTargetUnavailable;
-    private final LongCounter targetProbes;
     private final DoubleHistogram attemptGap;
     // Documents each open batch has waiting on the target, for the gauge.
     private final java.util.concurrent.ConcurrentHashMap<Long, Long> waitingOnTarget =
@@ -150,14 +148,11 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
         throttleStreak = meter.histogramBuilder(BULK_THROTTLE_STREAK).setUnit(COUNT).ofLongs()
             .setExplicitBucketBoundariesAdvice(THROTTLE_STREAK_BUCKETS).build();
         docsTargetUnavailable = meter.counterBuilder(BULK_DOCS_TARGET_UNAVAILABLE).setUnit(COUNT).build();
-        targetProbes = meter.counterBuilder(BULK_TARGET_PROBES).setUnit(COUNT).build();
         // Rare events start at 0, so their first occurrence counts in rate() and a run without them shows 0, not
         // no data.
         for (var reason : GiveUpReason.values()) {
             docsGaveUp.add(0, Attributes.of(REASON, reason.label()));
         }
-        targetProbes.add(0, Attributes.of(RESULT, "answered"));
-        targetProbes.add(0, Attributes.of(RESULT, "unanswered"));
         docsTargetUnavailable.add(0, Attributes.of(REASON, "other"));
         for (var reason : SplitReason.values()) {
             batchSplits.add(0, Attributes.of(REASON, reason.label()));
@@ -318,11 +313,6 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
     @Override
     public void onAttemptGap(long millis) {
         attemptGap.record(millis);
-    }
-
-    @Override
-    public void onTargetProbe(boolean answered) {
-        targetProbes.add(1, Attributes.of(RESULT, answered ? "answered" : "unanswered"));
     }
 
     @Override

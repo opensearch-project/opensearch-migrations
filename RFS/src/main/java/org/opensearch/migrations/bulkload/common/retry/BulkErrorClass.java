@@ -30,8 +30,8 @@ import org.opensearch.migrations.parsing.BulkResponseParser;
  * 400 and 413, which describe the request itself, and items of kind {@link BulkItemErrorKind#DOCUMENT} are handled
  * before this, by splitting the batch or recording the document in the failed document stream. Each class's
  * {@link #cost()} is what a retry takes from the {@link RetryBudget}. Throttles and unavailability are about the
- * target and never count against a document; whether a transient failure does is decided by the client from the
- * evidence: see {@code OpenSearchClient}.
+ * target and never count against a document. Transient failures advance the client's fixed split or document
+ * give-up thresholds; see {@code OpenSearchClient}.
  */
 public enum BulkErrorClass {
     /** The target pushed back: retried, at a cost of 5 tokens, and never counted against a document. */

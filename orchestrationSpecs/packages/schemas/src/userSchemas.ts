@@ -1205,15 +1205,6 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("[Expert] ISO 8601 upper bound on a work item lease (e.g. 'P1D' = 1 day). The lease doubles each time " +
             "a shard is picked up again after its lease expired; once the doubled lease would reach this value, it stays " +
             "at this value. Must be at least initialLeaseDuration."),
-    maxFailurePercentToFailDocuments: z.number().min(0).max(100).default(5).optional()
-        .describe("[Expert] A failing bulk request is retried until it succeeds; throttles and an unavailable target " +
-            "(unavailable shards, blocked writes, refused connections) never count against a document. A single " +
-            "document is given up, into the failed document stream, after 3 retries that got an unknown status or 5 " +
-            "that timed out, and a batch is split to find such a document. A failure only counts toward that, or " +
-            "toward splitting, if no more than this percent (0-100) of the worker's other requests (for an item " +
-            "error, other documents) failed in the last two minutes; otherwise the target is assumed to be in " +
-            "trouble and the streak starts over, so a shard may wait until the target recovers. 100 ignores other " +
-            "requests' failures. Safe to change on a running migration."),
     bulkResponseTimeout: z.string()
         .regex(ISO_DURATION_PATTERN)
         .refine(d => (isoDurationSeconds(d) ?? 0) > 0, {message: "bulkResponseTimeout must be positive"})

@@ -27,7 +27,6 @@ the way independent TCP senders share a link, each reacting only to what its own
 - [The retry budget](#the-retry-budget)
 - [Splitting a batch](#splitting-a-batch)
 - [Giving up on a document](#giving-up-on-a-document)
-- [Evidence: whether a failure counts](#evidence-whether-a-failure-counts)
 - [Credentials the target refuses](#credentials-the-target-refuses)
 - [Time: the response timeout and the lease](#time-the-response-timeout-and-the-lease)
 - [Ordering and starvation](#ordering-and-starvation)
@@ -48,8 +47,9 @@ the way independent TCP senders share a link, each reacting only to what its own
 3. **A document that fails on its own is recorded and the migration moves on.** A document that fails while the
    target accepts others is set aside in the failed document stream after a small, fixed number of retries, with
    enough to investigate and replay it, and its batch checkpoints.
-4. **Failed documents are exceptional.** Whenever the worker can't tell whether a failure belongs to a document or to
-   the target, it doesn't count the failure against the document.
+4. **Unknown failures are bounded.** When the worker can't recognize a failure as target state or as a document
+   error, it retries a fixed number of times, splits a multi-document batch to isolate the cause, then records a
+   persistently failing single operation and moves on.
 5. **A broken workload is evident early.** A broken mapping, missing index or bad transform fails at full speed, every
    failure recorded with its reason, rather than every healthy shard being slowed to soften the news
    ([Correlated terminal failure](#correlated-terminal-failure)).
@@ -79,15 +79,15 @@ Every decision the worker makes about traffic, what it looks at, and where it's 
 | What a failed attempt is | Status code; body's `cluster_block_exception`; each item's error type chain; whether a connection was made or the response timed out | [Classifying an attempt](#classifying-an-attempt) |
 | How long to wait before a retry | Retries so far; `Retry-After` | [Waiting before a retry](#waiting-before-a-retry) |
 | Whether a retry may go now | The shared retry budget | [The retry budget](#the-retry-budget) |
-| Whether to halve a batch | 400/413 at once; or 2 counted whole-request failures in a row, judged by **other requests** | [Splitting a batch](#splitting-a-batch) |
-| Whether to give a single document up (unknown status or response timeout) | Its counted failures in a row, judged by **other requests**, or a **probe** when there are none | [Giving up](#giving-up-on-a-document), [Evidence](#evidence-whether-a-failure-counts) |
-| Whether to give a document up for an unknown item error | Its counted item failures, judged by **other documents** | [Giving up](#giving-up-on-a-document), [Evidence](#evidence-whether-a-failure-counts) |
+| Whether to halve a batch | 400/413 at once; or 2 transient whole-request failures in a row | [Splitting a batch](#splitting-a-batch) |
+| Whether to give a single document up (unknown status or response timeout) | Its fixed number of failures in a row | [Giving up](#giving-up-on-a-document) |
+| Whether to give a document up for an unknown item error | Its fixed number of item failures | [Giving up](#giving-up-on-a-document) |
 | Whether to stop the worker | 401, or a 403 that isn't a write block | [Credentials](#credentials-the-target-refuses) |
 | When to stop trying altogether | The work item's lease | [Time](#time-the-response-timeout-and-the-lease) |
 | How fast terminal failures may accumulate | Nothing limits them: they're recorded at the pace the target answers | [Correlated terminal failure](#correlated-terminal-failure) |
 
-Two things never fail a document: anything classified as the target's state (throttled or unavailable), however long
-it lasts, and time.
+Anything classified as the target's state (throttled or unavailable) never fails a document, however long it lasts.
+Elapsed lease time alone also never fails a document.
 
 ## Overview
 
@@ -100,7 +100,6 @@ it lasts, and time.
 | [Retry budget](#the-retry-budget) | Whether a retry may go now, or must wait for retries to start succeeding | none | `RetryBudget` |
 | [Splitting](#splitting-a-batch) | When a failing batch is halved to find the document responsible | none | `OpenSearchClient` |
 | [Giving up](#giving-up-on-a-document) | When a document is recorded in the failed document stream | none | `OpenSearchClient` |
-| [Evidence](#evidence-whether-a-failure-counts) | Whether a failure counts toward giving up or splitting | `--max-failure-percent-to-fail-documents` | `EvidenceWindow`, `OpenSearchClient` |
 | [Time](#time-the-response-timeout-and-the-lease) | How long one attempt waits for a response; what happens when the lease runs out | `--bulk-response-timeout`, `--initial-lease-duration`, `--max-lease-duration` | `OpenSearchClient`, the lease logic |
 
 The in-flight limit and the retry budget answer different questions: the limit asks "how many requests can the
@@ -146,7 +145,6 @@ migration workflow; "On a running migration" is how a change is treated there
 | `--documents-per-bulk-request` | `documentsPerBulkRequest` | no limit | Most documents in one bulk request | Safe |
 | `--max-document-size-bytes` | `maxDocumentSizeBytes` | 0 (no limit) | Document bodies bigger than this after transformation (or without a transform) are recorded in the failed document stream and not sent; action metadata and NDJSON separators are excluded | Impossible (changes which documents migrate) |
 | `--bulk-response-timeout` | `bulkResponseTimeout` | `PT310S` | How long one attempt waits for its response | Safe |
-| `--max-failure-percent-to-fail-documents` | `maxFailurePercentToFailDocuments` (Expert) | 5 | `F`, the share of other requests (or documents) that may fail before a failure stops counting against a document | Safe |
 | `--initial-lease-duration`, `--max-lease-duration` | `initialLeaseDuration`, `maxLeaseDuration` | `PT10M`, `P1D` | How long a worker owns a work item before it checkpoints and hands it off | Safe |
 | `--disable-compression` | | false | Whether bulk bodies are gzipped (when the target supports it) | |
 | `--failed-document-stream-s3-bucket` or `--disable-failed-document-stream` | | one is required | Where terminal failures are recorded; without a stream they are counted and the batch moves on, unrecorded | |
@@ -163,12 +161,10 @@ The fixed constants, which are not settings:
 | First retry wait bound, longest wait | 2 s, 30 s | `BulkRetryPolicy` |
 | Retry budget capacity, refill, first-try reward | 500 tokens, 1 token/s, 1 token | `RetryBudget` |
 | Retry cost: throttle or unavailable, transient | 5, 10 tokens | `BulkErrorClass` |
-| Evidence window | 2 min | `EvidenceWindow.WINDOW` |
-| Probe: request, timeout | `GET /`, 10 s | `OpenSearchClient.TARGET_PROBE_TIMEOUT` |
 | Whole-request failures before a split | 2 in a row | `OpenSearchClient.FAILED_ATTEMPTS_BEFORE_SPLIT` |
-| Retries before a single document is given up: unknown status | 3 (the 4th counted failure gives up) | `OpenSearchClient.MAX_UNKNOWN_FAILURE_RETRIES` |
-| Retries before a single document is given up: no response | 5 (the 6th counted failure gives up) | `OpenSearchClient.MAX_NO_RESPONSE_RETRIES` |
-| Retries before a document whose item keeps failing with an unknown error is given up | 3 (the 4th counted failure gives up) | `OpenSearchClient.MAX_ITEM_FAILURE_RETRIES` |
+| Retries before a single document is given up: unknown status | 3 (the 4th failure gives up) | `OpenSearchClient.MAX_UNKNOWN_FAILURE_RETRIES` |
+| Retries before a single document is given up: no response | 5 (the 6th failure gives up) | `OpenSearchClient.MAX_NO_RESPONSE_RETRIES` |
+| Retries before a document whose item keeps failing with an unknown error is given up | 3 (the 4th failure gives up) | `OpenSearchClient.MAX_ITEM_FAILURE_RETRIES` |
 
 ## Batches
 
@@ -275,7 +271,7 @@ target-state errors are 4xx (`shard_not_found_exception` and `illegal_index_shar
 | **Throttle** | `es_rejected_execution_exception`, `rejected_execution_exception` (full write queues), `circuit_breaking_exception` (heap) | Retried until it succeeds. Never counts. Cuts the limit. |
 | **Unavailable** | Shards: `unavailable_shards_exception`, `no_shard_available_action_exception`, `primary_missing_action_exception`, `shard_not_found_exception`, `illegal_index_shard_state_exception`, `index_shard_closed_exception`, `index_shard_not_started_exception`, `index_shard_not_recovering_exception`, `primary_shard_closed_exception`, `shard_not_in_primary_mode_exception`, `shard_lock_obtain_failed_exception`, `index_primary_shard_not_allocated_exception`, `retry_on_primary_exception`, `retry_on_replica_exception`. Nodes and cluster manager: `node_not_connected_exception`, `node_disconnected_exception`, `node_closed_exception`, `connect_transport_exception`, `send_request_transport_exception`, `receive_timeout_transport_exception`, `no_node_available_exception`, `cluster_manager_not_discovered_exception`, `master_not_discovered_exception`, `not_cluster_manager_exception`, `not_master_exception`, `process_cluster_event_timeout_exception`. Blocked writes: `cluster_block_exception`, `index_closed_exception`. | Retried until it succeeds. Never counts. Doesn't touch the limit. |
 | **Document** | The non-retryable list shared with the replayer (`mapper_parsing_exception`, `strict_dynamic_mapping_exception`, `illegal_argument_exception`, `action_request_validation_exception`, `routing_missing_exception`, `invalid_index_name_exception`, `stream_constraints_exception`, `version_conflict_engine_exception`, `document_missing_exception`, `resource_already_exists_exception`), plus, for RFS only, `index_not_found_exception`, `parse_exception`, `x_content_parse_exception`, `json_parse_exception`, `number_format_exception`, `document_parsing_exception` | Recorded in the failed document stream at once (`NON_RETRYABLE`) |
-| **Unknown** | Anything else | Retried; given up after 3 counted retries ([below](#giving-up-on-a-document)) |
+| **Unknown** | Anything else | Retried; given up after 3 retries ([below](#giving-up-on-a-document)) |
 
 The target's state is checked first: a circuit breaker that trips while a document is parsed is reported as the
 `caused_by` of a `mapper_parsing_exception`, and it is still about the target. A missing index is a document error
@@ -303,8 +299,7 @@ Each attempt is classified by its outcome, first match wins (`BulkErrorClass`):
 *Target state* means throttle or unavailable: the target, not a document, is why the attempt failed, so it never
 counts against a document, ends the batch's streaks (below), shows in the `bulkDocsWaitingOnTarget` gauge, and is
 retried until the target can take the documents. A connection that was refused or reset is the target's state
-because the document may never have reached it. Only *transient* failures can count against a document, and only
-when the [evidence](#evidence-whether-a-failure-counts) says so.
+because the document may never have reached it. *Transient* failures advance the fixed split or give-up thresholds.
 
 ### Allowlisted errors
 
@@ -365,10 +360,8 @@ many batches are failing at once.
 A batch of more than one document is split into two halves, the first `⌊n/2⌋` documents and the rest, when:
 
 - it gets a 400 or 413 (`reason=status` or `reason=too_large`), at once; or
-- it gets two counted transient whole-request failures in a row (`FAILED_ATTEMPTS_BEFORE_SPLIT`): another status
-  (`reason=status`) or a response timeout (`reason=no_response`). Whether a failure counts is judged by other
-  requests ([below](#evidence-whether-a-failure-counts)); with no other requests it counts, since splitting is
-  harmless. An uncounted failure starts the streak over.
+- it gets two transient whole-request failures in a row (`FAILED_ATTEMPTS_BEFORE_SPLIT`): another status
+  (`reason=status`) or a response timeout (`reason=no_response`).
 
 The halves are new batches, sent one after the other, each starting with no streaks, no counts and `k` = 0. A batch
 of `n` documents is therefore narrowed down to one document in at most `⌈log₂ n⌉` splits. A whole-request failure
@@ -384,9 +377,9 @@ these cases:
 |---|---|---|---|
 | Document error | Its item fails with a document-kind error. At once. | `NON_RETRYABLE` | (not a give-up) |
 | Rejected request | A single document's request gets a 400 or 413. At once. | `NON_RETRYABLE` | (not a give-up) |
-| Unknown status | A single document's request gets a transient status 4 times in a row, each counted: 3 retries. | `RETRYABLE_EXHAUSTED` | `unknown_failures` |
-| Response timeout | A single document's request times out 6 times in a row, each counted: 5 retries. | `RETRYABLE_EXHAUSTED` | `no_response` |
-| Unknown item error | Its item fails with an unknown error for the 4th counted time in the batch: 3 retries. | `RETRYABLE_EXHAUSTED` | `item_failures` |
+| Unknown status | A single document's request gets a transient status 4 times in a row: 3 retries. | `RETRYABLE_EXHAUSTED` | `unknown_failures` |
+| Response timeout | A single document's request times out 6 times in a row: 5 retries. | `RETRYABLE_EXHAUSTED` | `no_response` |
+| Unknown item error | Its item fails with an unknown error for the 4th time in the batch: 3 retries. | `RETRYABLE_EXHAUSTED` | `item_failures` |
 | Too large to send | It is bigger than `--max-document-size-bytes`. Never sent. | | (not a give-up) |
 
 Nothing else fails a document:
@@ -402,21 +395,18 @@ How a document came to be alone doesn't matter: a batch of one from the start, o
 the same rules. The streaks end differently:
 
 - any response ends the response-timeout streak;
-- a 2xx, or any target-state outcome, ends the unknown-status streak and the split streak;
-- an uncounted failure sets its own streak to 0.
+- a 2xx, or any target-state outcome, ends the unknown-status streak and the split streak.
 
 The unknown-item count is per document and per batch, and isn't a streak: it only grows, by one for each response in
-which the document's item failed with an unknown error and the evidence counted it. A half from a split starts with no
-streaks and no counts.
+which the document's item failed with an unknown error. A half from a split starts with no streaks and no counts.
 
 ### What the numbers mean
 
 A document that fails on its own is recorded after at most `2·⌈log₂ n⌉` attempts to narrow it down (each split needs
-two counted failures, unless a 400 or 413 split it at once) plus 4 for an unknown status or 6 for a response timeout.
+two failures, unless a 400 or 413 split it at once) plus 4 for an unknown status or 6 for a response timeout.
 If instead a healthy target fails requests at random with probability `p`, independently, a document is given up by
-mistake only if its own request fails 4 (or 6) times in a row while other requests mostly succeed: about `p⁴` per
-single-document batch for an unknown status (`p = 0.05` gives 6·10⁻⁶) and `p⁶` for timeouts (1.6·10⁻⁸). Failures
-that come from the target itself show up in other requests too, and stop counting.
+mistake only if its own request fails 4 (or 6) times in a row: about `p⁴` per single-document batch for an unknown
+status (`p = 0.05` gives 6·10⁻⁶) and `p⁶` for timeouts (1.6·10⁻⁸).
 
 The waits between those attempts are jittered (means 1, 2, 4, 8, then 15 s), so the shortest time to give a document
 up is about the duration of its attempts; with response timeouts, 6 attempts take at least 6 × `--bulk-response-timeout`
@@ -442,43 +432,6 @@ its in-flight limit allow, and records every failure. That is deliberate:
 
 Stopping a shard once its committed terminal failures exceed a configured share of its source documents is deferred;
 see [Deferred work](#deferred-work).
-
-## Evidence: whether a failure counts
-
-Only a transient failure can count against a document, and only if the worker's other traffic shows the target
-taking work. The evidence is kept by `EvidenceWindow` over the last 2 minutes, per worker, as two separate series:
-
-| Series | One point per | Failed if | Decides |
-|---|---|---|---|
-| **Requests** | attempt | no response; a status other than 2xx, 400 and 413; an unreadable 2xx; or a 2xx with a throttled or unavailable item | Splitting a batch; giving a single document up for an unknown status or a response timeout |
-| **Documents** | item of a 2xx response with per-item results | the item failed with an error that isn't the document's (throttled, unavailable or unknown) | Giving a document up for an unknown item error |
-
-A request without per-item results is one request point and no document points, however many documents it carried:
-a 1,000-document request that gets a 500 is one failed request, and one that succeeds is one request and 1,000
-documents. A 400 or 413 is a request that didn't fail (the target answered; the request was wrong).
-
-**What's excluded.** A batch asks only about *other* batches: never its own attempts, nor those of the batches it was
-split from (so a single document's failures as part of its parent batch can't block it later). Its siblings and
-cousins from the same split are other batches. Other workers' traffic isn't seen at all.
-
-**The rules.** Let `F` be `--max-failure-percent-to-fail-documents` (default 5, from 0 to 100).
-
-- *Whole-request failure* (an unknown status, or a response timeout): with `r` other requests in the window, `f` of
-  them failed, the failure counts if `r > 0` and `100·f ≤ F·r`. If `r = 0` there is no evidence either way: for a
-  batch of several documents the failure counts (splitting is harmless); for a single document the worker sends
-  `GET /` to the target, and the failure counts if any HTTP response comes back within 10 s.
-- *Unknown item error*: with `d` documents from other batches plus this response's other items, `g` of them failed,
-  the failures count if `d = 0` or `100·g ≤ F·d`. The target did answer, so no other documents is no reason to wait.
-
-Other evidence can break a streak, but none is needed to keep one: a document alone on a healthy target is found and
-recorded, using the probe to tell a healthy target from one that isn't answering. A worker whose other requests are
-failing or being throttled waits for the target instead.
-
-- `F` = 100 ignores other requests' and documents' failures. The probe still decides when there's no evidence.
-- `F` = 0 stops a failure from counting if any other request (or document) failed.
-
-`--max-failure-percent-to-fail-documents` only decides whether an ambiguous failure counts; it doesn't limit how
-quickly terminal failures accumulate.
 
 ## Credentials the target refuses
 
@@ -508,7 +461,7 @@ Batches still retrying at that moment are abandoned without recording anything a
 documents again. A work item whose lease expires is given a longer lease the next time, up to
 `--max-lease-duration`.
 
-The in-flight limit, the retry budget and the evidence window are process-local. A replacement process starts them
+The in-flight limit and retry budget are process-local. A replacement process starts them
 afresh with the settings it was started with, and may send again the operations after its predecessor's last durable
 checkpoint. Lease expiry never turns pending operations into failures.
 
@@ -696,7 +649,6 @@ worker ids):
 | `rfsWorkerPhase` | gauge | `phase` (`starting`, `acquiring_work`, `downloading_shard`, `migrating`, `completing`, `exited`) | 1 for the process's current phase, 0 for the others, on every export: how many workers are in each phase. Each transition is logged at INFO with the previous phase's duration |
 | `bulkDocsWaitingOnTarget` | gauge (documents) | | Documents in open batches whose last attempt was throttled or found the target unavailable. **Alarm on this staying above 0**: the migration is frozen on the target |
 | `bulkDocsTargetUnavailable` | counter (documents) | `reason` (an unavailable type, `http_503`, `connect_failed`, `connection_reset`, else `other`) | Why the target couldn't take documents |
-| `bulkTargetProbes` | counter | `result` (`answered`, `unanswered`) | Probes sent for a lone document's failure; `unanswered` means the target isn't answering at all |
 | `bulkDocumentsFailed` | counter (operations) | `failureClass` (`NON_RETRYABLE`, `RETRYABLE_EXHAUSTED`) | Every terminal failure, recorded or not (with the stream disabled) |
 | `bulkDocsGaveUp` | counter (documents) | `reason` (`unknown_failures`, `no_response`, `item_failures`) | Documents given up by the rules above. Should be 0 on a healthy migration |
 | `bulkBatchSplits` | counter | `reason` (`status`, `no_response`, `too_large`) | Batches halved to find a failing document |
@@ -711,7 +663,7 @@ worker ids):
 | `bulkLimitCuts`, `bulkLimitQuietResets`, `bulkLimitGrowthSkipped`, `bulkTimeToFullLimit` | counters, histogram (ms) | `signal` on cuts (`throttled_429`, `admission_rejected`, `timeout`) | How the in-flight limit moves |
 
 Logs: each cut and quiet-period reset at INFO; each throttled attempt at INFO; each unavailable attempt, each other
-failed attempt, each split, and each uncounted failure at WARN (with whether it counted); each give-up and each refused
+failed attempt, and each split at WARN; each give-up and each refused
 credential at ERROR; the retry budget running out at WARN; the minute summary at WARN while documents wait on the
 target. The `BulkRequestTrace` logger, off by default, logs every attempt's request and
 response at TRACE (see the [README](../../DocumentsFromSnapshotMigration/README.md#tracing-bulk-requests); it contains
@@ -731,10 +683,8 @@ metrics.
 |---|---|---|
 | Frequent `timeout` cuts; `bulkAttemptDuration` near the timeout | Bulks take longer than `--bulk-response-timeout` | Raise the timeout, or lower `documentsSizePerBulkRequest` so each bulk finishes sooner |
 | `bulkDocsWaitingOnTarget` above 0 for minutes; WARN summaries | The target is throttling or unavailable (see `bulkDocsTargetUnavailable` by `reason`) | Fix the target: allocate shards, free disk, clear blocks, bring nodes back. The migration resumes on its own |
-| `bulkDocsGaveUp` with `reason=no_response` | Single documents whose requests time out while other requests succeed | Check the documents in the failed document stream; if the target is in fact struggling, lower `maxFailurePercentToFailDocuments` |
+| `bulkDocsGaveUp` with `reason=no_response` | Single documents whose requests repeatedly time out | Check the documents in the failed document stream; if the target is struggling, raise `bulkResponseTimeout` or reduce load |
 | `bulkDocsGaveUp` with `reason=unknown_failures` or `item_failures` | Documents that fail on their own with an error in neither list | Check the `failureType` in the failed document stream; a type that is really about the target belongs in `BulkItemErrorKind` |
-| Shards stop progressing; WARN logs say failures aren't counted | The target fails many requests with transient errors; the worker is waiting for it | Fix the target or reduce the load (`podReplicas`, `maxConnections`). If the failures really are the documents', raise `maxFailurePercentToFailDocuments` (100 to ignore other requests' failures) |
-| `bulkTargetProbes` with `result=unanswered` | A lone document's request failed and the target didn't answer `GET /` | The target is down or unreachable from the worker |
 | `bulkOldestOpenBatchAge` climbing; long `bulkThrottleStreak` tail | Some batches are throttled over and over while others get through | Fewer workers or a lower `maxConnections` |
 | `retryBudgetEmpty` frequent, `retryBudgetWait` large | Most retries are failing | The target can't take the load; reduce `podReplicas` |
 | `bulkLimit` well below `M` on every pod, with regular cuts | The target is the bottleneck and the workers are sharing it | Expected under load; more workers won't help, a larger target will |

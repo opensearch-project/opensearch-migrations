@@ -3,10 +3,9 @@ import {isoDurationSeconds, USER_RFS_OPTIONS} from "../src/userSchemas";
 const base = {maxShardSizeBytes: 1024, disableFailedDocumentStream: true};
 
 describe("RFS expert limits", () => {
-    test("default to a one-day lease cap and a 5% failure threshold", () => {
+    test("defaults to a one-day lease cap", () => {
         const parsed = USER_RFS_OPTIONS.parse(base);
         expect(parsed.maxLeaseDuration).toBe("P1D");
-        expect(parsed.maxFailurePercentToFailDocuments).toBe(5);
     });
 
     test.each([
@@ -31,10 +30,6 @@ describe("RFS expert limits", () => {
         expect(USER_RFS_OPTIONS.safeParse({...base, maxLeaseDuration: "PT30M"}).success).toBe(false);
     });
 
-    test.each([[-1], [100.5]])("rejects maxFailurePercentToFailDocuments %s", (maxFailurePercentToFailDocuments) => {
-        expect(USER_RFS_OPTIONS.safeParse({...base, maxFailurePercentToFailDocuments}).success).toBe(false);
-    });
-
     test("bulkResponseTimeout defaults to just over the 300 s front-end idle timeout", () => {
         expect(USER_RFS_OPTIONS.parse(base).bulkResponseTimeout).toBe("PT310S");
         expect(USER_RFS_OPTIONS.parse({...base, bulkResponseTimeout: "PT2M"}).bulkResponseTimeout).toBe("PT2M");
@@ -44,10 +39,6 @@ describe("RFS expert limits", () => {
         expect(USER_RFS_OPTIONS.safeParse({...base, bulkResponseTimeout}).success).toBe(false);
     });
 
-    test.each([[0], [12.5], [100]])("accepts maxFailurePercentToFailDocuments %s", (percent) => {
-        expect(USER_RFS_OPTIONS.parse({...base, maxFailurePercentToFailDocuments: percent})
-            .maxFailurePercentToFailDocuments).toBe(percent);
-    });
 });
 
 describe("isoDurationSeconds", () => {

@@ -238,16 +238,6 @@ public class RfsMigrateDocuments {
         public Duration maxLeaseDuration = Duration.ofDays(1);
 
         @Parameter(required = false,
-            names = { "--max-failure-percent-to-fail-documents", "--maxFailurePercentToFailDocuments" },
-            description = "Optional. A transient failure (an unknown status, a response timeout, or an unknown item "
-                + "error) counts toward giving a document up, or toward splitting a batch, only if at most this "
-                + "percent (0-100) of this worker's other requests (or, for an item error, other documents) failed in "
-                + "the last two minutes. Otherwise the target is assumed to be the problem and the streak starts "
-                + "over. Throttles and an unavailable target never count. 100 ignores other requests' failures. "
-                + "Default: 5")
-        public double maxFailurePercentToFailDocuments = 5;
-
-        @Parameter(required = false,
             names = { "--bulk-response-timeout", "--bulkResponseTimeout" },
             converter = DurationConverter.class,
             description = "Optional. How long each bulk request waits for its response once sent, before it is " +
@@ -531,9 +521,6 @@ public class RfsMigrateDocuments {
             throw new ParameterException("--max-lease-duration (" + args.maxLeaseDuration
                 + ") must be at least --initial-lease-duration (" + args.initialLeaseDuration + ").");
         }
-        if (!(args.maxFailurePercentToFailDocuments >= 0 && args.maxFailurePercentToFailDocuments <= 100)) {
-            throw new ParameterException("--max-failure-percent-to-fail-documents must be between 0 and 100.");
-        }
         if (args.bulkResponseTimeout.isZero() || args.bulkResponseTimeout.isNegative()) {
             throw new ParameterException("--bulk-response-timeout must be positive.");
         }
@@ -695,7 +682,6 @@ public class RfsMigrateDocuments {
         var failedDocumentStreamSink = buildFailedDocumentStreamSink(arguments, workerId, resolvedSessionId);
         targetClient.setFailedDocumentStreamContext(failedDocumentStreamSink, resolvedSessionId, workerId);
         targetClient.setMaxDocumentSizeBytes(arguments.maxDocumentSizeBytes);
-        targetClient.setMaxFailurePercentToFailDocuments(arguments.maxFailurePercentToFailDocuments);
         targetClient.setBulkResponseTimeout(arguments.bulkResponseTimeout);
         // Held for the life of the process: the meter keeps only a weak reference to the callback.
         workerPhaseGauge = context.makeWorkerPhaseGauge();
