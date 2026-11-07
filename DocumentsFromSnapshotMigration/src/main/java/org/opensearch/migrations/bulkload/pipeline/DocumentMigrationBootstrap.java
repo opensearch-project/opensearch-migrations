@@ -51,6 +51,8 @@ public class DocumentMigrationBootstrap {
     @Builder.Default
     private final boolean allowServerGeneratedIds = false;
     @Builder.Default
+    private final boolean allowMissingDocumentIds = false;
+    @Builder.Default
     private final DocumentExceptionAllowlist allowlist = DocumentExceptionAllowlist.empty();
 
     @Builder.Default
@@ -85,7 +87,7 @@ public class DocumentMigrationBootstrap {
         var source = documentSource;
         var contextRef = new AtomicReference<IDocumentMigrationContexts.IDocumentReindexContext>();
         var sink = new OpenSearchDocumentSink(
-            targetClient, transformerSupplier, allowServerGeneratedIds, allowlist,
+            targetClient, transformerSupplier, allowServerGeneratedIds, allowMissingDocumentIds, allowlist,
             () -> {
                 var ctx = contextRef.get();
                 return ctx != null ? ctx.createBulkRequest() : null;
@@ -147,8 +149,8 @@ public class DocumentMigrationBootstrap {
         latestProgress.set(null);
         log.info("Pipeline acquired work item: {}", wi);
 
-        // Stamp failed document stream records emitted while processing this shard with its canonical work-item id
-        // (index + shard + checkpoint) so each terminal failure traces back to the work item.
+        // Stamp failed document stream records with this work item's canonical id (index +
+        // partition + cursor) so each terminal failure traces back to the work item.
         targetClient.setFailedDocumentStreamWorkItem(wi.toString());
 
         if (workItemTimeProvider != null) {
@@ -156,8 +158,6 @@ public class DocumentMigrationBootstrap {
         }
 
         var partition = resolvePartition(wi);
-        long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
-            ? wi.getStartingDocId() : 0;
 
         var pipeline = new DocumentMigrationPipeline(
             pipelineConfig.source(), pipelineConfig.sink(),
@@ -173,7 +173,7 @@ public class DocumentMigrationBootstrap {
         var migrationError = new AtomicReference<Throwable>();
         var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
 
-        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset)
+        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), wi.getCursor())
             .subscribeOn(finishScheduler)
             .doFirst(() -> {
                 if (workItemTimeProvider != null) {
@@ -192,7 +192,7 @@ public class DocumentMigrationBootstrap {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                    publishProgress(new WorkItemCursor(cursor.nextPosition(), cursor.metrics(), false, null));
+                    publishProgress(new WorkItemCursor(cursor.cursorAfter(), cursor.metrics(), false, null));
                 },
                 error -> {
                     log.atError()
@@ -204,7 +204,7 @@ public class DocumentMigrationBootstrap {
                     latch.countDown();
                 },
                 () -> {
-                    log.info("Pipeline completed for index={}, shard={}", wi.getIndexName(), wi.getShardNumber());
+                    log.info("Pipeline completed for index={}, partition={}", wi.getIndexName(), wi.getPartitionName());
                     latch.countDown();
                 }
             );
@@ -217,12 +217,11 @@ public class DocumentMigrationBootstrap {
             long durationMs = System.currentTimeMillis() - start;
             var snapshotCounts = documentSource.snapshotDocumentCounts(partition);
             log.atInfo()
-                .setMessage("Partition migration stats: index={}, shard={}, sourcePartition={}, docsThisGeneration={}, "
+                .setMessage("Partition migration stats: index={}, partition={}, docsThisGeneration={}, "
                     + "bytesThisGeneration={}, batchesThisGeneration={}, durationMs={}, "
                     + "shardLiveLuceneDocs={}")
                 .addArgument(wi.getIndexName())
-                .addArgument(wi.getShardNumber())
-                .addArgument(partition.name())
+                .addArgument(wi.getPartitionName())
                 .addArgument(totalDocsMigrated::get)
                 .addArgument(totalBytesMigrated::get)
                 .addArgument(batchCount::get)
@@ -238,7 +237,7 @@ public class DocumentMigrationBootstrap {
 
             var progress = latestProgress.get();
             publishProgress(new WorkItemCursor(
-                progress == null ? startingOffset : progress.getProgressCheckpointNum(),
+                progress == null ? wi.getCursor() : progress.getCursor(),
                 progress == null ? MigrationMetrics.ZERO : progress.getMetrics(), true,
                 snapshotCounts.orElse(null)));
 
@@ -266,15 +265,12 @@ public class DocumentMigrationBootstrap {
         return failedDocumentStreamSink.flush().timeout(Duration.ofMinutes(5));
     }
 
+    /** Resolve by name; a vanished partition fails loudly rather than reading nothing. */
     private org.opensearch.migrations.bulkload.pipeline.model.Partition resolvePartition(
             IWorkCoordinator.WorkItemAndDuration.WorkItem wi) {
-        var partitions = documentSource.listPartitions(wi.getIndexName());
-        int shardIdx = wi.getShardNumber();
-        if (shardIdx < partitions.size()) {
-            return partitions.get(shardIdx);
-        }
-        throw new IllegalStateException("Shard index " + shardIdx + " out of range for " +
-            wi.getIndexName() + " (has " + partitions.size() + " partitions)");
+        return documentSource.findPartition(wi.getIndexName(), wi.getPartitionName())
+            .orElseThrow(() -> new IllegalStateException("Partition '" + wi.getPartitionName()
+                + "' no longer exists in collection '" + wi.getIndexName() + "'"));
     }
 
     private static void closeQuietly(AutoCloseable closeable) {

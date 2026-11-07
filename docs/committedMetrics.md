@@ -18,8 +18,8 @@ early remain outside the watermark.
 
 At a lease handoff or shard completion, RFS writes the watermark and its metrics
 in the same coordinator update. Completion cannot succeed without persisting
-the metrics. Successors resume at `nextPosition`, so committed ranges
-`[fromPosition, nextPosition)` do not overlap. Recovery preserves frozen metrics;
+the metrics. Successors resume after `nextCursor`, so the ranges committed from
+`fromCursor` to `nextCursor` do not overlap. Recovery preserves frozen metrics;
 abandoned attempts do not add another committed range.
 
 ## Metric scope and aggregation
@@ -53,7 +53,7 @@ duration includes shard preparation, processing, retry delays and failure-stream
 flushes. It freezes before the first commit request so retries preserve identical
 metrics, and excludes coordinator commit latency and subsequent recovery.
 
-For lease analysis, group completed records by snapshot/index/shard and inspect
+For lease analysis, group completed records by index and partition and inspect
 the sum and maximum work-item duration, the number of items, and their completion
 flags. Summed duration includes repeated preparation in committed attempts, but
 excludes abandoned attempts and gaps between workers; it is not the shard's full
@@ -84,24 +84,26 @@ merge; they are not interchangeable with delta delete operations.
 These are excerpts from coordinator document responses; existing lease and
 completion fields are omitted. `_id` is the serialized work-item ID, outside
 `_source`; it is preserved by the existing archive and is not duplicated in
-`committed_metrics`. This first published metrics format uses `schemaVersion: 1`,
-separate from the coordinator checkpoint `scriptVersion: "3.1"`.
+`committed_metrics`. This metrics format uses `schemaVersion: 2`, separate from
+the coordinator checkpoint `scriptVersion: "4.0"`. Cursors are opaque strings
+defined by the source, and `fromCursor` is `null` for a work item that starts at
+the beginning of its partition.
 
 Full snapshot: five root documents with nine nested children give a whole-shard
 live Lucene count of 14, plus two tombstoned slots.
 
 ```json
 {
-  "_id": "b3JkZXJz__0__0",
+  "_id": "b3JkZXJz.ZnVsbC0wMDEvb3JkZXJzLzA.",
   "_source": {
-    "scriptVersion": "3.1",
+    "scriptVersion": "4.0",
     "committed_metrics": {
-      "schemaVersion": 1,
+      "schemaVersion": 2,
       "snapshotName": "full-001",
       "indexName": "orders",
-      "shardNumber": 0,
-      "fromPosition": 0,
-      "nextPosition": 16,
+      "partitionName": "full-001/orders/0",
+      "fromCursor": null,
+      "nextCursor": "lucene:16",
       "shardComplete": true,
       "previousSnapshotName": null,
       "deltaMode": null,
@@ -125,16 +127,16 @@ validating the current snapshot baseline.
 
 ```json
 {
-  "_id": "b3JkZXJz__0__0",
+  "_id": "b3JkZXJz.ZGVsdGEtMDAyL29yZGVycy8w.",
   "_source": {
-    "scriptVersion": "3.1",
+    "scriptVersion": "4.0",
     "committed_metrics": {
-      "schemaVersion": 1,
+      "schemaVersion": 2,
       "snapshotName": "delta-002",
       "indexName": "orders",
-      "shardNumber": 0,
-      "fromPosition": 0,
-      "nextPosition": 4,
+      "partitionName": "delta-002/orders/0",
+      "fromCursor": null,
+      "nextCursor": "delta:4",
       "shardComplete": true,
       "previousSnapshotName": "full-001",
       "deltaMode": "UPDATES_AND_DELETES",

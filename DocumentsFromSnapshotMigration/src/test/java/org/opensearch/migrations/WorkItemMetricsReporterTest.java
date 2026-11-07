@@ -18,14 +18,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WorkItemMetricsReporterTest {
     @Test
     void includesIdentityAndPreservesUnknownCounts() {
-        var work = new WorkItem("idx", 2, 42L);
+        var work = new WorkItem("idx", "snapshot/idx/2", "lucene:42");
         var metrics = RfsMigrateDocuments.committedMetricsReporter("snapshot", null, null, () -> 1200)
-            .apply(work, new WorkItemCursor(43, MigrationMetrics.ZERO, true, null));
-        assertEquals(1, metrics.get("schemaVersion"));
+            .apply(work, new WorkItemCursor("lucene:43", MigrationMetrics.ZERO, true, null));
+        assertEquals(2, metrics.get("schemaVersion"));
         assertFalse(metrics.containsKey("workItemId"));
         assertEquals("snapshot", metrics.get("snapshotName"));
-        assertEquals(42L, ((Number) metrics.get("fromPosition")).longValue());
-        assertEquals(43L, ((Number) metrics.get("nextPosition")).longValue());
+        assertEquals("snapshot/idx/2", metrics.get("partitionName"));
+        assertEquals("lucene:42", metrics.get("fromCursor"));
+        assertEquals("lucene:43", metrics.get("nextCursor"));
         assertTrue((Boolean) metrics.get("shardComplete"));
         var snapshot = (Map<?, ?>) ((Map<?, ?>) metrics.get("metrics")).get("snapshot");
         assertNull(snapshot);
@@ -39,8 +40,9 @@ class WorkItemMetricsReporterTest {
             new MigrationMetrics.Operations(6, 1, 600),
             new MigrationMetrics.Requests(2, 3, 1, 900, 90));
         var metrics = RfsMigrateDocuments.committedMetricsReporter(
-            "after", "before", DeltaMode.UPDATES_AND_DELETES, () -> 1200)
-            .apply(new WorkItem("idx", 0, 0L), new WorkItemCursor(4, totals, true, new SnapshotDocumentCounts(16, 9, 4)));
+            "after", "before", DeltaMode.UPDATES_AND_DELETES.name(), () -> 1200)
+            .apply(new WorkItem("idx", "after/idx/0", null),
+                new WorkItemCursor("delta:4", totals, true, new SnapshotDocumentCounts(16, 9, 4)));
         assertEquals("before", metrics.get("previousSnapshotName"));
         assertEquals("UPDATES_AND_DELETES", metrics.get("deltaMode"));
         var groups = (Map<?, ?>) metrics.get("metrics");
@@ -58,10 +60,10 @@ class WorkItemMetricsReporterTest {
     @Test
     void publishesSnapshotCountsOnlyOnShardCompletion() {
         var reporter = RfsMigrateDocuments.committedMetricsReporter("snapshot", null, null, () -> 0);
-        var work = new WorkItem("idx", 0, 0L);
-        var checkpoint = reporter.apply(work, new WorkItemCursor(1, MigrationMetrics.ZERO, false, new SnapshotDocumentCounts(14, 9, 2)));
+        var work = new WorkItem("idx", "snapshot/idx/0", null);
+        var checkpoint = reporter.apply(work, new WorkItemCursor("lucene:1", MigrationMetrics.ZERO, false, new SnapshotDocumentCounts(14, 9, 2)));
         assertNull(((Map<?, ?>) checkpoint.get("metrics")).get("snapshot"));
-        var completed = reporter.apply(work, new WorkItemCursor(0, MigrationMetrics.ZERO, true, new SnapshotDocumentCounts(0, 0, 0)));
+        var completed = reporter.apply(work, new WorkItemCursor(null, MigrationMetrics.ZERO, true, new SnapshotDocumentCounts(0, 0, 0)));
         var snapshot = (Map<?, ?>) ((Map<?, ?>) completed.get("metrics")).get("snapshot");
         assertEquals(0L, ((Number) snapshot.get("liveDocuments")).longValue());
     }

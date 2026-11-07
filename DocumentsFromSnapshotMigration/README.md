@@ -6,6 +6,18 @@ This tool exposes the underlying Reindex-From-Snapshot (RFS) core library in an 
 
 The snapshot the application extracts the documents from can be local or in S3.  You'll need network access to the target cluster because the application uses the standard REST API on the cluster to ingest the extracted documents.
 
+
+## Selecting a document source
+
+Pass `--source-kind` and `--source-config` to choose a source. The config is the source's own JSON, given inline or as `@/path/to/file.json`, and unknown keys or wrong types are rejected at startup. `--source-kind` also replaces `--index-allowlist`, which moves into the config.
+
+```shell
+--source-kind es-snapshot \
+--source-config '{"repoUri":"s3://bucket/repo","snapshotName":"nightly","version":"ES 7.10.2","s3Region":"us-east-2","indexAllowlist":["logs"]}'
+```
+
+The per-source flags shown below, such as `--snapshot-name`, `--repo-uri` and `--source-version`, are deprecated and will be removed. They can't be combined with `--source-kind`.
+
 ## How to use the tool
 
 You can kick off locally using Gradle. These worker are designed to be run multiple times to fully migrate a cluster.

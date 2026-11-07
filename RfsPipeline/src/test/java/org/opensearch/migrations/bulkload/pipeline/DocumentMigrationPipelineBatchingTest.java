@@ -11,6 +11,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
@@ -44,7 +45,7 @@ class DocumentMigrationPipelineBatchingTest {
         int[] sourceMiB, List<Integer> expectedCounts, List<Long> expectedMiB
     ) {
         var partition = new EsShardPartition("snapshot", "index", 0);
-        var documents = new ArrayList<Document>();
+        var documents = new ArrayList<PositionedDocument>();
         for (int i = 0; i < sourceMiB.length; i++) {
             // Valid JSON with an exactly sized ASCII string value.
             var bytes = new byte[sourceMiB[i] * MIB];
@@ -53,7 +54,8 @@ class DocumentMigrationPipelineBatchingTest {
             System.arraycopy(prefix, 0, bytes, 0, prefix.length);
             bytes[bytes.length - 2] = '"';
             bytes[bytes.length - 1] = '}';
-            documents.add(new Document("doc-" + i, bytes, Document.Operation.UPSERT, Map.of(), Map.of()));
+            documents.add(new PositionedDocument(
+                new Document("doc-" + i, bytes, Document.Operation.UPSERT, Map.of(), Map.of()), String.valueOf(i + 1)));
         }
 
         var counts = new CopyOnWriteArrayList<Integer>();
@@ -61,23 +63,23 @@ class DocumentMigrationPipelineBatchingTest {
         var writtenIds = new CopyOnWriteArrayList<String>();
         var source = Mockito.mock(DocumentSource.class);
         var sink = Mockito.mock(DocumentSink.class);
-        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+        Mockito.when(source.readDocuments(partition, null)).thenReturn(Flux.fromIterable(documents));
         Mockito.when(sink.writeBatch(Mockito.eq("index"), Mockito.anyList())).thenAnswer(invocation -> {
-            List<Document> batch = invocation.getArgument(1);
-            long bytes = batch.stream().mapToLong(Document::sourceLength).sum();
+            List<PositionedDocument> batch = invocation.getArgument(1);
+            long bytes = batch.stream().mapToLong(d -> d.document().sourceLength()).sum();
             counts.add(batch.size());
             sizes.add(bytes / MIB);
-            writtenIds.addAll(batch.stream().map(Document::id).toList());
+            writtenIds.addAll(batch.stream().map(d -> d.document().id()).toList());
             Assertions.assertTrue(batch.size() == 1 || bytes <= 10L * MIB);
-            return Mono.just(new BatchResult(batch.size(), bytes));
+            return Mono.just(new BatchResult(batch.size(), bytes, batch.get(batch.size() - 1).cursorAfter()));
         });
 
         new DocumentMigrationPipeline(source, sink, Integer.MAX_VALUE, 10L * MIB)
-            .migratePartition(partition, "index", 0)
+            .migratePartition(partition, "index", null)
             .blockLast(Duration.ofSeconds(20));
 
         Assertions.assertEquals(expectedCounts, counts);
         Assertions.assertEquals(expectedMiB, sizes);
-        Assertions.assertEquals(documents.stream().map(Document::id).toList(), writtenIds);
+        Assertions.assertEquals(documents.stream().map(d -> d.document().id()).toList(), writtenIds);
     }
 }

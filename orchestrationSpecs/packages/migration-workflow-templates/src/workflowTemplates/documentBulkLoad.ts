@@ -10,6 +10,7 @@ import {
     ARGO_FILE_SOURCE_VOLUME_MOUNT,
     ARGO_RFS_OPTIONS,
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
+    ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {ResourceManagement} from "./resourceManagement";
@@ -31,7 +32,6 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
-import {makeRepoParamDict} from "./metadataMigration";
 import {
     setupFileSourcesForContainer,
     setupLog4jConfigForContainer,
@@ -73,6 +73,55 @@ function shouldCreateRfsWorkCoordinationCluster(
     );
 }
 
+// Solr and ES/OS snapshots take different source configs, and strict parsing rejects the other's fields.
+function makeSnapshotSourceParams(
+    sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
+    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
+    optionsDict: BaseExpression<z.infer<typeof ARGO_RFS_OPTIONS>>
+) {
+    const snapshot = expr.deserializeRecord(snapshotConfig);
+    const repoConfig = expr.get(snapshot, "repoConfig");
+    const snapshotName = expr.get(snapshot, "snapshotName");
+    const location = expr.mergeDicts(
+        expr.mergeDicts(
+            expr.ternary(
+                expr.isEmpty(expr.dig(repoConfig, ["endpoint"], (""))),
+                expr.makeDict({}),
+                expr.makeDict({endpoint: expr.getLoose(repoConfig, "endpoint")})),
+            expr.ternary(
+                expr.isEmpty(expr.dig(repoConfig, ["awsRegion"], (""))),
+                expr.makeDict({}),
+                expr.makeDict({s3Region: expr.getLoose(repoConfig, "awsRegion")}))
+        ),
+        expr.makeDict({
+            repoUri: expr.get(repoConfig, "repoPathUri"),
+            indexAllowlist: expr.dig(optionsDict, ["indexAllowlist"], [] as string[])
+        })
+    );
+    const solrConfig = expr.mergeDicts(location, expr.makeDict({
+        backupName: snapshotName,
+        solrMajorVersion: expr.deserializeRecord(
+            expr.regexFind("[0-9]+", sourceVersion) as unknown as BaseExpression<Serialized<number>>)
+    }));
+    const esConfig = expr.mergeDicts(location, expr.makeDict({
+        snapshotName: snapshotName,
+        version: sourceVersion,
+        allowLooseVersionMatches: expr.dig(optionsDict, ["allowLooseVersionMatching"], true),
+        maxShardSizeBytes: expr.dig(optionsDict, ["maxShardSizeBytes"], 80 * 1024 * 1024 * 1024),
+        useRecoverySource: expr.dig(optionsDict, ["useRecoverySource"], false),
+        emitDocType: expr.dig(optionsDict, ["emitDocType"], "AUTO"),
+        enableSourcelessMigrations: expr.dig(optionsDict, ["enableSourcelessMigrations"], false)
+    }));
+    const isSolr = expr.regexMatch("^SOLR ", sourceVersion);
+    return expr.makeDict({
+        sourceKind: expr.ternary(isSolr, expr.literal("solr-backup"), expr.literal("es-snapshot")),
+        sourceConfig: expr.ternary(isSolr,
+            expr.asString(expr.serialize(solrConfig)),
+            expr.asString(expr.serialize(esConfig))),
+        localDir: expr.literal("/tmp")
+    });
+}
+
 function makeParamsDict(
     sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
@@ -84,34 +133,46 @@ function makeParamsDict(
     sourceEndpoint?: BaseExpression<string>
 ) {
     const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
+    const optionsDict = expr.deserializeRecord(options);
     const failedDocumentStreamParams = expr.makeDict({
         // The SnapshotMigration's own UID is the failed-document-stream session id: it uniquely
         // identifies this backfill (so multiple backfills in one workflow never share a session=
         // prefix) and is exactly what the console reads back from the SnapshotMigration it reports on.
         failedDocumentStreamSessionId: snapshotMigrationUid
     });
+
+    // A backfill that names its own source describes it entirely through sourceConfig.
+    const readsAnExplicitSource = expr.not(
+        expr.isEmpty(expr.dig(optionsDict, ["sourceKind"], (""))));
+    const processOptions = expr.omit(optionsDict,
+        ...ARGO_RFS_WORKFLOW_OPTION_KEYS, ...ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS, "sourceKind", "sourceConfig");
+    const sourceParams = expr.ternary(
+        readsAnExplicitSource,
+        expr.makeDict({
+            sourceKind: expr.dig(optionsDict, ["sourceKind"], ""),
+            sourceConfig: expr.dig(optionsDict, ["sourceConfig"], "")
+        }),
+        makeSnapshotSourceParams(sourceVersion, snapshotConfig, optionsDict)
+    );
+
     const base = expr.mergeDicts(
         expr.mergeDicts(
             expr.mergeDicts(
                 makeTargetParamDict(targetConfig),
                 makeRfsCoordinatorParamDict(rfsCoordinatorConfig)
             ),
-            expr.omit(expr.deserializeRecord(options), ...ARGO_RFS_WORKFLOW_OPTION_KEYS)
+            processOptions
         ),
         expr.mergeDicts(
             expr.mergeDicts(
                 expr.makeDict({
-                    snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                    sourceVersion: sourceVersion,
                     sessionName: sessionName,
                     luceneDir: "/tmp",
                     cleanLocalDirs: true
                 }),
                 failedDocumentStreamParams
             ),
-            makeRepoParamDict(
-                expr.omit(repoConfig, "s3RoleArn"),
-                true)
+            sourceParams
         )
     );
     return base;

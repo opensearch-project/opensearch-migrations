@@ -12,6 +12,7 @@ dependencies {
     implementation project(":SnapshotReaderGcs")
     implementation project(":SnapshotReaderAzure")
     implementation project(":RfsPipeline")
+    implementation project(":RfsSourceSpi")
     implementation project(":SolrReader")
     implementation project(":transformation")
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')

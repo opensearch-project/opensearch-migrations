@@ -50,7 +50,7 @@ public abstract class MigratorEvaluatorBase {
         var sourceCluster = clusterReaderCliExtractor.extractClusterReader();
         clusters.source(sourceCluster);
 
-        var targetCluster = ClusterWriterRegistry.getRemoteWriter(arguments.targetArgs.toConnectionContext(), null, arguments.dataFilterArgs, arguments.versionStrictness.allowLooseVersionMatches);
+        var targetCluster = ClusterWriterRegistry.getRemoteWriter(arguments.targetArgs.toConnectionContext(), null, arguments.dataFilterArgs, arguments.versionStrictness.allowsLooseVersionMatches());
         clusters.target(targetCluster);
         return clusters.build();
     }
@@ -107,7 +107,7 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformers selectTransformer(Clusters clusters) {
-        return selectTransformer(clusters, arguments.clusterAwarenessAttributes, arguments.versionStrictness.allowLooseVersionMatches);
+        return selectTransformer(clusters, arguments.clusterAwarenessAttributes, arguments.versionStrictness.allowsLooseVersionMatches());
     }
 
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {

@@ -15,6 +15,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailureClass;
@@ -94,7 +95,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                 new Document("d3", "{\"title\":\"Third\"}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of())
             );
 
-            var cursor = sink.writeBatch("sink_docs", docs).block();
+            var cursor = sink.writeBatch("sink_docs", positioned(docs)).block();
 
             assertNotNull(cursor);
             assertEquals(3, cursor.docsInBatch());
@@ -119,13 +120,13 @@ public class OpenSearchDocumentSinkEndToEndTest {
                 new Document("keep2", "{\"v\":2}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()),
                 new Document("to_delete", "{\"v\":3}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of())
             );
-            sink.writeBatch("sink_deletes", additions).block();
+            sink.writeBatch("sink_deletes", positioned(additions)).block();
 
             // Lucene delta deletions carry the previous document's source bytes.
             var deletions = List.of(
                 new Document("to_delete", additions.get(2).source(), Document.Operation.DELETE, Map.of(), Map.of())
             );
-            sink.writeBatch("sink_deletes", deletions).block();
+            sink.writeBatch("sink_deletes", positioned(deletions)).block();
 
             verifyDocCount(cluster, "sink_deletes", 2);
             log.info("Successfully wrote UPSERT + DELETE ops to {} via OpenSearchDocumentSink", targetVersion);
@@ -148,7 +149,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                 new Document("r2", "{\"score\":20}".getBytes(), Document.Operation.UPSERT,
                     Map.of(Document.HINT_ROUTING, "shard_b"), Map.of())
             );
-            sink.writeBatch("sink_routing", docs).block();
+            sink.writeBatch("sink_routing", positioned(docs)).block();
 
             var restClient = createRestClient(cluster);
             var context = DocumentMigrationTestContext.factory().noOtelTracking();
@@ -198,13 +199,13 @@ public class OpenSearchDocumentSinkEndToEndTest {
                                 response.body);
                         }
                     }
-                    sink.writeBatch(index, List.of(snapshotVersion(7, "original"))).block();
+                    sink.writeBatch(index, positioned(List.of(snapshotVersion(7, "original")))).block();
                     assertSnapshotWrite(restClient, context, index, internal ? 1 : 7, "original");
 
-                    sink.writeBatch(index, List.of(snapshotVersion(7, "equal"))).block();
+                    sink.writeBatch(index, positioned(List.of(snapshotVersion(7, "equal")))).block();
                     String equalTitle = strict ? "original" : "equal";
                     assertSnapshotWrite(restClient, context, index, internal ? 2 : 7, equalTitle);
-                    sink.writeBatch(index, List.of(snapshotVersion(5, "stale"))).block();
+                    sink.writeBatch(index, positioned(List.of(snapshotVersion(5, "stale")))).block();
                     assertSnapshotWrite(restClient, context, index, internal ? 3 : 7, internal ? "stale" : equalTitle);
 
                     if (!internal) {
@@ -212,10 +213,10 @@ public class OpenSearchDocumentSinkEndToEndTest {
                         var allowlist = new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"));
                         var allowedSink = new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
                             false, allowlist, null);
-                        allowedSink.writeBatch(index, List.of(snapshotVersion(5, "allowlisted"))).block();
+                        allowedSink.writeBatch(index, positioned(List.of(snapshotVersion(5, "allowlisted")))).block();
                         assertSnapshotWrite(restClient, context, index, 7, equalTitle);
                     }
-                    sink.writeBatch(index, List.of(snapshotVersion(9, "newer"))).block();
+                    sink.writeBatch(index, positioned(List.of(snapshotVersion(9, "newer")))).block();
                     assertSnapshotWrite(restClient, context, index, internal ? 4 : 9, "newer");
 
                     // Normal ingestion still increments the stored version after backfill.
@@ -238,7 +239,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                     var document = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "v1", null,
                         MAPPER.writeValueAsBytes(Map.of("title", "application", "ext_version", version)),
                         null, DocumentChangeType.INDEX, 7L));
-                    sink.writeBatch("application_versions", List.of(document)).block();
+                    sink.writeBatch("application_versions", positioned(List.of(document))).block();
                     var written = assertSnapshotWrite(restClient, context, "application_versions",
                         Long.parseLong(version.toString()), "application");
                     assertEquals(MAPPER.valueToTree(version), written.path("_source").path("ext_version"));
@@ -320,4 +321,12 @@ public class OpenSearchDocumentSinkEndToEndTest {
         assertEquals(expected, counts.getOrDefault(indexName, 0),
             "Expected " + expected + " docs in " + indexName);
     }
+
+    /** Pairs each document with a cursor; these tests assert on the target, not on cursors. */
+    private static List<PositionedDocument> positioned(List<Document> documents) {
+        return documents.stream()
+            .map(d -> new PositionedDocument(d, "cursor-after-" + d.id()))
+            .collect(java.util.stream.Collectors.toList());
+    }
+
 }

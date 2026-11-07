@@ -4,12 +4,13 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
-import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -111,13 +112,19 @@ public class SolrMultiCollectionSource implements DocumentSource {
     }
 
     @Override
+    public Optional<Partition> findPartition(String collectionName, String partitionName) {
+        ensureCollectionPrepared(collectionName);
+        return getSource(collectionName).findPartition(collectionName, partitionName);
+    }
+
+    @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
         ensureCollectionPrepared(collectionName);
         return getSource(collectionName).readCollectionMetadata(collectionName);
     }
 
     @Override
-    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+    public Flux<PositionedDocument> readDocuments(Partition partition, String startingCursor) {
         ensureCollectionPrepared(partition.collectionName());
         if (shardPreparer != null && partition instanceof SolrShardPartition solrPartition) {
             preparedShards.computeIfAbsent(solrPartition.name(), key -> {
@@ -126,7 +133,7 @@ public class SolrMultiCollectionSource implements DocumentSource {
                 return true;
             });
         }
-        return getSource(partition.collectionName()).readDocuments(partition, startingDocOffset);
+        return getSource(partition.collectionName()).readDocuments(partition, startingCursor);
     }
 
     @Override

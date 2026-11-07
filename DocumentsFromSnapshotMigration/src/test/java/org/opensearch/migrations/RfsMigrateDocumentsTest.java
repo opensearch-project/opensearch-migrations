@@ -6,6 +6,7 @@ import java.util.OptionalInt;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
+import org.opensearch.migrations.bulkload.pipeline.provider.EmitDocTypeMode;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 
 import org.junit.jupiter.api.Assertions;
@@ -51,8 +52,8 @@ class RfsMigrateDocumentsTest {
 
     @ParameterizedTest
     @MethodSource("emitDocTypeCases")
-    void testResolveEmitDocType(RfsMigrateDocuments.EmitDocTypeMode mode, Version version, String transformerConfig, boolean expected) {
-        Assertions.assertEquals(expected, RfsMigrateDocuments.resolveEmitDocType(mode, version, transformerConfig));
+    void testResolveEmitDocType(EmitDocTypeMode mode, Version version, String transformerConfig, boolean expected) {
+        Assertions.assertEquals(expected, mode.resolve(version, transformerConfig != null));
     }
 
     static Stream<Arguments> emitDocTypeCases() {
@@ -63,22 +64,22 @@ class RfsMigrateDocumentsTest {
         String someTransformer = "[{\"TypeMappingSanitizationTransformerProvider\":{}}]";
 
         return Stream.of(
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.ON,  es7, null, true),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.OFF, es5, someTransformer, false),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es5, someTransformer, true),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es6, someTransformer, true),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es7, someTransformer, false),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es5, null, false),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, os3, someTransformer, false),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, null, someTransformer, false)
+            Arguments.of(EmitDocTypeMode.ON,  es7, null, true),
+            Arguments.of(EmitDocTypeMode.OFF, es5, someTransformer, false),
+            Arguments.of(EmitDocTypeMode.AUTO, es5, someTransformer, true),
+            Arguments.of(EmitDocTypeMode.AUTO, es6, someTransformer, true),
+            Arguments.of(EmitDocTypeMode.AUTO, es7, someTransformer, false),
+            Arguments.of(EmitDocTypeMode.AUTO, es5, null, false),
+            Arguments.of(EmitDocTypeMode.AUTO, os3, someTransformer, false),
+            Arguments.of(EmitDocTypeMode.AUTO, null, someTransformer, false)
         );
     }
 
     @Test
     void classifySnapshotReadFailure_wrappedFailureReturnsDedicatedExitCode() {
         var args = new RfsMigrateDocuments.Args();
-        args.snapshotName = "snap1";
-        args.repoUri = "s3://bucket/repo";
+        args.legacySource.snapshotName = "snap1";
+        args.legacySource.repoUri = "s3://bucket/repo";
         // A wrapped snapshot read failure must be located and classified with the dedicated exit code.
         var wrapped = new RuntimeException("reading snapshot failed",
             new SnapshotRepo.CannotParseRepoFile("corrupt repo metadata: index-0"));
@@ -93,8 +94,8 @@ class RfsMigrateDocumentsTest {
     void classifySnapshotReadFailure_localDirRepoIsClassified() {
         // The repo path comes from a file-scheme repoUri (the non-S3 branch of the ternary).
         var args = new RfsMigrateDocuments.Args();
-        args.snapshotName = "snap2";
-        args.repoUri = "/snapshots/repo";
+        args.legacySource.snapshotName = "snap2";
+        args.legacySource.repoUri = "/snapshots/repo";
         var failure = new SnapshotRepo.CannotParseRepoFile("bad index-0");
 
         var exitCode = RfsMigrateDocuments.classifySnapshotReadFailure(failure, args);

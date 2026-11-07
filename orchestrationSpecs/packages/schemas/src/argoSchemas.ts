@@ -249,6 +249,19 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
         skipApproval: z.boolean(),
     })
 );
+/**
+ * Options that describe the source and so belong to `sourceConfig`. RfsMigrateDocuments rejects them
+ * alongside `sourceKind`, and they carry defaults, so they are never passed as process arguments.
+ */
+export const ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS = [
+    "allowLooseVersionMatching",
+    "maxShardSizeBytes",
+    "enableSourcelessMigrations",
+    "useRecoverySource",
+    "emitDocType",
+    "indexAllowlist",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_RFS_OPTIONS>)[];
+
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "podReplicas",
     "minPodReplicas",

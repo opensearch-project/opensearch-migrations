@@ -10,12 +10,12 @@ import lombok.Value;
 @Builder
 public class WorkItemMetricsRecord {
     @Builder.Default
-    int schemaVersion = 1;
+    int schemaVersion = 2;
     String snapshotName;
     String indexName;
-    int shardNumber;
-    long fromPosition;
-    long nextPosition;
+    String partitionName;
+    String fromCursor;
+    String nextCursor;
     boolean shardComplete;
     String previousSnapshotName;
     String deltaMode;
