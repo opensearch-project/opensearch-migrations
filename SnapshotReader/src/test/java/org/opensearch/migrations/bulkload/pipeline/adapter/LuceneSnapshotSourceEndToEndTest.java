@@ -103,39 +103,39 @@ public class LuceneSnapshotSourceEndToEndTest {
     @MethodSource("supportedSources")
     void listCollectionsFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
-        var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
+        try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build()) {
+            var collections = source.listCollections();
 
-        var collections = source.listCollections();
-
-        assertThat("Should contain our test index", collections.contains(INDEX_NAME), equalTo(true));
-        log.info("Listed {} collections from {} snapshot", collections.size(), sourceVersion);
+            assertThat("Should contain our test index", collections.contains(INDEX_NAME), equalTo(true));
+            log.info("Listed {} collections from {} snapshot", collections.size(), sourceVersion);
+        }
     }
 
     @ParameterizedTest(name = "listPartitions from {0}")
     @MethodSource("supportedSources")
     void listPartitionsFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
-        var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
+        try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build()) {
+            var partitions = source.listPartitions(INDEX_NAME);
 
-        var partitions = source.listPartitions(INDEX_NAME);
-
-        assertThat("Should have 1 partition", partitions, hasSize(1));
-        var esShard = (EsShardPartition) partitions.get(0);
-        assertThat(esShard.snapshotName(), equalTo(SNAPSHOT_NAME));
-        assertThat(esShard.indexName(), equalTo(INDEX_NAME));
-        assertThat(esShard.shardNumber(), equalTo(0));
+            assertThat("Should have 1 partition", partitions, hasSize(1));
+            var esShard = (EsShardPartition) partitions.get(0);
+            assertThat(esShard.snapshotName(), equalTo(SNAPSHOT_NAME));
+            assertThat(esShard.indexName(), equalTo(INDEX_NAME));
+            assertThat(esShard.shardNumber(), equalTo(0));
+        }
     }
 
     @ParameterizedTest(name = "readCollectionMetadata from {0}")
     @MethodSource("supportedSources")
     void readCollectionMetadataFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
-        var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
+        try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build()) {
+            var metadata = source.readCollectionMetadata(INDEX_NAME);
 
-        var metadata = source.readCollectionMetadata(INDEX_NAME);
-
-        assertThat(metadata.name(), equalTo(INDEX_NAME));
-        assertThat(metadata.partitionCount(), equalTo(1));
+            assertThat(metadata.name(), equalTo(INDEX_NAME));
+            assertThat(metadata.partitionCount(), equalTo(1));
+        }
     }
 
     @ParameterizedTest(name = "readDocuments from {0}")
@@ -143,8 +143,7 @@ public class LuceneSnapshotSourceEndToEndTest {
     void readDocumentsFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_source_e2e");
-        try {
-            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
+        try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build()) {
             source.listPartitions(INDEX_NAME); // populate cache
 
             var partition = source.listPartitions(INDEX_NAME).get(0);
@@ -170,16 +169,14 @@ public class LuceneSnapshotSourceEndToEndTest {
     void resumeFromOffsetOnRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_source_resume");
-        try {
-            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
+        try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build()) {
             var partition = source.listPartitions(INDEX_NAME).get(0);
 
             var allDocs = source.readDocuments(partition, 0).collectList().block();
             assertThat(allDocs, hasSize(3));
 
             Path workDir2 = Files.createTempDirectory("pipeline_source_resume2");
-            try {
-                var source2 = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir2).build();
+            try (var source2 = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir2).build()) {
                 source2.listPartitions(INDEX_NAME);
                 var resumed = source2.readDocuments(partition, 2).collectList().block();
                 assertThat("Resuming from offset 2 should yield 1 doc", resumed, hasSize(1));
@@ -254,11 +251,10 @@ public class LuceneSnapshotSourceEndToEndTest {
         var extractor = createDeltaSnapshots(sourceVersion);
         var rootCtx = DocumentMigrationTestContext.factory().noOtelTracking();
         Path workDir = Files.createTempDirectory("pipeline_source_delta_resume");
-        try {
-            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_V2, workDir)
-                .delta(SNAPSHOT_V1, DeltaMode.UPDATES_AND_DELETES,
-                    () -> new RfsContexts.DeltaStreamContext(rootCtx, null))
-                .build();
+        try (var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_V2, workDir)
+            .delta(SNAPSHOT_V1, DeltaMode.UPDATES_AND_DELETES,
+                () -> new RfsContexts.DeltaStreamContext(rootCtx, null))
+            .build()) {
             var partition = source.listPartitions(INDEX_NAME).get(0);
 
             var allDelta = source.readDocuments(partition, 0).collectList().block();
@@ -266,11 +262,10 @@ public class LuceneSnapshotSourceEndToEndTest {
             assertThat(allDelta.size(), greaterThanOrEqualTo(2));
 
             Path workDir2 = Files.createTempDirectory("pipeline_source_delta_resume2");
-            try {
-                var source2 = LuceneSnapshotSource.builder(extractor, SNAPSHOT_V2, workDir2)
-                    .delta(SNAPSHOT_V1, DeltaMode.UPDATES_AND_DELETES,
-                        () -> new RfsContexts.DeltaStreamContext(rootCtx, null))
-                    .build();
+            try (var source2 = LuceneSnapshotSource.builder(extractor, SNAPSHOT_V2, workDir2)
+                .delta(SNAPSHOT_V1, DeltaMode.UPDATES_AND_DELETES,
+                    () -> new RfsContexts.DeltaStreamContext(rootCtx, null))
+                .build()) {
                 source2.listPartitions(INDEX_NAME); // populate previous-shard cache for delta mode
                 var resumed = source2.readDocuments(partition, 1).collectList().block();
 

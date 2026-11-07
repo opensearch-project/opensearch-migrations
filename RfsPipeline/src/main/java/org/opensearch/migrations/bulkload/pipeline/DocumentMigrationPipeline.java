@@ -134,7 +134,8 @@ public class DocumentMigrationPipeline {
             currentPartition.set(partition);
             return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
-                .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
+                .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch,
+                    (Document doc) -> estimatedDocumentBytes(doc, collectionName)), true)
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
                     // Preserve the source position before handing the batch to the sink.
@@ -203,4 +204,18 @@ public class DocumentMigrationPipeline {
             .concatMap(this::migrateCollection);
     }
 
+    /**
+     * Bound pre-sink batches even for deletes with no source; the sink enforces exact request sizes.
+     */
+    private static long estimatedDocumentBytes(Document doc, String collectionName) {
+        long bytes = doc.sourceLength();
+        if (doc.operation() == Document.Operation.DELETE) {
+            // Conservatively include up to six JSON bytes per UTF-16 unit of metadata.
+            bytes += 64L + 6L * (collectionName.length() + doc.id().length());
+            for (var hint : doc.hints().entrySet()) {
+                bytes += 6L * (hint.getKey().length() + hint.getValue().length()) + 6;
+            }
+        }
+        return bytes;
+    }
 }

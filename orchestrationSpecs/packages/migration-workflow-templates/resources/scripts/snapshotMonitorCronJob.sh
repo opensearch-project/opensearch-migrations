@@ -96,6 +96,7 @@ make_snapshot_status_patch() {
         --arg updatedAt "$now" \
         --arg message "$message" \
         --arg snapshotName "$SNAPSHOT_NAME" \
+        --argjson snapshotStartTimeMillis "${snapshot_start_time_millis:-null}" \
         --arg configChecksum "$CONFIG_CHECKSUM" \
         --arg checksumForSnapshotMigration "$CONFIG_CHECKSUM" \
         --argjson shardsTotal "$total" \
@@ -107,6 +108,7 @@ make_snapshot_status_patch() {
         '{status:{
             phase:$dataSnapshotPhase,
             snapshotName:$snapshotName,
+            snapshotStartTimeMillis:$snapshotStartTimeMillis,
             configChecksum:$configChecksum,
             checksumForSnapshotMigration:$checksumForSnapshotMigration,
             snapshotCreation:{
@@ -159,7 +161,12 @@ if { [ "$ds_phase" = "Completed" ] || [ "$ds_phase" = "Error" ]; } && [ "$ds_con
 fi
 
 status_error_file="/tmp/snapshot-status-error.txt"
-status="$(console --config-file=/config/migration_services.yaml snapshot status 2>"$status_error_file" || true)"
+status_json="$(console --config-file=/config/migration_services.yaml --json snapshot status 2>"$status_error_file" || true)"
+status="$(printf '%s' "$status_json" | jq -r '.state // ""' 2>/dev/null || true)"
+snapshot_start_time_millis="$(printf '%s' "$status_json" | jq -c '.snapshot_start_time_in_millis // null' 2>/dev/null || true)"
+if [ -z "$snapshot_start_time_millis" ] || [ "$snapshot_start_time_millis" = "null" ]; then
+    snapshot_start_time_millis="$(printf '%s' "$ds_json" | jq -c '.status.snapshotStartTimeMillis // null')"
+fi
 status_error="$(cat "$status_error_file" 2>/dev/null || true)"
 SNAPSHOT_DEEP_OUTPUT="$(console --config-file=/config/migration_services.yaml snapshot status --deep-check 2>>"$status_error_file" || true)"
 if [ -z "$SNAPSHOT_DEEP_OUTPUT" ]; then

@@ -76,7 +76,9 @@ public final class BulkNdjson {
     private static EncodedOperation encodeRaw(
         OperationType operationType, BaseOperationMeta meta, byte[] rawSource, ObjectMapper mapper
     ) {
-        byte[] body = rawSource != null && rawSource.length > 0 ? rawSource : null;
+        // Bulk deletes have only an action line, even when callers retain the old source.
+        byte[] body = operationType != OperationType.DELETE && rawSource != null && rawSource.length > 0
+            ? rawSource : null;
         if (body != null) {
             body = singleLineJson(body);
         }

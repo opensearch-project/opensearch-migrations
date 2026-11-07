@@ -18,12 +18,14 @@ describe("terminal-resource dependsOn is written by tryApply", () => {
         );
     });
 
-    it("SnapshotMigration apply manifest emits spec.dependsOn as [dataSnapshotResourceName] or []", () => {
-        // A SnapshotMigration depends on its DataSnapshot when one exists (workflow-generated or Solr
-        // import-prepare); an externally-managed ES/OS snapshot with no DataSnapshot has no edge.
+    it("SnapshotMigration applies current and previous snapshot edges and the predecessor migration edge", () => {
+        // The optional edges keep workflow reset aware of the entire successive-snapshot chain.
+        expect(rendered).toContain('\\"dependsOn\\", sprig.concat(');
         expect(rendered).toContain(
-            "dependsOn: {{=(('dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? " +
-            "([sprig.dig('dataSnapshotResourceName', '', fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution'])]) : ([]))}}"
-        );
+            "sprig.dig('dataSnapshotResourceName', '', fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution'])");
+        expect(rendered).toContain(
+            "sprig.dig('delta', 'previousSnapshotNameResolution', 'dataSnapshotResourceName', '', fromJSON(inputs.parameters.snapshotMigrationConfig))");
+        expect(rendered).toContain(
+            "sprig.dig('previousMigrationResourceName', '', fromJSON(inputs.parameters.snapshotMigrationConfig))");
     });
 });
