@@ -62,7 +62,8 @@ as written. Each index name can appear there only once.
 
 An entry in `regexCollectionRouting` has a Java regular expression as its `sourceIndex`, and the expression has
 to match the whole index name. Its `collection` can use the pattern's capture groups, either by number (`$1`) or
-by name (`${app}` for a group written as `(?<app>...)`). To use a literal `$` or `\`, escape it with `\`.
+by name (`${app}` for a group written as `(?<app>...)`). To use a literal `$` or `\`, escape it with `\`. A
+workflow configuration doesn't accept all Java regex syntax, as described in [Validation](#validation).
 
 An index first looks for an exact match in `staticCollectionRouting`, which always wins. If there isn't one, the
 regex entries are checked in order and the first match is used, so put specific patterns before broad ones.
@@ -78,11 +79,17 @@ The workflow configuration is rejected when any of these is true.
 * A migration to a `collectionRouted` target has an entry with no routing entries in either list.
 * An entry has a routing list but its target isn't `collectionRouted`.
 * The same index name appears more than once in `staticCollectionRouting`.
+* A `regexCollectionRouting` `sourceIndex` isn't a valid regular expression.
+* A `collection` in `regexCollectionRouting` references a group its pattern doesn't define, such as `$2` for a
+  pattern with one group.
 * A replayer points at a `collectionRouted` target and has no request transform. The workflow can't check what a
   transform does, so it assumes that one adds the header.
 
-When a migration starts, each regex is compiled, and a `collection` that references a group its pattern doesn't
-define, such as `$2` for a pattern with one group, stops the migration with an error.
+The workflow checks each regex with JavaScript's engine, which doesn't match Java's exactly. It rejects some valid
+Java syntax, so inline flags such as `(?i)`, possessive quantifiers such as `a++` and atomic groups such as `(?>a)`
+aren't accepted in a workflow configuration, and those patterns need rewriting without them. It also lets some
+invalid Java patterns through, such as `logs-{` or an unknown escape like `\y`. When a migration starts, Java checks
+each regex and `collection` again and stops the migration with an error if one is invalid.
 
 Before writing anything, metadata migration and each backfill worker check that every source index selected by
 `indexAllowlist` matches an entry. If any index has no match, the run fails and lists every unmatched index.

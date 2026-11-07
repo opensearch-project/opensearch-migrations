@@ -30,6 +30,60 @@ describe("collection-routed targets", () => {
         expect(messages.some(message => message.includes(expected))).toBe(true);
     });
 
+    function configWithRegexRoute(sourceIndex: string, collection: string) {
+        const config = loadFixture("valid", "collection-routed-target-regex-only.json");
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].regexCollectionRouting = [{sourceIndex, collection}];
+        return config;
+    }
+
+    test.each([
+        ["(.+)-\\d{4}", "$1"],
+        ["(.+)-\\d{4}", "$0"],
+        ["logs-(?<app>[a-z]+)-.*", "col-${app}"],
+        ["(a)", "x\\$1"],
+        ["logs-.*", "common"],
+    ])("regex route %s to %s is valid", (sourceIndex, collection) => {
+        const result = OVERALL_MIGRATION_CONFIG.safeParse(configWithRegexRoute(sourceIndex, collection));
+        expect(result.success ? [] : result.error.issues.map(issue => issue.message)).toEqual([]);
+    });
+
+    // The same patterns that Java rejects, plus Java-only syntax that this check is too conservative for
+    test.each([
+        "[",
+        "(unclosed",
+        "*a",
+        "a{2,1}",
+        "abc\\",
+        "(?<n>a)(?<n>b)",
+        "(?<1bad>a)",
+        "[z-a]",
+        "(?i)logs-.*",
+        "(?x)a b",
+        "a++",
+        "(?>abc)",
+    ])("regex route sourceIndex %s is rejected", (sourceIndex) => {
+        const messages = issueMessages(configWithRegexRoute(sourceIndex, "common"));
+        expect(messages.some(message => message.includes("is not a valid regular expression"))).toBe(true);
+    });
+
+    // JavaScript accepts these, so only the Java check at migration start rejects them
+    test.each(["logs-{", "a{,2}", "\\y", "[]"])("regex route sourceIndex %s is left for Java to reject", (sourceIndex) => {
+        expect(OVERALL_MIGRATION_CONFIG.safeParse(configWithRegexRoute(sourceIndex, "common")).success).toBe(true);
+    });
+
+    // The same cases as ServerlessCollectionRoutingTest.invalidReplacements_areRejectedWhenParsed
+    test.each([
+        ["$2", "references undefined group 2"],
+        ["${missing}", "references undefined group 'missing'"],
+        ["${app", "has an unclosed '${'"],
+        ["a$", "has '$' that is not a group reference"],
+        ["$x", "has '$' that is not a group reference"],
+        ["a\\", "ends with an unescaped backslash"],
+    ])("regex route collection %s is rejected", (collection, expected) => {
+        const messages = issueMessages(configWithRegexRoute("(?<app>[a-z]+)-\\d+", collection));
+        expect(messages.some(message => message.includes(expected))).toBe(true);
+    });
+
     function trafficConfigWithRoutedTarget(replayerConfig?: Record<string, unknown>) {
         const config = loadFixture("valid", "traffic.json");
         config.targetClusters.target = {

@@ -31,7 +31,8 @@ public class ServerlessCollectionRouting {
     public static final String REGEX_FIELD = "regexCollectionRouting";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    // In order: an escaped character, ${name}, $n, then the incomplete forms ${, $ and a trailing backslash
+    // In order: an escaped character, ${name}, $n, then the incomplete forms ${, $ and a trailing backslash.
+    // Keep in sync with COLLECTION_REPLACEMENT_TOKEN in userSchemas.ts.
     private static final Pattern REPLACEMENT_TOKEN =
         Pattern.compile("\\\\.|\\$\\{([^}]*)}|\\$(\\d)|\\$\\{|\\$|\\\\", Pattern.DOTALL);
 

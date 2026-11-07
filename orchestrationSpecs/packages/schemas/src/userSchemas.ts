@@ -1719,7 +1719,8 @@ export const REGEX_COLLECTION_ROUTING = z.array(z.object({
         .describe("Collection name replacement pattern, which may reference the regex's capture groups by number or name (e.g. '$1' or '${tenant}')."),
 }).describe("Routes source indices that match a regex to an OpenSearch Serverless collection."))
     .describe("Ordered regex mappings for a collection-routed target, used when no static entry matches. The first regex that matches " +
-        "the whole index name wins. Patterns and group references are validated when the migration starts.");
+        "the whole index name wins. Patterns and group references are validated with JavaScript's regex engine, which " +
+        "rejects Java-only syntax such as (?i), a++ and (?>a), and then fully by Java when the migration starts.");
 
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional()
@@ -1781,6 +1782,61 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG)
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG)
     .describe("Map of target cluster names to their configurations. Keys are used as labels and must be referenced by snapshotMigrationConfigs and traffic replayers.");
 
+// Keep in sync with REPLACEMENT_TOKEN in ServerlessCollectionRouting.java. In order: an escaped character, ${name},
+// $n, then the incomplete forms ${, $ and a trailing backslash.
+const COLLECTION_REPLACEMENT_TOKEN = /\\.|\$\{([^}]*)}|\$(\d)|\$\{|\$|\\/gs;
+
+/** Returns why a regex route's collection can't work with its pattern, or undefined when it can. */
+function collectionReplacementProblem(collection: string, groupCount: number, groupNames: string[]): string | undefined {
+    for (const [token, groupName, groupNumber] of collection.matchAll(COLLECTION_REPLACEMENT_TOKEN)) {
+        if (groupName !== undefined) {
+            if (!groupNames.includes(groupName)) {
+                return `references undefined group '${groupName}'`;
+            }
+        } else if (groupNumber !== undefined) {
+            if (Number(groupNumber) > groupCount) {
+                return `references undefined group ${groupNumber}`;
+            }
+        } else if (token === "${") {
+            return "has an unclosed '${'";
+        } else if (token === "$") {
+            return "has '$' that is not a group reference";
+        } else if (token === "\\") {
+            return "ends with an unescaped backslash";
+        }
+    }
+    return undefined;
+}
+
+function validateRegexRoute(
+    route: z.infer<typeof REGEX_COLLECTION_ROUTING>[number],
+    routePath: (string | number)[],
+    ctx: z.RefinementCtx
+) {
+    let compiled: RegExp;
+    try {
+        compiled = new RegExp(route.sourceIndex);
+    } catch {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `regexCollectionRouting sourceIndex '${route.sourceIndex}' is not a valid regular expression. ` +
+                `This check uses JavaScript's engine, so it also rejects Java-only syntax such as (?i), a++ and (?>a).`,
+            path: [...routePath, 'sourceIndex']
+        });
+        return;
+    }
+    // An empty alternative always matches, which exposes the groups without needing an index name that fits the pattern
+    const groups = new RegExp(`${compiled.source}|`).exec("")!;
+    const problem = collectionReplacementProblem(route.collection, groups.length - 1, Object.keys(groups.groups ?? {}));
+    if (problem !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Collection '${route.collection}' for regex '${route.sourceIndex}' in regexCollectionRouting ${problem}.`,
+            path: [...routePath, 'collection']
+        });
+    }
+}
+
 function validateCollectionRouting(
     targetCluster: z.infer<typeof TARGET_CLUSTER_CONFIG> | undefined,
     mc: z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>,
@@ -1833,6 +1889,8 @@ function validateCollectionRouting(
                 }
                 seen.add(route.sourceIndex);
             });
+            (regexRoutes ?? []).forEach((route, k) =>
+                validateRegexRoute(route, [...entryPath, 'regexCollectionRouting', k], ctx));
         });
     }
 }
