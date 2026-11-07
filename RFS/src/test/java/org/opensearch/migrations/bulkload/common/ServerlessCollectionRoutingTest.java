@@ -186,9 +186,9 @@ class ServerlessCollectionRoutingTest {
 
         assertEquals("ts", target.collectionFor("ts-1"));
         target.prepare("ts-1");
-        assertTrue(target.allowServerGeneratedIds("ts"));
-        assertTrue(target.allowServerGeneratedIds("ts"));
-        assertEquals(false, target.allowServerGeneratedIds("search"));
+        assertTrue(target.requiresServerGeneratedIds("ts"));
+        assertTrue(target.requiresServerGeneratedIds("ts"));
+        assertEquals(false, target.requiresServerGeneratedIds("search"));
         assertEquals(List.of("ts", "search"), probed);
         target.validateSourceIndices(List.of("ts-1", "search-2"));
         assertThrows(IllegalArgumentException.class, () -> target.validateSourceIndices(List.of("ts-1", "nope")));

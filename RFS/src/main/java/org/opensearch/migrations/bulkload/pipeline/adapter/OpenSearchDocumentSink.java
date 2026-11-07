@@ -124,7 +124,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
             ? collectionRoutedTarget.collectionFor(collectionName)
             : null;
         var useServerGeneratedIds = serverlessCollection != null
-            ? collectionRoutedTarget.allowServerGeneratedIds(serverlessCollection)
+            ? collectionRoutedTarget.requiresServerGeneratedIds(serverlessCollection)
             : allowServerGeneratedIds;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;

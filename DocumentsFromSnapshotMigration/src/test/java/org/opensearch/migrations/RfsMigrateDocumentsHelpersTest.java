@@ -379,7 +379,7 @@ class RfsMigrateDocumentsHelpersTest {
         var target = RfsMigrateDocuments.buildCollectionRoutedTarget(args, factory);
 
         assertThat(target.collectionFor("tenant-a-2024"), equalTo("tenant-a"));
-        assertTrue(target.allowServerGeneratedIds("tenant-a"));
+        assertTrue(target.requiresServerGeneratedIds("tenant-a"));
     }
 
     @Test

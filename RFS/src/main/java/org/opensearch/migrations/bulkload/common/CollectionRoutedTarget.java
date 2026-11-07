@@ -31,10 +31,10 @@ public class CollectionRoutedTarget {
      * decision may block on a probe request, so call this off the reactive threads.
      */
     public void prepare(String sourceIndex) {
-        allowServerGeneratedIds(collectionFor(sourceIndex));
+        requiresServerGeneratedIds(collectionFor(sourceIndex));
     }
 
-    public boolean allowServerGeneratedIds(String collection) {
+    public boolean requiresServerGeneratedIds(String collection) {
         return serverGeneratedIdsByCollection.computeIfAbsent(collection, requiresServerGeneratedIds::test);
     }
 
