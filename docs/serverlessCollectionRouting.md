@@ -86,14 +86,13 @@ define, such as `$2` for a pattern with one group, stops the migration with an e
 
 Before writing anything, metadata migration and each backfill worker check that every source index selected by
 `indexAllowlist` matches an entry. If any index has no match, the run fails and lists every unmatched index.
-Metadata migration also fails if no source index is selected at all, because templates need at least one
-collection to go to.
 
 ## Templates
 
-Index templates, component templates and legacy templates don't belong to any index. On a collection-routed
-target, metadata migration creates each template in every collection that at least one migrated index routes
-to. The results list each copy separately, for example `logs-template (collection tenant-a)`.
+Metadata migration doesn't migrate index templates, component templates or legacy templates to a collection-routed
+target, because they don't belong to any one index and so have no single collection to go to. Each template appears
+in the results as skipped, which doesn't fail the migration. If a collection needs a template, create it there
+yourself.
 
 ## Document IDs
 

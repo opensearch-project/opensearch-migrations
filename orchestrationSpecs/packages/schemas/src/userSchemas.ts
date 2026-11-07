@@ -1731,7 +1731,7 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     staticCollectionRouting: STATIC_COLLECTION_ROUTING.optional()
         .describe("Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry " +
             "when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill " +
-            "so an index's metadata and documents reach the same collection, and templates go to every collection a migrated index routes to."),
+            "so an index's metadata and documents reach the same collection. Templates aren't migrated to collection-routed targets."),
     regexCollectionRouting: REGEX_COLLECTION_ROUTING.optional()
         .describe("Ordered regex source index to OpenSearch Serverless collection mappings, used when no static entry matches. " +
             "Same rules as staticCollectionRouting."),

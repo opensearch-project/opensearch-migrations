@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -129,7 +130,7 @@ class MigrateTest {
     }
 
     @Test
-    void resolveServerlessCollections_coversAllowlistedIndicesAndFailsOnUnmatched() {
+    void validateCollectionRouting_coversAllowlistedIndicesAndFailsOnUnmatched() {
         var args = new MigrateArgs();
         args.snapshotName = "snap1";
         args.targetArgs.collectionRouted = true;
@@ -138,16 +139,16 @@ class MigrateTest {
         var migrate = new MetadataMigration().migrate(args);
 
         var clusters = clustersWithSnapshotIndices("b-1", "a-1", "b-2", "skipped");
-        assertThat(migrate.resolveServerlessCollections(clusters), equalTo(List.of("b", "a")));
+        assertDoesNotThrow(() -> migrate.validateCollectionRouting(clusters));
 
         args.dataFilterArgs.indexAllowlist = List.of();
         var unmatched = assertThrows(ParameterException.class,
-            () -> migrate.resolveServerlessCollections(clusters));
+            () -> migrate.validateCollectionRouting(clusters));
         assertThat(unmatched.getMessage(), containsString("[skipped]"));
     }
 
     @Test
-    void resolveServerlessCollections_failsWhenNoIndexIsSelected() {
+    void validateCollectionRouting_allowsAnEmptySelection() {
         var args = new MigrateArgs();
         args.snapshotName = "snap1";
         args.targetArgs.collectionRouted = true;
@@ -155,17 +156,15 @@ class MigrateTest {
         args.dataFilterArgs.indexAllowlist = List.of("nothing-matches");
         var migrate = new MetadataMigration().migrate(args);
 
-        var e = assertThrows(ParameterException.class,
-            () -> migrate.resolveServerlessCollections(clustersWithSnapshotIndices("a")));
-        assertThat(e.getMessage(), containsString("No source indices were selected"));
+        assertDoesNotThrow(() -> migrate.validateCollectionRouting(clustersWithSnapshotIndices("a")));
     }
 
     @Test
-    void resolveServerlessCollections_isEmptyForOtherTargets() {
+    void validateCollectionRouting_ignoresOtherTargets() {
         var args = new MigrateArgs();
         args.snapshotName = "snap1";
 
-        assertThat(new MetadataMigration().migrate(args).resolveServerlessCollections(null), equalTo(List.of()));
+        assertDoesNotThrow(() -> new MetadataMigration().migrate(args).validateCollectionRouting(null));
     }
 
     private static Clusters clustersWithSnapshotIndices(String... names) {

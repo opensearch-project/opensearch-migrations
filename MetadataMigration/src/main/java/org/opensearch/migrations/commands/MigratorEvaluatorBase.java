@@ -137,8 +137,8 @@ public abstract class MigratorEvaluatorBase {
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
         items.succeedOnEmpty(arguments.succeedOnEmpty);
         items.allowExistingIndexes(arguments.allowExistingIndexes);
-        var serverlessCollections = resolveServerlessCollections(clusters);
-        var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context, serverlessCollections);
+        validateCollectionRouting(clusters);
+        var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
 
         var indexTemplates = new ArrayList<CreationResult>();
         indexTemplates.addAll(metadataResults.getLegacyTemplates());
@@ -165,13 +165,12 @@ public abstract class MigratorEvaluatorBase {
 
     /**
      * Resolves the collection of every selected source index before anything is written, so a
-     * routing table that misses an index fails fast. Returns the distinct collections, which also
-     * receive the templates, or an empty list when the target is not collection-routed.
+     * routing table that misses an index fails fast.
      */
-    List<String> resolveServerlessCollections(Clusters clusters) {
+    void validateCollectionRouting(Clusters clusters) {
         var routing = getCollectionRouting();
         if (routing.isEmpty()) {
-            return List.of();
+            return;
         }
         var allowed = FilterScheme.filterByAllowList(arguments.dataFilterArgs.indexAllowlist, FilterScheme.FilterContext.INDEX);
         var sourceIndices = clusters.getSource().getIndexMetadata().getRepoDataProvider()
@@ -180,26 +179,21 @@ public abstract class MigratorEvaluatorBase {
             .filter(allowed)
             .toList();
         try {
-            var collections = List.copyOf(routing.get().resolveAll(sourceIndices));
-            if (collections.isEmpty()) {
-                throw new ParameterException("No source indices were selected, so no collection can receive the templates");
-            }
+            var collections = routing.get().resolveAll(sourceIndices);
             log.atInfo().setMessage("Collection routing sends {} source indices to collections {}")
                 .addArgument(sourceIndices.size()).addArgument(collections).log();
-            return collections;
         } catch (IllegalArgumentException e) {
             throw new ParameterException(e.getMessage(), e);
         }
     }
 
     private GlobalMetadataCreatorResults migrateGlobalMetadata(MigrationMode mode, Clusters clusters, Transformer transformer,
-                                                               RootMetadataMigrationContext context, List<String> serverlessCollections) {
+                                                               RootMetadataMigrationContext context) {
         var metadataRunner = new MetadataRunner(
             arguments.snapshotName,
             clusters.getSource().getGlobalMetadata(),
             clusters.getTarget().getGlobalMetadataCreator(),
-            transformer,
-            serverlessCollections
+            transformer
         );
         var metadataResults = metadataRunner.migrateMetadata(mode, context.createMetadataMigrationContext());
         log.info("Metadata copy complete.");

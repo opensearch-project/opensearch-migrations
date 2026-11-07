@@ -215,25 +215,6 @@ class Test0024AossCollectionRouting(Test0021AossCollectionMigrations):
             f"{suffix}/{index}: index should not exist in this collection (status={response.status_code})"
         )
 
-    @staticmethod
-    def _template_names(target, path):
-        response = target.call_api(path, raise_error=False)
-        if response.status_code != 200:
-            return None
-        body = response.json()
-        key = "index_templates" if "index_templates" in body else "component_templates"
-        return {template["name"] for template in body.get(key, []) if not template["name"].startswith(".")}
-
-    def _assert_templates_in_every_collection(self):
-        for path in ("/_index_template", "/_component_template"):
-            names = {suffix: self._template_names(target, path) for suffix, target in self.target_clusters.items()}
-            if any(found is None for found in names.values()):
-                logger.warning("Skipping %s comparison; not every collection answered: %s", path, names)
-                continue
-            distinct = {frozenset(found) for found in names.values()}
-            assert len(distinct) == 1, f"{path} differs between collections: {names}"
-            logger.info("Every collection has the same %d entries for %s", len(next(iter(distinct))), path)
-
     def verify_clusters(self):
         for suffix, indices in ROUTED_INDICES.items():
             target = self.target_clusters[suffix]
@@ -254,5 +235,3 @@ class Test0024AossCollectionRouting(Test0021AossCollectionMigrations):
                     for index in indices:
                         self._assert_index_absent(other_suffix, other_target, index)
             logger.info("Verified %d routed indices in the %s collection", len(indices), suffix)
-
-        self._assert_templates_in_every_collection()

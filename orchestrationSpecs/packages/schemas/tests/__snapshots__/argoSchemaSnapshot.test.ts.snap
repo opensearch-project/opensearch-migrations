@@ -5473,7 +5473,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       ],
                       "description": "Routes one source index to one OpenSearch Serverless collection."
                     },
-                    "description": "Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill so an index's metadata and documents reach the same collection, and templates go to every collection a migrated index routes to."
+                    "description": "Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill so an index's metadata and documents reach the same collection. Templates aren't migrated to collection-routed targets."
                   },
                   "regexCollectionRouting": {
                     "type": "array",

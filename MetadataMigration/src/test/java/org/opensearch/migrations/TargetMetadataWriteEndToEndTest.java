@@ -1,6 +1,5 @@
 package org.opensearch.migrations;
 
-import java.util.List;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -57,7 +56,7 @@ class TargetMetadataWriteEndToEndTest {
             );
 
             var results = writer.getGlobalMetadataCreator()
-                .create(globalMetadata, MigrationMode.PERFORM, context.createMetadataMigrationContext(), List.of());
+                .create(globalMetadata, MigrationMode.PERFORM, context.createMetadataMigrationContext());
 
             assertThat("Legacy template should be created",
                 results.getLegacyTemplates().stream().anyMatch(r -> r.wasSuccessful() && "test_template".equals(r.getName())),
