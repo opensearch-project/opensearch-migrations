@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.util.List;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -56,7 +57,7 @@ class TargetMetadataWriteEndToEndTest {
             );
 
             var results = writer.getGlobalMetadataCreator()
-                .create(globalMetadata, MigrationMode.PERFORM, context.createMetadataMigrationContext());
+                .create(globalMetadata, MigrationMode.PERFORM, context.createMetadataMigrationContext(), List.of());
 
             assertThat("Legacy template should be created",
                 results.getLegacyTemplates().stream().anyMatch(r -> r.wasSuccessful() && "test_template".equals(r.getName())),
@@ -87,7 +88,8 @@ class TargetMetadataWriteEndToEndTest {
                 indexMetadata,
                 MigrationMode.PERFORM,
                 AwarenessAttributeSettings.builder().balanceEnabled(false).numberOfAttributeValues(0).build(),
-                context.createIndexContext()
+                context.createIndexContext(),
+                null
             );
 
             assertThat("Index should be created", result.wasSuccessful(), equalTo(true));
@@ -121,7 +123,8 @@ class TargetMetadataWriteEndToEndTest {
                 indexMetadata,
                 MigrationMode.PERFORM,
                 AwarenessAttributeSettings.builder().balanceEnabled(false).numberOfAttributeValues(0).build(),
-                context.createIndexContext()
+                context.createIndexContext(),
+                null
             );
 
             assertThat("Should report already exists",

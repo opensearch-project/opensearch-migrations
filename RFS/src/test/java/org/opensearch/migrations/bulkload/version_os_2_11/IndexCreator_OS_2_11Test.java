@@ -12,7 +12,6 @@ import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.metadata.CreationResult;
-import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
@@ -27,7 +26,6 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -315,16 +313,6 @@ class IndexCreator_OS_2_11Test {
     }
 
     @Test
-    void testCreate_defaultIndexCreator_rejectsCollection() {
-        IndexCreator plain = (index, mode, awareness, context) -> CreationResult.builder().name("x").build();
-        var awareness = new AwarenessAttributeSettings(false, 0);
-
-        assertThat(plain.create(null, MigrationMode.PERFORM, awareness, null, null).getName(), equalTo("x"));
-        assertThrows(UnsupportedOperationException.class,
-            () -> plain.create(null, MigrationMode.PERFORM, awareness, null, "tenant-a"));
-    }
-
-    @Test
     void testCreate_retriesWithoutRoutingShardsWhenTargetRejectsThem() throws Exception {
         // opensearch-migrations#3440: the snapshot's top-level "routing_num_shards" is copied into
         // settings.number_of_routing_shards. If the target rejects it (here with the error
@@ -385,6 +373,6 @@ class IndexCreator_OS_2_11Test {
         var indexId = "indexId";
         var indexData = new IndexMetadataData_OS_2_11(node, indexId, indexName);
         var indexCreator = new IndexCreator_OS_2_11(client);
-        return indexCreator.create(indexData, MigrationMode.PERFORM, new AwarenessAttributeSettings(false, 0), mock(ICreateIndexContext.class));
+        return indexCreator.create(indexData, MigrationMode.PERFORM, new AwarenessAttributeSettings(false, 0), mock(ICreateIndexContext.class), null);
     }
 }

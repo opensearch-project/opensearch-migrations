@@ -39,15 +39,6 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
     protected final OpenSearchClient client;
 
-    public CreationResult create(
-        IndexMetadata index,
-        MigrationMode mode,
-        AwarenessAttributeSettings awarenessAttributeSettings,
-        ICreateIndexContext context
-    ) {
-        return create(index, mode, awarenessAttributeSettings, context, null);
-    }
-
     @Override
     public CreationResult create(
         IndexMetadata index,

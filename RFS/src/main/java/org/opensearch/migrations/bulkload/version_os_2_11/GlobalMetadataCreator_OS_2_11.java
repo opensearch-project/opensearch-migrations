@@ -33,13 +33,6 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
     private final List<String> componentTemplateAllowlist;
     private final List<String> indexTemplateAllowlist;
 
-    public GlobalMetadataCreatorResults create(
-        GlobalMetadata root,
-        MigrationMode mode,
-        IClusterMetadataContext context) {
-        return create(root, mode, context, List.of());
-    }
-
     @Override
     public GlobalMetadataCreatorResults create(
         GlobalMetadata root,

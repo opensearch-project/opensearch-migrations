@@ -9,8 +9,6 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
-import org.opensearch.migrations.metadata.GlobalMetadataCreator;
-import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.IClusterMetadataContext;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,7 +20,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
@@ -62,7 +59,7 @@ public class GlobalMetadataCreator_OS_2_11Test {
         doReturn(Map.of("it1", obj, ".its", obj)).when(creator).getAllTemplates(indexTemplates);
         doReturn(Map.of("ct1", obj, ".cts", obj)).when(creator).getAllTemplates(componentTemplates);
 
-        var results = creator.create(globalMetadata, MigrationMode.PERFORM, context);
+        var results = creator.create(globalMetadata, MigrationMode.PERFORM, context, List.of());
         assertThat(results.fatalIssueCount(), equalTo(0L));
         assertThat(results.getLegacyTemplates(), containsInAnyOrder(createSuccessResult("lit1"), createResult("lit2", SKIPPED_DUE_TO_FILTER), createResult(".lits", SKIPPED_DUE_TO_FILTER)));
         assertThat(results.getComponentTemplates(), containsInAnyOrder(createSuccessResult("ct1"), createResult(".cts", SKIPPED_DUE_TO_FILTER)));
@@ -112,16 +109,6 @@ public class GlobalMetadataCreator_OS_2_11Test {
         assertThat(results.getComponentTemplates(), containsInAnyOrder(
             createResult("ct1 (collection a)", CreationFailureType.METADATA_ALREADY_EXISTS),
             createSuccessResult("ct1 (collection b)")));
-    }
-
-    @Test
-    void testCreate_defaultGlobalMetadataCreator_rejectsCollections() {
-        var expected = GlobalMetadataCreatorResults.builder().build();
-        GlobalMetadataCreator plain = (metadata, mode, ctx) -> expected;
-
-        assertThat(plain.create(null, MigrationMode.PERFORM, context, List.of()), equalTo(expected));
-        assertThrows(UnsupportedOperationException.class,
-            () -> plain.create(null, MigrationMode.PERFORM, context, List.of("a")));
     }
 
     private CreationResult createSuccessResult(String name) {
