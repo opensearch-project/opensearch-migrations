@@ -86,21 +86,6 @@ public class ServerlessCollectionRouting {
         return Optional.of(new ServerlessCollectionRouting(staticRules, regexRules));
     }
 
-    /**
-     * Parses the routing table for a target, requiring a table exactly when the target is a
-     * collection-routed (per-account) endpoint.
-     */
-    public static Optional<ServerlessCollectionRouting> forTarget(String json, boolean targetCollectionRouted) {
-        var routing = fromJson(json);
-        if (targetCollectionRouted && routing.isEmpty()) {
-            throw new IllegalArgumentException("A collection-routed target requires --collection-routing");
-        }
-        if (!targetCollectionRouted && routing.isPresent()) {
-            throw new IllegalArgumentException("--collection-routing requires --target-collection-routed");
-        }
-        return routing;
-    }
-
     private static List<JsonNode> entries(JsonNode root, String field) {
         var list = root.get(field);
         if (list == null || list.isNull()) {

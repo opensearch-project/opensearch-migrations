@@ -117,23 +117,39 @@ class MigrateTest {
     }
 
     @Test
-    void migrate_rejectsCollectionRoutingWithoutRoutedTarget() {
+    void migrate_rejectsAnInvalidRoutingTableBeforeConnecting() {
         var args = new MigrateArgs();
         args.snapshotName = "snap1";
-        args.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
+        args.collectionRouting = "[]";
         var context = mock(RootMetadataMigrationContext.class);
 
         var result = new MetadataMigration().migrate(args).execute(context);
 
         assertThat(result.getExitCode(), equalTo(Migrate.INVALID_PARAMETER_CODE));
-        assertThat(result.getErrorMessage(), containsString("--target-collection-routed"));
+        assertThat(result.getErrorMessage(), containsString("must be a JSON object"));
+    }
+
+    private static boolean collectionRoutedAfterCreatingClusters(String collectionRouting) {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap1";
+        args.collectionRouting = collectionRouting;
+        // There is no source to connect to, but the target is marked first
+        assertThrows(Exception.class, new MetadataMigration().migrate(args)::createClusters);
+        return args.targetArgs.collectionRouted;
+    }
+
+    @Test
+    void createClusters_targetIsCollectionRoutedOnlyWithARoutingTable() {
+        assertThat(collectionRoutedAfterCreatingClusters(
+            "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}"), equalTo(true));
+        assertThat(collectionRoutedAfterCreatingClusters(null), equalTo(false));
+        assertThat(collectionRoutedAfterCreatingClusters(""), equalTo(false));
     }
 
     @Test
     void validateCollectionRouting_coversAllowlistedIndicesAndFailsOnUnmatched() {
         var args = new MigrateArgs();
         args.snapshotName = "snap1";
-        args.targetArgs.collectionRouted = true;
         args.collectionRouting = "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d+\", \"collection\": \"$1\"}]}";
         args.dataFilterArgs.indexAllowlist = List.of("regex:.*-\\d+");
         var migrate = new MetadataMigration().migrate(args);
@@ -151,7 +167,6 @@ class MigrateTest {
     void validateCollectionRouting_allowsAnEmptySelection() {
         var args = new MigrateArgs();
         args.snapshotName = "snap1";
-        args.targetArgs.collectionRouted = true;
         args.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
         args.dataFilterArgs.indexAllowlist = List.of("nothing-matches");
         var migrate = new MetadataMigration().migrate(args);

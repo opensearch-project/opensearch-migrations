@@ -49,13 +49,11 @@ public abstract class MigratorEvaluatorBase {
         this.clusterReaderCliExtractor = new ClusterReaderExtractor(arguments);
     }
 
-    /** Parses the routing table once; empty unless the target is collection-routed. */
+    /** Parses the routing table once; empty unless one was configured. */
     Optional<ServerlessCollectionRouting> getCollectionRouting() {
         if (!collectionRoutingParsed) {
             try {
-                collectionRouting = ServerlessCollectionRouting
-                    .forTarget(arguments.collectionRouting, arguments.targetArgs.collectionRouted)
-                    .orElse(null);
+                collectionRouting = ServerlessCollectionRouting.fromJson(arguments.collectionRouting).orElse(null);
             } catch (IllegalArgumentException e) {
                 throw new ParameterException(e.getMessage(), e);
             }
@@ -65,8 +63,8 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Clusters createClusters() {
-        // Reject a bad routing table before connecting to anything
-        getCollectionRouting();
+        // Also rejects a bad routing table before connecting to anything
+        arguments.targetArgs.collectionRouted = getCollectionRouting().isPresent();
 
         var clusters = Clusters.builder();
         var sourceCluster = clusterReaderCliExtractor.extractClusterReader();

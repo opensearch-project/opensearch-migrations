@@ -326,43 +326,42 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
-    void validateArgs_collectionRoutingRequiresRoutedTargetAndViceVersa() {
-        var routedWithoutTable = validEsArgs();
-        routedWithoutTable.targetArgs.collectionRouted = true;
-        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(routedWithoutTable));
-
-        var tableWithoutRoutedTarget = validEsArgs();
-        tableWithoutRoutedTarget.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
-        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(tableWithoutRoutedTarget));
-
-        var invalidTable = validEsArgs();
-        invalidTable.targetArgs.collectionRouted = true;
-        invalidTable.collectionRouting = "[]";
-        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(invalidTable));
-
+    void validateArgs_targetIsCollectionRoutedOnlyWithARoutingTable() {
         var routed = validEsArgs();
-        routed.targetArgs.collectionRouted = true;
         routed.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(routed));
+        assertTrue(routed.targetArgs.collectionRouted);
+
+        var unset = validEsArgs();
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(unset));
+        assertFalse(unset.targetArgs.collectionRouted);
+
+        // The workflow writes an empty string when a migration has no routing
+        var workflowDefault = validEsArgs();
+        workflowDefault.collectionRouting = "";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(workflowDefault));
+        assertFalse(workflowDefault.targetArgs.collectionRouted);
+
+        var invalidTable = validEsArgs();
+        invalidTable.collectionRouting = "[]";
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(invalidTable));
     }
 
     @Test
     void inlineJson_collectionRoutingArgsParseAsTheWorkflowSendsThem() throws Exception {
-        // The workflow sends the routing table as a JSON string and the target flag as a boolean
+        // The workflow sends the routing table as a JSON string
         var routing = "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}";
         var json = new ObjectMapper().writeValueAsString(Map.of(
             "targetHost", "https://123456789012.aoss.us-east-1.on.aws",
             "targetAwsRegion", "us-east-1",
             "targetAwsServiceSigningName", "aoss",
-            "targetCollectionRouted", true,
             "collectionRouting", routing));
         var args = new RfsMigrateDocuments.Args();
         JsonCommandLineParser.newBuilder().addObject(args).build()
             .parse(new String[]{"---INLINE-JSON", json});
 
         assertThat(args.collectionRouting, equalTo(routing));
-        assertTrue(args.targetArgs.toConnectionContext().isCollectionRouted());
-        var parsed = ServerlessCollectionRouting.forTarget(args.collectionRouting, args.targetArgs.collectionRouted);
+        var parsed = ServerlessCollectionRouting.fromJson(args.collectionRouting);
         assertThat(parsed.orElseThrow().resolve("tenant-a-2024"), equalTo(Optional.of("tenant-a")));
     }
 
@@ -374,7 +373,6 @@ class RfsMigrateDocumentsHelpersTest {
         assertThat(RfsMigrateDocuments.buildCollectionRoutedTarget(validEsArgs(), factory), nullValue());
 
         var args = validEsArgs();
-        args.targetArgs.collectionRouted = true;
         args.collectionRouting = "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}";
         var target = RfsMigrateDocuments.buildCollectionRoutedTarget(args, factory);
 

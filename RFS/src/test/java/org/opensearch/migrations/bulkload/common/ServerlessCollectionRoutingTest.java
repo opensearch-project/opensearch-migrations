@@ -160,16 +160,6 @@ class ServerlessCollectionRoutingTest {
     }
 
     @Test
-    void forTarget_requiresTableExactlyForRoutedTargets() {
-        var table = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
-
-        assertTrue(ServerlessCollectionRouting.forTarget(table, true).isPresent());
-        assertTrue(ServerlessCollectionRouting.forTarget(null, false).isEmpty());
-        assertThrows(IllegalArgumentException.class, () -> ServerlessCollectionRouting.forTarget(null, true));
-        assertThrows(IllegalArgumentException.class, () -> ServerlessCollectionRouting.forTarget(table, false));
-    }
-
-    @Test
     void headersFor_namesTheCollection() {
         assertEquals(Map.of("x-amz-aoss-collection-name", List.of("c")), ServerlessCollectionRouting.headersFor("c"));
         assertNull(ServerlessCollectionRouting.headersFor(null));

@@ -269,11 +269,12 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--collection-routing", "--collectionRouting" },
             description = """
-                Optional. JSON object mapping source indices to OpenSearch Serverless collections, e.g. \
+                Optional. JSON object mapping source indices to collections on an OpenSearch Serverless \
+                per-account endpoint (<account-id>.aoss.<region>.on.aws), e.g. \
                 {"staticCollectionRouting": [{"sourceIndex": "shared-config", "collection": "common"}], \
                 "regexCollectionRouting": [{"sourceIndex": "(.+)-\\\\d{4}", "collection": "$1"}]}. \
                 An exact static match wins, otherwise the first regex that matches the whole index name is used. \
-                Required when --target-collection-routed is set.""")
+                Requires SigV4 auth with service 'aoss'.""")
         public String collectionRouting;
 
         @Parameter(required = false,
@@ -484,7 +485,7 @@ public class RfsMigrateDocuments {
 
     public static void validateArgs(Args args) {
         try {
-            ServerlessCollectionRouting.forTarget(args.collectionRouting, args.targetArgs.collectionRouted);
+            args.targetArgs.collectionRouted = ServerlessCollectionRouting.fromJson(args.collectionRouting).isPresent();
         } catch (IllegalArgumentException e) {
             throw new ParameterException(e.getMessage(), e);
         }
@@ -675,8 +676,7 @@ public class RfsMigrateDocuments {
 
     /** Returns null unless the target is collection-routed. */
     static CollectionRoutedTarget buildCollectionRoutedTarget(Args arguments, OpenSearchClientFactory targetClientFactory) {
-        return ServerlessCollectionRouting
-            .forTarget(arguments.collectionRouting, arguments.targetArgs.collectionRouted)
+        return ServerlessCollectionRouting.fromJson(arguments.collectionRouting)
             .map(routing -> new CollectionRoutedTarget(routing,
                 collection -> requiresServerGeneratedIds(arguments.serverGeneratedIds, targetClientFactory, collection)))
             .orElse(null);

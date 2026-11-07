@@ -117,10 +117,9 @@ Both lists go in one JSON object.
 --target-host https://123456789012.aoss.us-east-1.on.aws \
 --target-aws-region us-east-1 \
 --target-aws-service-signing-name aoss \
---target-collection-routed \
 --collection-routing '{"staticCollectionRouting": [{"sourceIndex": "shared-config", "collection": "common"}],
   "regexCollectionRouting": [{"sourceIndex": "(.+)[-_]\\d{4}", "collection": "$1"}]}'
 ```
 
-Each tool requires `--collection-routing` when `--target-collection-routed` is set and rejects it otherwise.
-A collection-routed target is always treated as OpenSearch Serverless, so its version isn't probed.
+Setting `--collection-routing` makes the target collection-routed, so it also needs SigV4 auth with the `aoss`
+service. A collection-routed target is always treated as OpenSearch Serverless, so its version isn't probed.

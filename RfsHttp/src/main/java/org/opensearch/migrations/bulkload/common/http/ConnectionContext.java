@@ -237,12 +237,7 @@ public class ConnectionContext {
             description = "Allow untrusted SSL certificates for target", required = false)
         public boolean insecure = false;
 
-        @Parameter(
-            names = { "--target-collection-routed", "--targetCollectionRouted" },
-            description = "Optional. The target is an OpenSearch Serverless per-account endpoint " +
-                "(<account-id>.aoss.<region>.on.aws) that selects the collection from a request header. " +
-                "Requires a collection routing table.",
-            required = false)
+        /** Set by each tool when it has a collection routing table, rather than from the command line */
         public boolean collectionRouted = false;
 
         @ParametersDelegate

@@ -53,12 +53,13 @@ public class MigrateOrEvaluateArgs {
 
     @Parameter(required = false,
         names = { "--collection-routing", "--collectionRouting" },
-        description = "Optional. JSON object mapping source indices to OpenSearch Serverless collections, e.g. " +
+        description = "Optional. JSON object mapping source indices to collections on an OpenSearch Serverless " +
+            "per-account endpoint (<account-id>.aoss.<region>.on.aws), e.g. " +
             "{\"staticCollectionRouting\": [{\"sourceIndex\": \"shared-config\", \"collection\": \"common\"}], " +
             "\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}. " +
             "An exact static match wins, otherwise the first regex that matches the whole index name is used. " +
             "Templates aren't migrated to a collection-routed target. " +
-            "Required when --target-collection-routed is set.")
+            "Requires SigV4 auth with service 'aoss'.")
     public String collectionRouting;
 
     // https://opensearch.org/docs/2.19/tuning-your-cluster/#forced-awareness

@@ -178,14 +178,12 @@ public class MetadataMigrationTest {
                     "targetHost", "https://123456789012.aoss.us-east-1.on.aws",
                     "targetAwsRegion", "us-east-1",
                     "targetAwsServiceSigningName", "aoss",
-                    "targetCollectionRouted", true,
                     "collectionRouting", routing
                 ))
             });
 
         assertThat(migrateArgs.collectionRouting, equalTo(routing));
-        assertThat(migrateArgs.targetArgs.toConnectionContext().isCollectionRouted(), equalTo(true));
-        var parsed = ServerlessCollectionRouting.forTarget(migrateArgs.collectionRouting, migrateArgs.targetArgs.collectionRouted);
+        var parsed = ServerlessCollectionRouting.fromJson(migrateArgs.collectionRouting);
         assertThat(parsed.orElseThrow().resolve("shared-config"), equalTo(Optional.of("common")));
     }
 }
