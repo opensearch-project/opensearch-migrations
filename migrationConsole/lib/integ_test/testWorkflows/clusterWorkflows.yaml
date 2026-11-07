@@ -1359,7 +1359,7 @@ spec:
             # Add OpenSearch Helm repository
             helm repo add opensearch https://opensearch-project.github.io/helm-charts/
             helm repo update
-            
+
             # Create OpenSearch configuration
             cat > /tmp/opensearch.yml << EOF
             cluster.name: {{inputs.parameters.cluster-name}}
@@ -1369,7 +1369,7 @@ spec:
             thread_pool.write.size: 1
             thread_pool.write.queue_size: 10
             EOF
-            
+
             # Create OpenSearch values file
             cat > /tmp/opensearch-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
@@ -1396,13 +1396,13 @@ spec:
               installList:
                 - "repository-s3"
             EOF
-            
+
             # Install OpenSearch 2.19.1
             helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
               --namespace {{inputs.parameters.namespace}} \
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
-            
+
             # Create cluster credentials secret for compatibility with older test helpers.
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
               --from-literal=username=admin \
@@ -1411,7 +1411,7 @@ spec:
               --dry-run=client -o yaml | \
               kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} use-case=http-basic-credentials -o yaml | \
               kubectl apply -f -
-            
+
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
             {
@@ -1423,7 +1423,7 @@ spec:
             kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
               --from-file=cluster-config=/tmp/cluster-config.json \
               --namespace {{inputs.parameters.namespace}}
-            
+
             echo "Starved OpenSearch 2.19.1 cluster created successfully"
             echo "Cluster config:"
             cat /tmp/cluster-config.json
