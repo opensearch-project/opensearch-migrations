@@ -103,10 +103,11 @@ yourself.
 
 ## Document IDs
 
-Some collection types require the service to generate document IDs. With the default `serverGeneratedIds`
-setting of `AUTO`, each backfill work item checks the type of its collection before writing and drops source
-document IDs only when that collection needs it. One migration can therefore send indices to collections of
-different types, such as a search collection and a vector search collection.
+Vector search collections require the service to generate document IDs, while search collections keep the IDs from
+the source. One migration can route indices to both, so the decision is made per collection. With the default
+`serverGeneratedIds` setting of `AUTO`, each backfill work item checks the type of its collection before writing and
+drops source document IDs only if that collection needs it. `ALWAYS` and `NEVER` apply to every collection, so
+`ALWAYS` drops source IDs from search collections too, and `NEVER` can fail on vector search collections.
 
 ## Running the tools directly
 
