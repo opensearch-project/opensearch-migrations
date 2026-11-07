@@ -337,13 +337,13 @@ class RfsMigrateDocumentsHelpersTest {
 
         var unset = validEsArgs();
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(unset));
-        assertFalse(unset.targetArgs.collectionRouted);
+        assertFalse(unset.targetArgs.isCollectionRouted());
 
         // The workflow writes an empty string when a migration has no routing
         var workflowDefault = validEsArgs();
         workflowDefault.collectionRouting = "";
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(workflowDefault));
-        assertFalse(workflowDefault.targetArgs.collectionRouted);
+        assertFalse(workflowDefault.targetArgs.isCollectionRouted());
 
         var invalidTable = validEsArgs();
         invalidTable.collectionRouting = "[]";

@@ -64,7 +64,7 @@ public abstract class MigratorEvaluatorBase {
 
     protected Clusters createClusters() {
         // Also rejects a bad routing table before connecting to anything
-        arguments.targetArgs.collectionRouted = getCollectionRouting().isPresent();
+        arguments.targetArgs.setCollectionRouted(getCollectionRouting().isPresent());
 
         var clusters = Clusters.builder();
         var sourceCluster = clusterReaderCliExtractor.extractClusterReader();

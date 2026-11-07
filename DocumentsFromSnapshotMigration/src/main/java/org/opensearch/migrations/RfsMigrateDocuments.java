@@ -485,7 +485,7 @@ public class RfsMigrateDocuments {
 
     public static void validateArgs(Args args) {
         try {
-            args.targetArgs.collectionRouted = ServerlessCollectionRouting.fromJson(args.collectionRouting).isPresent();
+            args.targetArgs.setCollectionRouted(ServerlessCollectionRouting.fromJson(args.collectionRouting).isPresent());
         } catch (IllegalArgumentException e) {
             throw new ParameterException(e.getMessage(), e);
         }

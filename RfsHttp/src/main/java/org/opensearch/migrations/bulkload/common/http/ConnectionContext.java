@@ -16,6 +16,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.ToString;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
@@ -238,7 +239,8 @@ public class ConnectionContext {
         public boolean insecure = false;
 
         /** Set by each tool when it has a collection routing table, rather than from the command line */
-        public boolean collectionRouted = false;
+        @Setter
+        private boolean collectionRouted = false;
 
         @ParametersDelegate
         TargetAdvancedArgs advancedArgs = new TargetAdvancedArgs();
