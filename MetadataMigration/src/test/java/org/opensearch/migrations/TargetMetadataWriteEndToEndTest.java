@@ -87,8 +87,7 @@ class TargetMetadataWriteEndToEndTest {
                 indexMetadata,
                 MigrationMode.PERFORM,
                 AwarenessAttributeSettings.builder().balanceEnabled(false).numberOfAttributeValues(0).build(),
-                context.createIndexContext(),
-                null
+                context.createIndexContext()
             );
 
             assertThat("Index should be created", result.wasSuccessful(), equalTo(true));
@@ -122,8 +121,7 @@ class TargetMetadataWriteEndToEndTest {
                 indexMetadata,
                 MigrationMode.PERFORM,
                 AwarenessAttributeSettings.builder().balanceEnabled(false).numberOfAttributeValues(0).build(),
-                context.createIndexContext(),
-                null
+                context.createIndexContext()
             );
 
             assertThat("Should report already exists",

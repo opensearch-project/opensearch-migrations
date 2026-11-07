@@ -78,20 +78,17 @@ public abstract class OpenSearchClient {
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
 
-    // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
-    // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
-    // volatile: emitFailedDocumentStreamRecord runs on concurrent bulk-write threads (batchConcurrency defaults
-    // to 10) while setFailedDocumentStreamContext/setFailedDocumentStreamWorkItem are written from the pipeline thread, so these
-    // need safe publication across threads.
-    private volatile FailedDocumentStreamSink failedDocumentStreamSink;
-    private volatile String failedDocumentStreamSessionId = "unknown-session";
-    private volatile String failedDocumentStreamWorkerId = "unknown-worker";
-    // Canonical work-item id (index + shard + checkpoint) for the work item currently being
-    // processed. Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
-    private volatile String failedDocumentStreamWorkItemId;
+    private final FailedDocumentStreamContext failedDocumentStream;
 
     protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
                                CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
+        this(client, failedRequestsLogger, version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest,
+            new FailedDocumentStreamContext());
+    }
+
+    private OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
+                             CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest,
+                             FailedDocumentStreamContext failedDocumentStream) {
         if (maxDocsPerBulkRequest < 1 || maxBytesPerBulkRequest < 1) {
             throw new IllegalArgumentException("Bulk request count and byte limits must be positive");
         }
@@ -101,6 +98,20 @@ public abstract class OpenSearchClient {
         this.compressionMode = compressionMode;
         this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
         this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
+        this.failedDocumentStream = failedDocumentStream;
+    }
+
+    /**
+     * Returns a client that sends every request to one OpenSearch Serverless collection behind a
+     * per-account endpoint. It shares this client's connections and failed document stream context.
+     */
+    public OpenSearchClient forCollection(String serverlessCollection) {
+        return new CollectionBoundClient(this, serverlessCollection);
+    }
+
+    /** True for an OpenSearch Serverless per-account endpoint that selects the collection from a request header */
+    public boolean isCollectionRouted() {
+        return client.getConnectionContext().isCollectionRouted();
     }
 
     /**
@@ -109,9 +120,9 @@ public abstract class OpenSearchClient {
      * requests are issued.
      */
     public void setFailedDocumentStreamContext(FailedDocumentStreamSink failedDocumentStreamSink, String sessionId, String workerId) {
-        this.failedDocumentStreamSink = failedDocumentStreamSink;
-        this.failedDocumentStreamSessionId = sessionId;
-        this.failedDocumentStreamWorkerId = workerId;
+        failedDocumentStream.sink = failedDocumentStreamSink;
+        failedDocumentStream.sessionId = sessionId;
+        failedDocumentStream.workerId = workerId;
     }
 
     /**
@@ -123,11 +134,11 @@ public abstract class OpenSearchClient {
      * exact work item that produced it.
      */
     public void setFailedDocumentStreamWorkItem(String workItemId) {
-        this.failedDocumentStreamWorkItemId = workItemId;
+        failedDocumentStream.workItemId = workItemId;
     }
 
     public FailedDocumentStreamSink getFailedDocumentStreamSink() {
-        return failedDocumentStreamSink;
+        return failedDocumentStream.sink;
     }
 
     public Version getClusterVersion() {
@@ -137,11 +148,6 @@ public abstract class OpenSearchClient {
     private JsonNode getSettingFromPersistentOrDefaults(String path, ObjectNode settings) {
         return settings.get("persistent").has(path) ?
             settings.get("persistent").get(path) : settings.get("defaults").get(path);
-    }
-
-    /** True for an OpenSearch Serverless per-account endpoint that selects the collection from a request header */
-    public boolean isCollectionRouted() {
-        return client.getConnectionContext().isCollectionRouted();
     }
 
     public AwarenessAttributeSettings getAwarenessAttributeSettings() {
@@ -220,7 +226,7 @@ public abstract class OpenSearchClient {
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
         String targetPath = "_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings, context, null);
+        return createObjectIdempotent(targetPath, settings, context);
     }
 
     /*
@@ -233,7 +239,7 @@ public abstract class OpenSearchClient {
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
         String targetPath = "_component_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings, context, null);
+        return createObjectIdempotent(targetPath, settings, context);
     }
 
     /*
@@ -246,35 +252,30 @@ public abstract class OpenSearchClient {
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
         String targetPath = "_index_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings, context, null);
+        return createObjectIdempotent(targetPath, settings, context);
     }
 
     /** Returns true if this template already exists */
     public boolean hasLegacyTemplate(String templateName) {
         var targetPath = "_template/" + templateName;
-        return hasObjectCheck(targetPath, null, null);
+        return hasObjectCheck(targetPath, null);
     }
 
     /** Returns true if this template already exists */
     public boolean hasComponentTemplate(String templateName) {
         var targetPath = "_component_template/" + templateName;
-        return hasObjectCheck(targetPath, null, null);
+        return hasObjectCheck(targetPath, null);
     }
 
     /** Returns true if this template already exists */
     public boolean hasIndexTemplate(String templateName) {
         var targetPath = "_index_template/" + templateName;
-        return hasObjectCheck(targetPath, null, null);
+        return hasObjectCheck(targetPath, null);
     }
 
     /** Returns true if this index already exists */
     public boolean hasIndex(String indexName) {
-        return hasIndex(indexName, null);
-    }
-
-    /** Returns true if this index already exists */
-    public boolean hasIndex(String indexName, String serverlessCollection) {
-        return hasObjectCheck(indexName, null, serverlessCollection);
+        return hasObjectCheck(indexName, null);
     }
 
     protected abstract String getCreateIndexPath(String indexName);
@@ -288,35 +289,21 @@ public abstract class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
-        return createIndex(indexName, settings, context, null);
-    }
-
-    /**
-     * Create an index if it does not already exist.  serverlessCollection selects the OpenSearch
-     * Serverless collection on a per-account endpoint and is null for every other target.
-     */
-    public Optional<ObjectNode> createIndex(
-        String indexName,
-        ObjectNode settings,
-        IRfsContexts.ICheckedIdempotentPutRequestContext context,
-        String serverlessCollection
-    ) {
         var targetPath = getCreateIndexPath(indexName);
-        return createObjectIdempotent(targetPath, settings, context, serverlessCollection);
+        return createObjectIdempotent(targetPath, settings, context);
     }
 
     private Optional<ObjectNode> createObjectIdempotent(
         String objectPath,
         ObjectNode settings,
-        IRfsContexts.ICheckedIdempotentPutRequestContext context,
-        String serverlessCollection
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
         log.info("Starting createObjectIdempotent for path={} with settings={}", objectPath, settings);
-        var objectDoesNotExist = !hasObjectCheck(objectPath, context, serverlessCollection);
+        var objectDoesNotExist = !hasObjectCheck(objectPath, context);
         if (objectDoesNotExist) {
             long startTime = System.currentTimeMillis();
             var putRequestContext = context == null ? null : context.createCheckRequestContext();
-            var putResponse = putAsync(objectPath, settings.toString(), serverlessCollection, putRequestContext).flatMap(resp -> {
+            var putResponse = client.putAsync(objectPath, settings.toString(), putRequestContext).flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else if (resp.statusCode == HttpURLConnection.HTTP_BAD_REQUEST) {
@@ -344,19 +331,6 @@ public abstract class OpenSearchClient {
         return Optional.empty();
     }
 
-    private Mono<HttpResponse> getAsync(String path, String serverlessCollection, IRfsContexts.IRequestContext context) {
-        return serverlessCollection == null
-            ? client.getAsync(path, context)
-            : client.getAsync(path, ServerlessCollectionRouting.headersFor(serverlessCollection), context);
-    }
-
-    private Mono<HttpResponse> putAsync(String path, String body, String serverlessCollection,
-                                        IRfsContexts.IRequestContext context) {
-        return serverlessCollection == null
-            ? client.putAsync(path, body, context)
-            : client.putAsync(path, body, ServerlessCollectionRouting.headersFor(serverlessCollection), context);
-    }
-
     private static String getString(HttpResponse resp) {
         return "Response Code: "
             + resp.statusCode
@@ -368,15 +342,14 @@ public abstract class OpenSearchClient {
 
     private boolean hasObjectCheck(
         String objectPath,
-        IRfsContexts.ICheckedIdempotentPutRequestContext context,
-        String serverlessCollection
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
         log.info("Starting hasObjectCheck for path={}", objectPath);
         long startTime = System.currentTimeMillis();
         var requestContext = Optional.ofNullable(context)
             .map(IRfsContexts.ICheckedIdempotentPutRequestContext::createCheckRequestContext)
             .orElse(null);
-        var getResponse = getAsync(objectPath, serverlessCollection, requestContext)
+        var getResponse = client.getAsync(objectPath, requestContext)
             .flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND ||
                     resp.statusCode == HttpURLConnection.HTTP_OK)
@@ -569,16 +542,7 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
-        return sendBulkRequest(indexName, docs, context, allowServerGeneratedIds, allowlist, null);
-    }
-
-    public Mono<BulkResponse> sendBulkRequest(String indexName, List<? extends BulkOperationSpec> docs,
-                                              IRfsContexts.IRequestContext context,
-                                              boolean allowServerGeneratedIds,
-                                              DocumentExceptionAllowlist allowlist,
-                                              String serverlessCollection)
-    {
-        return sendBulkRequests(indexName, serverlessCollection, docs, op -> new PreparedOperation(() -> op,
+        return sendBulkRequests(indexName, docs, op -> new PreparedOperation(() -> op,
             BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER)), context, allowlist);
     }
 
@@ -587,15 +551,7 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
-        return sendBulkRequestRaw(indexName, docs, context, allowServerGeneratedIds, allowlist, null);
-    }
-
-    public Mono<BulkResponse> sendBulkRequestRaw(String indexName, List<Document> docs,
-                                                  IRfsContexts.IRequestContext context,
-                                                  boolean allowServerGeneratedIds,
-                                                  DocumentExceptionAllowlist allowlist,
-                                                  String serverlessCollection) {
-        return sendBulkRequests(indexName, serverlessCollection, docs, doc -> new PreparedOperation(
+        return sendBulkRequests(indexName, docs, doc -> new PreparedOperation(
             () -> BulkOperationConverter.fromRawDocument(doc, indexName),
             BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER)), context, allowlist);
     }
@@ -606,7 +562,7 @@ public abstract class OpenSearchClient {
     private record PreparedOperation(Supplier<BulkOperationSpec> operation, BulkNdjson.EncodedOperation encoded) {}
 
     private <T> Mono<BulkResponse> sendBulkRequests(
-        String indexName, String serverlessCollection, List<T> docs, Function<T, PreparedOperation> prepare,
+        String indexName, List<T> docs, Function<T, PreparedOperation> prepare,
         IRfsContexts.IRequestContext context, DocumentExceptionAllowlist allowlist
     ) {
         // The batching predicate and retry state must be fresh for every subscription.
@@ -615,7 +571,7 @@ public abstract class OpenSearchClient {
             .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
                 (PreparedOperation op) -> op.encoded().size()), true)
             // A split batch completes in source order, before its source checkpoint can advance.
-            .concatMap(batch -> executeBulkWithRetry(indexName, serverlessCollection, batch, context, allowlist), 1)
+            .concatMap(batch -> executeBulkWithRetry(indexName, batch, context, allowlist), 1)
             .reduce((previous, next) -> new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
                 previous.target.plus(next.target), previous.requests.plus(next.requests)))
             .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
@@ -629,14 +585,12 @@ public abstract class OpenSearchClient {
      * Shared bulk request execution with retry, error handling, and compaction.
      *
      * @param indexName         target index
-     * @param serverlessCollection collection header for per-account serverless endpoints, or null
      * @param pendingOps        mutable list of pending operations (compacted on partial success)
      * @param context           request context for metrics
      * @param allowlist         exception types to treat as success
      */
     private Mono<BulkResponse> executeBulkWithRetry(
         String indexName,
-        String serverlessCollection,
         List<PreparedOperation> pendingOps,
         IRfsContexts.IRequestContext context,
         DocumentExceptionAllowlist allowlist
@@ -652,7 +606,7 @@ public abstract class OpenSearchClient {
             totals.attempts++;
             totals.bytes += bodyBytes.length;
             long start = System.nanoTime();
-            return postBulkRequest(indexName, serverlessCollection, bodyBytes, context)
+            return postBulkRequest(indexName, bodyBytes, context)
                 .doOnSuccess(response -> totals.durationNanos += System.nanoTime() - start)
                 .doOnError(error -> totals.durationNanos += System.nanoTime() - start)
                 .flatMap(response -> {
@@ -715,12 +669,9 @@ public abstract class OpenSearchClient {
         MigrationMetrics.Operations target = MigrationMetrics.Operations.ZERO;
     }
 
-    private Mono<HttpResponse> postBulkRequest(String indexName, String serverlessCollection, byte[] bodyBytes,
+    private Mono<HttpResponse> postBulkRequest(String indexName, byte[] bodyBytes,
                                                        IRfsContexts.IRequestContext context) {
         var additionalHeaders = new HashMap<String, List<String>>();
-        if (serverlessCollection != null) {
-            additionalHeaders.putAll(ServerlessCollectionRouting.headersFor(serverlessCollection));
-        }
         if (CompressionMode.GZIP_BODY_COMPRESSION.equals(compressionMode)) {
             RestClient.addGzipRequestHeaders(additionalHeaders);
             RestClient.addGzipResponseHeaders(additionalHeaders);
@@ -846,7 +797,7 @@ public abstract class OpenSearchClient {
     }
 
     void emitFailedDocumentStreamRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
-        if (failedDocumentStreamSink == null) {
+        if (failedDocumentStream.sink == null) {
             return;
         }
         try {
@@ -864,9 +815,9 @@ public abstract class OpenSearchClient {
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
             FailedDocumentStreamRecord failedDocumentStreamRecord = FailedDocumentStreamRecord.builder()
-                .sessionId(failedDocumentStreamSessionId)
-                .workerId(failedDocumentStreamWorkerId)
-                .workItemId(failedDocumentStreamWorkItemId)
+                .sessionId(failedDocumentStream.sessionId)
+                .workerId(failedDocumentStream.workerId)
+                .workItemId(failedDocumentStream.workItemId)
                 .targetIndex(indexName)
                 .documentId(docId)
                 .failureType(failureType)
@@ -875,7 +826,7 @@ public abstract class OpenSearchClient {
                 .requestItem(requestItem)
                 .responseItem(responseItem)
                 .build();
-            failedDocumentStreamSink.write(failedDocumentStreamRecord).subscribe(
+            failedDocumentStream.sink.write(failedDocumentStreamRecord).subscribe(
                 v -> {},
                 err -> log.atError().setCause(err)
                     .setMessage("Failed to buffer failed document stream record for index {}: {}")
@@ -986,6 +937,45 @@ public abstract class OpenSearchClient {
     public static class UnexpectedStatusCode extends OperationFailed {
         public UnexpectedStatusCode(HttpResponse response) {
             super("Unexpected status code " + response.statusCode, response);
+        }
+    }
+
+    // Null sink when no failed document stream is configured. The bootstrap in RfsMigrateDocuments installs an
+    // S3FailedDocumentStreamSink when a bucket is provided. volatile: records are emitted on concurrent bulk-write
+    // threads (batchConcurrency defaults to 10) while the pipeline thread writes these, so they need safe
+    // publication across threads.
+    private static final class FailedDocumentStreamContext {
+        private volatile FailedDocumentStreamSink sink;
+        private volatile String sessionId = "unknown-session";
+        private volatile String workerId = "unknown-worker";
+        // Canonical work-item id (index + shard + checkpoint) for the work item currently being processed.
+        // Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
+        private volatile String workItemId;
+    }
+
+    private static final class CollectionBoundClient extends OpenSearchClient {
+        private final OpenSearchClient unbound;
+
+        private CollectionBoundClient(OpenSearchClient unbound, String serverlessCollection) {
+            super(unbound.client.withDefaultHeaders(ServerlessCollectionRouting.headersFor(serverlessCollection)),
+                unbound.failedRequestsLogger, unbound.version, unbound.compressionMode,
+                unbound.maxDocsPerBulkRequest, unbound.maxBytesPerBulkRequest, unbound.failedDocumentStream);
+            this.unbound = unbound;
+        }
+
+        @Override
+        protected String getCreateIndexPath(String indexName) {
+            return unbound.getCreateIndexPath(indexName);
+        }
+
+        @Override
+        protected String getBulkRequestPath(String indexName) {
+            return unbound.getBulkRequestPath(indexName);
+        }
+
+        @Override
+        protected Retry getBulkRetryStrategy() {
+            return unbound.getBulkRetryStrategy();
         }
     }
 }

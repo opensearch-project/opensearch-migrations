@@ -29,6 +29,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -65,14 +66,14 @@ class IndexCreator_OS_2_11Test {
     void testCreate() throws Exception {
         // Setup
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
 
         // Action
         var result = create(client, MIN_INDEX_JSON, "indexName");
 
         // Assertions
         assertThat(result.wasSuccessful(), equalTo(true));
-        verify(client).createIndex(any(), any(), any(), any());
+        verify(client).createIndex(any(), any(), any());
     }
 
     @Test
@@ -80,14 +81,14 @@ class IndexCreator_OS_2_11Test {
         // Setup
         var invalidResponse = mock(InvalidResponse.class);
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any())).thenThrow(invalidResponse);
+        when(client.createIndex(any(), any(), any())).thenThrow(invalidResponse);
 
         // Action
         var result = create(client, MIN_INDEX_JSON, "indexName");
 
         // Assertions
         assertThat(result.getException(), equalTo(invalidResponse));
-        verify(client).createIndex(any(), any(), any(), any());
+        verify(client).createIndex(any(), any(), any());
     }
 
     @Test
@@ -99,14 +100,14 @@ class IndexCreator_OS_2_11Test {
             "document.doc_id" // Unprocessable illegal argument - for document instead of index
         ));
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any())).thenThrow(invalidResponse);
+        when(client.createIndex(any(), any(), any())).thenThrow(invalidResponse);
 
         // Action
         var result = create(client, MIN_INDEX_JSON, "indexName");
 
         // Assertions
         assertThat(result.getException(), equalTo(invalidResponse));
-        verify(client).createIndex(any(), any(), any(), any());
+        verify(client).createIndex(any(), any(), any());
     }
 
     @Test
@@ -116,7 +117,7 @@ class IndexCreator_OS_2_11Test {
         when(invalidResponse.getIllegalArguments()).thenReturn(Set.of("index.lifecycle.name", "index.field_array", "index.field_string", "index.field_object"));
 
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any()))
+        when(client.createIndex(any(), any(), any()))
             .thenThrow(invalidResponse)
             .thenReturn(INDEX_CREATE_SUCCESS);
 
@@ -142,7 +143,7 @@ class IndexCreator_OS_2_11Test {
         assertThat(result.wasSuccessful(), equalTo(true));
 
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any(), any());
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
 
         var finalIndexBody = requestBodyCapture.getValue().toPrettyString();
         assertThat("Empty nodes are OK to send to the service", finalIndexBody, containsString("lifecycle"));
@@ -167,7 +168,7 @@ class IndexCreator_OS_2_11Test {
         ));
 
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any()))
+        when(client.createIndex(any(), any(), any()))
             .thenThrow(invalidResponse)
             .thenReturn(INDEX_CREATE_SUCCESS);
 
@@ -191,7 +192,7 @@ class IndexCreator_OS_2_11Test {
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
         // Exactly one retry — the second call must succeed because all three
         // illegal args were stripped on the first failure.
-        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any(), any());
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
 
         var finalIndexBody = requestBodyCapture.getValue().toPrettyString();
         assertThat(finalIndexBody, not(containsString("algo_param.ef_construction")));
@@ -208,7 +209,7 @@ class IndexCreator_OS_2_11Test {
         when(invalidResponse.getUnsupportedMappingParameters()).thenReturn(Set.of("_all", "_parent"));
 
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any()))
+        when(client.createIndex(any(), any(), any()))
             .thenThrow(invalidResponse)
             .thenReturn(INDEX_CREATE_SUCCESS);
 
@@ -230,7 +231,7 @@ class IndexCreator_OS_2_11Test {
         assertThat(result.wasSuccessful(), equalTo(true));
 
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any(), any());
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
 
         var finalIndexBody = requestBodyCapture.getValue().toPrettyString();
         assertThat(finalIndexBody, not(containsString("_all")));
@@ -246,7 +247,7 @@ class IndexCreator_OS_2_11Test {
         when(invalidResponse.getRemovedTokenFilters()).thenReturn(Set.of("standard"));
 
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any()))
+        when(client.createIndex(any(), any(), any()))
             .thenThrow(invalidResponse)
             .thenReturn(INDEX_CREATE_SUCCESS);
 
@@ -273,7 +274,7 @@ class IndexCreator_OS_2_11Test {
         assertThat(result.wasSuccessful(), equalTo(true));
 
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any(), any());
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
 
         var finalBody = requestBodyCapture.getValue();
         var filters = finalBody.get("settings")
@@ -295,21 +296,25 @@ class IndexCreator_OS_2_11Test {
     }
 
     @Test
-    void testCreate_collectionRouted_passesCollectionInBothModes() throws Exception {
+    void testForCollection_usesTheCollectionClientInBothModes() throws Exception {
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
-        when(client.hasIndex("indexName", "tenant-a")).thenReturn(true);
+        var collectionClient = mock(OpenSearchClient.class);
+        when(client.forCollection("tenant-a")).thenReturn(collectionClient);
+        when(collectionClient.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+        when(collectionClient.hasIndex("indexName")).thenReturn(true);
         var indexData = new IndexMetadataData_OS_2_11((ObjectNode) OBJECT_MAPPER.readTree(MIN_INDEX_JSON), "indexId", "indexName");
-        var indexCreator = new IndexCreator_OS_2_11(client);
+        var indexCreator = new IndexCreator_OS_2_11(client).forCollection("tenant-a");
         var awareness = new AwarenessAttributeSettings(false, 0);
 
-        var performed = indexCreator.create(indexData, MigrationMode.PERFORM, awareness, mock(ICreateIndexContext.class), "tenant-a");
-        var simulated = indexCreator.create(indexData, MigrationMode.SIMULATE, awareness, mock(ICreateIndexContext.class), "tenant-a");
+        var performed = indexCreator.create(indexData, MigrationMode.PERFORM, awareness, mock(ICreateIndexContext.class));
+        var simulated = indexCreator.create(indexData, MigrationMode.SIMULATE, awareness, mock(ICreateIndexContext.class));
 
         assertThat(performed.wasSuccessful(), equalTo(true));
-        verify(client).createIndex(eq("indexName"), any(), any(), eq("tenant-a"));
+        verify(collectionClient).createIndex(eq("indexName"), any(), any());
         assertThat(simulated.getFailureType(), equalTo(CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS));
-        verify(client).hasIndex("indexName", "tenant-a");
+        verify(collectionClient).hasIndex("indexName");
+        verify(client, never()).createIndex(any(), any(), any());
+        verify(client, never()).hasIndex(any());
     }
 
     @Test
@@ -318,7 +323,7 @@ class IndexCreator_OS_2_11Test {
         // settings.number_of_routing_shards. If the target rejects it (here with the error
         // Serverless returns), the setting is removed and creation is retried.
         var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(client.createIndex(any(), any(), any())).thenAnswer(invocation -> {
             ObjectNode body = invocation.getArgument(1);
             if (body.path("settings").has("number_of_routing_shards")) {
                 throw new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), SERVERLESS_ROUTING_SHARDS_ERROR));
@@ -330,7 +335,7 @@ class IndexCreator_OS_2_11Test {
 
         assertThat(String.valueOf(result.getException()), result.wasSuccessful(), equalTo(true));
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any(), any());
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
         var finalIndexBody = requestBodyCapture.getValue().toPrettyString();
         assertThat(finalIndexBody, not(containsString("number_of_routing_shards")));
         assertThat(finalIndexBody, containsString("number_of_shards"));
@@ -340,13 +345,13 @@ class IndexCreator_OS_2_11Test {
     void testCreate_serverlessTarget_doesNotSendRoutingShardsOrInternalSettings() throws Exception {
         var client = mock(OpenSearchClient.class);
         when(client.getClusterVersion()).thenReturn(Version.builder().flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH).major(2).build());
-        when(client.createIndex(any(), any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
 
         var result = create(client, ES_6_8_SNAPSHOT_INDEX_JSON, "v4_messages_01_2025");
 
         assertThat(result.wasSuccessful(), equalTo(true));
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client).createIndex(any(), requestBodyCapture.capture(), any(), any());
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
         var settings = requestBodyCapture.getValue().get("settings");
         assertThat(settings.toString(), equalTo("{\"number_of_replicas\":\"1\",\"number_of_shards\":\"1\"}"));
     }
@@ -355,13 +360,13 @@ class IndexCreator_OS_2_11Test {
     void testCreate_openSearchTarget_copiesRoutingShardsAndStripsInternalSettings() throws Exception {
         var client = mock(OpenSearchClient.class);
         when(client.getClusterVersion()).thenReturn(Version.fromString("OS 2.19.0"));
-        when(client.createIndex(any(), any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
 
         var result = create(client, ES_6_8_SNAPSHOT_INDEX_JSON, "v4_messages_01_2025");
 
         assertThat(result.wasSuccessful(), equalTo(true));
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client).createIndex(any(), requestBodyCapture.capture(), any(), any());
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
         var settings = requestBodyCapture.getValue().get("settings");
         assertThat(settings.toString(),
             equalTo("{\"number_of_replicas\":\"1\",\"number_of_shards\":\"1\",\"number_of_routing_shards\":1}"));
@@ -373,6 +378,6 @@ class IndexCreator_OS_2_11Test {
         var indexId = "indexId";
         var indexData = new IndexMetadataData_OS_2_11(node, indexId, indexName);
         var indexCreator = new IndexCreator_OS_2_11(client);
-        return indexCreator.create(indexData, MigrationMode.PERFORM, new AwarenessAttributeSettings(false, 0), mock(ICreateIndexContext.class), null);
+        return indexCreator.create(indexData, MigrationMode.PERFORM, new AwarenessAttributeSettings(false, 0), mock(ICreateIndexContext.class));
     }
 }

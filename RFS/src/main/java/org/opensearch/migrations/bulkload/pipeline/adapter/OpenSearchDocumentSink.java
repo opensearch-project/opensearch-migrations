@@ -83,9 +83,9 @@ public class OpenSearchDocumentSink implements DocumentSink {
     @Override
     public Mono<Void> createCollection(CollectionMetadata metadata) {
         return Mono.fromRunnable(() -> {
-            var serverlessCollection = collectionRoutedTarget != null
-                ? collectionRoutedTarget.collectionFor(metadata.name())
-                : null;
+            var targetClient = collectionRoutedTarget != null
+                ? client.forCollection(collectionRoutedTarget.collectionFor(metadata.name()))
+                : client;
             var sourceConfig = metadata.sourceConfig();
             if (sourceConfig.containsKey(CollectionMetadata.ES_NUMBER_OF_SHARDS)) {
                 // ES→ES path: reconstruct IndexMetadataSnapshot from sourceConfig
@@ -98,15 +98,15 @@ public class OpenSearchDocumentSink implements DocumentSink {
                     (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_SETTINGS),
                     (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_ALIASES)
                 );
-                OpenSearchIndexCreator.createIndex(client, esMetadata, OBJECT_MAPPER, null, serverlessCollection);
+                OpenSearchIndexCreator.createIndex(targetClient, esMetadata, OBJECT_MAPPER, null);
             } else if (sourceConfig.containsKey(CollectionMetadata.ES_MAPPINGS)) {
                 // Non-ES source with mappings (e.g. Solr): create index with mappings only
                 var body = OBJECT_MAPPER.createObjectNode();
                 body.set("mappings", (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_MAPPINGS));
-                client.createIndex(metadata.name(), body, null, serverlessCollection);
+                targetClient.createIndex(metadata.name(), body, null);
             } else {
                 // Unknown source: create index with defaults
-                client.createIndex(metadata.name(), OBJECT_MAPPER.createObjectNode(), null, serverlessCollection);
+                targetClient.createIndex(metadata.name(), OBJECT_MAPPER.createObjectNode(), null);
             }
         })
             .subscribeOn(Schedulers.boundedElastic())
@@ -126,12 +126,13 @@ public class OpenSearchDocumentSink implements DocumentSink {
         var useServerGeneratedIds = serverlessCollection != null
             ? collectionRoutedTarget.requiresServerGeneratedIds(serverlessCollection)
             : allowServerGeneratedIds;
+        var targetClient = serverlessCollection != null ? client.forCollection(serverlessCollection) : client;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (nativeTransformers != null && nativeTransformers.isEmpty()) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
-            bulkMono = client.sendBulkRequestRaw(collectionName, batch,
-                requestContext, useServerGeneratedIds, allowlist, serverlessCollection);
+            bulkMono = targetClient.sendBulkRequestRaw(collectionName, batch,
+                requestContext, useServerGeneratedIds, allowlist);
         } else if (nativeTransformers != null) {
             var operations = batch.stream()
                 .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
@@ -139,15 +140,15 @@ public class OpenSearchDocumentSink implements DocumentSink {
             for (var nativeTransformer : nativeTransformers) {
                 operations = nativeTransformer.transformOperations(operations);
             }
-            bulkMono = client.sendBulkRequest(collectionName, operations,
-                requestContext, useServerGeneratedIds, allowlist, serverlessCollection);
+            bulkMono = targetClient.sendBulkRequest(collectionName, operations,
+                requestContext, useServerGeneratedIds, allowlist);
         } else {
             var bulkOps = batch.stream()
                 .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
                 .collect(Collectors.toList());
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
-            bulkMono = client.sendBulkRequest(collectionName, opsToSend,
-                requestContext, useServerGeneratedIds, allowlist, serverlessCollection);
+            bulkMono = targetClient.sendBulkRequest(collectionName, opsToSend,
+                requestContext, useServerGeneratedIds, allowlist);
         }
 
         return bulkMono.map(response -> new BatchResult(batch.size(), bytesInBatch, response.target, response.requests));

@@ -16,9 +16,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,7 +43,9 @@ class IndexRunnerCollectionRoutingTest {
         when(transformer.transformIndexMetadata(sourceMetadata)).thenReturn(List.of(renamedMetadata));
 
         var indexCreator = mock(IndexCreator.class);
-        when(indexCreator.create(any(), any(), any(), any(), any()))
+        var collectionCreator = mock(IndexCreator.class);
+        when(indexCreator.forCollection("tenant-a")).thenReturn(collectionCreator);
+        when(collectionCreator.create(any(), any(), any(), any()))
             .thenReturn(CreationResult.builder().name("renamed").build());
 
         var routing = ServerlessCollectionRouting.fromJson(
@@ -54,6 +56,7 @@ class IndexRunnerCollectionRoutingTest {
         var context = mock(ICreateIndexContext.class);
         runner.migrateIndices(MigrationMode.PERFORM, context);
 
-        verify(indexCreator).create(eq(renamedMetadata), eq(MigrationMode.PERFORM), eq(awareness), eq(context), eq("tenant-a"));
+        verify(collectionCreator).create(renamedMetadata, MigrationMode.PERFORM, awareness, context);
+        verify(indexCreator, never()).create(any(), any(), any(), any());
     }
 }

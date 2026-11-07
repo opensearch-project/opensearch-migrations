@@ -40,12 +40,15 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
     protected final OpenSearchClient client;
 
     @Override
+    public IndexCreator forCollection(String serverlessCollection) {
+        return new IndexCreator_OS_2_11(client.forCollection(serverlessCollection));
+    }
+
     public CreationResult create(
         IndexMetadata index,
         MigrationMode mode,
         AwarenessAttributeSettings awarenessAttributeSettings,
-        ICreateIndexContext context,
-        String serverlessCollection
+        ICreateIndexContext context
     ) {
         var result = CreationResult.builder().name(index.getName());
         IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.getRawJson(), index.getId(), index.getName());
@@ -104,7 +107,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         body.set("settings", settings);
 
         try {
-            createInner(index, mode, context, result, settings, mappings, body, awarenessAttributeSettings, serverlessCollection);
+            createInner(index, mode, context, result, settings, mappings, body, awarenessAttributeSettings);
         } catch (IncompatibleReplicaCountException e) {
             result.failureType(CreationFailureType.INCOMPATIBLE_REPLICA_COUNT_FAILURE);
             result.exception(e);
@@ -147,14 +150,13 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                              ObjectNode settings,
                              ObjectNode mappings,
                              ObjectNode body,
-                             AwarenessAttributeSettings awarenessAttributeSettings,
-                             String serverlessCollection) throws IncompatibleReplicaCountException {
+                             AwarenessAttributeSettings awarenessAttributeSettings) throws IncompatibleReplicaCountException {
         // Create the index; it's fine if it already exists
         var alreadyExists = false;
         if (mode == MigrationMode.SIMULATE) {
-            alreadyExists = client.hasIndex(index.getName(), serverlessCollection);
+            alreadyExists = client.hasIndex(index.getName());
         } else if (mode == MigrationMode.PERFORM) {
-            alreadyExists = createWithRetry(index.getName(), body, settings, mappings, context, serverlessCollection);
+            alreadyExists = createWithRetry(index.getName(), body, settings, mappings, context);
         }
 
         if (alreadyExists) {
@@ -173,11 +175,10 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
      *
      * @return true if the index already existed, false if it was created
      */
-    private boolean createWithRetry(String indexName, ObjectNode body, ObjectNode settings, ObjectNode mappings,
-                                    ICreateIndexContext context, String serverlessCollection) throws IncompatibleReplicaCountException {
+    private boolean createWithRetry(String indexName, ObjectNode body, ObjectNode settings, ObjectNode mappings, ICreateIndexContext context) throws IncompatibleReplicaCountException {
         while (true) {
             try {
-                return client.createIndex(indexName, body, context, serverlessCollection).isEmpty();
+                return client.createIndex(indexName, body, context).isEmpty();
             } catch (InvalidResponse invalidResponse) {
                 handleInvalidResponse(invalidResponse, indexName, settings, mappings);
             } catch (Exception e) {

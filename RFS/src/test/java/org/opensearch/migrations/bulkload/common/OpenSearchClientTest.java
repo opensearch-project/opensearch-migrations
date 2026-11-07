@@ -34,6 +34,7 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempoten
 import org.opensearch.migrations.bulkload.transformers.BulkVersioningTransformerProvider;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -665,36 +666,42 @@ class OpenSearchClientTest {
         verifyNoMoreInteractions(restClient);
     }
 
+    private RestClient collectionRestClient(String collection) {
+        var collectionRestClient = mock(RestClient.class);
+        when(restClient.withDefaultHeaders(Map.of("x-amz-aoss-collection-name", List.of(collection))))
+            .thenReturn(collectionRestClient);
+        return collectionRestClient;
+    }
+
     @Test
-    void testBulkRequest_addsCollectionHeader_whenRouted() {
+    void testForCollection_sendsBulkRequestsThroughTheCollectionRestClient() {
+        var collectionRestClient = collectionRestClient("tenant-a");
         var docId = "tt1979320";
-        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+        when(collectionRestClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry(docId)))));
 
-        openSearchClient.sendBulkRequest(
+        openSearchClient.forCollection("tenant-a").sendBulkRequest(
             "testIndex",
             List.of(createBulkDoc(docId)),
             mock(IRfsContexts.IRequestContext.class),
             false,
-            DocumentExceptionAllowlist.empty(),
-            "tenant-a"
+            DocumentExceptionAllowlist.empty()
         ).block();
 
-        ArgumentCaptor<Map<String, List<String>>> headersCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(restClient).postAsyncBytes(eq("testIndex/_bulk"), any(), headersCaptor.capture(), any());
-        assertThat(headersCaptor.getValue().get("x-amz-aoss-collection-name"), equalTo(List.of("tenant-a")));
+        verify(collectionRestClient).postAsyncBytes(eq("testIndex/_bulk"), any(), any(), any());
+        verify(restClient, times(0)).postAsyncBytes(any(), any(), any(), any());
     }
 
     @Test
-    void testCreateIndex_addsCollectionHeader_whenRouted() {
-        var collectionHeaders = Map.of("x-amz-aoss-collection-name", List.of("tenant-a"));
-        when(restClient.getAsync(eq("indexName"), eq(collectionHeaders), any()))
+    void testForCollection_createsIndicesThroughTheCollectionRestClient() {
+        var collectionRestClient = collectionRestClient("tenant-a");
+        when(collectionRestClient.getAsync(eq("indexName"), any()))
             .thenReturn(Mono.just(new HttpResponse(404, "", null, "does not exist")));
-        when(restClient.putAsync(eq("indexName"), any(), eq(collectionHeaders), any()))
+        when(collectionRestClient.putAsync(eq("indexName"), any(), any()))
             .thenReturn(Mono.just(new HttpResponse(200, "", null, "{}")));
 
-        var result = openSearchClient.createIndex("indexName", OBJECT_MAPPER.createObjectNode(),
-            mock(ICheckedIdempotentPutRequestContext.class), "tenant-a");
+        var result = openSearchClient.forCollection("tenant-a").createIndex("indexName",
+            OBJECT_MAPPER.createObjectNode(), mock(ICheckedIdempotentPutRequestContext.class));
 
         assertThat(result.isPresent(), equalTo(true));
         verify(restClient, times(0)).getAsync(any(), any());
@@ -702,14 +709,14 @@ class OpenSearchClientTest {
     }
 
     @Test
-    void testHasIndex_addsCollectionHeader_whenRouted() {
-        var collectionHeaders = Map.of("x-amz-aoss-collection-name", List.of("c"));
-        when(restClient.getAsync(any(), eq(collectionHeaders), any()))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null, "{}")));
+    void testForCollection_sharesFailedDocumentStreamContextSetAfterBinding() {
+        collectionRestClient("tenant-a");
+        var bound = openSearchClient.forCollection("tenant-a");
+        var sink = mock(FailedDocumentStreamSink.class);
 
-        assertThat(openSearchClient.hasIndex("i", "c"), equalTo(true));
+        openSearchClient.setFailedDocumentStreamContext(sink, "session", "worker");
 
-        verify(restClient).getAsync(eq("i"), eq(collectionHeaders), any());
+        assertThat(bound.getFailedDocumentStreamSink(), equalTo(sink));
     }
 
     @ParameterizedTest

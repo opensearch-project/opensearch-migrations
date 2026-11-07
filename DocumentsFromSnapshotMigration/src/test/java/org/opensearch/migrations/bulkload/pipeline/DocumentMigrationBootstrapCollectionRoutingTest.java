@@ -23,7 +23,6 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -32,6 +31,7 @@ import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,14 +39,16 @@ class DocumentMigrationBootstrapCollectionRoutingTest {
     private static final String INDEX = "tenant-a-2024";
 
     @Test
-    @SuppressWarnings("unchecked")
     void routedWorkItem_probesOnCallingThreadAndSendsCollectionHeader() {
         var restClient = mock(RestClient.class);
         var connectionContext = mock(ConnectionContext.class);
         when(connectionContext.getUri()).thenReturn(URI.create("https://123456789012.aoss.us-east-1.on.aws/"));
         when(restClient.getConnectionContext()).thenReturn(connectionContext);
         var response = "{\"took\":1,\"errors\":false,\"items\":[]}";
-        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+        var collectionRestClient = mock(RestClient.class);
+        when(restClient.withDefaultHeaders(Map.of(ServerlessCollectionRouting.COLLECTION_NAME_HEADER, List.of("tenant-a"))))
+            .thenReturn(collectionRestClient);
+        when(collectionRestClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(new HttpResponse(200, "", null, response)));
         var client = new OpenSearchClient_OS_2_11(restClient, mock(FailedRequestsLogger.class),
             Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED);
@@ -81,8 +83,7 @@ class DocumentMigrationBootstrapCollectionRoutingTest {
         assertThat(status, is(CompletionStatus.WORK_COMPLETED));
         // The probe may block, so it has to run before the reactive pipeline starts
         assertThat(probeThreads, equalTo(List.of(Thread.currentThread())));
-        ArgumentCaptor<Map<String, List<String>>> headers = ArgumentCaptor.forClass(Map.class);
-        verify(restClient).postAsyncBytes(eq(INDEX + "/_bulk"), any(), headers.capture(), any());
-        assertThat(headers.getValue().get(ServerlessCollectionRouting.COLLECTION_NAME_HEADER), equalTo(List.of("tenant-a")));
+        verify(collectionRestClient).postAsyncBytes(eq(INDEX + "/_bulk"), any(), any(), any());
+        verify(restClient, never()).postAsyncBytes(any(), any(), any(), any());
     }
 }

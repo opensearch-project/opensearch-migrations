@@ -129,8 +129,8 @@ class CollectionRoutedSigningTest {
     @Test
     void bulkRequest_signsCollectionHeaderOnTheWire() throws Exception {
         try (var server = SimpleNettyHttpServer.makeServer(false, this::respond)) {
-            routedClient(server.port).sendBulkRequest("tenant-a-2024", List.of(bulkDoc()), null,
-                false, DocumentExceptionAllowlist.empty(), "tenant-a").block();
+            routedClient(server.port).forCollection("tenant-a").sendBulkRequest("tenant-a-2024", List.of(bulkDoc()), null,
+                false, DocumentExceptionAllowlist.empty()).block();
         }
 
         assertThat(received, hasSize(1));
@@ -144,11 +144,24 @@ class CollectionRoutedSigningTest {
     void createIndex_signsCollectionHeaderOnCheckAndCreate() throws Exception {
         var settings = new ObjectMapper().createObjectNode().put("settings", "{}");
         try (var server = SimpleNettyHttpServer.makeServer(false, this::respond)) {
-            routedClient(server.port).createIndex("logs", settings, null, "common");
+            routedClient(server.port).forCollection("common").createIndex("logs", settings, null);
         }
 
         assertThat(received, hasSize(2));
         assertSignedFor(received.get(0), null, "common");
         assertSignedFor(received.get(1), settings.toString().getBytes(StandardCharsets.UTF_8), "common");
+    }
+
+    @Test
+    void forCollection_leavesTheOriginalClientUnbound() throws Exception {
+        var settings = new ObjectMapper().createObjectNode().put("settings", "{}");
+        try (var server = SimpleNettyHttpServer.makeServer(false, this::respond)) {
+            var client = routedClient(server.port);
+            client.forCollection("common");
+            client.createIndex("logs", settings, null);
+        }
+
+        assertThat(received, hasSize(2));
+        received.forEach(request -> assertThat(request.headers().containsKey(COLLECTION_HEADER), equalTo(false)));
     }
 }

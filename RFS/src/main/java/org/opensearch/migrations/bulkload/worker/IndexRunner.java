@@ -107,8 +107,10 @@ public class IndexRunner {
                                        IndexMetadata transformedMetadata) {
         try {
             // Route by the source index name so metadata and documents land in the same collection
-            var serverlessCollection = collectionRouting == null ? null : collectionRouting.resolveRequired(indexName);
-            return indexCreator.create(transformedMetadata, mode, awarenessAttributeSettings, context, serverlessCollection);
+            var creator = collectionRouting == null
+                ? indexCreator
+                : indexCreator.forCollection(collectionRouting.resolveRequired(indexName));
+            return creator.create(transformedMetadata, mode, awarenessAttributeSettings, context);
         } catch (Exception e) {
             log.atError()
                 .setMessage("Index Creation failed for index \"{}\"")
