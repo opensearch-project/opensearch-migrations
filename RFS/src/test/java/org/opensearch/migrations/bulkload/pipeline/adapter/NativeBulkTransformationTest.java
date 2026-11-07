@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.bulkload.transformers.BulkVersioningTransformerProvider;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -331,7 +332,8 @@ class NativeBulkTransformationTest {
         when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any()))
             .thenReturn(Mono.just(new OpenSearchClient.BulkResponse(200, "", null, "{}")));
         var sink = new OpenSearchDocumentSink(client, () -> transformer, false, DocumentExceptionAllowlist.empty(), null);
-        sink.writeBatch("products", documents).block();
+        sink.writeBatch("products", documents.stream()
+            .map(d -> new PositionedDocument(d, "cursor-after-" + d.id())).toList()).block();
         ArgumentCaptor<List<BulkOperationSpec>> captured = ArgumentCaptor.forClass(List.class);
         verify(client).sendBulkRequest(anyString(), captured.capture(), any(), anyBoolean(), any());
         return captured.getValue();

@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
@@ -237,7 +238,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 .delta(snapshot1Name, DeltaMode.UPDATES_AND_DELETES,
                     () -> new RfsContexts.DeltaStreamContext(countsContext, null)).build()) {
                 var partition = source.listPartitions(indexName).get(0);
-                var changes = source.readDocuments(partition, 0).collectList().block();
+                var changes = source.readDocuments(partition, null).map(PositionedDocument::document).collectList().block();
                 var metrics = MigrationMetrics.Operations.fromDocuments(changes);
                 Assertions.assertEquals(1, metrics.upserts());
                 Assertions.assertEquals(1, metrics.deletes());

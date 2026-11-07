@@ -12,6 +12,7 @@ import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -45,7 +46,7 @@ class LuceneSnapshotSourceCheckpointTest {
         try (var source = builder.build()) {
             var partition = source.listPartitions("idx").get(0);
             assertTrue(source.snapshotDocumentCounts(partition).isEmpty(), "the reader has not opened yet");
-            source.readDocuments(partition, 9).blockLast();
+            source.readDocuments(partition, "lucene:9").blockLast();
             assertEquals(Optional.of(new SnapshotDocumentCounts(liveCount, liveCount / 2, 3)),
                 source.snapshotDocumentCounts(partition));
         }
@@ -66,13 +67,13 @@ class LuceneSnapshotSourceCheckpointTest {
         try (var source = LuceneSnapshotSource.builder(extractor, "current", Path.of("/unused"))
             .delta("previous", DeltaMode.UPDATES_AND_DELETES, () -> null).build()) {
             var partition = source.listPartitions("idx").get(0);
-            var documents = source.readDocuments(partition, 0).collectList().block();
-            assertEquals(List.of(0L, 1L, 2L),
-                documents.stream().map(d -> d.position().orElseThrow()).toList());
-            assertEquals(80, documents.get(0).sourceMetadata().get(Document.SOURCE_META_LUCENE_DOC_NUMBER));
-            for (int i = 0; i < documents.size(); i++) {
+            var documents = source.readDocuments(partition, null).collectList().block();
+            assertEquals(List.of("delta:1", "delta:2", "delta:3"),
+                documents.stream().map(PositionedDocument::cursorAfter).toList());
+            assertEquals(80, documents.get(0).document().sourceMetadata().get(Document.SOURCE_META_LUCENE_DOC_NUMBER));
+            for (int i = 1; i < documents.size(); i++) {
                 assertEquals(documents.subList(i, documents.size()),
-                    source.readDocuments(partition, documents.get(i).position().orElseThrow()).collectList().block());
+                    source.readDocuments(partition, documents.get(i - 1).cursorAfter()).collectList().block());
             }
             assertTrue(source.snapshotDocumentCounts(partition).isEmpty(),
                 "delta operations do not provide a whole-shard live count");

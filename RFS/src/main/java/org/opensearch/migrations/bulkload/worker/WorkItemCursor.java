@@ -5,20 +5,26 @@ import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 
 import lombok.Value;
 
+/**
+ * The last position a worker has durably committed for its work item.
+ *
+ * <p>The cursor is opaque: it comes from the source that produced the documents and is only ever
+ * handed back to that source, or written into a successor work item.
+ */
 @Value
 public class WorkItemCursor {
-    long progressCheckpointNum;
+    String cursor;
     MigrationMetrics metrics;
     boolean shardComplete;
     SnapshotDocumentCounts snapshotDocumentCounts;
 
-    public WorkItemCursor(long progressCheckpointNum) {
-        this(progressCheckpointNum, MigrationMetrics.ZERO, false, null);
+    public WorkItemCursor(String cursor) {
+        this(cursor, MigrationMetrics.ZERO, false, null);
     }
 
-    public WorkItemCursor(long progressCheckpointNum, MigrationMetrics metrics,
+    public WorkItemCursor(String cursor, MigrationMetrics metrics,
                           boolean shardComplete, SnapshotDocumentCounts snapshotDocumentCounts) {
-        this.progressCheckpointNum = progressCheckpointNum;
+        this.cursor = cursor;
         this.metrics = java.util.Objects.requireNonNull(metrics);
         this.shardComplete = shardComplete;
         this.snapshotDocumentCounts = snapshotDocumentCounts;

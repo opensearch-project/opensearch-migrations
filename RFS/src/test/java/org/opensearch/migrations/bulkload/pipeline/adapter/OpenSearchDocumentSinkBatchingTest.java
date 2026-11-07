@@ -27,6 +27,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
@@ -90,7 +91,7 @@ class OpenSearchDocumentSinkBatchingTest {
         long limit = serialized(docs.subList(0, 2)).length;
         var sink = sink(transformer, Integer.MAX_VALUE, limit);
 
-        var result = sink.writeBatch("idx", docs).block(Duration.ofSeconds(10));
+        var result = sink.writeBatch("idx", positioned(docs)).block(Duration.ofSeconds(10));
 
         assertNotNull(result);
         assertEquals(List.of(2, 1), requestCounts());
@@ -111,7 +112,7 @@ class OpenSearchDocumentSinkBatchingTest {
         var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":1}"));
         long limit = serialized(docs).length - 1L;
 
-        sink(identity(path), Integer.MAX_VALUE, limit).writeBatch("idx", docs).block(Duration.ofSeconds(10));
+        sink(identity(path), Integer.MAX_VALUE, limit).writeBatch("idx", positioned(docs)).block(Duration.ofSeconds(10));
 
         assertEquals(List.of(1, 1), requestCounts());
         assertTrue(requests.stream().allMatch(bytes -> bytes.length <= limit));
@@ -125,7 +126,7 @@ class OpenSearchDocumentSinkBatchingTest {
         var docs = List.of(doc("d1", source), doc("d2", source), doc("d3", source));
         var expected = serialized(List.of(doc("d1", singleLine), doc("d2", singleLine)));
         var result = sink(identity(path), Integer.MAX_VALUE, expected.length)
-            .writeBatch("idx", docs).block(Duration.ofSeconds(10));
+            .writeBatch("idx", positioned(docs)).block(Duration.ofSeconds(10));
 
         assertEquals(List.of(2, 1), requestCounts());
         org.junit.jupiter.api.Assertions.assertArrayEquals(expected, requests.get(0));
@@ -172,7 +173,7 @@ class OpenSearchDocumentSinkBatchingTest {
         var docs = List.of(doc("d1", json), doc("d2", json), doc("d3", json));
         long limit = 10L * 1024 * 1024;
 
-        sink(null, Integer.MAX_VALUE, limit).writeBatch("idx", docs).block(Duration.ofSeconds(20));
+        sink(null, Integer.MAX_VALUE, limit).writeBatch("idx", positioned(docs)).block(Duration.ofSeconds(20));
 
         assertEquals(List.of(1, 1, 1), requestCounts());
         assertTrue(requests.stream().allMatch(bytes -> bytes.length <= limit));
@@ -185,7 +186,7 @@ class OpenSearchDocumentSinkBatchingTest {
             doc("d3", "{\"x\":1}"));
         long limit = 200;
 
-        sink(identity(path), Integer.MAX_VALUE, limit).writeBatch("idx", docs).block(Duration.ofSeconds(10));
+        sink(identity(path), Integer.MAX_VALUE, limit).writeBatch("idx", positioned(docs)).block(Duration.ofSeconds(10));
 
         assertEquals(List.of(1, 1, 1), requestCounts());
         assertTrue(requests.get(1).length > limit);
@@ -209,7 +210,7 @@ class OpenSearchDocumentSinkBatchingTest {
             };
         long limit = 250;
 
-        var result = sink(transform, Integer.MAX_VALUE, limit).writeBatch("idx", docs).block(Duration.ofSeconds(10));
+        var result = sink(transform, Integer.MAX_VALUE, limit).writeBatch("idx", positioned(docs)).block(Duration.ofSeconds(10));
 
         assertNotNull(result);
         assertEquals(List.of(1, 1, 1), requestCounts());
@@ -232,7 +233,7 @@ class OpenSearchDocumentSinkBatchingTest {
             }).toList();
         };
 
-        var result = sink(expand, 2, 1000).writeBatch("idx", List.of(doc("source", "{\"x\":1}"))).block();
+        var result = sink(expand, 2, 1000).writeBatch("idx", positioned(List.of(doc("source", "{\"x\":1}")))).block();
 
         assertNotNull(result);
         assertEquals(List.of(2, 2, 1), requestCounts());
@@ -259,10 +260,10 @@ class OpenSearchDocumentSinkBatchingTest {
         }).when(transport).postAsyncBytes(any(), any(), any(), any());
         var partition = new EsShardPartition("snapshot", "idx", 0);
         var source = mock(DocumentSource.class);
-        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+        when(source.readDocuments(partition, null)).thenReturn(Flux.fromIterable(positioned(docs)));
         var cursors = new CopyOnWriteArrayList<ProgressCursor>();
         var future = new DocumentMigrationPipeline(source, sink, 10, 1000)
-            .migratePartition(partition, "idx", 0).doOnNext(cursors::add).then().toFuture();
+            .migratePartition(partition, "idx", null).doOnNext(cursors::add).then().toFuture();
         assertTrue(firstStarted.await(10, TimeUnit.SECONDS));
         assertEquals(1, requests.size());
         assertTrue(cursors.isEmpty());
@@ -273,7 +274,7 @@ class OpenSearchDocumentSinkBatchingTest {
         completions.get(1).tryEmitValue(OK);
         future.get(10, TimeUnit.SECONDS);
         assertEquals(1, cursors.size());
-        assertEquals(2, cursors.get(0).nextPosition());
+        assertEquals("2", cursors.get(0).cursorAfter());
         assertEquals(2, cursors.get(0).metrics().requests().total());
     }
 
@@ -318,11 +319,11 @@ class OpenSearchDocumentSinkBatchingTest {
         var partition = new EsShardPartition("snapshot", "idx", 0);
         var source = mock(DocumentSource.class);
         var docs = List.of(doc("d1", "{}"), doc("d2", "{}"), doc("d3", "{}"));
-        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+        when(source.readDocuments(partition, null)).thenReturn(Flux.fromIterable(positioned(docs)));
         var cursors = new CopyOnWriteArrayList<ProgressCursor>();
 
         assertThrows(RuntimeException.class, () -> new DocumentMigrationPipeline(source, sink, 10, 1000)
-            .migratePartition(partition, "idx", 0).doOnNext(cursors::add).blockLast(Duration.ofSeconds(10)));
+            .migratePartition(partition, "idx", null).doOnNext(cursors::add).blockLast(Duration.ofSeconds(10)));
 
         assertTrue(cursors.isEmpty());
         verify(transport, times(2)).postAsyncBytes(any(), any(), any(), any());
@@ -339,6 +340,12 @@ class OpenSearchDocumentSinkBatchingTest {
     private static Document doc(String id, String json) {
         return new Document(id, json.getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT,
             Map.of(Document.HINT_ROUTING, "路由"), Map.of());
+    }
+
+    private static List<PositionedDocument> positioned(List<Document> docs) {
+        return IntStream.range(0, docs.size())
+            .mapToObj(i -> new PositionedDocument(docs.get(i), String.valueOf(i + 1)))
+            .toList();
     }
 
     private static byte[] serialized(List<Document> docs) {

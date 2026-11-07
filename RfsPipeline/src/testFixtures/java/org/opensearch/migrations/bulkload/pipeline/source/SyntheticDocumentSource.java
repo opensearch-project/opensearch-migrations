@@ -3,17 +3,21 @@ package org.opensearch.migrations.bulkload.pipeline.source;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 
 import reactor.core.publisher.Flux;
 
 /**
  * In-memory document source for testing. Generates synthetic documents with predictable
  * IDs and content, enabling deterministic pipeline tests without real snapshots.
+ *
+ * <p>Its cursor is the decimal index of the next document to emit.
  */
 public class SyntheticDocumentSource implements DocumentSource {
 
@@ -47,28 +51,37 @@ public class SyntheticDocumentSource implements DocumentSource {
     }
 
     @Override
+    public Optional<Partition> findPartition(String collectionName, String partitionName) {
+        return listPartitions(collectionName).stream()
+            .filter(p -> p.name().equals(partitionName))
+            .findFirst();
+    }
+
+    @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
         return new CollectionMetadata(collectionName, partitionCount, Map.of());
     }
 
     @Override
-    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+    public Flux<PositionedDocument> readDocuments(Partition partition, String startingCursor) {
         var synth = (SyntheticPartition) partition;
-        int count = docsPerPartition - (int) startingDocOffset;
+        int start = startingCursor == null ? 0 : Integer.parseInt(startingCursor);
+        int count = docsPerPartition - start;
         if (count <= 0) {
             return Flux.empty();
         }
-        return Flux.range((int) startingDocOffset, count)
+        return Flux.range(start, count)
             .map(docNum -> {
                 String id = synth.collectionName() + "-" + synth.index() + "-" + docNum;
                 String body = "{\"field\":\"value-" + docNum + "\",\"partition\":" + synth.index() + "}";
-                return new Document(
+                var doc = new Document(
                     id,
                     body.getBytes(StandardCharsets.UTF_8),
                     Document.Operation.UPSERT,
                     Map.of(),
                     Map.of()
                 );
+                return new PositionedDocument(doc, String.valueOf(docNum + 1));
             });
     }
 

@@ -72,7 +72,7 @@ public class SnapshotDocCountTest extends SourceTestBase {
             try (var source = LuceneSnapshotSource.builder(extractor, "legacy-snapshot",
                     Files.createTempDirectory(localDirectory.toPath(), "counts")).build()) {
                 var partition = source.listPartitions("legacy").get(0);
-                Assertions.assertEquals(1, source.readDocuments(partition, 0).count().block());
+                Assertions.assertEquals(1, source.readDocuments(partition, null).count().block());
                 Assertions.assertEquals(new SnapshotDocumentCounts(1, 0, 0),
                     source.snapshotDocumentCounts(partition).orElseThrow());
             }
@@ -204,7 +204,7 @@ public class SnapshotDocCountTest extends SourceTestBase {
                 long live = 0;
                 long nested = 0;
                 for (var partition : source.listPartitions(NESTED_INDEX)) {
-                    source.readDocuments(partition, 0).blockLast();
+                    source.readDocuments(partition, null).blockLast();
                     var counts = source.snapshotDocumentCounts(partition).orElseThrow();
                     live += counts.liveDocuments();
                     nested += counts.nestedDocuments();
@@ -229,7 +229,7 @@ public class SnapshotDocCountTest extends SourceTestBase {
                 ));
                 var countsByShard = new HashMap<Integer, Long>();
                 var pattern = Pattern.compile("Partition migration stats: index=" + NESTED_INDEX
-                    + ", shard=(\\d+),.*shardLiveLuceneDocs=(\\d+)");
+                    + ", partition=[^,]*/(\\d+),.*shardLiveLuceneDocs=(\\d+)");
                 logs.getLogEvents().forEach(line -> {
                     var match = pattern.matcher(line);
                     if (match.find()) {
