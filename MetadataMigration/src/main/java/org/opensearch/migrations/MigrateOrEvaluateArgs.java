@@ -51,6 +51,18 @@ public class MigrateOrEvaluateArgs {
     @ParametersDelegate
     public DataFilterArgs dataFilterArgs = new DataFilterArgs(); 
 
+    @Parameter(required = false,
+        names = { "--collection-routing", "--collectionRouting" },
+        description = """
+            Optional. JSON object mapping source indices to collections on an OpenSearch Serverless \
+            per-account endpoint (<account-id>.aoss.<region>.on.aws), e.g. \
+            {"staticCollectionRouting": [{"sourceIndex": "shared-config", "collection": "common"}], \
+            "regexCollectionRouting": [{"sourceIndex": "(.+)-\\\\d{4}", "collection": "$1"}]}. \
+            An exact static match wins, otherwise the first regex that matches the whole index name is used. \
+            Templates aren't migrated to a collection-routed target. \
+            Requires SigV4 auth with service 'aoss'.""")
+    public String collectionRouting;
+
     // https://opensearch.org/docs/2.19/tuning-your-cluster/#forced-awareness
     @Parameter(names = {"--cluster-awareness-attributes" }, description = "Optional. This sets up a transformation for all indices to ensure"
         + " that the number of replicas is compatible with the routing awareness attributes of the cluster (usually the number of zones)."

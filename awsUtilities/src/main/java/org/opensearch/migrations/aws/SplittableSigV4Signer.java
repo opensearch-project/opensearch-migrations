@@ -138,6 +138,7 @@ public class SplittableSigV4Signer {
         private final String path;
         private final String host;
         private final String contentType;
+        private final Map<String, List<String>> amzRequestHeaders;
         private final boolean hasPayload;
 
         ReentrantSigner(
@@ -159,6 +160,7 @@ public class SplittableSigV4Signer {
                 .orElseThrow(() -> new IllegalArgumentException("Host header is missing"));
             this.contentType = referenceMessage.getFirstHeaderValueCaseInsensitive(SigV4Signer.CONTENT_TYPE)
                 .orElse(null);
+            this.amzRequestHeaders = SigV4Signer.amzRequestHeaders(referenceMessage);
         }
 
         public Map<String, List<String>> sign() {
@@ -172,6 +174,8 @@ public class SplittableSigV4Signer {
             if (contentType != null) {
                 httpRequestBuilder.appendHeader(SigV4Signer.CONTENT_TYPE, contentType);
             }
+            amzRequestHeaders.forEach((name, values) ->
+                values.forEach(value -> httpRequestBuilder.appendHeader(name, value)));
             if (contentHash != null) {
                 httpRequestBuilder.appendHeader(SigV4Signer.AMZ_CONTENT_SHA_256, contentHash);
             }

@@ -39,6 +39,11 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
     protected final OpenSearchClient client;
 
+    @Override
+    public IndexCreator forCollection(String serverlessCollection) {
+        return new IndexCreator_OS_2_11(client.forCollection(serverlessCollection));
+    }
+
     public CreationResult create(
         IndexMetadata index,
         MigrationMode mode,

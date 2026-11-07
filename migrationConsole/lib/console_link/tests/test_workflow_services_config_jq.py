@@ -90,3 +90,18 @@ def test_context_path_is_normalized_by_the_cluster():
     services = translate(solr_workflow_config(solrContextPath="tenant-a/solr/"))
 
     assert Cluster(config=services["source_cluster"]).solr_context_path == "/tenant-a/solr"
+
+
+def test_collection_routed_target_is_accepted_by_the_cluster():
+    """collectionRouted only matters to the Java tools, and the cluster schema rejects unknown keys."""
+    services = translate({
+        "target_cluster": {
+            "label": "tenant-collections",
+            "endpoint": "https://123456789012.aoss.us-east-1.on.aws",
+            "collectionRouted": True,
+            "authConfig": {"sigv4": {"region": "us-east-1", "service": "aoss"}},
+        },
+    })
+
+    assert "collectionRouted" not in services["target_cluster"]
+    assert Cluster(config=services["target_cluster"]).endpoint == "https://123456789012.aoss.us-east-1.on.aws"

@@ -78,20 +78,17 @@ public abstract class OpenSearchClient {
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
 
-    // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
-    // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
-    // volatile: emitFailedDocumentStreamRecord runs on concurrent bulk-write threads (batchConcurrency defaults
-    // to 10) while setFailedDocumentStreamContext/setFailedDocumentStreamWorkItem are written from the pipeline thread, so these
-    // need safe publication across threads.
-    private volatile FailedDocumentStreamSink failedDocumentStreamSink;
-    private volatile String failedDocumentStreamSessionId = "unknown-session";
-    private volatile String failedDocumentStreamWorkerId = "unknown-worker";
-    // Canonical work-item id (index + shard + checkpoint) for the work item currently being
-    // processed. Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
-    private volatile String failedDocumentStreamWorkItemId;
+    private final FailedDocumentStreamContext failedDocumentStream;
 
     protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
                                CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
+        this(client, failedRequestsLogger, version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest,
+            new FailedDocumentStreamContext());
+    }
+
+    private OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
+                             CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest,
+                             FailedDocumentStreamContext failedDocumentStream) {
         if (maxDocsPerBulkRequest < 1 || maxBytesPerBulkRequest < 1) {
             throw new IllegalArgumentException("Bulk request count and byte limits must be positive");
         }
@@ -101,6 +98,20 @@ public abstract class OpenSearchClient {
         this.compressionMode = compressionMode;
         this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
         this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
+        this.failedDocumentStream = failedDocumentStream;
+    }
+
+    /**
+     * Returns a client that sends every request to one OpenSearch Serverless collection behind a
+     * per-account endpoint. It shares this client's connections and failed document stream context.
+     */
+    public OpenSearchClient forCollection(String serverlessCollection) {
+        return new CollectionBoundClient(this, serverlessCollection);
+    }
+
+    /** True for an OpenSearch Serverless per-account endpoint that selects the collection from a request header */
+    public boolean isCollectionRouted() {
+        return client.getConnectionContext().isCollectionRouted();
     }
 
     /**
@@ -109,9 +120,9 @@ public abstract class OpenSearchClient {
      * requests are issued.
      */
     public void setFailedDocumentStreamContext(FailedDocumentStreamSink failedDocumentStreamSink, String sessionId, String workerId) {
-        this.failedDocumentStreamSink = failedDocumentStreamSink;
-        this.failedDocumentStreamSessionId = sessionId;
-        this.failedDocumentStreamWorkerId = workerId;
+        failedDocumentStream.sink = failedDocumentStreamSink;
+        failedDocumentStream.sessionId = sessionId;
+        failedDocumentStream.workerId = workerId;
     }
 
     /**
@@ -123,11 +134,11 @@ public abstract class OpenSearchClient {
      * exact work item that produced it.
      */
     public void setFailedDocumentStreamWorkItem(String workItemId) {
-        this.failedDocumentStreamWorkItemId = workItemId;
+        failedDocumentStream.workItemId = workItemId;
     }
 
     public FailedDocumentStreamSink getFailedDocumentStreamSink() {
-        return failedDocumentStreamSink;
+        return failedDocumentStream.sink;
     }
 
     public Version getClusterVersion() {
@@ -786,7 +797,7 @@ public abstract class OpenSearchClient {
     }
 
     void emitFailedDocumentStreamRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
-        if (failedDocumentStreamSink == null) {
+        if (failedDocumentStream.sink == null) {
             return;
         }
         try {
@@ -804,9 +815,9 @@ public abstract class OpenSearchClient {
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
             FailedDocumentStreamRecord failedDocumentStreamRecord = FailedDocumentStreamRecord.builder()
-                .sessionId(failedDocumentStreamSessionId)
-                .workerId(failedDocumentStreamWorkerId)
-                .workItemId(failedDocumentStreamWorkItemId)
+                .sessionId(failedDocumentStream.sessionId)
+                .workerId(failedDocumentStream.workerId)
+                .workItemId(failedDocumentStream.workItemId)
                 .targetIndex(indexName)
                 .documentId(docId)
                 .failureType(failureType)
@@ -815,7 +826,7 @@ public abstract class OpenSearchClient {
                 .requestItem(requestItem)
                 .responseItem(responseItem)
                 .build();
-            failedDocumentStreamSink.write(failedDocumentStreamRecord).subscribe(
+            failedDocumentStream.sink.write(failedDocumentStreamRecord).subscribe(
                 v -> {},
                 err -> log.atError().setCause(err)
                     .setMessage("Failed to buffer failed document stream record for index {}: {}")
@@ -926,6 +937,45 @@ public abstract class OpenSearchClient {
     public static class UnexpectedStatusCode extends OperationFailed {
         public UnexpectedStatusCode(HttpResponse response) {
             super("Unexpected status code " + response.statusCode, response);
+        }
+    }
+
+    // Null sink when no failed document stream is configured. The bootstrap in RfsMigrateDocuments installs an
+    // S3FailedDocumentStreamSink when a bucket is provided. volatile: records are emitted on concurrent bulk-write
+    // threads (batchConcurrency defaults to 10) while the pipeline thread writes these, so they need safe
+    // publication across threads.
+    private static final class FailedDocumentStreamContext {
+        private volatile FailedDocumentStreamSink sink;
+        private volatile String sessionId = "unknown-session";
+        private volatile String workerId = "unknown-worker";
+        // Canonical work-item id (index + shard + checkpoint) for the work item currently being processed.
+        // Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
+        private volatile String workItemId;
+    }
+
+    private static final class CollectionBoundClient extends OpenSearchClient {
+        private final OpenSearchClient unbound;
+
+        private CollectionBoundClient(OpenSearchClient unbound, String serverlessCollection) {
+            super(unbound.client.withDefaultHeaders(ServerlessCollectionRouting.headersFor(serverlessCollection)),
+                unbound.failedRequestsLogger, unbound.version, unbound.compressionMode,
+                unbound.maxDocsPerBulkRequest, unbound.maxBytesPerBulkRequest, unbound.failedDocumentStream);
+            this.unbound = unbound;
+        }
+
+        @Override
+        protected String getCreateIndexPath(String indexName) {
+            return unbound.getCreateIndexPath(indexName);
+        }
+
+        @Override
+        protected String getBulkRequestPath(String indexName) {
+            return unbound.getBulkRequestPath(indexName);
+        }
+
+        @Override
+        protected Retry getBulkRetryStrategy() {
+            return unbound.getBulkRetryStrategy();
         }
     }
 }

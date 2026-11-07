@@ -27,7 +27,9 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -291,6 +293,28 @@ class IndexCreator_OS_2_11Test {
             finalBody.get("settings").get("analysis").get("analyzer")
                 .get("custom_tokenized_string").get("tokenizer").asText(),
             equalTo("standard"));
+    }
+
+    @Test
+    void testForCollection_usesTheCollectionClientInBothModes() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        var collectionClient = mock(OpenSearchClient.class);
+        when(client.forCollection("tenant-a")).thenReturn(collectionClient);
+        when(collectionClient.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+        when(collectionClient.hasIndex("indexName")).thenReturn(true);
+        var indexData = new IndexMetadataData_OS_2_11((ObjectNode) OBJECT_MAPPER.readTree(MIN_INDEX_JSON), "indexId", "indexName");
+        var indexCreator = new IndexCreator_OS_2_11(client).forCollection("tenant-a");
+        var awareness = new AwarenessAttributeSettings(false, 0);
+
+        var performed = indexCreator.create(indexData, MigrationMode.PERFORM, awareness, mock(ICreateIndexContext.class));
+        var simulated = indexCreator.create(indexData, MigrationMode.SIMULATE, awareness, mock(ICreateIndexContext.class));
+
+        assertThat(performed.wasSuccessful(), equalTo(true));
+        verify(collectionClient).createIndex(eq("indexName"), any(), any());
+        assertThat(simulated.getFailureType(), equalTo(CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS));
+        verify(collectionClient).hasIndex("indexName");
+        verify(client, never()).createIndex(any(), any(), any());
+        verify(client, never()).hasIndex(any());
     }
 
     @Test
