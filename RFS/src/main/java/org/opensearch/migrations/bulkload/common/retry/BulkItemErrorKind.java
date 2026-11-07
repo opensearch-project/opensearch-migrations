@@ -31,7 +31,7 @@ public enum BulkItemErrorKind {
     UNAVAILABLE,
     /** The document fails the same way on every attempt: recorded in the failed document stream at once. */
     DOCUMENT,
-    /** Neither: retried, and given up after a few retries that the evidence counts against the document. */
+    /** Neither: retried, and given up after a fixed number of failures. */
     UNKNOWN;
 
     /** Write queues full ({@code es_} is Elasticsearch's prefix), or the heap too full to take the request. */

@@ -21,9 +21,9 @@ public interface BulkFlowMetrics {
 
     /** Why documents were given up after retrying (counted per document; see {@code OpenSearchClient}). */
     enum GiveUpReason {
-        /** A single document's request failed with an unknown status 4 counted times in a row. */
+        /** A single document's request failed with an unknown status 4 times in a row. */
         UNKNOWN_FAILURES,
-        /** A single document's request got no response 6 counted times in a row. */
+        /** A single document's request got no response 6 times in a row. */
         NO_RESPONSE,
         /** A document's item failed with a retryable, non-throttle error 4 times. */
         ITEM_FAILURES;
@@ -83,9 +83,6 @@ public interface BulkFlowMetrics {
     /** {@code documents} couldn't be written because the target was unavailable, for {@code reason}. */
     default void onTargetUnavailable(String reason, long documents) {}
 
-    /** The target did or didn't answer a probe asked because there was no other evidence. */
-    default void onTargetProbe(boolean answered) {}
-
     /**
      * A retry of a batch was sent {@code millis} after the batch's previous attempt ended: the whole wait, whatever
      * held it (backoff, retry tokens, an in-flight slot).
@@ -128,7 +125,6 @@ public interface BulkFlowMetrics {
             @Override public void onBatchClosed(long i, long a, int t) { first.onBatchClosed(i, a, t); second.onBatchClosed(i, a, t); }
             @Override public void onWaitingOnTarget(long i, long d) { first.onWaitingOnTarget(i, d); second.onWaitingOnTarget(i, d); }
             @Override public void onTargetUnavailable(String r, long d) { first.onTargetUnavailable(r, d); second.onTargetUnavailable(r, d); }
-            @Override public void onTargetProbe(boolean a) { first.onTargetProbe(a); second.onTargetProbe(a); }
             @Override public void onAttemptGap(long m) { first.onAttemptGap(m); second.onAttemptGap(m); }
             @Override public void onBudgetSpent(BulkErrorClass c, int t) { first.onBudgetSpent(c, t); second.onBudgetSpent(c, t); }
             @Override public void onBudgetRefunded(int t) { first.onBudgetRefunded(t); second.onBudgetRefunded(t); }

@@ -46,8 +46,6 @@ class BulkResponseTimeoutTest {
                 }
             };
             client.setBulkResponseTimeout(bulkTimeout);
-            // Only the bulk requests are under test, not the probe that asks whether the target answers.
-            client.setTargetProbe(() -> reactor.core.publisher.Mono.just(true));
             var doc = new Document("a", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(),
                 Map.of());
             long start = System.nanoTime();

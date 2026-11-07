@@ -2440,12 +2440,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                       "default": "P1D"
                     },
-                    "maxFailurePercentToFailDocuments": {
-                      "type": "number",
-                      "minimum": 0,
-                      "maximum": 100,
-                      "default": 5
-                    },
                     "bulkResponseTimeout": {
                       "type": "string",
                       "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
@@ -5545,13 +5539,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                         "default": "P1D",
                         "description": "[Expert] ISO 8601 upper bound on a work item lease (e.g. 'P1D' = 1 day). The lease doubles each time a shard is picked up again after its lease expired; once the doubled lease would reach this value, it stays at this value. Must be at least initialLeaseDuration."
-                      },
-                      "maxFailurePercentToFailDocuments": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 100,
-                        "default": 5,
-                        "description": "[Expert] A failing bulk request is retried until it succeeds; throttles and an unavailable target (unavailable shards, blocked writes, refused connections) never count against a document. A single document is given up, into the failed document stream, after 3 retries that got an unknown status or 5 that timed out, and a batch is split to find such a document. A failure only counts toward that, or toward splitting, if no more than this percent (0-100) of the worker's other requests (for an item error, other documents) failed in the last two minutes; otherwise the target is assumed to be in trouble and the streak starts over, so a shard may wait until the target recovers. 100 ignores other requests' failures. Safe to change on a running migration."
                       },
                       "bulkResponseTimeout": {
                         "type": "string",
