@@ -26,7 +26,12 @@ public interface DocumentSourceProvider<S extends DocumentSourceSpec> {
     /** Parse this provider's own config. The kind selects the provider; the provider reads the rest. */
     S parseSpec(JsonNode config);
 
-    /** Reject a malformed source before construction. May do I/O. */
+    /** Reject a malformed spec. Runs at startup, so it must not do I/O. */
+    default void validateSpec(S spec) {
+        // Nothing to check by default.
+    }
+
+    /** Reject a source that cannot be read, before construction. May do I/O. */
     default void validate(S spec, SourceRuntime runtime) {
         // Nothing to check by default.
     }
@@ -87,6 +92,7 @@ public interface DocumentSourceProvider<S extends DocumentSourceSpec> {
      */
     default DocumentSource open(JsonNode config, SourceRuntime runtime) throws IOException {
         S spec = parseSpec(config);
+        validateSpec(spec);
         validate(spec, runtime);
         return create(spec, runtime);
     }

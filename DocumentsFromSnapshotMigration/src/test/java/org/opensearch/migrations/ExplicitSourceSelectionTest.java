@@ -6,8 +6,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
 
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
@@ -24,6 +26,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -70,7 +74,7 @@ class ExplicitSourceSelectionTest {
         // A version that inference would read as an ES snapshot.
         args.legacySource.sourceVersion = null;
 
-        var selection = RfsMigrateDocuments.selectSource(args, false);
+        var selection = RfsMigrateDocuments.selectSource(args);
 
         assertThat(selection.kind(), equalTo(SolrBackupSourceProvider.KIND));
         assertThat(selection.config().get("backupName").asText(), equalTo("nightly"));
@@ -83,7 +87,7 @@ class ExplicitSourceSelectionTest {
         args.legacySource.repoUri = "file:///snapshots";
         args.legacySource.snapshotName = "nightly";
 
-        var selection = RfsMigrateDocuments.selectSource(args, false);
+        var selection = RfsMigrateDocuments.selectSource(args);
 
         assertThat(selection.kind(), equalTo(EsSnapshotSourceProvider.KIND));
     }
@@ -142,6 +146,68 @@ class ExplicitSourceSelectionTest {
 
         assertThat(message, containsString("--repo-uri"));
         assertThat(message, containsString("--snapshot-name"));
+    }
+
+    /** Pins the shapes {@code makeSnapshotSourceParams} in documentBulkLoad.ts renders. */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{\"sourceKind\":\"es-snapshot\",\"sourceConfig\":\"{\\\"allowLooseVersionMatches\\\":true,"
+            + "\\\"emitDocType\\\":\\\"AUTO\\\",\\\"enableSourcelessMigrations\\\":false,"
+            + "\\\"endpoint\\\":\\\"http://localstack:4566\\\",\\\"indexAllowlist\\\":[\\\"logs\\\"],"
+            + "\\\"maxShardSizeBytes\\\":85899345920,\\\"repoUri\\\":\\\"s3://bucket/repo\\\","
+            + "\\\"s3Region\\\":\\\"us-east-2\\\",\\\"snapshotName\\\":\\\"snap\\\","
+            + "\\\"useRecoverySource\\\":false,\\\"version\\\":\\\"ES 7.10.2\\\"}\","
+            + "\"localDir\":\"/tmp\",\"luceneDir\":\"/tmp\",\"coordinatorHost\":\"http://c:9200\"}",
+        "{\"sourceKind\":\"solr-backup\",\"sourceConfig\":\"{\\\"backupName\\\":\\\"snap\\\","
+            + "\\\"indexAllowlist\\\":[\\\"catalog\\\"],\\\"repoUri\\\":\\\"s3://bucket/repo\\\","
+            + "\\\"s3Region\\\":\\\"us-east-2\\\",\\\"solrMajorVersion\\\":8}\","
+            + "\"localDir\":\"/tmp\",\"luceneDir\":\"/tmp\",\"coordinatorHost\":\"http://c:9200\"}"
+    })
+    void theWorkflowsSourceConfigsAreAccepted(String workflowOutput) {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", workflowOutput});
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void aGlobalAllowlistIsRejectedRatherThanIgnored() {
+        var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_CONFIG);
+        args.indexAllowlist = List.of("logs");
+
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateSourceSelection(args)).getMessage(),
+            containsString("--index-allowlist"));
+    }
+
+    /** Shard preparation filters on this, and {@code es-snapshot} has no other filter. */
+    @Test
+    void theAllowlistComesFromTheConfig() {
+        var config = RfsMigrateDocuments.readSourceConfig(
+            "{\"repoUri\":\"file:///s\",\"snapshotName\":\"n\",\"indexAllowlist\":[\"logs\"]}");
+        DocumentSourceProvider<?> provider = new EsSnapshotSourceProvider();
+
+        assertThat(provider.parseSpec(config).indexAllowlist(), equalTo(List.of("logs")));
+    }
+
+    @Test
+    void aMalformedSpecIsRejectedAtStartup() {
+        var args = argsWithExplicitSource(EsSnapshotSourceProvider.KIND,
+            "{\"repoUri\":\"s3://bucket/repo\",\"snapshotName\":\"n\",\"version\":\"ES 7.10.2\"}");
+        args.localDir = "/tmp";
+
+        assertThat(assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args)).getMessage(),
+            containsString("s3Region"));
+    }
+
+    @Test
+    void aSnapshotReadFailureIsClassifiedForAnExplicitSource() {
+        var args = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, ES_CONFIG);
+        var failure = new RuntimeException(new SnapshotRepo.CannotParseRepoFile("corrupt repo metadata"));
+
+        assertThat(RfsMigrateDocuments.classifySnapshotReadFailure(failure, args),
+            equalTo(OptionalInt.of(RfsMigrateDocuments.SNAPSHOT_READ_FAILED_EXIT_CODE)));
     }
 
     @Test

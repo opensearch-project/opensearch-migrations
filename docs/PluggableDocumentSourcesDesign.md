@@ -370,6 +370,11 @@ delimited field, so a key containing `:` needs no escaping. Ordinals count the *
 before `--index`/`--failure-class` filtering, so a cursor means the same position whatever the run
 was asked to select.
 
+A spec is checked twice, and for different reasons. `validateSpec` must not do I/O, so it runs at
+startup and catches a malformed config before any work. `validate` may do I/O, so it runs when the
+source opens, where a redrive pays for its manifest read only if work remains. The allowlist is read
+from the spec because shard preparation filters on it and `es-snapshot` has no filter of its own.
+
 Two things a source cannot check about itself are checked by the caller, in `validateRedriveArgs`:
 that the run does not write into the session it reads, and that `--session-name` namespaces its
 coordination away from the backfill that produced the failures.
@@ -381,11 +386,11 @@ race for one session, and the loser proves it lost by comparing digests, which o
 implementations encode identically.
 
 On the Argo side, `sourceKind`/`sourceConfig`/`allowMissingDocumentIds` are ordinary RFS process
-options, so they reach the process through the existing `---INLINE-JSON` path. `makeParamsDict` had
-to change all the same: it unconditionally emitted the snapshot arguments, and RfsMigrateDocuments
-rejects those alongside an explicit kind rather than silently preferring one. When a kind is named,
-neither the snapshot params nor the four source options it supersedes (`ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS`)
-are emitted.
+options, so they reach the process through the existing `---INLINE-JSON` path. Every backfill now uses
+them. When a kind is named, the workflow passes that kind and config through. Otherwise `makeParamsDict`
+derives `es-snapshot` or `solr-backup` from the source version and builds the config from the snapshot
+and the process options, so the per-source flags (`ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS`) never reach
+RfsMigrateDocuments. Those flags are deprecated and remain only for direct CLI and CDK use.
 
 ### #3065's acceptance criteria, rewritten
 

@@ -70,14 +70,14 @@ class RfsSolrDocumentSourceTest {
     void validate_rejectsUnsupportedSolrMajorVersion() {
         var spec = new SolrBackupSourceSpec("file://" + backupDir, null, 5, List.of(), null, null);
 
-        assertThrows(IllegalArgumentException.class, () -> provider.validate(spec, runtime()));
+        assertThrows(IllegalArgumentException.class, () -> provider.validateSpec(spec));
     }
 
     @Test
     void validate_rejectsNonFileOrS3Uri() {
         var spec = new SolrBackupSourceSpec("gs://bucket/backup", null, 8, List.of(), null, null);
 
-        assertThrows(IllegalArgumentException.class, () -> provider.validate(spec, runtime()));
+        assertThrows(IllegalArgumentException.class, () -> provider.validateSpec(spec));
     }
 
     /** Construction lists and downloads, so the caller is told to check for work first. */

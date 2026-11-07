@@ -98,7 +98,7 @@ class RedriveSelectionTest {
         var provider = DocumentSourceRegistry.getDefault().resolve(EsSnapshotSourceProvider.KIND);
         java.util.function.Supplier<IJsonTransformer> user = () -> input -> input;
         var config = RfsMigrateDocuments.readSourceConfig(
-            "{\"repoUri\":\"file:///snapshots\",\"snapshotName\":\"nightly\"}");
+            "{\"repoUri\":\"file:///snapshots\",\"snapshotName\":\"nightly\",\"version\":\"ES 7.10.2\"}");
 
         assertThat(RfsMigrateDocuments.chainRequiredPreTransform(provider, config, user), sameInstance(user));
         assertThat(RfsMigrateDocuments.chainRequiredPreTransform(provider, config, null), equalTo(null));
@@ -152,7 +152,7 @@ class RedriveSelectionTest {
         // Neither check applies to a snapshot source.
         var args = new RfsMigrateDocuments.Args();
         args.sourceKind = EsSnapshotSourceProvider.KIND;
-        args.sourceConfig = "{\"repoUri\":\"file:///snapshots\",\"snapshotName\":\"nightly\"}";
+        args.sourceConfig = "{\"repoUri\":\"file:///snapshots\",\"snapshotName\":\"nightly\",\"version\":\"ES 7.10.2\"}";
         args.indexNameSuffix = "";
 
         assertDoesNotThrow(() -> validateRedrive(args));

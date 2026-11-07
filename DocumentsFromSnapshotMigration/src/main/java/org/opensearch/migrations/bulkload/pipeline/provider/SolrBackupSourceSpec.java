@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.pipeline.provider;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.spi.SourceLocation;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -33,6 +34,11 @@ public record SolrBackupSourceSpec(
     @Override
     public String kind() {
         return SolrBackupSourceProvider.KIND;
+    }
+
+    @Override
+    public SourceLocation location() {
+        return new SourceLocation(backupName, repoUri, s3Region);
     }
 
     /** The config form of this spec, which {@code parseSpec} binds back. */

@@ -65,7 +65,7 @@ class EsSnapshotSourceProviderTest {
     private static EsSnapshotSourceSpec spec(String repoUri, String previousSnapshot, DeltaMode deltaMode,
                                        boolean sourceless) {
         return new EsSnapshotSourceSpec(repoUri, SNAPSHOT, VERSION, List.of(), "us-east-1",
-            "http://endpoint:9200", true, 1024L, false, true, previousSnapshot, deltaMode, sourceless);
+            "http://endpoint:9200", true, 1024L, false, EmitDocTypeMode.ON, previousSnapshot, deltaMode, sourceless);
     }
 
     /** Holds the static mocks {@code create()} needs, plus the builder it should drive. */
@@ -102,6 +102,23 @@ class EsSnapshotSourceProviderTest {
             source.close();
             extractor.close();
             registry.close();
+        }
+    }
+
+    @Test
+    void create_resolvesAutoEmitDocTypeFromTheVersionAndTheTransform() throws Exception {
+        var legacySpec = new EsSnapshotSourceSpec("file:///snapshots", SNAPSHOT, Version.fromString("ES 6.8.23"),
+            List.of(), null, null, true, 1024L, false, EmitDocTypeMode.AUTO, null, null, false);
+        var withTransform = new SourceRuntime(Path.of("/tmp/scratch"), Path.of("/tmp/work"),
+            () -> mock(IRfsContexts.IDeltaStreamContext.class), true);
+
+        try (var h = new Harness()) {
+            provider.create(legacySpec, withTransform);
+            verify(h.builder).emitDocType(true);
+        }
+        try (var h = new Harness()) {
+            provider.create(legacySpec, runtime());
+            verify(h.builder).emitDocType(false);
         }
     }
 

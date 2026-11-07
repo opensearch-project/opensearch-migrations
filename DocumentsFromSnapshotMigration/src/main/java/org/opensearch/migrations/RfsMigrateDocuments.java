@@ -34,6 +34,7 @@ import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
+import org.opensearch.migrations.bulkload.pipeline.provider.EmitDocTypeMode;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.FailedDocumentStreamSourceProvider;
@@ -44,6 +45,7 @@ import org.opensearch.migrations.bulkload.pipeline.spi.CoordinationRequirement;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceRegistry;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.spi.SourceLocation;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
@@ -142,12 +144,6 @@ public class RfsMigrateDocuments {
         NEVER   // Always preserve source IDs
     }
 
-    public enum EmitDocTypeMode {
-        AUTO, // Emit _type only when source is ES <= 6 and a doc transformer is configured
-        ON,   // Always emit _type into bulk action-line metadata
-        OFF   // Never emit _type
-    }
-
     public static class Args {
         /** Default maximum documents per bulk batch. */
         static final int DEFAULT_MAX_DOCS_PER_BATCH = Integer.MAX_VALUE;
@@ -189,7 +185,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--index-allowlist", "--indexAllowlist" },
-            description = ("Optional.  List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02').  " +
+            description = ("Deprecated, use --source-kind and --source-config. " +
+                "Optional.  List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02').  " +
                 "Default: all non-system indices (e.g. those not starting with '.')"))
         public List<String> indexAllowlist = List.of();
 
@@ -276,14 +273,6 @@ public class RfsMigrateDocuments {
             description = "Optional. Maximum delay in milliseconds for any single coordinator completion retry. Default: 64000")
         public long coordinatorRetryMaxDelayMs = 64_000;
 
-        @Parameter(required = false,
-            names = { "--emit-doc-type" },
-            description = "Optional. Controls whether the ES _type field is propagated into bulk action-line metadata. " +
-                "AUTO (default): emit _type only when the source is ES 6 or older AND a document transformer is " +
-                "configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). " +
-                "ON: always emit _type. OFF: never emit _type.")
-        public EmitDocTypeMode emitDocType = EmitDocTypeMode.AUTO;
-
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
 
@@ -301,7 +290,7 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--source-kind", "--sourceKind" },
             description = "Which document source to open, e.g. es-snapshot or solr-backup. When unset, the "
-                + "kind is inferred from --source-version. Requires --source-config.")
+                + "kind is inferred from the deprecated --source-version. Requires --source-config.")
         public String sourceKind = null;
 
         @Parameter(required = false,
@@ -356,7 +345,7 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * The flags whose values now live in {@code --source-config}, grouped so the conflict check reads
+     * The deprecated flags whose values now live in {@code --source-config}, grouped so the conflict check reads
      * the group rather than a hand-maintained list. Flags that also configure {@link SourceRuntime}
      * stay out, since rejecting them would take their runtime meaning with them.
      *
@@ -366,35 +355,37 @@ public class RfsMigrateDocuments {
      */
     public static class LegacySourceArgs {
 
+        private static final String DEPRECATED_SOURCE_FLAG = "Deprecated, use --source-kind and --source-config. ";
+
         @Parameter(required = false,
             names = { "--snapshot-name", "--snapshotName" },
-            description = "The name of the snapshot to migrate. Required for snapshot migrations.")
+            description = DEPRECATED_SOURCE_FLAG + "The name of the snapshot to migrate. Required for snapshot migrations.")
         public String snapshotName;
 
         @Parameter(required = false,
             names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
-            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
+            description = (DEPRECATED_SOURCE_FLAG + "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
         public String repoUri = null;
 
         @Parameter(required = false,
             names = { "--s3-region", "--s3Region" },
-            description = ("The AWS Region the S3 bucket is in, like: us-east-2.  Required for s3:// repos."))
+            description = (DEPRECATED_SOURCE_FLAG + "The AWS Region the S3 bucket is in, like: us-east-2.  Required for s3:// repos."))
         public String s3Region = null;
 
         @Parameter(required = false,
             names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
-            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+            description = (DEPRECATED_SOURCE_FLAG + "Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
         public String endpoint = null;
 
         @Parameter(required = false,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
-            description = ("Version of the source cluster, for example: Elasticsearch 7.10, OS 1.3 or Solr 9. Required."))
+            description = (DEPRECATED_SOURCE_FLAG + "Version of the source cluster, for example: Elasticsearch 7.10, OS 1.3 or Solr 9. Required."))
         public Version sourceVersion;
 
         @Parameter(required = false,
             names = { "--max-shard-size-bytes", "--maxShardSizeBytes" },
-            description = ("Optional. The maximum shard size, in bytes, to allow when " +
+            description = (DEPRECATED_SOURCE_FLAG + "Optional. The maximum shard size, in bytes, to allow when " +
                 "performing the document migration.  " +
                 "Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"))
         public Long maxShardSizeBytes;
@@ -405,7 +396,7 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
-            description = "Optional. The name of the previous snapshot for delta migration (experimental feature)",
+            description = DEPRECATED_SOURCE_FLAG + "Optional. The name of the previous snapshot for delta migration (experimental feature)",
             hidden = true
         )
         public String previousSnapshotName = null;
@@ -413,14 +404,14 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--experimental-delta-mode" },
             converter = DeltaModeConverter.class,
-            description = "Experimental delta snapshot migration mode. Requires --base-snapshot-name",
+            description = DEPRECATED_SOURCE_FLAG + "Experimental delta snapshot migration mode. Requires --base-snapshot-name",
             hidden = true
         )
         public DeltaMode experimentalDeltaMode = null;
 
         @Parameter(required = false,
             names = { "--enable-sourceless-migrations" },
-            description = "Enable migration of indices that have _source disabled. When enabled, documents " +
+            description = DEPRECATED_SOURCE_FLAG + "Enable migration of indices that have _source disabled. When enabled, documents " +
                 "are reconstructed from stored fields and doc_values instead of _source. " +
                 "Without this flag, migration of sourceless indices will fail with an error.",
             arity = 0
@@ -433,7 +424,7 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--use-recovery-source" },
-            description = "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch " +
+            description = DEPRECATED_SOURCE_FLAG + "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch " +
                 "snapshots with soft-deletes) as _source. This field is transient and may not be present for " +
                 "all documents, so results can be inconsistent. Use only when reconstruction from doc_values " +
                 "and stored fields is insufficient.",
@@ -443,6 +434,18 @@ public class RfsMigrateDocuments {
 
         public boolean useRecoverySourceOrDefault() {
             return Boolean.TRUE.equals(useRecoverySource);
+        }
+
+        @Parameter(required = false,
+            names = { "--emit-doc-type" },
+            description = DEPRECATED_SOURCE_FLAG + "Optional. Controls whether the ES _type field is propagated into bulk action-line metadata. " +
+                "AUTO (default): emit _type only when the source is ES 6 or older AND a document transformer is " +
+                "configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). " +
+                "ON: always emit _type. OFF: never emit _type.")
+        public EmitDocTypeMode emitDocType;
+
+        public EmitDocTypeMode emitDocTypeOrDefault() {
+            return emitDocType != null ? emitDocType : EmitDocTypeMode.AUTO;
         }
 
         @ParametersDelegate
@@ -567,6 +570,9 @@ public class RfsMigrateDocuments {
             throw new ParameterException("--source-kind and --source-config must be given together.");
         }
         var conflicting = args.legacySource.givenFlags();
+        if (!args.indexAllowlist.isEmpty()) {
+            conflicting.add("--index-allowlist");
+        }
         if (!conflicting.isEmpty()) {
             throw new ParameterException("--source-kind supersedes " + String.join(", ", conflicting)
                 + "; put those settings in --source-config instead of passing both.");
@@ -596,6 +602,7 @@ public class RfsMigrateDocuments {
         S spec;
         try {
             spec = provider.parseSpec(config);
+            provider.validateSpec(spec);
         } catch (RuntimeException e) {
             throw new ParameterException("--source-config is not valid for " + provider.kind()
                 + ": " + e.getMessage(), e);
@@ -659,6 +666,7 @@ public class RfsMigrateDocuments {
             validateRedriveArgs(args, provider, config);
             return;
         }
+        warnAboutDeprecatedSourceFlags(args);
         // Solr backup path
         if (args.legacySource.sourceVersion != null && args.legacySource.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.legacySource.repoUri == null) {
@@ -731,9 +739,6 @@ public class RfsMigrateDocuments {
                     "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
                 );
             }
-            log.atWarn().setMessage("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
-                    "This feature is experimental and should not be used in production.")
-                    .addArgument(args.legacySource.experimentalDeltaMode).log();
         } else if (args.legacySource.previousSnapshotName != null) {
             log.atError().setMessage("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.").log();
             throw new ParameterException(
@@ -745,6 +750,18 @@ public class RfsMigrateDocuments {
         // but we log here if coordinator is enabled for visibility
         if (args.coordinatorArgs.isEnabled()) {
             log.atInfo().setMessage("Coordinator connection enabled with host: {}").addArgument(args.coordinatorArgs.host).log();
+        }
+    }
+
+    private static void warnAboutDeprecatedSourceFlags(Args args) {
+        var given = args.legacySource.givenFlags();
+        if (!args.indexAllowlist.isEmpty()) {
+            given.add("--index-allowlist");
+        }
+        if (!given.isEmpty()) {
+            log.atWarn().setMessage("Deprecated source flags were given, use --source-kind and --source-config"
+                    + " instead: {}")
+                .addArgument(given).log();
         }
     }
 
@@ -836,15 +853,12 @@ public class RfsMigrateDocuments {
             ? null
             : () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
-        boolean emitDocType = resolveEmitDocType(
-            arguments.emitDocType, arguments.legacySource.sourceVersion, docTransformerConfig);
-
         var sourceFactory = buildSourceFactory(arguments, targetClient,
-            docTransformerSupplier, useServerGeneratedIds, emitDocType, context);
+            docTransformerSupplier, useServerGeneratedIds, context);
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
         runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory,
-            selectSource(arguments, emitDocType).config(), failedDocumentStreamSink, resolvedSessionId);
+            selectSource(arguments).config(), failedDocumentStreamSink, resolvedSessionId);
     }
 
     private static void runMigration(
@@ -976,13 +990,22 @@ public class RfsMigrateDocuments {
         if (snapshotReadFailure == null) {
             return OptionalInt.empty();
         }
-        var repo = arguments.legacySource.repoUri;
+        var location = sourceLocation(arguments);
         log.atError().setCause(e)
             .setMessage("{}")
             .addArgument(SnapshotReadFailures.describe(
-                snapshotReadFailure, arguments.legacySource.snapshotName, repo, arguments.legacySource.s3Region))
+                snapshotReadFailure, location.name(), location.uri(), location.region()))
             .log();
         return OptionalInt.of(SNAPSHOT_READ_FAILED_EXIT_CODE);
+    }
+
+    private static SourceLocation sourceLocation(Args arguments) {
+        if (arguments.sourceKind == null) {
+            var legacy = arguments.legacySource;
+            return new SourceLocation(legacy.snapshotName, legacy.repoUri, legacy.s3Region);
+        }
+        return DocumentSourceRegistry.getDefault().resolve(arguments.sourceKind)
+            .parseSpec(readSourceConfig(arguments.sourceConfig)).location();
     }
 
     /** Which source to open: a registered kind plus that provider's own config. */
@@ -992,7 +1015,7 @@ public class RfsMigrateDocuments {
      * Takes {@code --source-kind} and {@code --source-config} when given, else infers the selection
      * from the per-source arguments so existing invocations keep working.
      */
-    static SourceSelection selectSource(Args arguments, boolean emitDocType) {
+    static SourceSelection selectSource(Args arguments) {
         if (arguments.sourceKind != null) {
             return new SourceSelection(arguments.sourceKind, readSourceConfig(arguments.sourceConfig));
         }
@@ -1016,7 +1039,7 @@ public class RfsMigrateDocuments {
             arguments.legacySource.versionStrictness.allowsLooseVersionMatches(),
             arguments.legacySource.maxShardSizeBytesOrDefault(),
             arguments.legacySource.useRecoverySourceOrDefault(),
-            emitDocType,
+            arguments.legacySource.emitDocTypeOrDefault(),
             arguments.legacySource.previousSnapshotName,
             arguments.legacySource.experimentalDeltaMode,
             arguments.legacySource.enableSourcelessMigrationsOrDefault()
@@ -1040,11 +1063,16 @@ public class RfsMigrateDocuments {
         }
     }
 
-    static SourceRuntime buildSourceRuntime(Args arguments, RootDocumentMigrationContext context) {
+    static SourceRuntime buildSourceRuntime(
+        Args arguments,
+        RootDocumentMigrationContext context,
+        boolean hasDocTransformer
+    ) {
         return new SourceRuntime(
             resolveWorkingDir(arguments.localDir, arguments.luceneDir),
             resolveWorkingDir(arguments.luceneDir, arguments.localDir),
-            () -> new RfsContexts.DeltaStreamContext(context, null));
+            () -> new RfsContexts.DeltaStreamContext(context, null),
+            hasDocTransformer);
     }
 
     /**
@@ -1078,13 +1106,13 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
         boolean useServerGeneratedIds,
-        boolean emitDocType,
         RootDocumentMigrationContext context
     ) {
-        var selection = selectSource(arguments, emitDocType);
+        var selection = selectSource(arguments);
         var provider = DocumentSourceRegistry.getDefault().resolve(selection.kind());
-        var runtime = buildSourceRuntime(arguments, context);
+        var runtime = buildSourceRuntime(arguments, context, docTransformerSupplier != null);
         var transformerSupplier = chainRequiredPreTransform(provider, selection.config(), docTransformerSupplier);
+        var indexAllowlist = provider.parseSpec(selection.config()).indexAllowlist();
 
         return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider, metricsReporter) -> {
             // Skip an expensive setup when nothing is left, so a restarted pod doesn't redo it.
@@ -1098,7 +1126,7 @@ public class RfsMigrateDocuments {
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, transformerSupplier,
                 useServerGeneratedIds, buildDocumentExceptionAllowlist(arguments), progressCursor,
-                cancellationRunnableRef, workItemTimeProvider, arguments, context, metricsReporter);
+                cancellationRunnableRef, workItemTimeProvider, arguments, indexAllowlist, context, metricsReporter);
         };
     }
 
@@ -1114,12 +1142,13 @@ public class RfsMigrateDocuments {
         AtomicReference<Runnable> cancellationRunnableRef,
         WorkItemTimeProvider workItemTimeProvider,
         Args arguments,
+        List<String> indexAllowlist,
         RootDocumentMigrationContext context,
         BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter
     ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, processManager, documentSource,
-            arguments.indexAllowlist, context);
+            indexAllowlist, context);
 
         var runner = DocumentMigrationBootstrap.builder()
             .documentSource(documentSource)
@@ -1334,31 +1363,6 @@ public class RfsMigrateDocuments {
                 .setMessage("Pre-check of coordinator pending work failed; proceeding with normal flow").log();
             return false;
         }
-    }
-
-    /**
-     * Resolve {@link EmitDocTypeMode} to a boolean. AUTO enables _type emission only when the
-     * source is ES 6 or older AND a document transformer is configured — the combination that
-     * exercises type-mapping transformers (e.g. TypeMappingSanitizationTransformerProvider) on
-     * multi-type indices.
-     */
-    static boolean resolveEmitDocType(EmitDocTypeMode mode, Version sourceVersion, String docTransformerConfig) {
-        return switch (mode) {
-            case ON -> true;
-            case OFF -> false;
-            case AUTO -> {
-                boolean isLegacyEs = sourceVersion != null
-                    && sourceVersion.getFlavor() == Flavor.ELASTICSEARCH
-                    && sourceVersion.getMajor() <= 6;
-                boolean hasCustomTransformer = docTransformerConfig != null;
-                boolean enable = isLegacyEs && hasCustomTransformer;
-                if (enable) {
-                    log.atInfo().setMessage("Auto-enabling --emit-doc-type for {} with custom transformer")
-                        .addArgument(sourceVersion).log();
-                }
-                yield enable;
-            }
-        };
     }
 
     /**

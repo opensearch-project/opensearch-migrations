@@ -3,6 +3,7 @@ package org.opensearch.migrations;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.pipeline.provider.EmitDocTypeMode;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
@@ -28,7 +29,7 @@ class LegacySourceSelectionTest {
         args.legacySource.s3Region = "us-east-2";
         args.indexAllowlist = List.of("catalog");
 
-        var selection = RfsMigrateDocuments.selectSource(args, false);
+        var selection = RfsMigrateDocuments.selectSource(args);
 
         assertThat(selection.kind(), equalTo(SolrBackupSourceProvider.KIND));
         var spec = new SolrBackupSourceProvider().parseSpec(selection.config());
@@ -44,15 +45,16 @@ class LegacySourceSelectionTest {
         args.legacySource.snapshotName = "nightly";
         args.legacySource.maxShardSizeBytes = 1234L;
         args.legacySource.useRecoverySource = true;
+        args.legacySource.emitDocType = EmitDocTypeMode.ON;
         args.legacySource.previousSnapshotName = "previous";
         args.legacySource.experimentalDeltaMode = DeltaMode.UPDATES_ONLY;
 
-        var selection = RfsMigrateDocuments.selectSource(args, true);
+        var selection = RfsMigrateDocuments.selectSource(args);
 
         assertThat(selection.kind(), equalTo(EsSnapshotSourceProvider.KIND));
         var spec = new EsSnapshotSourceProvider().parseSpec(selection.config());
         assertThat(spec, equalTo(new EsSnapshotSourceSpec(
             "file:///snapshots", "nightly", Version.fromString("ES 7.10.2"), List.of(),
-            null, null, false, 1234L, true, true, "previous", DeltaMode.UPDATES_ONLY, false)));
+            null, null, false, 1234L, true, EmitDocTypeMode.ON, "previous", DeltaMode.UPDATES_ONLY, false)));
     }
 }

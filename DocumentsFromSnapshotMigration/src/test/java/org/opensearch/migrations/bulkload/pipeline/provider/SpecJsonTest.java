@@ -40,17 +40,17 @@ class SpecJsonTest {
         assertThat("a null must not become the string \"null\"", explicitNull.endpoint(), nullValue());
         assertThat(absent.indexAllowlist(), empty());
         assertThat(absent.maxShardSizeBytes(), equalTo(0L));
-        assertThat(absent.emitDocType(), is(false));
+        assertThat(absent.emitDocType(), equalTo(EmitDocTypeMode.AUTO));
     }
 
     @Test
     void bindsTypedFields() throws Exception {
-        var spec = bindEs(",\"version\":\"ES 7.10.2\",\"deltaMode\":\"UPDATES_ONLY\",\"emitDocType\":true,"
+        var spec = bindEs(",\"version\":\"ES 7.10.2\",\"deltaMode\":\"UPDATES_ONLY\",\"emitDocType\":\"ON\","
             + "\"maxShardSizeBytes\":4242,\"indexAllowlist\":[\"logs\"]");
 
         assertThat(spec.version(), equalTo(Version.fromString("ES 7.10.2")));
         assertThat(spec.deltaMode(), equalTo(DeltaMode.UPDATES_ONLY));
-        assertThat(spec.emitDocType(), is(true));
+        assertThat(spec.emitDocType(), equalTo(EmitDocTypeMode.ON));
         assertThat(spec.maxShardSizeBytes(), equalTo(4242L));
         assertThat(spec.indexAllowlist(), equalTo(List.of("logs")));
     }

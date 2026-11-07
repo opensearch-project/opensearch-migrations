@@ -27,7 +27,7 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 /**
- * Covers {@code create()} and {@code validate()}. The end-to-end tests run the migration in a
+ * Covers {@code create()} and {@code validateSpec()}. The end-to-end tests run the migration in a
  * forked JVM, so this wiring needs in-process coverage here.
  */
 class SolrBackupSourceProviderTest {
@@ -118,7 +118,7 @@ class SolrBackupSourceProviderTest {
     @Test
     void validate_rejectsANonFileNonS3Uri() {
         var thrown = assertThrows(IllegalArgumentException.class,
-            () -> provider.validate(spec("gs://bucket/backups"), runtime()));
+            () -> provider.validateSpec(spec("gs://bucket/backups")));
 
         assertThat(thrown.getMessage(), containsString("file:// or s3://"));
     }
@@ -126,17 +126,17 @@ class SolrBackupSourceProviderTest {
     @Test
     void validate_rejectsAnUnsupportedSolrMajorVersion() {
         assertThat(assertThrows(IllegalArgumentException.class,
-            () -> provider.validate(spec("file:///backups/solr", 5), runtime())).getMessage(),
+            () -> provider.validateSpec(spec("file:///backups/solr", 5))).getMessage(),
             containsString("Unsupported Solr major version: 5"));
         assertThat(assertThrows(IllegalArgumentException.class,
-            () -> provider.validate(spec("file:///backups/solr", 10), runtime())).getMessage(),
+            () -> provider.validateSpec(spec("file:///backups/solr", 10))).getMessage(),
             containsString("Unsupported Solr major version: 10"));
     }
 
     @Test
     void validate_acceptsTheSupportedRange() {
-        provider.validate(spec("file:///backups/solr", 6), runtime());
-        provider.validate(spec("s3://bucket/backups", 9), runtime());
+        provider.validateSpec(spec("file:///backups/solr", 6));
+        provider.validateSpec(spec("s3://bucket/backups", 9));
     }
 
     @Test

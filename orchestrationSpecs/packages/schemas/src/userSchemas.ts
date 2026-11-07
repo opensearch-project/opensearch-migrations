@@ -1158,8 +1158,9 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     sourceKind: z.string().optional()
         .describe("Which document source the backfill reads, e.g. 'es-snapshot', 'solr-backup' or " +
             "'failed-document-stream'. Leave it unset for an ordinary backfill: the kind is then inferred " +
-            "from the snapshot being migrated. Setting it supersedes the snapshot arguments, which are " +
-            "omitted from the RFS invocation, and requires sourceConfig."),
+            "from the snapshot being migrated. Setting it requires sourceConfig, which then fully describes " +
+            "the source: the snapshot and the options that apply to it, including indexAllowlist and emitDocType, " +
+            "are not used."),
     sourceConfig: z.string().optional()
         .describe("The source's own configuration as JSON, for use with sourceKind. Each source defines its " +
             "own shape — a failure-stream redrive takes {\"streamUri\",\"sessionId\",\"s3Region\"," +

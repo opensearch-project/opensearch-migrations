@@ -6,6 +6,7 @@ import java.util.OptionalInt;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
+import org.opensearch.migrations.bulkload.pipeline.provider.EmitDocTypeMode;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 
 import org.junit.jupiter.api.Assertions;
@@ -51,8 +52,8 @@ class RfsMigrateDocumentsTest {
 
     @ParameterizedTest
     @MethodSource("emitDocTypeCases")
-    void testResolveEmitDocType(RfsMigrateDocuments.EmitDocTypeMode mode, Version version, String transformerConfig, boolean expected) {
-        Assertions.assertEquals(expected, RfsMigrateDocuments.resolveEmitDocType(mode, version, transformerConfig));
+    void testResolveEmitDocType(EmitDocTypeMode mode, Version version, String transformerConfig, boolean expected) {
+        Assertions.assertEquals(expected, mode.resolve(version, transformerConfig != null));
     }
 
     static Stream<Arguments> emitDocTypeCases() {
@@ -63,14 +64,14 @@ class RfsMigrateDocumentsTest {
         String someTransformer = "[{\"TypeMappingSanitizationTransformerProvider\":{}}]";
 
         return Stream.of(
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.ON,  es7, null, true),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.OFF, es5, someTransformer, false),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es5, someTransformer, true),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es6, someTransformer, true),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es7, someTransformer, false),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es5, null, false),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, os3, someTransformer, false),
-            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, null, someTransformer, false)
+            Arguments.of(EmitDocTypeMode.ON,  es7, null, true),
+            Arguments.of(EmitDocTypeMode.OFF, es5, someTransformer, false),
+            Arguments.of(EmitDocTypeMode.AUTO, es5, someTransformer, true),
+            Arguments.of(EmitDocTypeMode.AUTO, es6, someTransformer, true),
+            Arguments.of(EmitDocTypeMode.AUTO, es7, someTransformer, false),
+            Arguments.of(EmitDocTypeMode.AUTO, es5, null, false),
+            Arguments.of(EmitDocTypeMode.AUTO, os3, someTransformer, false),
+            Arguments.of(EmitDocTypeMode.AUTO, null, someTransformer, false)
         );
     }
 

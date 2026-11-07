@@ -22,6 +22,7 @@ import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Serves documents from an Elasticsearch/OpenSearch snapshot repository.
@@ -29,6 +30,7 @@ import com.fasterxml.jackson.databind.JsonNode;
  * <p>Picks the snapshot file finder for the source version, opens the {@link SourceRepo} matching
  * the repo URI scheme, and wires the optional delta and sourceless reads.
  */
+@Slf4j
 public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapshotSourceSpec> {
 
     public static final String KIND = "es-snapshot";
@@ -44,7 +46,13 @@ public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapsh
     }
 
     @Override
-    public void validate(EsSnapshotSourceSpec spec, SourceRuntime runtime) {
+    public void validateSpec(EsSnapshotSourceSpec spec) {
+        if (spec.version() == null) {
+            throw new IllegalArgumentException("A snapshot source needs a version.");
+        }
+        if (RepoUri.parse(spec.repoUri()) instanceof RepoUri.S3RepoUri && spec.s3Region() == null) {
+            throw new IllegalArgumentException("An s3:// repository needs an s3Region.");
+        }
         if (spec.previousSnapshotName() != null && spec.deltaMode() == null) {
             throw new IllegalArgumentException(
                 "A previous snapshot was given without a delta mode; a delta read needs both.");
@@ -86,9 +94,12 @@ public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapsh
         var builder = LuceneSnapshotSource.builder(extractor, spec.snapshotName(), runtime.workDir())
             .maxShardSizeBytes(spec.maxShardSizeBytes())
             .useRecoverySource(spec.useRecoverySource())
-            .emitDocType(spec.emitDocType());
+            .emitDocType(spec.emitDocType().resolve(spec.version(), runtime.hasDocTransformer()));
 
         if (spec.isDeltaRead()) {
+            log.atWarn().setMessage("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. "
+                    + "This feature is experimental and should not be used in production.")
+                .addArgument(spec.deltaMode()).log();
             builder.delta(spec.previousSnapshotName(), spec.deltaMode(), runtime.deltaStreamContextFactory());
         }
 

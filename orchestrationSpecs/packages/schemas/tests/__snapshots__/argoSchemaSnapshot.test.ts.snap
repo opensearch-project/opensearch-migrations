@@ -2411,7 +2411,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "sourceKind": {
                       "type": "string",
-                      "description": "Which document source the backfill reads, e.g. 'es-snapshot', 'solr-backup' or 'failed-document-stream'. Leave it unset for an ordinary backfill: the kind is then inferred from the snapshot being migrated. Setting it supersedes the snapshot arguments, which are omitted from the RFS invocation, and requires sourceConfig."
+                      "description": "Which document source the backfill reads, e.g. 'es-snapshot', 'solr-backup' or 'failed-document-stream'. Leave it unset for an ordinary backfill: the kind is then inferred from the snapshot being migrated. Setting it requires sourceConfig, which then fully describes the source: the snapshot and the options that apply to it, including indexAllowlist and emitDocType, are not used."
                     },
                     "sourceConfig": {
                       "type": "string",
@@ -5431,7 +5431,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "sourceKind": {
                         "type": "string",
-                        "description": "Which document source the backfill reads, e.g. 'es-snapshot', 'solr-backup' or 'failed-document-stream'. Leave it unset for an ordinary backfill: the kind is then inferred from the snapshot being migrated. Setting it supersedes the snapshot arguments, which are omitted from the RFS invocation, and requires sourceConfig."
+                        "description": "Which document source the backfill reads, e.g. 'es-snapshot', 'solr-backup' or 'failed-document-stream'. Leave it unset for an ordinary backfill: the kind is then inferred from the snapshot being migrated. Setting it requires sourceConfig, which then fully describes the source: the snapshot and the options that apply to it, including indexAllowlist and emitDocType, are not used."
                       },
                       "sourceConfig": {
                         "type": "string",

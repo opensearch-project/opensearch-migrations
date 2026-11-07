@@ -46,11 +46,14 @@ public class SolrBackupSourceProvider implements DocumentSourceProvider<SolrBack
     }
 
     @Override
-    public void validate(SolrBackupSourceSpec spec, SourceRuntime runtime) {
+    public void validateSpec(SolrBackupSourceSpec spec) {
         var parsed = RepoUri.parse(spec.repoUri());
         if (!(parsed instanceof RepoUri.FileRepoUri) && !(parsed instanceof RepoUri.S3RepoUri)) {
             throw new IllegalArgumentException(
                 "A Solr backup must be given as a file:// or s3:// URI, got: " + spec.repoUri());
+        }
+        if (parsed instanceof RepoUri.S3RepoUri && spec.s3Region() == null) {
+            throw new IllegalArgumentException("An s3:// backup needs an s3Region.");
         }
         if (spec.solrMajorVersion() < MIN_SUPPORTED_SOLR_MAJOR || spec.solrMajorVersion() > MAX_SUPPORTED_SOLR_MAJOR) {
             throw new IllegalArgumentException("Unsupported Solr major version: " + spec.solrMajorVersion()
@@ -102,7 +105,7 @@ public class SolrBackupSourceProvider implements DocumentSourceProvider<SolrBack
                     spec.endpoint() != null ? URI.create(spec.endpoint()) : null);
                 backupDir = s3Repo.getRepoRootDir();
             }
-            // validate() has already rejected every other scheme.
+            // validateSpec() has already rejected every other scheme.
             default -> throw new IllegalArgumentException(
                 "A Solr backup must be given as a file:// or s3:// URI, got: " + spec.repoUri());
         }

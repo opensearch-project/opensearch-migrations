@@ -5,6 +5,7 @@ import java.util.List;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.spi.SourceLocation;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -21,7 +22,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param allowLooseVersionMatches   accept a reader whose version only loosely matches the source
  * @param maxShardSizeBytes          reject a shard larger than this; 0 disables the check
  * @param useRecoverySource          treat {@code _recovery_source} as {@code _source} when present
- * @param emitDocType                carry the ES {@code _type} through to the sink
+ * @param emitDocType                whether to carry the ES {@code _type} through to the sink
  * @param previousSnapshotName       previous snapshot for a delta read, else null
  * @param deltaMode                  which delta changes to emit, else null
  * @param enableSourcelessMigrations reconstruct {@code _source} for indices that disabled it
@@ -36,7 +37,7 @@ public record EsSnapshotSourceSpec(
     boolean allowLooseVersionMatches,
     long maxShardSizeBytes,
     boolean useRecoverySource,
-    boolean emitDocType,
+    EmitDocTypeMode emitDocType,
     String previousSnapshotName,
     DeltaMode deltaMode,
     boolean enableSourcelessMigrations
@@ -46,11 +47,17 @@ public record EsSnapshotSourceSpec(
         SpecJson.requireNonBlank(repoUri, "repoUri");
         SpecJson.requireNonBlank(snapshotName, "snapshotName");
         indexAllowlist = indexAllowlist == null ? List.of() : List.copyOf(indexAllowlist);
+        emitDocType = emitDocType == null ? EmitDocTypeMode.AUTO : emitDocType;
     }
 
     @Override
     public String kind() {
         return EsSnapshotSourceProvider.KIND;
+    }
+
+    @Override
+    public SourceLocation location() {
+        return new SourceLocation(snapshotName, repoUri, s3Region);
     }
 
     /** True when both delta inputs are set; a lone one is rejected by the CLI before we get here. */
