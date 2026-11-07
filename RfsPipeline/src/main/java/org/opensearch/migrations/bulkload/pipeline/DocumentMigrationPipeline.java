@@ -134,7 +134,7 @@ public class DocumentMigrationPipeline {
             currentPartition.set(partition);
             return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
-                .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
+                .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
                     // Preserve the source position before handing the batch to the sink.
@@ -203,31 +203,4 @@ public class DocumentMigrationPipeline {
             .concatMap(this::migrateCollection);
     }
 
-    /**
-     * Batching predicate that groups documents by count and byte size.
-     */
-    static class BatchPredicate implements java.util.function.Predicate<Document> {
-        private final int maxDocs;
-        private final long maxBytes;
-        private int currentCount;
-        private long currentBytes;
-
-        BatchPredicate(int maxDocs, long maxBytes) {
-            this.maxDocs = maxDocs;
-            this.maxBytes = maxBytes;
-        }
-
-        @Override
-        public boolean test(Document doc) {
-            currentCount++;
-            currentBytes += doc.sourceLength();
-
-            if (currentCount >= maxDocs || currentBytes >= maxBytes) {
-                currentCount = 0;
-                currentBytes = 0;
-                return true;
-            }
-            return false;
-        }
-    }
 }
