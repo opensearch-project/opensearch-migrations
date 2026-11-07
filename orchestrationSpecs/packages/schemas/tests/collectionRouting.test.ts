@@ -1,4 +1,4 @@
-import { OVERALL_MIGRATION_CONFIG } from "../src";
+import { ARGO_METADATA_WORKFLOW_OPTION_KEYS, ARGO_RFS_WORKFLOW_OPTION_KEYS, OVERALL_MIGRATION_CONFIG } from "../src";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -28,6 +28,14 @@ describe("collection-routed targets", () => {
     ])("%s is rejected", (file, expected) => {
         const messages = issueMessages(loadFixture("invalid", file));
         expect(messages.some(message => message.includes(expected))).toBe(true);
+    });
+
+    // The tools treat a target as routed only when they receive the table, so it can't be held back as a workflow option
+    test.each([
+        ["metadata", ARGO_METADATA_WORKFLOW_OPTION_KEYS],
+        ["document backfill", ARGO_RFS_WORKFLOW_OPTION_KEYS],
+    ])("%s passes collectionRouting to its tool", (_, workflowOptionKeys) => {
+        expect(workflowOptionKeys as readonly string[]).not.toContain("collectionRouting");
     });
 
     function configWithRegexRoute(sourceIndex: string, collection: string) {

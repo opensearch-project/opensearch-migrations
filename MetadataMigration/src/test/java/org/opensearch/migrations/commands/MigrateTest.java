@@ -133,9 +133,12 @@ class MigrateTest {
         var args = new MigrateArgs();
         args.snapshotName = "snap1";
         args.collectionRouting = collectionRouting;
+        args.targetArgs.host = "https://123456789012.aoss.us-east-1.on.aws";
+        args.targetArgs.awsRegion = "us-east-1";
+        args.targetArgs.awsServiceSigningName = "aoss";
         // There is no source to connect to, but the target is marked first
         assertThrows(Exception.class, new MetadataMigration().migrate(args)::createClusters);
-        return args.targetArgs.collectionRouted;
+        return args.targetArgs.toConnectionContext().isCollectionRouted();
     }
 
     @Test

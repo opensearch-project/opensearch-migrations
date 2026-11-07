@@ -328,9 +328,12 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void validateArgs_targetIsCollectionRoutedOnlyWithARoutingTable() {
         var routed = validEsArgs();
+        routed.targetArgs.host = "https://123456789012.aoss.us-east-1.on.aws";
+        routed.targetArgs.awsRegion = "us-east-1";
+        routed.targetArgs.awsServiceSigningName = "aoss";
         routed.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(routed));
-        assertTrue(routed.targetArgs.collectionRouted);
+        assertTrue(routed.targetArgs.toConnectionContext().isCollectionRouted());
 
         var unset = validEsArgs();
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(unset));
