@@ -293,6 +293,12 @@ function hasConfiguredString(value: unknown): boolean {
     return typeof value === "string" && value.trim().length > 0;
 }
 
+function hasRequestTransform(config: z.infer<typeof USER_REPLAYER_OPTIONS> | undefined): boolean {
+    return (config?.requestTransforms?.length ?? 0) > 0
+        || [config?.transformerConfig, config?.transformerConfigEncoded, config?.transformerConfigFile]
+            .some(hasConfiguredString);
+}
+
 function validatePipelineRawConfigConflict(
     ctx: z.RefinementCtx,
     data: Record<string, unknown>,
@@ -1324,6 +1330,7 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
         .describe("Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), " +
             "which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration " +
             "to this target must define staticCollectionRouting or regexCollectionRouting. " +
+            "A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. " +
             "Migration console cluster commands don't send the collection header, so most of them don't work against this target."),
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
@@ -2026,11 +2033,11 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     }
                 }
 
-                if (data.targetClusters[rc.toTarget]?.collectionRouted) {
+                if (data.targetClusters[rc.toTarget]?.collectionRouted && !hasRequestTransform(rc.replayerConfig)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
-                        message: `Replayer '${replayerName}' targets '${rc.toTarget}', which is collectionRouted. ` +
-                            `Traffic replay does not support collection-routed targets yet.`,
+                        message: `Replayer '${replayerName}' targets '${rc.toTarget}', which is collectionRouted, so it needs ` +
+                            `a request transform that adds the x-amz-aoss-collection-name header to each request.`,
                         path: ['traffic', 'replayers', replayerName, 'toTarget']
                     });
                 }

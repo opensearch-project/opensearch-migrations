@@ -30,14 +30,34 @@ describe("collection-routed targets", () => {
         expect(messages.some(message => message.includes(expected))).toBe(true);
     });
 
-    test("replayer targeting a routed target is rejected", () => {
+    function trafficConfigWithRoutedTarget(replayerConfig?: Record<string, unknown>) {
         const config = loadFixture("valid", "traffic.json");
         config.targetClusters.target = {
             endpoint: "https://123456789012.aoss.us-east-1.on.aws",
             authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
             collectionRouted: true,
         };
-        const messages = issueMessages(config);
-        expect(messages.some(message => message.includes("does not support collection-routed targets"))).toBe(true);
+        config.traffic.replayers.replayer1.replayerConfig = replayerConfig;
+        return config;
+    }
+
+    test.each([
+        ["no transform", undefined],
+        ["only a tuple transform", {tupleTransformerConfig: "[]"}],
+        ["an empty requestTransforms list", {requestTransforms: []}],
+    ])("replayer targeting a routed target with %s is rejected", (_, replayerConfig) => {
+        const messages = issueMessages(trafficConfigWithRoutedTarget(replayerConfig));
+        expect(messages.some(message => message.includes("needs a request transform"))).toBe(true);
+    });
+
+    test.each([
+        ["transformerConfig", {transformerConfig: "[]"}],
+        ["transformerConfigEncoded", {transformerConfigEncoded: "W10="}],
+        ["transformerConfigFile", {transformerConfigFile: "/config/transform.json"}],
+        ["a requestTransforms list", {requestTransforms: [{entryPoint: {javascript: "(m) => m"}}]}],
+        ["a single requestTransforms entry", {requestTransforms: {entryPoint: {javascript: "(m) => m"}}}],
+    ])("replayer targeting a routed target with %s is valid", (_, replayerConfig) => {
+        const result = OVERALL_MIGRATION_CONFIG.safeParse(trafficConfigWithRoutedTarget(replayerConfig));
+        expect(result.success ? [] : result.error.issues.map(issue => issue.message)).toEqual([]);
     });
 });

@@ -5,10 +5,12 @@ import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -91,6 +93,22 @@ public class SigV4Signer {
         return stream.collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
+    /**
+     * AWS requires x-amz-* request headers (e.g. x-amz-aoss-collection-name) to be signed.
+     *
+     * @return those headers from the message, with lowercase names, excluding the ones the signer computes
+     */
+    static Map<String, List<String>> amzRequestHeaders(IHttpMessage msg) {
+        var amzHeaders = new TreeMap<String, List<String>>();
+        msg.headers().forEach((name, values) -> {
+            var lowerName = name.toLowerCase();
+            if (lowerName.startsWith(AMZ_HEADER_PREFIX) && !SIGNER_COMPUTED_HEADERS.contains(lowerName)) {
+                amzHeaders.computeIfAbsent(lowerName, k -> new ArrayList<>()).addAll(values);
+            }
+        });
+        return amzHeaders;
+    }
+
     private static class AwsSignerWithPrecomputedContentHash extends BaseAws4Signer {
         @Override
         protected String calculateContentHash(
@@ -119,13 +137,8 @@ public class SigV4Signer {
         msg.getFirstHeaderValueCaseInsensitive(CONTENT_TYPE)
             .ifPresent(contentType -> httpRequestBuilder.appendHeader(CONTENT_TYPE, contentType));
 
-        // AWS requires x-amz-* request headers (e.g. x-amz-aoss-collection-name) to be signed
-        msg.headers().forEach((name, values) -> {
-            var lowerName = name.toLowerCase();
-            if (lowerName.startsWith(AMZ_HEADER_PREFIX) && !SIGNER_COMPUTED_HEADERS.contains(lowerName)) {
-                values.forEach(value -> httpRequestBuilder.appendHeader(lowerName, value));
-            }
-        });
+        amzRequestHeaders(msg).forEach((name, values) ->
+            values.forEach(value -> httpRequestBuilder.appendHeader(name, value)));
 
         if (messageDigest != null) {
             byte[] bytesToEncode = messageDigest.digest();

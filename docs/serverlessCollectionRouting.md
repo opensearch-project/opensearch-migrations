@@ -10,11 +10,12 @@ The per-account endpoint only works with NextGen collections, which are created 
 and can be search or vector search collections. Classic collections, including all time series collections, only
 have per-collection endpoints, so each one still needs its own target.
 
-Collection routing applies to metadata migration and document backfill. Traffic replay to a collection-routed
-target would need a custom transformation that adds the `x-amz-aoss-collection-name` header to each request, and a
-request that spans indices in different collections, such as a mixed `_bulk`, can't be routed that way. The
-workflow configuration doesn't allow a replayer to point at a collection-routed target yet. The migration console's
-cluster commands, such as `connection-check` and `cat-indices`, don't send the collection header either, so most
+Collection routing applies to metadata migration and document backfill. To replay traffic to a collection-routed
+target, give the replayer a request transform that adds the `x-amz-aoss-collection-name` header to each request,
+and the replayer signs that header along with the rest of the request. The transform has to change the request it
+receives and return that same object, because SigV4 signing fails when a transform returns a new object. A request
+that spans indices in different collections, such as a mixed `_bulk`, can't be routed this way. The migration
+console's cluster commands, such as `connection-check` and `cat-indices`, don't send the collection header, so most
 of them don't work against a collection-routed target.
 
 ## Configuration
@@ -77,7 +78,8 @@ The workflow configuration is rejected when any of these is true.
 * A migration to a `collectionRouted` target has an entry with no routing entries in either list.
 * An entry has a routing list but its target isn't `collectionRouted`.
 * The same index name appears more than once in `staticCollectionRouting`.
-* A replayer points at a `collectionRouted` target.
+* A replayer points at a `collectionRouted` target and has no request transform. The workflow can't check what a
+  transform does, so it assumes that one adds the header.
 
 When a migration starts, each regex is compiled, and a `collection` that references a group its pattern doesn't
 define, such as `$2` for a pattern with one group, stops the migration with an error.

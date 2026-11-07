@@ -210,7 +210,7 @@ describe('MigrationConfigTransformer validation', () => {
 
     it('should pass collectionRouting to both metadata and backfill as JSON for a collection-routed target', async () => {
         const config = cloneBaseConfig() as any;
-        // Replay to a collection-routed target is rejected until it is supported
+        // A replayer on a collection-routed target would need a request transform
         delete config.traffic;
         config.targetClusters.target1 = {
             endpoint: "https://123456789012.aoss.us-east-1.on.aws",
@@ -233,6 +233,29 @@ describe('MigrationConfigTransformer validation', () => {
         expect(JSON.parse(migration.metadataMigrationConfig.collectionRouting)).toEqual(collectionRouting);
         expect(JSON.parse(migration.documentBackfillConfig.collectionRouting)).toEqual(collectionRouting);
         expect(migration.targetConfig.collectionRouted).toBe(true);
+    });
+
+    it('should pass a replayer with a request transform through for a collection-routed target', async () => {
+        const config = cloneBaseConfig() as any;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            staticCollectionRouting: [{sourceIndex: "shared-config", collection: "common"}],
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+        config.traffic.replayers.replay1.replayerConfig = {
+            requestTransforms: {entryPoint: {javascript: "(m) => m"}}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const replay = result.trafficReplays?.[0] as any;
+
+        expect(replay.replayerConfig.transformerConfig).toEqual(expect.any(String));
+        expect(replay.toTarget.authConfig.sigv4.service).toBe("aoss");
     });
 
     it('should pass only the routing lists that are set', async () => {

@@ -114,6 +114,32 @@ public class SigV4SigningTransformationTest {
         assertFalse(signedHeaders.containsKey("x-amz-aoss-collection-name"));
     }
 
+    @Test
+    public void testSplittableSignerSignsAmzRequestHeaders() {
+        var signer = new SplittableSigV4Signer(
+            new MockCredentialsProvider(),
+            "aoss",
+            "us-east-1",
+            "https",
+            () -> Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
+        );
+        var headers = new HashMap<String, List<String>>();
+        headers.put("Host", List.of("123456789012.aoss.us-east-1.on.aws"));
+        headers.put("X-Amz-Aoss-Collection-Name", List.of("tenant-a"));
+        headers.put("X-Amz-Date", List.of("20990101T000000Z"));
+        headers.put("User-Agent", List.of("Replayer-1.0"));
+
+        var signedHeaders = signer
+            .createReentrantSigner(null, modifiableHttpMessage("GET", "/", "HTTP/1.1", headers))
+            .sign();
+
+        var authHeader = signedHeaders.get("Authorization").get(0);
+        assertTrue(authHeader.contains("SignedHeaders=host;x-amz-aoss-collection-name;x-amz-date,"),
+            "Unexpected signed headers in " + authHeader);
+        assertEquals(List.of("19700101T000000Z"), signedHeaders.get("X-Amz-Date"));
+        assertFalse(signedHeaders.containsKey("x-amz-aoss-collection-name"));
+    }
+
     @SneakyThrows
     private static String calculateSHA256(String payload) {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
