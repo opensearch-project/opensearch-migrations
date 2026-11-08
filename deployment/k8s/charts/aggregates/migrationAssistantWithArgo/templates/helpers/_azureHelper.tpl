@@ -70,8 +70,9 @@
     local max_retries="${1:-1}"
     local attempt=1
     while [ "$attempt" -le "$max_retries" ]; do
-      # tsv prints Python booleans (True/False).
-      if [ "$(az storage container exists --name "$CONTAINER_NAME" --query exists -o tsv)" = "True" ]; then
+      # A one-blob listing rather than `container exists`: a container-scoped SAS can list blobs but
+      # cannot read container properties.
+      if az storage blob list --container-name "$CONTAINER_NAME" --num-results 1 -o none >/dev/null 2>&1; then
         return 0
       fi
       if [ "$attempt" -lt "$max_retries" ]; then
