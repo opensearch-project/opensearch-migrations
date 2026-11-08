@@ -255,9 +255,9 @@ azureStorageConfiguration:
   deleteOnUninstall: false
   serviceAccountName: "migrations-service-account"
   # Used instead of Workload ID by the Argo artifact repository, the console and the container
-  # jobs: a Secret holding one key, accountKey or sasToken (a SAS without a leading "?"). A
-  # container-scoped SAS cannot create or delete the container: pre-create it and leave
-  # deleteOnUninstall off, or use Workload ID or an account key.
+  # jobs: a Secret holding one key, accountKey or sasToken (a SAS without a leading "?"); set
+  # `key` to match it. A container-scoped SAS cannot create or delete the container: pre-create
+  # it and leave deleteOnUninstall off, or use Workload ID or an account key.
   artifactCredentials:
     secretName: ""
     key: sasToken
