@@ -14,7 +14,7 @@ metadata:
     "helm.sh/resource-policy": keep
 spec:
   accessModes:
-    - ReadWriteOnce
+    - {{ .Values.logs.sharedLogsVolume.accessMode | default "ReadWriteOnce" }}
   resources:
     requests:
       storage: {{ .Values.logs.sharedLogsVolume.size }}

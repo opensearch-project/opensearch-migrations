@@ -255,7 +255,9 @@ azureStorageConfiguration:
   deleteOnUninstall: false
   serviceAccountName: "migrations-service-account"
   # Used instead of Workload ID by the Argo artifact repository, the console and the container
-  # jobs: a Secret holding one key, accountKey or sasToken (a SAS without a leading "?").
+  # jobs: a Secret holding one key, accountKey or sasToken (a SAS without a leading "?"). A
+  # container-scoped SAS cannot create or delete the container: pre-create it and leave
+  # deleteOnUninstall off, or use Workload ID or an account key.
   artifactCredentials:
     secretName: ""
     key: sasToken
@@ -273,6 +275,8 @@ logs:
     name: logs-pvc
     size: 10Gi
     storageClass: ""
+    # ReadWriteMany needs a storage class every node can mount (fluent-bit runs on each node).
+    accessMode: ReadWriteOnce
   # Alternative to sharedLogsVolume for local clusters: Fluent Bit writes each node's logs to
   # <node name>/ under this node path (valuesForLocalK8s.yaml), and the console mounts the path at
   # /shared-logs-output. kindTesting.sh mounts one host directory here on every node, so the console

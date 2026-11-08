@@ -9,9 +9,9 @@ azure:
 
 logs:
   sharedLogsVolume:
-    enabled: false
-    # Used only if the shared logs volume is turned back on. AKS built-in Premium SSD class.
-    storageClass: managed-csi-premium
+    # Fluent Bit runs on every node, so the shared logs volume must be mountable from all of them.
+    storageClass: azurefile-csi
+    accessMode: ReadWriteMany
 
 defaultBucketConfiguration:
   useLocalStack: false
