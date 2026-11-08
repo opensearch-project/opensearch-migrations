@@ -78,7 +78,6 @@ describe("generated migration resources", () => {
             "documentBackfillDocumentsPerBulkRequest",
             "documentBackfillDocumentsSizePerBulkRequest",
             "documentBackfillMaxLeaseDuration",
-            "documentBackfillBulkMaxRetries",
         ]) {
             expect(vaps).not.toContain(safeField);
         }
