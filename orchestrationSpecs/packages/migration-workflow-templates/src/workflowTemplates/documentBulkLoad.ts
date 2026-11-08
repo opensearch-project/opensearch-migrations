@@ -37,7 +37,7 @@ import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
 } from "./commonUtils/containerFragments";
-import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, cloudProviderResolvedInput, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
@@ -153,6 +153,7 @@ const startHistoricalBackfillInputs = {
     snapshotK8sLabel: defineRequiredParam<string>(),
     fromSnapshotMigrationK8sLabel: defineRequiredParam<string>(),
     taskK8sLabel: defineParam<string>({expression: expr.literal("reindexFromSnapshot")}),
+    ...cloudProviderResolvedInput(),
     ...makeRequiredImageParametersForKeys(["ReindexFromSnapshot"])
 };
 
@@ -183,7 +184,8 @@ function getRfsDeploymentManifest
     targetK8sLabel: BaseExpression<string>,
     snapshotK8sLabel: BaseExpression<string>,
     fromSnapshotMigrationK8sLabel: BaseExpression<string>,
-    taskK8sLabel: BaseExpression<string>
+    taskK8sLabel: BaseExpression<string>,
+    cloudProvider: BaseExpression<string>
 }): Deployment {
     const ownerReferences: OwnerReference[] = [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -281,6 +283,11 @@ function getRfsDeploymentManifest
                         "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
                         "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
                         [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.crdUid),
+                        // Microsoft Entra Workload ID mutates only pods labeled "true"; "false" leaves them alone.
+                        "azure.workload.identity/use": makeStringTypeProxy(expr.ternary(
+                            expr.equals(args.cloudProvider, expr.literal("azure")),
+                            expr.literal("true"),
+                            expr.literal("false"))),
                     },
                 },
                 spec: {
@@ -489,6 +496,7 @@ function makeRfsDeploymentDefinition(
             snapshotK8sLabel: inputs.snapshotK8sLabel,
             fromSnapshotMigrationK8sLabel: inputs.fromSnapshotMigrationK8sLabel,
             taskK8sLabel: inputs.taskK8sLabel,
+            cloudProvider: inputs.cloudProvider,
         })
     };
 }

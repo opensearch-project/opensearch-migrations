@@ -9,6 +9,10 @@ metadata:
   annotations:
     iam.gke.io/gcp-service-account: {{ .Values.gcp.serviceAccountEmail | quote }}
   {{- end }}
+  {{- if include "migration.azureWorkloadIdentityEnabled" . }}
+  annotations:
+    azure.workload.identity/client-id: {{ .Values.azure.workloadIdentityClientId | quote }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

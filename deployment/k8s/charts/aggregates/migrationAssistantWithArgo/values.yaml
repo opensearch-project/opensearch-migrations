@@ -89,7 +89,14 @@ aws:
   # given) and disabling the built-in NodePools, whose nodes always use "default".
   nodeClassName: default
 
-cloudProvider: ""
+cloudProvider: ""  # "" | aws | gcp | azure
+
+azure:
+  # Client ID of the user-assigned managed identity that Microsoft Entra Workload ID federates to
+  # this release's service accounts. Set with cloudProvider=azure to annotate the service accounts
+  # (azure.workload.identity/client-id) and label the pods (azure.workload.identity/use) that read
+  # Azure Blob Storage.
+  workloadIdentityClientId: ""
 
 gcp:
   project: ""
@@ -243,6 +250,15 @@ azureStorageConfiguration:
   localCredentialsSecretName: "azurite-test-creds"
   containerOperationImage: "mcr.microsoft.com/azure-cli:2.91.0"
   containerOperationImagePullPolicy: "IfNotPresent"
+  # cloudProvider=azure only: create the container on install, delete it on uninstall.
+  create: false
+  deleteOnUninstall: false
+  serviceAccountName: "migrations-service-account"
+  # Used instead of Workload ID by the Argo artifact repository, the console and the container
+  # jobs: a Secret holding one key, accountKey or sasToken (a SAS without a leading "?").
+  artifactCredentials:
+    secretName: ""
+    key: sasToken
 
 kafkaExternal:
   enabled: false

@@ -15,6 +15,9 @@ metadata:
     {{- if and (eq .Values.cloudProvider "gcp") .Values.gcp.serviceAccountEmail }}
     iam.gke.io/gcp-service-account: {{ .Values.gcp.serviceAccountEmail | quote }}
     {{- end }}
+    {{- if include "migration.azureWorkloadIdentityEnabled" . }}
+    azure.workload.identity/client-id: {{ .Values.azure.workloadIdentityClientId | quote }}
+    {{- end }}
 {{- end }}
 {{- if .Values.installer.rbac.create }}
 ---

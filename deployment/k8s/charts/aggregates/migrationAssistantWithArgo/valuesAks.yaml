@@ -1,0 +1,33 @@
+conditionalPackageInstalls:
+  localstack: false
+
+cloudProvider: azure
+
+azure:
+  # Client ID of the user-assigned managed identity federated to the release's service accounts.
+  workloadIdentityClientId: ""
+
+logs:
+  sharedLogsVolume:
+    enabled: false
+    # Used only if the shared logs volume is turned back on. AKS built-in Premium SSD class.
+    storageClass: managed-csi-premium
+
+defaultBucketConfiguration:
+  useLocalStack: false
+  create: false
+
+azureStorageConfiguration:
+  accountName: ""
+  containerName: ""  # empty: migration-snapshots
+  create: true
+  # The container may hold snapshots that predate this release; delete it only on request.
+  deleteOnUninstall: false
+
+charts:
+  argo-workflows:
+    values:
+      artifactRepository:
+        s3: null
+        azure:
+          blobNameFormat: 'argo-artifacts/{{ "{{workflow.name}}" }}/{{ "{{pod.name}}" }}'
