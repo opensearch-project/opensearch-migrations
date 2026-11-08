@@ -65,19 +65,20 @@ class SolrSnapshotCreatorTest {
     }
 
     @Test
-    void isCloudRepoUri_recognizesS3AndGcs() {
+    void isCloudRepoUri_recognizesS3AndGcsAndAzure() {
         assertTrue(SolrSnapshotCreator.isCloudRepoUri("s3://my-bucket/foo"));
         assertTrue(SolrSnapshotCreator.isCloudRepoUri("gs://my-bucket/foo"));
+        assertTrue(SolrSnapshotCreator.isCloudRepoUri("azure://mystorageacct/my-container/foo"));
         assertFalse(SolrSnapshotCreator.isCloudRepoUri("/var/solr/data"));
         assertFalse(SolrSnapshotCreator.isCloudRepoUri("file:///var/solr/data"));
         assertFalse(SolrSnapshotCreator.isCloudRepoUri(null));
     }
 
-    // isCloudRepoUri must stay total. RepoUri.parse throws on an unrecognized scheme, but
-    // callers reach here with a location that Solr may still handle as a plain path (e.g.
-    // SolrBackupStrategy passes a bare path for file repos, and the legacy standalone
-    // replication handler accepts relative paths), so an unparseable value has to answer
-    // "not cloud" rather than blow up the backup request.
+    // isCloudRepoUri must stay total. RepoUri.parse throws on an unrecognized scheme, but callers
+    // reach here with a location Solr still handles as a plain path: SolrBackupStrategy resolves a
+    // file repo to its bare path() first, and for a file:// URI without a leading slash that path
+    // is relative, which parse rejects. So an unparseable value has to answer "not cloud" rather
+    // than blow up the backup request.
     @Test
     void isCloudRepoUri_unparseableLocationIsNotCloud() {
         assertFalse(SolrSnapshotCreator.isCloudRepoUri("relative/path"));
