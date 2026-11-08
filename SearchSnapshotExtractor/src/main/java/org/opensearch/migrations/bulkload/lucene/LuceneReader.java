@@ -14,6 +14,7 @@ import java.util.stream.IntStream;
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
+import org.opensearch.migrations.bulkload.common.SourceFormat;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -335,6 +336,7 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
+            sourceBytes = normalizeSourceToJson(sourceBytes, openSearchDocId, indexDirectoryPath);
             sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
                 openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
             if (sourceBytes == null) {
@@ -389,6 +391,27 @@ public class LuceneReader {
      * </ol>
      * @return resolved source bytes, or null if the document should be skipped
      */
+    /**
+     * Stored sources keep the indexing request's content type, so convert SMILE, CBOR, and YAML to JSON
+     * once, here, before anything parses or forwards them. A source that cannot be converted is passed
+     * through unchanged so the sink can fail that one document rather than the whole shard.
+     */
+    private static byte[] normalizeSourceToJson(byte[] sourceBytes, String docId, Object indexDirectoryPath) {
+        if (sourceBytes == null) {
+            return null;
+        }
+        try {
+            return SourceFormat.toJson(sourceBytes);
+        } catch (SourceFormat.InvalidDocumentSourceException e) {
+            log.atWarn().setCause(e)
+                .setMessage("Document {} from {} has a source that cannot be converted to JSON; passing it through")
+                .addArgument(docId)
+                .addArgument(indexDirectoryPath)
+                .log();
+            return sourceBytes;
+        }
+    }
+
     private static byte[] resolveSourceBytes(byte[] sourceBytes,
             LuceneLeafReader reader, int luceneDocId,
             LuceneDocument document, FieldMappingContext mappingContext, String openSearchDocId,

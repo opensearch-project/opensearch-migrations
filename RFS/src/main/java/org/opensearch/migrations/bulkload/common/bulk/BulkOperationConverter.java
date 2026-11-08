@@ -1,10 +1,10 @@
 package org.opensearch.migrations.bulkload.common.bulk;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.SourceFormat;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -43,10 +43,10 @@ public class BulkOperationConverter {
             } else if (retainRawSource) {
                 document = null;
             } else {
-                document = OBJECT_MAPPER.readValue(doc.source(), new TypeReference<>() {});
+                document = OBJECT_MAPPER.readValue(SourceFormat.toJson(doc.source()), new TypeReference<>() {});
             }
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw new SourceFormat.InvalidDocumentSourceException("Document source is not valid JSON", e);
         }
 
         String routing = doc.hints().get(Document.HINT_ROUTING);
