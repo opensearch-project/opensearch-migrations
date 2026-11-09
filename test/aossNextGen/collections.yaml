@@ -57,7 +57,7 @@ Resources:
     Properties:
       Name: !Ref CollectionPrefix
       Generation: NEXTGEN
-      StandbyReplicas: DISABLED
+      StandbyReplicas: ENABLED
       CapacityLimits:
         MaxIndexingCapacityInOcu: !Ref MaxIndexingCapacityInOcu
         MaxSearchCapacityInOcu: !Ref MaxSearchCapacityInOcu
