@@ -5,6 +5,7 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.regex.Pattern;
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.SourceFormat.InvalidDocumentSourceException;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
@@ -49,6 +51,8 @@ import reactor.util.retry.Retry;
 @Slf4j
 public abstract class OpenSearchClient {
     protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+    /** Failed document stream type for a source that is not JSON and could not be converted to JSON. */
+    public static final String INVALID_SOURCE_FORMAT = "invalid_source_format";
     private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
     private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
     private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
@@ -531,8 +535,15 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
-        return sendBulkRequests(indexName, docs, op -> new PreparedOperation(() -> op,
-            BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER)), context, allowlist);
+        return sendBulkRequests(indexName, docs, op -> {
+            try {
+                return new PreparedOperation(() -> op,
+                    BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER));
+            } catch (InvalidDocumentSourceException e) {
+                reportInvalidDocumentSource(indexName, op.getOperation().getId(), op.getRawDocument(), e);
+                return null;
+            }
+        }, context, allowlist);
     }
 
     /** Send raw source bytes without a byte[]→Map→byte[] round-trip. */
@@ -540,9 +551,62 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
-        return sendBulkRequests(indexName, docs, doc -> new PreparedOperation(
-            () -> BulkOperationConverter.fromRawDocument(doc, indexName),
-            BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER)), context, allowlist);
+        return sendBulkRequests(indexName, docs, doc -> {
+            try {
+                return new PreparedOperation(() -> BulkOperationConverter.fromRawDocument(doc, indexName),
+                    BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER));
+            } catch (InvalidDocumentSourceException e) {
+                reportInvalidDocumentSource(indexName, doc.id(), doc.source(), e);
+                return null;
+            }
+        }, context, allowlist);
+    }
+
+    /**
+     * Fail one document whose source cannot be sent as JSON, without failing the rest of its batch or shard.
+     * The record carries the source as base64 because it cannot be embedded as JSON.
+     */
+    public void reportInvalidDocumentSource(String indexName, String docId, byte[] source, Exception cause) {
+        log.atWarn().setCause(cause)
+            .setMessage("Skipping document {} for index '{}': its source cannot be sent as JSON")
+            .addArgument(docId)
+            .addArgument(indexName)
+            .log();
+        if (failedDocumentStreamSink == null) {
+            return;
+        }
+        try {
+            var requestItem = OBJECT_MAPPER.createObjectNode();
+            requestItem.putObject("operation").put("_index", indexName).put("_id", docId);
+            if (source != null) {
+                requestItem.put("documentBase64", Base64.getEncoder().encodeToString(source));
+            }
+            var responseItem = OBJECT_MAPPER.createObjectNode();
+            responseItem.putObject("index").put("_index", indexName).put("_id", docId).put("status", 400)
+                .putObject("error").put("type", INVALID_SOURCE_FORMAT).put("reason", cause.getMessage());
+            failedDocumentStreamSink.write(FailedDocumentStreamRecord.builder()
+                .sessionId(failedDocumentStreamSessionId)
+                .workerId(failedDocumentStreamWorkerId)
+                .workItemId(failedDocumentStreamWorkItemId)
+                .targetIndex(indexName)
+                .documentId(docId)
+                .failureType(INVALID_SOURCE_FORMAT)
+                .failureClass(FailureClass.NON_RETRYABLE)
+                .timestamp(Instant.now().toString())
+                .requestItem(requestItem)
+                .responseItem(responseItem)
+                .build()).subscribe(
+                    v -> {},
+                    err -> log.atError().setCause(err)
+                        .setMessage("Failed to buffer failed document stream record for index {}")
+                        .addArgument(indexName)
+                        .log());
+        } catch (Exception e) {
+            log.atError().setCause(e)
+                .setMessage("Unexpected error while emitting failed document stream record for index {}")
+                .addArgument(indexName)
+                .log();
+        }
     }
 
     // Build diagnostic operations only on failure; successful raw requests need only the encoded bytes.
@@ -556,7 +620,7 @@ public abstract class OpenSearchClient {
     ) {
         // The batching predicate and retry state must be fresh for every subscription.
         return Mono.defer(() -> Flux.fromIterable(docs)
-            .map(prepare)
+            .mapNotNull(prepare)
             .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
                 (PreparedOperation op) -> op.encoded().size()), true)
             // A split batch completes in source order, before its source checkpoint can advance.
