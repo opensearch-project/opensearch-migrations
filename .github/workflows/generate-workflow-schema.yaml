@@ -61,7 +61,7 @@ jobs:
           curl -sS http://docker-registry:5000/v2/ || true
 
       - name: Restore Docker Cache
-        uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
+        uses: AndreKurait/docker-cache@e1eb0120c0c16b3f1c6ff1c0ef4ebc9f67f8dc6a # 0.7.1
         with:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           read-only: ${{ github.event_name != 'push' }}
@@ -79,7 +79,7 @@ jobs:
               insecure = true
 
       - name: Set up Kind cluster
-        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           cluster_name: generate-workflow-schema
           node_image: kindest/node:v1.35.0
