@@ -1,0 +1,10 @@
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+cdk.context.json
+coverage
+dist
+cdk.out
+# The repo-wide .gitignore ignores **/bin/; this app keeps its entry point there, like opensearch-service-migration
+!bin/

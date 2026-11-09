@@ -23,20 +23,23 @@ jobs:
     steps:
       - name: Sanitize repo and branch
         id: sanitize
+        # Event values go through env, never as ${{ }} inside the script.
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          branch="${{ github.event.pull_request.head.ref || github.ref_name }}"
-          repo="${{ github.event.pull_request.head.repo.full_name || github.repository }}"
-          commit="${{ github.event.pull_request.head.sha || github.sha }}"
-
-          clean_branch_name=$(echo "$branch" | tr -cd '[:alnum:]_\-\./')
-          clean_repo_base=$(echo "$repo" | tr -cd '[:alnum:]_\-\./')
+          clean_branch_name=$(printf '%s' "$HEAD_REF" | tr -cd '[:alnum:]_\-\./')
+          clean_repo_base=$(printf '%s' "$HEAD_REPO" | tr -cd '[:alnum:]_\-\./')
           clean_repo_url="https://github.com/$clean_repo_base.git"
-          clean_commit_hash=$(echo "$commit" | tr -cd '[:alnum:]')
+          clean_commit_hash=$(printf '%s' "$HEAD_SHA" | tr -cd '[:alnum:]')
 
           echo "Sanitized repo: $clean_repo_url"
           echo "Sanitized branch: $clean_branch_name"
           echo "Sanitized commit: $clean_commit_hash"
 
-          echo "branch_name=$clean_branch_name" >> $GITHUB_OUTPUT
-          echo "pr_repo_url=$clean_repo_url" >> $GITHUB_OUTPUT
-          echo "commit_hash=$clean_commit_hash" >> $GITHUB_OUTPUT
+          {
+            echo "branch_name=$clean_branch_name"
+            echo "pr_repo_url=$clean_repo_url"
+            echo "commit_hash=$clean_commit_hash"
+          } >> "$GITHUB_OUTPUT"

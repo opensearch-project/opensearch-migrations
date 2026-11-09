@@ -1,0 +1,211 @@
+---
+# Runs one command in the AWS test account with short-lived OIDC credentials. The IAM roles trust only jobs from this
+# file on main, in these environments:
+#   pool 'main' -> environment migrations-ci-main -> role osm-ci-main (push, schedule and dispatch on main only)
+#   pool 'pr'   -> environment migrations-ci-pr   -> role osm-ci-pr   (PR runs a maintainer approved with a label)
+# Callers on pull_request_target must pass the aws-ci-pr-gate.yml check first. Don't call this from merge_group.
+name: AWS CI job
+on:
+  workflow_call:
+    inputs:
+      pool:
+        description: "'main' or 'pr'"
+        required: true
+        type: string
+      commit:
+        description: 'Commit to check out (use the sanitize-repo-details.yml output)'
+        required: true
+        type: string
+      scripts-ref:
+        description: >-
+          Run the ci/aws scripts from this ref instead of `commit` (release canaries test a release tag, which predates
+          ci/aws). Commands reach the scripts through $CI_AWS either way.
+        required: false
+        type: string
+        default: ''
+      release:
+        description: 'Name stages as release runs (<base>-r...) instead of main/PR'
+        required: false
+        type: boolean
+        default: false
+      run:
+        description: 'Shell command to run once the credentials are set'
+        required: true
+        type: string
+      cleanup:
+        description: 'Shell command that always runs after `run`, even if it failed or timed out (teardown)'
+        required: false
+        type: string
+        default: ''
+      setup-env:
+        description: 'Install the repo toolchain (Java, Gradle, Python + pipenv, Node) with .github/actions/setup-env'
+        required: false
+        type: boolean
+        default: false
+      collect-logs:
+        description: >-
+          Before cleanup, print diagnostics into the job log with ci/aws/shared/collect-logs.sh (Kubernetes, CloudFormation
+          and test reports, masked, one collapsed group per section)
+        required: false
+        type: boolean
+        default: true
+      test-name:
+        description: 'Test name for the job summary'
+        required: true
+        type: string
+      run-timeout-minutes:
+        description: 'Timeout for the `run` step; leave room for `cleanup` inside timeout-minutes'
+        required: false
+        type: number
+        default: 270
+      timeout-minutes:
+        description: 'Job timeout; GitHub-hosted jobs stop at 360'
+        required: false
+        type: number
+        default: 360
+      print-oidc-claims:
+        description: 'Print the non-secret claims of the OIDC token (never the token)'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE:
+        required: false
+      MIGRATIONS_CI_PR_ROLE:
+        required: false
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # PR events always land in migrations-ci-pr, whatever pool the caller asked for.
+    environment: ${{ (inputs.pool == 'main' && github.event_name != 'pull_request_target' && github.event_name != 'pull_request') && 'migrations-ci-main' || 'migrations-ci-pr' }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      POOL: ${{ inputs.pool }}
+      CI_POOL: ${{ inputs.release && 'release' || inputs.pool }}
+      CI_AWS: ${{ inputs.scripts-ref != '' && '.ci-scripts/ci/aws' || './ci/aws' }}
+      REGION: us-east-1
+    steps:
+      - name: Check pool and pick the role
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+          PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+        run: |
+          case "$POOL" in
+            pr) role="$PR_ROLE" ;;
+            main)
+              if [[ "$EVENT_NAME" == pull_request* || "$EVENT_NAME" == merge_group ]]; then
+                echo "::error::pool 'main' can't be used from $EVENT_NAME"
+                exit 1
+              fi
+              role="$MAIN_ROLE" ;;
+            *) echo "::error::pool must be 'main' or 'pr', got '$POOL'"; exit 1 ;;
+          esac
+          if [[ -z "$role" ]]; then
+            echo "::error::No role secret for pool '$POOL' (MIGRATIONS_CI_MAIN_ROLE / MIGRATIONS_CI_PR_ROLE)"
+            exit 1
+          fi
+          echo "ROLE_ARN=$role" >> "$GITHUB_ENV"
+
+      - name: Print OIDC claims
+        if: inputs.print-oidc-claims
+        run: |
+          set -euo pipefail
+          token=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          payload=$(cut -d. -f2 <<< "$token" | tr '_-' '/+')
+          while (( ${#payload} % 4 )); do payload+="="; done
+          base64 -d <<< "$payload" | jq '{sub, aud, environment, ref, event_name, repository, job_workflow_ref}'
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+
+      - name: Check out the ci/aws scripts
+        if: inputs.scripts-ref != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.scripts-ref }}
+          path: .ci-scripts
+          sparse-checkout: ci/aws
+          persist-credentials: false
+
+      - name: Point the scripts at the product checkout
+        if: inputs.scripts-ref != ''
+        run: echo "CI_REPO_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-env
+        if: inputs.setup-env
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          role-session-name: osm-ci-${{ inputs.pool }}-${{ github.run_id }}
+          role-duration-seconds: 21600
+          aws-region: us-east-1
+          mask-aws-account-id: true
+
+      # Every CDK app the test deploys uses the test bootstrap and permissions boundary.
+      - name: Use the test CDK settings
+        run: bash -euo pipefail -c 'source "$CI_AWS/shared/lib.sh" && use_test_cdk_settings && cat "$HOME/.cdk.json"'
+
+      - name: Run
+        id: run
+        timeout-minutes: ${{ inputs.run-timeout-minutes }}
+        env:
+          RUN_COMMAND: ${{ inputs.run }}
+        run: |
+          set -o pipefail
+          # Account IDs are masked in public logs.
+          bash -euo pipefail -c "$RUN_COMMAND" 2>&1 | sed -E 's/[0-9]{12}/[MASKED]/g'
+
+      - name: Collect logs
+        # Before cleanup, while the cluster and stacks still exist.
+        if: always() && inputs.collect-logs
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          bash -uo pipefail "$CI_AWS"/shared/collect-logs.sh 2>&1 | sed -E 's/[0-9]{12}/[MASKED]/g'
+
+      - name: Cleanup
+        id: cleanup
+        if: always() && inputs.cleanup != ''
+        timeout-minutes: 75
+        env:
+          CLEANUP_COMMAND: ${{ inputs.cleanup }}
+          # Failed runs keep their CloudWatch log groups for 14 days (cleanup_log_groups in ci/aws/shared/lib.sh).
+          RUN_OUTCOME: ${{ steps.run.outcome }}
+        run: |
+          set -o pipefail
+          bash -uo pipefail -c "$CLEANUP_COMMAND" 2>&1 | sed -E 's/[0-9]{12}/[MASKED]/g'
+
+      - name: Summary
+        if: always()
+        env:
+          RUN_OUTCOME: ${{ steps.run.outcome }}
+          CLEANUP_OUTCOME: ${{ inputs.cleanup != '' && steps.cleanup.outcome || 'none' }}
+          TEST_NAME: ${{ inputs.test-name }}
+          COLLECT_LOGS: ${{ inputs.collect-logs }}
+        run: |
+          icon() { case "$1" in success) echo "✅" ;; failure) echo "❌" ;; cancelled) echo "⏹️" ;; *) echo "➖" ;; esac; }
+          state="${CI_REPO_ROOT:-$GITHUB_WORKSPACE}/tmp/ci-aws-state.env"
+          stage=$(sed -nE "s/^export STAGE=(.*)$/\1/p" "$state" 2>/dev/null | tail -1)
+          {
+            echo "### $TEST_NAME"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Test | $(icon "$RUN_OUTCOME") $RUN_OUTCOME |"
+            echo "| Cleanup | $(icon "$CLEANUP_OUTCOME") $CLEANUP_OUTCOME |"
+            echo "| Stage | \`${stage:-not deployed}\` |"
+            echo "| Pool | $CI_POOL |"
+            if [[ "$COLLECT_LOGS" == true ]]; then
+              echo "| Diagnostics | the job's **Collect logs** step |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

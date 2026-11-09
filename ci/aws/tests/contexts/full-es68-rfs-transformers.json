@@ -1,0 +1,24 @@
+[
+  {
+    "TypeMappingSanitizationTransformerProvider": {
+      "regexMappings": [
+        {
+          "sourceIndexPattern": "(test_e2e_0001_.*)",
+          "sourceTypePattern": ".*",
+          "targetIndexPattern": "$1_transformed"
+        },
+        {
+          "sourceIndexPattern": "(.*)",
+          "sourceTypePattern": "(.*)",
+          "targetIndexPattern": "$1"
+        }
+      ],
+      "sourceProperties": {
+        "version": {
+          "major": 6,
+          "minor": 8
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,623 @@
+---
+# AWS integration tests in the CI test account. Each test is a script under ci/aws/tests/ run by aws-ci-job.yml in its
+# own stage; its teardown always runs.
+#   Pushes to main run the "all" set. One concurrency group per test: one runs and one waits; a newer commit replaces
+#   the waiting one.
+#   Release canary: the latest x.y.z release tag, with the ci/aws scripts from this run's ref. Scheduled once a day for
+#   the "all" set; manual runs can choose it for any test.
+#   Pushes, scheduled and manual runs use osm-ci-main.
+#   PRs: a maintainer (CODEOWNERS) adds the test's run-* label, which runs it on the PR's code at that moment with
+#        osm-ci-pr. A later push runs nothing until a maintainer adds the label again. rfs-default,
+#        solutions-cfn-create-vpc and the AOSS time-series/vector tests have no PR label.
+name: AWS integ tests
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Test to run'
+        type: choice
+        options:
+          - all
+          - eks-integ
+          - eks-cfn-create-vpc
+          - eks-cfn-import-vpc
+          - eks-cdc-full-e2e
+          - eks-cdc-aoss-e2e
+          - eks-cdc-k6-load
+          - eks-aoss-search
+          - eks-aoss-timeseries
+          - eks-aoss-vector
+          - eks-byos
+          - eks-isolated
+          - full-es68
+          - rfs-default
+          - solutions-cfn-create-vpc
+        default: eks-integ
+      release-canary:
+        description: 'Test the latest release tag instead of this branch'
+        type: boolean
+        default: false
+  # Only `labeled`: a maintainer's label approves the PR's code at that moment (aws-ci-pr-gate.yml).
+  pull_request_target:
+    types: [labeled]
+  schedule:
+    # Once a day: the release canary for every test in "all". Off the hour, as GitHub delays runs at the top of the hour.
+    - cron: '17 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  # On PRs, nothing reads PR data until at least one test's gate allows the run (sanitize-repo-details.yml reads the
+  # PR's branch name). Unlabeled PRs only run the gates, which read the event in JavaScript and call the GitHub API.
+  sanitize-input:
+    needs: [eks-integ-gate, eks-cfn-create-vpc-gate, eks-cfn-import-vpc-gate, eks-cdc-full-e2e-gate, eks-cdc-aoss-e2e-gate, eks-cdc-k6-load-gate, eks-aoss-search-gate, eks-byos-gate, eks-isolated-gate, full-es68-gate]
+    if: |
+      !cancelled() && (github.event_name != 'pull_request_target' || contains(needs.*.outputs.allowed, 'true'))
+    uses: ./.github/workflows/sanitize-repo-details.yml
+
+  resolve-ref:
+    needs: sanitize-input
+    if: "!cancelled() && needs.sanitize-input.result == 'success'"
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.ref.outputs.commit }}
+      scripts_ref: ${{ steps.ref.outputs.scripts_ref }}
+    steps:
+      - id: ref
+        env:
+          CANARY: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+          COMMIT: ${{ needs.sanitize-input.outputs.commit_hash }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          if [[ "$CANARY" == true ]]; then
+            tag=$(git ls-remote --tags "$REPO_URL" | { grep -oE 'refs/tags/[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sed 's|refs/tags/||' | sort -V | tail -1)
+            [[ -n "$tag" ]] || { echo "::error::No x.y.z release tag found"; exit 1; }
+            echo "Release canary: testing $tag with the ci/aws scripts from $GITHUB_SHA"
+            echo "commit=refs/tags/$tag" >> "$GITHUB_OUTPUT"
+            echo "scripts_ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+            echo "scripts_ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+  eks-integ-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-eks-tests
+
+  eks-integ-test:
+    needs: [resolve-ref, eks-integ-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-integ' || inputs.test == 'all')) ||
+        needs.eks-integ-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-integ-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-integ-test.sh --source-version ES_7.10 --target-version OS_1.3 --test-ids 0001,0002'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 210
+      timeout-minutes: 300
+      test-name: eks-integ
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-cfn-create-vpc-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-cfn-tests
+
+  eks-cfn-create-vpc-test:
+    needs: [resolve-ref, eks-cfn-create-vpc-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-cfn-create-vpc' || inputs.test == 'all')) ||
+        needs.eks-cfn-create-vpc-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-cfn-create-vpc-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-cfn-test.sh --vpc-mode create'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 120
+      timeout-minutes: 210
+      test-name: eks-cfn-create-vpc
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-cfn-import-vpc-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-cfn-tests
+
+  eks-cfn-import-vpc-test:
+    needs: [resolve-ref, eks-cfn-import-vpc-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-cfn-import-vpc' || inputs.test == 'all')) ||
+        needs.eks-cfn-import-vpc-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-cfn-import-vpc-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-cfn-test.sh --vpc-mode import'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 120
+      timeout-minutes: 210
+      test-name: eks-cfn-import-vpc
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-cdc-full-e2e-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-eks-tests
+
+  eks-cdc-full-e2e-test:
+    needs: [resolve-ref, eks-cdc-full-e2e-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-cdc-full-e2e' || inputs.test == 'all')) ||
+        needs.eks-cdc-full-e2e-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-cdc-full-e2e-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-cdc-test.sh --test-ids 0031,0032,0033,0040,0042'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 270
+      timeout-minutes: 355
+      test-name: eks-cdc-full-e2e
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-cdc-aoss-e2e-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-eks-tests
+
+  eks-cdc-aoss-e2e-test:
+    needs: [resolve-ref, eks-cdc-aoss-e2e-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-cdc-aoss-e2e' || inputs.test == 'all')) ||
+        needs.eks-cdc-aoss-e2e-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-cdc-aoss-e2e-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-cdc-aoss-test.sh --test-ids 0034,0041'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 240
+      timeout-minutes: 330
+      test-name: eks-cdc-aoss-e2e
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-cdc-k6-load-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-eks-tests
+
+  eks-cdc-k6-load-test:
+    needs: [resolve-ref, eks-cdc-k6-load-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-cdc-k6-load' || inputs.test == 'all')) ||
+        needs.eks-cdc-k6-load-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-cdc-k6-load-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-cdc-test.sh --stage-base esosk6 --test-ids 0080'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 270
+      timeout-minutes: 355
+      test-name: eks-cdc-k6-load
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-aoss-search-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-eks-tests
+
+  eks-aoss-search-test:
+    needs: [resolve-ref, eks-aoss-search-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-aoss-search' || inputs.test == 'all')) ||
+        needs.eks-aoss-search-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-aoss-search-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-aoss-test.sh --stage-base aosss'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 180
+      timeout-minutes: 270
+      test-name: eks-aoss-search
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-aoss-timeseries-test:
+    needs: [resolve-ref]
+    if: |
+      always() && needs.resolve-ref.result == 'success' &&
+      github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-aoss-timeseries')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-aoss-timeseries-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-aoss-test.sh --stage-base aosst'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 180
+      timeout-minutes: 270
+      test-name: eks-aoss-timeseries
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-aoss-vector-test:
+    needs: [resolve-ref]
+    if: |
+      always() && needs.resolve-ref.result == 'success' &&
+      github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-aoss-vector')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-aoss-vector-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-aoss-test.sh --stage-base aossv'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 180
+      timeout-minutes: 270
+      test-name: eks-aoss-vector
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-byos-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-eks-byos-tests
+
+  eks-byos-test:
+    needs: [resolve-ref, eks-byos-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-byos' || inputs.test == 'all')) ||
+        needs.eks-byos-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-byos-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-byos-test.sh'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 270
+      timeout-minutes: 355
+      test-name: eks-byos
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  eks-isolated-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-eks-isolated-tests
+
+  eks-isolated-test:
+    needs: [resolve-ref, eks-isolated-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'eks-isolated' || inputs.test == 'all')) ||
+        needs.eks-isolated-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-eks-isolated-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/eks-isolated-test.sh'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 240
+      timeout-minutes: 330
+      test-name: eks-isolated
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  full-es68-gate:
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/aws-ci-pr-gate.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      label: run-aws-e2e-tests
+
+  full-es68-test:
+    needs: [resolve-ref, full-es68-gate]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'full-es68' || inputs.test == 'all')) ||
+        needs.full-es68-gate.outputs.allowed == 'true')
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-full-es68-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/cdk-integ-test.sh --test full-es68'
+      cleanup: '"$CI_AWS"/shared/cdk-integ-cleanup.sh'
+      run-timeout-minutes: 270
+      timeout-minutes: 355
+      test-name: full-es68
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  rfs-default-test:
+    needs: [resolve-ref]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'rfs-default' || inputs.test == 'all')))
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-rfs-default-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/cdk-integ-test.sh --test rfs-default'
+      cleanup: '"$CI_AWS"/shared/cdk-integ-cleanup.sh'
+      run-timeout-minutes: 270
+      timeout-minutes: 355
+      test-name: rfs-default
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  solutions-cfn-create-vpc-test:
+    needs: [resolve-ref]
+    if: |
+      always() && needs.resolve-ref.result == 'success' && (
+        github.event_name == 'push' || github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.test == 'solutions-cfn-create-vpc' || inputs.test == 'all')))
+    uses: ./.github/workflows/aws-ci-job.yml
+    concurrency:
+      group: aws-integ-solutions-cfn-create-vpc-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || (github.event_name == 'schedule' && 'release') || 'main' }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      pool: ${{ github.event_name == 'pull_request_target' && 'pr' || 'main' }}
+      release: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release-canary) }}
+      commit: ${{ needs.resolve-ref.outputs.commit }}
+      scripts-ref: ${{ needs.resolve-ref.outputs.scripts_ref }}
+      setup-env: true
+      run: '"$CI_AWS"/tests/solutions-cfn-test.sh'
+      cleanup: '"$CI_AWS"/shared/eks-cleanup.sh'
+      run-timeout-minutes: 120
+      timeout-minutes: 210
+      test-name: solutions-cfn-create-vpc
+    secrets:
+      MIGRATIONS_CI_MAIN_ROLE: ${{ secrets.MIGRATIONS_CI_MAIN_ROLE }}
+      MIGRATIONS_CI_PR_ROLE: ${{ secrets.MIGRATIONS_CI_PR_ROLE }}
+
+  all-aws-integ-checks-pass:
+    # One results table for the run, and the aggregate check. Tests that didn't run (not selected, or no label on a
+    # PR, which also skips resolve-ref) count as passing.
+    needs: [resolve-ref, eks-integ-test, eks-cfn-create-vpc-test, eks-cfn-import-vpc-test, eks-cdc-full-e2e-test, eks-cdc-aoss-e2e-test, eks-cdc-k6-load-test, eks-aoss-search-test, eks-aoss-timeseries-test, eks-aoss-vector-test, eks-byos-test, eks-isolated-test, full-es68-test, rfs-default-test, solutions-cfn-create-vpc-test]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    steps:
+      - name: Results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
+            --jq '.jobs[] | select(.name | endswith("-test / run"))' | jq -s .)
+          rows=$(jq -r --argjson jobs "$jobs" '
+            to_entries[] | select(.key != "resolve-ref" and .value.result != "skipped") | .key as $k
+            | ($jobs | map(select(.name == "\($k) / run")) | first) as $j
+            | [ ($k | rtrimstr("-test")),
+                ({"success": "✅", "failure": "❌", "cancelled": "⏹️"}[.value.result] // "➖") + " " + .value.result,
+                (if $j and $j.completed_at then "\((($j.completed_at | fromdate) - ($j.started_at | fromdate)) / 60 | floor) min" else "" end),
+                (if $j then "[job](\($j.html_url))" else "" end) ]
+            | "| " + join(" | ") + " |"' <<< "$NEEDS")
+          skipped=$(jq '[to_entries[] | select(.key != "resolve-ref" and .value.result == "skipped")] | length' <<< "$NEEDS")
+          {
+            echo "## AWS integ tests"
+            echo
+            if [[ -n "$rows" ]]; then
+              echo "| Test | Result | Duration | Job |"
+              echo "|---|---|---|---|"
+              echo "$rows"
+              echo
+            fi
+            echo "$skipped tests not run (not selected, or no label on the PR). Each job's diagnostics are in its Collect logs step."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          resolve=$(jq -r '.["resolve-ref"].result' <<< "$NEEDS")
+          if [[ "$resolve" == failure || "$resolve" == cancelled ||
+                ( "$GITHUB_EVENT_NAME" != pull_request_target && "$resolve" != success ) ]]; then
+            echo "::error::resolve-ref $resolve, so no test ran"; exit 1
+          fi
+          if jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' <<< "$NEEDS" > /dev/null; then
+            echo "::error::One or more AWS tests failed or were cancelled"; exit 1
+          fi

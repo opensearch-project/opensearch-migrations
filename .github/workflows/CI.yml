@@ -288,6 +288,7 @@ jobs:
       matrix:
         npm-project:
           - ./deployment/cdk/opensearch-service-migration
+          - ./deployment/cdk/ci-infra
           - ./deployment/migration-assistant-solution
           - ./TrafficCapture/SolrTransformations/transforms
           - ./schema-viewer
