@@ -12,4 +12,7 @@ public interface IndexCreator {
         AwarenessAttributeSettings awarenessAttributeSettings,
         ICreateIndexContext context
     );
+
+    /** Returns a creator that creates indices in one OpenSearch Serverless collection behind a per-account endpoint. */
+    public IndexCreator forCollection(String serverlessCollection);
 }

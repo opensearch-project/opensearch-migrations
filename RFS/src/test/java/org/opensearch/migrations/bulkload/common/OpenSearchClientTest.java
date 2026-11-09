@@ -34,6 +34,7 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempoten
 import org.opensearch.migrations.bulkload.transformers.BulkVersioningTransformerProvider;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -663,6 +664,69 @@ class OpenSearchClientTest {
         verify(restClient).getAsync(any(), any());
         verify(restClient).putAsync(any(), any(), any());
         verifyNoMoreInteractions(restClient);
+    }
+
+    private RestClient collectionRestClient(String collection) {
+        var collectionRestClient = mock(RestClient.class);
+        when(restClient.withDefaultHeaders(Map.of("x-amz-aoss-collection-name", List.of(collection))))
+            .thenReturn(collectionRestClient);
+        return collectionRestClient;
+    }
+
+    @Test
+    void testForCollection_sendsBulkRequestsThroughTheCollectionRestClient() {
+        var collectionRestClient = collectionRestClient("tenant-a");
+        var docId = "tt1979320";
+        when(collectionRestClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry(docId)))));
+
+        openSearchClient.forCollection("tenant-a").sendBulkRequest(
+            "testIndex",
+            List.of(createBulkDoc(docId)),
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
+        ).block();
+
+        verify(collectionRestClient).postAsyncBytes(eq("testIndex/_bulk"), any(), any(), any());
+        verify(restClient, times(0)).postAsyncBytes(any(), any(), any(), any());
+    }
+
+    @Test
+    void testForCollection_createsIndicesThroughTheCollectionRestClient() {
+        var collectionRestClient = collectionRestClient("tenant-a");
+        when(collectionRestClient.getAsync(eq("indexName"), any()))
+            .thenReturn(Mono.just(new HttpResponse(404, "", null, "does not exist")));
+        when(collectionRestClient.putAsync(eq("indexName"), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "", null, "{}")));
+
+        var result = openSearchClient.forCollection("tenant-a").createIndex("indexName",
+            OBJECT_MAPPER.createObjectNode(), mock(ICheckedIdempotentPutRequestContext.class));
+
+        assertThat(result.isPresent(), equalTo(true));
+        verify(restClient, times(0)).getAsync(any(), any());
+        verify(restClient, times(0)).putAsync(any(), any(), any());
+    }
+
+    @Test
+    void testForCollection_sharesFailedDocumentStreamContextSetAfterBinding() {
+        collectionRestClient("tenant-a");
+        var bound = openSearchClient.forCollection("tenant-a");
+        var sink = mock(FailedDocumentStreamSink.class);
+
+        openSearchClient.setFailedDocumentStreamContext(sink, "session", "worker");
+
+        assertThat(bound.getFailedDocumentStreamSink(), equalTo(sink));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testIsCollectionRouted_comesFromTheConnection(boolean collectionRouted) {
+        var connectionContext = mock(ConnectionContext.class);
+        when(connectionContext.isCollectionRouted()).thenReturn(collectionRouted);
+        when(restClient.getConnectionContext()).thenReturn(connectionContext);
+
+        assertThat(openSearchClient.isCollectionRouted(), equalTo(collectionRouted));
     }
 
     @Test

@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -47,6 +48,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
+    private final CollectionRoutedTarget collectionRoutedTarget;
 
     public OpenSearchDocumentSink(
         OpenSearchClient client,
@@ -55,6 +57,22 @@ public class OpenSearchDocumentSink implements DocumentSink {
         DocumentExceptionAllowlist allowlist,
         Supplier<IRfsContexts.IRequestContext> requestContextSupplier
     ) {
+        this(client, transformerSupplier, allowServerGeneratedIds, allowlist, requestContextSupplier, null);
+    }
+
+    /**
+     * @param collectionRoutedTarget routes each source index to a serverless collection and decides
+     *                               server-generated IDs per collection; null for other targets
+     */
+    public OpenSearchDocumentSink(
+        OpenSearchClient client,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean allowServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        Supplier<IRfsContexts.IRequestContext> requestContextSupplier,
+        CollectionRoutedTarget collectionRoutedTarget
+    ) {
+        this.collectionRoutedTarget = collectionRoutedTarget;
         this.client = client;
         this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
         this.nativeTransformers = this.transformer == null ? List.of()
@@ -67,6 +85,9 @@ public class OpenSearchDocumentSink implements DocumentSink {
     @Override
     public Mono<Void> createCollection(CollectionMetadata metadata) {
         return Mono.fromRunnable(() -> {
+            var targetClient = collectionRoutedTarget != null
+                ? client.forCollection(collectionRoutedTarget.collectionFor(metadata.name()))
+                : client;
             var sourceConfig = metadata.sourceConfig();
             if (sourceConfig.containsKey(CollectionMetadata.ES_NUMBER_OF_SHARDS)) {
                 // ES→ES path: reconstruct IndexMetadataSnapshot from sourceConfig
@@ -79,15 +100,15 @@ public class OpenSearchDocumentSink implements DocumentSink {
                     (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_SETTINGS),
                     (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_ALIASES)
                 );
-                OpenSearchIndexCreator.createIndex(client, esMetadata, OBJECT_MAPPER, null);
+                OpenSearchIndexCreator.createIndex(targetClient, esMetadata, OBJECT_MAPPER, null);
             } else if (sourceConfig.containsKey(CollectionMetadata.ES_MAPPINGS)) {
                 // Non-ES source with mappings (e.g. Solr): create index with mappings only
                 var body = OBJECT_MAPPER.createObjectNode();
                 body.set("mappings", (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_MAPPINGS));
-                client.createIndex(metadata.name(), body, null);
+                targetClient.createIndex(metadata.name(), body, null);
             } else {
                 // Unknown source: create index with defaults
-                client.createIndex(metadata.name(), OBJECT_MAPPER.createObjectNode(), null);
+                targetClient.createIndex(metadata.name(), OBJECT_MAPPER.createObjectNode(), null);
             }
         })
             .subscribeOn(Schedulers.boundedElastic())
@@ -100,12 +121,20 @@ public class OpenSearchDocumentSink implements DocumentSink {
             .mapToLong(Document::sourceLength)
             .sum();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
+        // collectionName is the source index; routing by it holds even when a transformer renames _index
+        var serverlessCollection = collectionRoutedTarget != null
+            ? collectionRoutedTarget.collectionFor(collectionName)
+            : null;
+        var useServerGeneratedIds = serverlessCollection != null
+            ? collectionRoutedTarget.requiresServerGeneratedIds(serverlessCollection)
+            : allowServerGeneratedIds;
+        var targetClient = serverlessCollection != null ? client.forCollection(serverlessCollection) : client;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (nativeTransformers != null && nativeTransformers.isEmpty()) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
-            bulkMono = client.sendBulkRequestRaw(collectionName, batch,
-                requestContext, allowServerGeneratedIds, allowlist);
+            bulkMono = targetClient.sendBulkRequestRaw(collectionName, batch,
+                requestContext, useServerGeneratedIds, allowlist);
         } else if (nativeTransformers != null) {
             var operations = batch.stream()
                 .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
@@ -113,8 +142,8 @@ public class OpenSearchDocumentSink implements DocumentSink {
             for (var nativeTransformer : nativeTransformers) {
                 operations = nativeTransformer.transformOperations(operations);
             }
-            bulkMono = client.sendBulkRequest(collectionName, operations,
-                requestContext, allowServerGeneratedIds, allowlist);
+            bulkMono = targetClient.sendBulkRequest(collectionName, operations,
+                requestContext, useServerGeneratedIds, allowlist);
         } else {
             var bulkOps = new ArrayList<BulkOperationSpec>(batch.size());
             for (var doc : batch) {
@@ -125,8 +154,8 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 }
             }
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
-            bulkMono = client.sendBulkRequest(collectionName, opsToSend,
-                requestContext, allowServerGeneratedIds, allowlist);
+            bulkMono = targetClient.sendBulkRequest(collectionName, opsToSend,
+                requestContext, useServerGeneratedIds, allowlist);
         }
 
         return bulkMono.map(response -> new BatchResult(batch.size(), bytesInBatch, response.target, response.requests));
