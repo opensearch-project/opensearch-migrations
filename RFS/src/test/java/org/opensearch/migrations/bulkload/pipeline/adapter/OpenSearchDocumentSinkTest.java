@@ -7,6 +7,7 @@ import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
@@ -216,6 +218,62 @@ class OpenSearchDocumentSinkTest {
         org.junit.jupiter.api.Assertions.assertNull(op.getOriginalSource(),
             "no source correlates to the renamed id");
         assertEquals("renamed", op.getOperation().getId());
+    }
+
+    private static Document undecodable(String id) {
+        return new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, id, null,
+            new byte[] {1, 2, 3}, null, DocumentChangeType.INDEX, null, "unknown format"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void writeBatch_undecodableSourceFailsOnlyThatDocument(boolean withTransformer) {
+        IJsonTransformer identity = input -> input;
+        if (withTransformer) {
+            when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        } else {
+            when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        }
+        var sink = new OpenSearchDocumentSink(client, withTransformer ? () -> identity : null,
+            false, DocumentExceptionAllowlist.empty(), null);
+        var good1 = doc("d1", "{\"a\":1}");
+        var bad = undecodable("d2");
+        var good2 = doc("d3", "{\"c\":3}");
+
+        var result = sink.writeBatch("idx", List.of(good1, bad, good2)).block();
+
+        assertNotNull(result);
+        assertEquals(3, result.docsInBatch());
+        verify(client).emitUndecodableSourceToFailedDocumentStream("idx", bad);
+        if (withTransformer) {
+            ArgumentCaptor<List<BulkOperationSpec>> sent = ArgumentCaptor.forClass(List.class);
+            verify(client).sendBulkRequest(eq("idx"), sent.capture(), isNull(), eq(false), any());
+            assertEquals(List.of("d1", "d3"), sent.getValue().stream().map(op -> op.getOperation().getId()).toList());
+        } else {
+            verify(client).sendBulkRequestRaw(eq("idx"), eq(List.of(good1, good2)), isNull(), eq(false), any());
+        }
+    }
+
+    @Test
+    void writeBatch_onlyUndecodableSources_sendsNoBulkRequest() {
+        var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
+        var bad = undecodable("d1");
+
+        var result = sink.writeBatch("idx", List.of(bad)).block();
+
+        assertNotNull(result);
+        assertEquals(1, result.docsInBatch());
+        verify(client).emitUndecodableSourceToFailedDocumentStream("idx", bad);
+        verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
+        verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void undecodablePriorSourceDoesNotBlockADelete() {
+        var delete = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "d1", null,
+            new byte[] {1, 2, 3}, null, DocumentChangeType.DELETE, null, "unknown format"));
+        assertEquals(null, delete.sourceDecodeError());
+        assertEquals(null, delete.source());
     }
 
     private static Document doc(String id, String json) {

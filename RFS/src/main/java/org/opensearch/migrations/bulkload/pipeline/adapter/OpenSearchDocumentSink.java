@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -97,6 +98,37 @@ public class OpenSearchDocumentSink implements DocumentSink {
         long bytesInBatch = batch.stream()
             .mapToLong(Document::sourceLength)
             .sum();
+        var writable = withoutUndecodableSources(collectionName, batch);
+        if (writable.isEmpty()) {
+            return Mono.just(new BatchResult(batch.size(), bytesInBatch));
+        }
+        return writeDocuments(collectionName, writable)
+            .map(response -> new BatchResult(batch.size(), bytesInBatch, response.target, response.requests));
+    }
+
+    /**
+     * Report documents whose source the reader could not convert to JSON and return the rest.
+     * Like a non-retryable bulk item failure, this fails only the document, not the partition.
+     */
+    private List<Document> withoutUndecodableSources(String collectionName, List<Document> batch) {
+        List<Document> writable = null;
+        for (int i = 0; i < batch.size(); i++) {
+            var doc = batch.get(i);
+            if (doc.sourceDecodeError() == null) {
+                if (writable != null) {
+                    writable.add(doc);
+                }
+                continue;
+            }
+            if (writable == null) {
+                writable = new ArrayList<>(batch.subList(0, i));
+            }
+            client.emitUndecodableSourceToFailedDocumentStream(collectionName, doc);
+        }
+        return writable != null ? writable : batch;
+    }
+
+    private Mono<OpenSearchClient.BulkResponse> writeDocuments(String collectionName, List<Document> batch) {
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
@@ -121,8 +153,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
             bulkMono = client.sendBulkRequest(collectionName, opsToSend,
                 requestContext, allowServerGeneratedIds, allowlist);
         }
-
-        return bulkMono.map(response -> new BatchResult(batch.size(), bytesInBatch, response.target, response.requests));
+        return bulkMono;
     }
 
     @SuppressWarnings("unchecked")

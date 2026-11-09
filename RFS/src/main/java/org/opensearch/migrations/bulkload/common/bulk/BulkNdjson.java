@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import org.opensearch.migrations.bulkload.common.DocumentSourceFormat;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
@@ -101,7 +102,9 @@ public final class BulkNdjson {
             }
             return singleLine;
         } catch (IOException e) {
-            throw new IOException("Raw source bytes are not valid JSON", e);
+            // Readers convert other formats to JSON; name the format to make a missed conversion obvious.
+            throw new IOException("Raw source bytes are not valid JSON (detected format: "
+                + DocumentSourceFormat.detect(bytes) + ")", e);
         }
     }
 

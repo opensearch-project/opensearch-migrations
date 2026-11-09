@@ -250,6 +250,45 @@ class OpenSearchClientFailedDocumentStreamHelpersTest {
             client.emitFailedDocumentStreamRecord("idx", op, failure, FailureClass.NON_RETRYABLE));
     }
 
+    // ---- emitUndecodableSourceToFailedDocumentStream -----------------------------------
+
+    private static org.opensearch.migrations.bulkload.pipeline.model.Document undecodable(String id, byte[] source) {
+        return new org.opensearch.migrations.bulkload.pipeline.model.Document(id, source,
+            org.opensearch.migrations.bulkload.pipeline.model.Document.Operation.UPSERT,
+            java.util.Map.of("routing", "r1"),
+            java.util.Map.of(org.opensearch.migrations.bulkload.pipeline.model.Document.SOURCE_META_SOURCE_DECODE_ERROR,
+                "not a known format"));
+    }
+
+    @Test
+    void emitUndecodableSource_noSinkConfigured_isNoOp() {
+        assertDoesNotThrow(() -> client.emitUndecodableSourceToFailedDocumentStream("idx", undecodable("d", new byte[] {1})));
+        verify(failedDocumentStreamSink, never()).write(any());
+    }
+
+    @Test
+    void emitUndecodableSource_recordsActionStoredBytesAndReason() throws Exception {
+        when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
+        client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
+        byte[] stored = {0x01, 0x02, 0x03};
+
+        client.emitUndecodableSourceToFailedDocumentStream("idx", undecodable("doc-9", stored));
+
+        ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failedDocumentStreamSink).write(rec.capture());
+        var r = rec.getValue();
+        assertThat(r.getDocumentId(), equalTo("doc-9"));
+        assertThat(r.getTargetIndex(), equalTo("idx"));
+        assertThat(r.getFailureType(), equalTo(OpenSearchClient.SOURCE_DECODE_FAILURE_TYPE));
+        assertThat(r.getFailureClass(), is(FailureClass.NON_RETRYABLE));
+        var operation = r.getRequestItem().get("operation");
+        assertThat(operation.get("_id").asText(), equalTo("doc-9"));
+        assertThat(operation.get("_index").asText(), equalTo("idx"));
+        assertThat(operation.get("routing").asText(), equalTo("r1"));
+        assertThat(r.getRequestItem().get(OpenSearchClient.UNDECODABLE_SOURCE_KEY).binaryValue(), equalTo(stored));
+        assertThat(r.getResponseItem().get("error").get("reason").asText(), equalTo("not a known format"));
+    }
+
     // ---- extractDocumentId ----------------------------------------------
 
     @Test

@@ -12,6 +12,7 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
+import org.opensearch.migrations.bulkload.common.DocumentSourceNormalizer;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 
@@ -288,6 +289,7 @@ public class LuceneReader {
         String openSearchDocId = null;
         String type = null;
         byte[] sourceBytes = null;
+        String sourceDecodeError = null;
         String routing = null;
 
         try {
@@ -335,10 +337,25 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
-                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
-            if (sourceBytes == null) {
-                return null;
+            // Sources indexed as SMILE, CBOR, or YAML are stored in that format. Convert them once, here,
+            // so everything downstream (merging, transformations, bulk encoding) only ever sees JSON.
+            try {
+                sourceBytes = DocumentSourceNormalizer.toJson(sourceBytes);
+            } catch (DocumentSourceNormalizer.UndecodableSourceException e) {
+                sourceDecodeError = e.getMessage();
+                log.atWarn().setCause(e).setMessage("Document {} from segment {} has a {} source that cannot be"
+                        + " converted to JSON; it will be reported as a failed document")
+                    .addArgument(openSearchDocId)
+                    .addArgument(getSegmentReaderDebugInfo)
+                    .addArgument(e.getFormat())
+                    .log();
+            }
+            if (sourceDecodeError == null) {
+                sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
+                    openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
+                if (sourceBytes == null) {
+                    return null;
+                }
             }
 
             log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
@@ -365,7 +382,7 @@ public class LuceneReader {
         Long version = operation == DocumentChangeType.INDEX ? readVersion(reader, luceneDocId, worker) : null;
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
         return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes,
-            routing, operation, version);
+            routing, operation, version, sourceDecodeError);
     }
 
     private static Long readVersion(LuceneLeafReader reader, int luceneDocId, SegmentReadSession.Reader worker) {

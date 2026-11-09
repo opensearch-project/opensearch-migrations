@@ -46,11 +46,24 @@ public final class LuceneAdapter {
             ? Map.of(Document.SOURCE_META_LUCENE_DOC_NUMBER, luceneDoc.getLuceneDocNumber())
             : Map.of(Document.SOURCE_META_LUCENE_DOC_NUMBER, luceneDoc.getLuceneDocNumber(),
                 Document.SOURCE_META_VERSION, version);
+        var operation = mapOperation(luceneDoc.getOperation());
+        byte[] source = luceneDoc.getSource();
+
+        if (luceneDoc.getSourceDecodeError() != null) {
+            if (operation == Document.Operation.DELETE) {
+                // A delete sends no body, so an unreadable prior source must not block it.
+                source = null;
+            } else {
+                var withError = new HashMap<>(sourceMetadata);
+                withError.put(Document.SOURCE_META_SOURCE_DECODE_ERROR, luceneDoc.getSourceDecodeError());
+                sourceMetadata = withError;
+            }
+        }
 
         return new Document(
             luceneDoc.getId(),
-            luceneDoc.getSource(),
-            mapOperation(luceneDoc.getOperation()),
+            source,
+            operation,
             hints,
             sourceMetadata
         );

@@ -33,8 +33,17 @@ public class LuceneDocumentChange {
     // have a version: the previous snapshot only contains the pre-deletion version.
     public final Long version;
 
+    // Why the stored _source could not be converted to JSON, or null when {@link #source} is JSON.
+    // When set, {@link #source} holds the bytes exactly as stored, for failure reporting.
+    public final String sourceDecodeError;
+
     public LuceneDocumentChange(int luceneDocNumber, String id, String type, byte[] source,
                                 String routing, DocumentChangeType operation) {
         this(luceneDocNumber, id, type, source, routing, operation, null);
+    }
+
+    public LuceneDocumentChange(int luceneDocNumber, String id, String type, byte[] source,
+                                String routing, DocumentChangeType operation, Long version) {
+        this(luceneDocNumber, id, type, source, routing, operation, version, null);
     }
 }

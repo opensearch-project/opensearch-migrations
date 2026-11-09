@@ -119,6 +119,7 @@ dependencies {
     implementation libs.reactor.core
 
     testImplementation libs.mockito.core
+    testImplementation libs.jackson.dataformat.cbor
     testImplementation libs.mockito.junit.jupiter
 
     lucene5 libs.lucene.v5.core

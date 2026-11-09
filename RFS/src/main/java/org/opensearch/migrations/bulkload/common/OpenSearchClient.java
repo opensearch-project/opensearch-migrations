@@ -22,6 +22,7 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
@@ -70,6 +71,10 @@ public abstract class OpenSearchClient {
         .maxBackoff(BULK_MAX_BACKOFF);
     public static final int BULK_TRUNCATED_RESPONSE_MAX_LENGTH = 1500;
     public static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
+    /** Failed document stream {@code failureType} for a source that could not be converted to JSON. */
+    public static final String SOURCE_DECODE_FAILURE_TYPE = "source_decode_exception";
+    /** Request item field holding the stored source bytes (base64) of an undecodable document. */
+    public static final String UNDECODABLE_SOURCE_KEY = "rawSourceBase64";
 
     protected final RestClient client;
     protected final FailedRequestsLogger failedRequestsLogger;
@@ -803,30 +808,67 @@ public abstract class OpenSearchClient {
             JsonNode responseItem = failure != null && failure.getResponseItemJson() != null
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
-            FailedDocumentStreamRecord failedDocumentStreamRecord = FailedDocumentStreamRecord.builder()
-                .sessionId(failedDocumentStreamSessionId)
-                .workerId(failedDocumentStreamWorkerId)
-                .workItemId(failedDocumentStreamWorkItemId)
-                .targetIndex(indexName)
-                .documentId(docId)
-                .failureType(failureType)
-                .failureClass(cls)
-                .timestamp(Instant.now().toString())
-                .requestItem(requestItem)
-                .responseItem(responseItem)
-                .build();
-            failedDocumentStreamSink.write(failedDocumentStreamRecord).subscribe(
-                v -> {},
-                err -> log.atError().setCause(err)
-                    .setMessage("Failed to buffer failed document stream record for index {}: {}")
-                    .addArgument(indexName)
-                    .addArgument(err.getMessage())
-                    .log()
-            );
+            writeFailedDocumentStreamRecord(indexName, docId, failureType, cls, requestItem, responseItem);
         } catch (Exception e) {
             log.atError().setCause(e)
                 .setMessage("Unexpected error while emitting failed document stream record for index {}").addArgument(indexName).log();
         }
+    }
+
+    /**
+     * Report a document whose stored source could not be converted to JSON, without sending it.
+     * The request item carries the index action and the stored source bytes, base64-encoded, since
+     * they cannot be represented as a JSON document.
+     */
+    public void emitUndecodableSourceToFailedDocumentStream(String indexName, Document doc) {
+        log.atError()
+            .setMessage("Not migrating document {} to index '{}': {}")
+            .addArgument(doc::id)
+            .addArgument(indexName)
+            .addArgument(doc::sourceDecodeError)
+            .log();
+        if (failedDocumentStreamSink == null) {
+            return;
+        }
+        try {
+            ObjectNode requestItem = OBJECT_MAPPER.createObjectNode();
+            requestItem.set("operation", OBJECT_MAPPER.valueToTree(BulkOperationConverter.indexMetadata(doc, indexName, false)));
+            requestItem.put("operationType", OperationType.INDEX.getValue());
+            requestItem.put(UNDECODABLE_SOURCE_KEY, doc.source());
+            ObjectNode responseItem = OBJECT_MAPPER.createObjectNode();
+            responseItem.putObject("error")
+                .put("type", SOURCE_DECODE_FAILURE_TYPE)
+                .put("reason", doc.sourceDecodeError());
+            writeFailedDocumentStreamRecord(indexName, doc.id(), SOURCE_DECODE_FAILURE_TYPE,
+                FailureClass.NON_RETRYABLE, requestItem, responseItem);
+        } catch (Exception e) {
+            log.atError().setCause(e)
+                .setMessage("Unexpected error while emitting failed document stream record for index {}").addArgument(indexName).log();
+        }
+    }
+
+    private void writeFailedDocumentStreamRecord(String indexName, String docId, String failureType,
+                                                 FailureClass cls, JsonNode requestItem, JsonNode responseItem) {
+        FailedDocumentStreamRecord failedDocumentStreamRecord = FailedDocumentStreamRecord.builder()
+            .sessionId(failedDocumentStreamSessionId)
+            .workerId(failedDocumentStreamWorkerId)
+            .workItemId(failedDocumentStreamWorkItemId)
+            .targetIndex(indexName)
+            .documentId(docId)
+            .failureType(failureType)
+            .failureClass(cls)
+            .timestamp(Instant.now().toString())
+            .requestItem(requestItem)
+            .responseItem(responseItem)
+            .build();
+        failedDocumentStreamSink.write(failedDocumentStreamRecord).subscribe(
+            v -> {},
+            err -> log.atError().setCause(err)
+                .setMessage("Failed to buffer failed document stream record for index {}: {}")
+                .addArgument(indexName)
+                .addArgument(err.getMessage())
+                .log()
+        );
     }
 
     static String extractDocumentId(BulkOperationSpec op) {

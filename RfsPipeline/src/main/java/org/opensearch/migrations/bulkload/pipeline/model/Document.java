@@ -38,6 +38,12 @@ public record Document(
     public static final String SOURCE_META_POSITION = "sourcePosition";
     /** Snapshot document version, as a decimal string to preserve 64-bit precision in JavaScript. */
     public static final String SOURCE_META_VERSION = "_version";
+    /**
+     * Present when the source reader could not convert the stored source to JSON; the value explains why.
+     * {@link #source()} then holds the stored bytes unchanged, and the document must be reported as failed
+     * rather than written.
+     */
+    public static final String SOURCE_META_SOURCE_DECODE_ERROR = "sourceDecodeError";
 
     /** The type of document operation. */
     public enum Operation {
@@ -57,6 +63,11 @@ public record Document(
     /** Returns the length of the source bytes, or 0 if source is null (e.g. DELETE operations). */
     public int sourceLength() {
         return source != null ? source.length : 0;
+    }
+
+    /** The reason this document's source could not be converted to JSON, or null if it is writable. */
+    public String sourceDecodeError() {
+        return (String) sourceMetadata.get(SOURCE_META_SOURCE_DECODE_ERROR);
     }
 
     /** Inclusive source position, if available, for resuming this partition. */
