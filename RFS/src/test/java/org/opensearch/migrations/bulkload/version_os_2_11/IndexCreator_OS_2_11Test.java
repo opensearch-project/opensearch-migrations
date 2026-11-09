@@ -372,6 +372,59 @@ class IndexCreator_OS_2_11Test {
             equalTo("{\"number_of_replicas\":\"1\",\"number_of_shards\":\"1\",\"number_of_routing_shards\":1}"));
     }
 
+    private static final String KNN_ENGINE_INDEX_JSON = "{\n" +
+        "  \"aliases\" : { },\n" +
+        "  \"mappings\" : {\n" +
+        "    \"dynamic_templates\": [ { \"vectors\": { \"match\": \"*_vec\", \"mapping\": {\n" +
+        "      \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "      \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\", \"space_type\": \"l2\" } } } } ],\n" +
+        "    \"properties\": {\n" +
+        "      \"embedding\": { \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "        \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\", \"space_type\": \"l2\", \"parameters\": { \"m\": 16 } } },\n" +
+        "      \"doc\": { \"properties\": { \"inner\": { \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "        \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\" } } } },\n" +
+        "      \"engine\": { \"type\": \"keyword\" }\n" +
+        "    }\n" +
+        "  },\n" +
+        "  \"settings\" : { }\n" +
+        "}";
+
+    @Test
+    void testCreate_collectionRoutedTarget_removesKnnVectorEngines() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.isCollectionRouted()).thenReturn(true);
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var result = create(client, KNN_ENGINE_INDEX_JSON, "vectors_faiss");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        var mappings = requestBodyCapture.getValue().get("mappings");
+        assertThat(mappings.toString(), not(containsString("faiss")));
+        var embeddingMethod = mappings.at("/properties/embedding/method");
+        assertThat(embeddingMethod.toString(), equalTo("{\"name\":\"hnsw\",\"space_type\":\"l2\",\"parameters\":{\"m\":16}}"));
+        assertThat(mappings.at("/properties/doc/properties/inner/method").toString(), equalTo("{\"name\":\"hnsw\"}"));
+        assertThat(mappings.at("/dynamic_templates/0/vectors/mapping/method").has("engine"), equalTo(false));
+        assertThat("a field named engine is not a knn method parameter",
+            mappings.at("/properties/engine/type").asText(), equalTo("keyword"));
+    }
+
+    @Test
+    void testCreate_notCollectionRouted_keepsKnnVectorEngines() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var result = create(client, KNN_ENGINE_INDEX_JSON, "vectors_faiss");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        var mappings = requestBodyCapture.getValue().get("mappings");
+        assertThat(mappings.at("/properties/embedding/method/engine").asText(), equalTo("faiss"));
+        assertThat(mappings.at("/dynamic_templates/0/vectors/mapping/method/engine").asText(), equalTo("faiss"));
+    }
+
     @SneakyThrows
     private CreationResult create(OpenSearchClient client, String rawJson, String indexName) {
         var node = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);

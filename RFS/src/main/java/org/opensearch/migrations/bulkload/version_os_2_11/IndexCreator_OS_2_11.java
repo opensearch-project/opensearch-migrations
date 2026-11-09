@@ -18,6 +18,7 @@ import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 import org.opensearch.migrations.parsing.ObjectNodeUtils;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
@@ -27,6 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 @AllArgsConstructor
 public class IndexCreator_OS_2_11 implements IndexCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
+    private static final String KNN_ENGINE = "engine";
 
     /**
      * Maps top-level index metadata fields from the snapshot to their corresponding
@@ -68,6 +70,9 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             String[] problemMappingFields = { "_all" };
             for (var field : problemMappingFields) {
                 ObjectNodeUtils.removeFieldsByPath(mappings, field);
+            }
+            if (client.isCollectionRouted()) {
+                removeKnnVectorEngines(mappings, index.getName());
             }
         }
 
@@ -116,6 +121,24 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             result.exception(e);
         }
         return result.build();
+    }
+
+    static void removeKnnVectorEngines(JsonNode node, String indexName) {
+        if (node == null || !node.isContainerNode()) {
+            return;
+        }
+        if (node instanceof ObjectNode field
+            && "knn_vector".equals(field.path("type").asText())
+            && field.get("method") instanceof ObjectNode method
+            && method.has(KNN_ENGINE)) {
+            log.atInfo()
+                .setMessage("Removing knn_vector method.engine '{}' from index '{}': NextGen collections choose the engine")
+                .addArgument(method.get(KNN_ENGINE).asText())
+                .addArgument(indexName)
+                .log();
+            method.remove(KNN_ENGINE);
+        }
+        node.elements().forEachRemaining(child -> removeKnnVectorEngines(child, indexName));
     }
 
     private boolean isServerlessTarget() {
