@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.SourceFormat;
 import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.bulk.enums.SchemaVersion;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
@@ -131,7 +132,7 @@ public abstract sealed class BulkOperationSpec permits IndexOp, DeleteOp {
 
     private static Map<String, Object> parseSource(byte[] source) {
         try {
-            return OBJECT_MAPPER.readValue(source, new TypeReference<>() {});
+            return OBJECT_MAPPER.readValue(SourceFormat.toJson(source), new TypeReference<>() {});
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

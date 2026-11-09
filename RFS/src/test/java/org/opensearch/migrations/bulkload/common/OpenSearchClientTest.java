@@ -728,4 +728,36 @@ class OpenSearchClientTest {
 
         assertThat(openSearchClient.isCollectionRouted(), equalTo(collectionRouted));
     }
+
+    @Test
+    void invalidSourceFailsOnlyThatDocumentThroughFailedDocumentStream() throws Exception {
+        var failures = mock(org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink.class);
+        when(failures.write(any())).thenReturn(Mono.empty());
+        openSearchClient.setFailedDocumentStreamContext(failures, "session", "worker");
+        byte[] smile = new ObjectMapper(new com.fasterxml.jackson.dataformat.smile.SmileFactory())
+            .writeValueAsBytes(Map.of("a", 1));
+        byte[] unknown = "not json".getBytes(StandardCharsets.UTF_8);
+        var docs = List.of(
+            new Document("smile", smile, Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("bad", unknown, Document.Operation.UPSERT, Map.of(), Map.of()));
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+
+        openSearchClient.sendBulkRequestRaw("idx", docs, null, false, DocumentExceptionAllowlist.empty()).block();
+
+        var body = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient).postAsyncBytes(any(), body.capture(), any(), any());
+        var lines = new String(body.getValue(), StandardCharsets.UTF_8).split("\n");
+        assertEquals(2, lines.length);
+        assertEquals("smile", OBJECT_MAPPER.readTree(lines[0]).path("index").path("_id").asText());
+        assertEquals("{\"a\":1}", lines[1]);
+
+        var record = ArgumentCaptor.forClass(
+            org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord.class);
+        verify(failures).write(record.capture());
+        assertEquals("bad", record.getValue().getDocumentId());
+        assertEquals(OpenSearchClient.INVALID_SOURCE_FORMAT, record.getValue().getFailureType());
+        assertEquals(java.util.Base64.getEncoder().encodeToString(unknown),
+            record.getValue().getRequestItem().path("documentBase64").asText());
+    }
 }

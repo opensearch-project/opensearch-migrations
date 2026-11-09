@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.SourceFormat;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
@@ -143,9 +145,14 @@ public class OpenSearchDocumentSink implements DocumentSink {
             bulkMono = targetClient.sendBulkRequest(collectionName, operations,
                 requestContext, useServerGeneratedIds, allowlist);
         } else {
-            var bulkOps = batch.stream()
-                .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
-                .collect(Collectors.toList());
+            var bulkOps = new ArrayList<BulkOperationSpec>(batch.size());
+            for (var doc : batch) {
+                try {
+                    bulkOps.add(BulkOperationConverter.fromDocument(doc, collectionName));
+                } catch (SourceFormat.InvalidDocumentSourceException e) {
+                    client.reportInvalidDocumentSource(collectionName, doc.id(), doc.source(), e);
+                }
+            }
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
             bulkMono = targetClient.sendBulkRequest(collectionName, opsToSend,
                 requestContext, useServerGeneratedIds, allowlist);
