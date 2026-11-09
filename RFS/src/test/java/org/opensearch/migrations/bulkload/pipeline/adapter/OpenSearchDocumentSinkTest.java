@@ -7,6 +7,7 @@ import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -220,5 +221,42 @@ class OpenSearchDocumentSinkTest {
 
     private static Document doc(String id, String json) {
         return new Document(id, json.getBytes(), Document.Operation.UPSERT, Map.of(), Map.of());
+    }
+
+    private static final byte[] UNCONVERTIBLE = {0x01, 0x02, 0x03, (byte) 0xFF};
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void writeBatch_withTransformer_unconvertibleSourceFailsOnlyThatDocument() {
+        IJsonTransformer identity = input -> input;
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
+        var bad = new Document("d2", UNCONVERTIBLE, Document.Operation.UPSERT, Map.of(), Map.of());
+
+        var result = sink.writeBatch("idx", List.of(doc("d1", "{\"a\":1}"), bad, doc("d3", "{\"c\":3}"))).block();
+
+        assertNotNull(result);
+        assertEquals(3, result.docsInBatch());
+        verify(client).reportInvalidDocumentSource(eq("idx"), eq("d2"), eq(UNCONVERTIBLE), any());
+        org.mockito.ArgumentCaptor<List<BulkOperationSpec>> sent = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(client).sendBulkRequest(eq("idx"), sent.capture(), isNull(), eq(false), any());
+        assertEquals(List.of("d1", "d3"), sent.getValue().stream().map(op -> op.getOperation().getId()).toList());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void writeBatch_withTransformer_unconvertiblePriorSourceDoesNotBlockADelete() {
+        IJsonTransformer identity = input -> input;
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
+        var delete = new Document("d1", UNCONVERTIBLE, Document.Operation.DELETE, Map.of(), Map.of());
+
+        sink.writeBatch("idx", List.of(delete)).block();
+
+        verify(client, never()).reportInvalidDocumentSource(any(), any(), any(), any());
+        org.mockito.ArgumentCaptor<List<BulkOperationSpec>> sent = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(client).sendBulkRequest(eq("idx"), sent.capture(), isNull(), eq(false), any());
+        assertEquals(1, sent.getValue().size());
+        assertEquals("d1", sent.getValue().get(0).getOperation().getId());
     }
 }
