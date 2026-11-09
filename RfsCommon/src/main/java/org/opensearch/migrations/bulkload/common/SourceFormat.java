@@ -10,6 +10,7 @@ import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import org.yaml.snakeyaml.LoaderOptions;
 
 /**
  * The XContent format of stored {@code _source} bytes.
@@ -27,7 +28,7 @@ public enum SourceFormat {
     JSON(null),
     SMILE(new SmileFactory()),
     CBOR(new CBORFactory()),
-    YAML(new YAMLFactory()),
+    YAML(YAMLFactory.builder().loaderOptions(unboundedYamlLoaderOptions()).build()),
     UNKNOWN(null);
 
     private static final JsonFactory JSON_FACTORY = new JsonFactory();
@@ -115,9 +116,18 @@ public enum SourceFormat {
                 generator.copyCurrentStructure(parser);
             }
             return out.toByteArray();
-        } catch (IOException e) {
+        } catch (InvalidDocumentSourceException e) {
+            throw e;
+        } catch (IOException | RuntimeException e) {
             throw new InvalidDocumentSourceException("Unable to convert " + name() + " document source to JSON", e);
         }
+    }
+
+    /** A source is bounded by what the cluster accepted, not by SnakeYAML's 3 MB default. */
+    private static LoaderOptions unboundedYamlLoaderOptions() {
+        var options = new LoaderOptions();
+        options.setCodePointLimit(Integer.MAX_VALUE);
+        return options;
     }
 
     private static boolean hasUtf8Bom(byte[] bytes) {

@@ -118,6 +118,13 @@ class SourceFormatTest {
         assertEquals(JSON.valueToTree(DOCUMENT), JSON.readTree(SourceFormat.toJson(yaml)));
     }
 
+    @Test
+    void yamlLargerThanSnakeYamlDefaultLimitIsConverted() throws Exception {
+        String big = "x".repeat(4 * 1024 * 1024);
+        byte[] yaml = write(new YAMLFactory(), Map.of("big", big));
+        assertEquals(big, JSON.readTree(SourceFormat.toJson(yaml)).path("big").asText());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"a: 1\n", "[1,2]", "x", "ZV\u0000"})
     void unknownFormatsAreRejected(String body) {

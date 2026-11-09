@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -63,7 +64,21 @@ class NonJsonSourceMigrationTest {
     Path directory;
 
     static Stream<ContainerVersion> sourceVersions() {
-        return Stream.of(SearchClusterContainer.ES_V7_17, SearchClusterContainer.ES_V8_19);
+        return Stream.of(
+            SearchClusterContainer.ES_V5_6_16,
+            elasticsearchOss("6.8.23"),
+            elasticsearchOss("7.10.2"),
+            SearchClusterContainer.ES_V7_17,
+            SearchClusterContainer.ES_V8_19,
+            SearchClusterContainer.OS_V1_3_20,
+            SearchClusterContainer.OS_V2_19_4,
+            SearchClusterContainer.OS_LATEST);
+    }
+
+    /** The official OSS distribution images, which bundle no x-pack modules. */
+    private static ContainerVersion elasticsearchOss(String tag) {
+        return new SearchClusterContainer.ElasticsearchOssVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:" + tag, Version.fromString("ES " + tag));
     }
 
     @Tag("isolatedTest")

@@ -91,11 +91,9 @@ class ExternalVersioningMigrationTest {
                     var sink = new OpenSearchDocumentSink(client, () -> transformer,
                         false, DocumentExceptionAllowlist.empty(), null);
                     var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE, 1, 1);
-                    var cursors = pipeline.migrateAll().collectList().block();
+                    var cursors = pipeline.migrateCollection(INDEX).collectList().block();
                     assertNotNull(cursors);
-                    assertEquals(VERSIONS.size(), cursors.stream()
-                        .filter(cursor -> INDEX.equals(cursor.partition().collectionName()))
-                        .mapToLong(cursor -> cursor.docsInBatch()).sum());
+                    assertEquals(VERSIONS.size(), cursors.stream().mapToLong(cursor -> cursor.docsInBatch()).sum());
                 }
             }
             verifyNoInteractions(failures);

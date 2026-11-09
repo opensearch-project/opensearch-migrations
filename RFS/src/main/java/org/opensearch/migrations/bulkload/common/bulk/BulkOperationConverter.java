@@ -37,16 +37,12 @@ public class BulkOperationConverter {
 
     private static BulkOperationSpec fromDocument(Document doc, String indexName, boolean retainRawSource) {
         Map<String, Object> document;
-        try {
-            if (doc.source() == null) {
-                document = Map.of();
-            } else if (retainRawSource) {
-                document = null;
-            } else {
-                document = OBJECT_MAPPER.readValue(SourceFormat.toJson(doc.source()), new TypeReference<>() {});
-            }
-        } catch (IOException e) {
-            throw new SourceFormat.InvalidDocumentSourceException("Document source is not valid JSON", e);
+        if (doc.source() == null) {
+            document = Map.of();
+        } else if (retainRawSource) {
+            document = null;
+        } else {
+            document = parseSource(doc);
         }
 
         String routing = doc.hints().get(Document.HINT_ROUTING);
@@ -77,6 +73,19 @@ public class BulkOperationConverter {
             .sourceHints(doc.hints())
             .sourceMetadata(doc.sourceMetadata())
             .build();
+    }
+
+    private static Map<String, Object> parseSource(Document doc) {
+        try {
+            return OBJECT_MAPPER.readValue(SourceFormat.toJson(doc.source()), new TypeReference<>() {});
+        } catch (IOException | SourceFormat.InvalidDocumentSourceException e) {
+            if (doc.operation() == Document.Operation.DELETE) {
+                // A delete sends no body, so an unreadable prior source (kept for diagnostics) must not block it.
+                return Map.of();
+            }
+            throw e instanceof SourceFormat.InvalidDocumentSourceException invalid ? invalid
+                : new SourceFormat.InvalidDocumentSourceException("Document source is not valid JSON", e);
+        }
     }
 
     /**
