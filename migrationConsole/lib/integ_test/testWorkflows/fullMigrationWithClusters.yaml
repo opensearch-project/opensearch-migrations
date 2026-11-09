@@ -127,6 +127,8 @@ spec:
             template: generate-migration-configs
             arguments:
               parameters:
+                - name: azure-credentials-secret-name
+                  value: "{{workflow.parameters.azure-credentials-secret-name}}"
                 - name: source-config
                   value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
                 - name: target-config
@@ -286,6 +288,8 @@ spec:
                 name: "{{workflow.parameters.snapshot-configmap}}"
                 key: AWS_REGION
                 optional: true
+          - name: azure-credentials-secret-name
+            default: ""
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -303,7 +307,7 @@ spec:
             BUCKET_ENDPOINT='{{inputs.parameters.bucketEndpoint}}'
             SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
             AWS_REGION='{{inputs.parameters.awsRegion}}'
-            AZURE_CREDENTIALS_SECRET_NAME='{{workflow.parameters.azure-credentials-secret-name}}'
+            AZURE_CREDENTIALS_SECRET_NAME='{{inputs.parameters.azure-credentials-secret-name}}'
 
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             SNAPSHOT_NAME_CONFIG=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
