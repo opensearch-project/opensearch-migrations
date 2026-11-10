@@ -256,7 +256,7 @@ public class PipelineInstruments implements PipelineMetrics {
         packedBatchDocuments.record(documents);
         packedBatchBytes.record(preparedBytes);
         packedBatchFill.record(documentFillPercent, Attributes.of(LIMIT, "documents"));
-        packedBatchFill.record(byteFillPercent, Attributes.of(LIMIT, "bytes"));
+        packedBatchFill.record(byteFillPercent, Attributes.of(LIMIT, BYTES_UNIT));
         addStage("packed", documents, preparedBytes);
     }
 
