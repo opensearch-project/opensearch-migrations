@@ -20,6 +20,8 @@ import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationM
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.AdaptiveLimit;
+import org.opensearch.migrations.bulkload.common.retry.RetryBudget;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
@@ -719,6 +721,20 @@ class OpenSearchClientTest {
         assertThat(bound.getFailedDocumentStreamSink(), equalTo(sink));
     }
 
+    @Test
+    void testForCollection_sharesBulkTrafficControlSetAfterBinding() {
+        collectionRestClient("tenant-a");
+        var bound = openSearchClient.forCollection("tenant-a");
+        var retryBudget = new RetryBudget();
+        var inFlightLimit = new AdaptiveLimit(7);
+
+        openSearchClient.setBulkRetryBudget(retryBudget);
+        openSearchClient.setBulkInFlightLimit(inFlightLimit);
+
+        org.junit.jupiter.api.Assertions.assertSame(retryBudget, bound.getBulkRetryBudget());
+        org.junit.jupiter.api.Assertions.assertSame(inFlightLimit, bound.getBulkInFlightLimit());
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     void testIsCollectionRouted_comesFromTheConnection(boolean collectionRouted) {
@@ -743,8 +759,10 @@ class OpenSearchClientTest {
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
 
-        openSearchClient.sendBulkRequestRaw("idx", docs, null, false, DocumentExceptionAllowlist.empty()).block();
+        var response =
+            openSearchClient.sendBulkRequestRaw("idx", docs, null, false, DocumentExceptionAllowlist.empty()).block();
 
+        assertEquals(1, response.failures.nonRetryable());
         var body = ArgumentCaptor.forClass(byte[].class);
         verify(restClient).postAsyncBytes(any(), body.capture(), any(), any());
         var lines = new String(body.getValue(), StandardCharsets.UTF_8).split("\n");
@@ -758,6 +776,6 @@ class OpenSearchClientTest {
         assertEquals("bad", record.getValue().getDocumentId());
         assertEquals(OpenSearchClient.INVALID_SOURCE_FORMAT, record.getValue().getFailureType());
         assertEquals(java.util.Base64.getEncoder().encodeToString(unknown),
-            record.getValue().getRequestItem().path("documentBase64").asText());
+            record.getValue().getSource().path("bodyBase64").asText());
     }
 }

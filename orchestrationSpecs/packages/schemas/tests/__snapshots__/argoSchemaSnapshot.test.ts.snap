@@ -266,17 +266,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                                     "default": "",
-<<<<<<< HEAD
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
-=======
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
                                   },
                                   "azureCredentialsSecretName": {
                                     "type": "string",
                                     "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
                                     "default": "",
                                     "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
                                   }
                                 },
                                 "required": [
@@ -435,17 +431,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                                     "default": "",
-<<<<<<< HEAD
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
-=======
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
                                   },
                                   "azureCredentialsSecretName": {
                                     "type": "string",
                                     "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
                                     "default": "",
                                     "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
                                   }
                                 },
                                 "required": [
@@ -4021,17 +4013,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": "",
-<<<<<<< HEAD
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
-=======
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
                         },
                         "azureCredentialsSecretName": {
                           "type": "string",
                           "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
                           "default": "",
                           "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
                         }
                       },
                       "required": [
@@ -4190,17 +4178,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": "",
-<<<<<<< HEAD
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
-=======
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
                         },
                         "azureCredentialsSecretName": {
                           "type": "string",
                           "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
                           "default": "",
                           "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
                         }
                       },
                       "required": [

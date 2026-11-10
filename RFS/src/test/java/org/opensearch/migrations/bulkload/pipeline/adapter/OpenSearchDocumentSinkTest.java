@@ -28,9 +28,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -53,8 +56,8 @@ class OpenSearchDocumentSinkTest {
     void writeBatch_collectionRouted_sendsCollectionAndDecidesIdsPerCollection() {
         var tsClient = collectionClient("ts");
         var searchClient = collectionClient("search");
-        when(tsClient.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
-        when(searchClient.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(tsClient.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
+        when(searchClient.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
         var routing = ServerlessCollectionRouting.fromJson(
             "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d+\", \"collection\": \"$1\"}]}").orElseThrow();
         var routedTarget = new CollectionRoutedTarget(routing, collection -> collection.equals("ts"));
@@ -64,9 +67,13 @@ class OpenSearchDocumentSinkTest {
         sink.writeBatch("ts-1", docs).block();
         sink.writeBatch("search-1", docs).block();
 
-        verify(tsClient).sendBulkRequestRaw(eq("ts-1"), eq(docs), isNull(), eq(true), any());
-        verify(searchClient).sendBulkRequestRaw(eq("search-1"), eq(docs), isNull(), eq(false), any());
-        verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
+        ArgumentCaptor<List<OpenSearchClient.PreparedRawDocument>> tsDocs = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<OpenSearchClient.PreparedRawDocument>> searchDocs = ArgumentCaptor.forClass(List.class);
+        verify(tsClient).sendBulkRequestPreparedRaw(eq("ts-1"), tsDocs.capture(), isNull(), any(), eq(1));
+        verify(searchClient).sendBulkRequestPreparedRaw(eq("search-1"), searchDocs.capture(), isNull(), any(), eq(1));
+        assertFalse(new String(tsDocs.getValue().get(0).prepared().action()).contains("\"_id\""));
+        assertTrue(new String(searchDocs.getValue().get(0).prepared().action()).contains("\"_id\":\"d1\""));
+        verify(client, never()).sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), anyInt());
     }
 
     @Test
@@ -340,7 +347,8 @@ class OpenSearchDocumentSinkTest {
 
         assertNotNull(result);
         assertEquals(3, result.docsInBatch());
-        verify(client).reportInvalidDocumentSource(eq("idx"), eq("d2"), eq(UNCONVERTIBLE), any());
+        assertEquals(1, result.failures().nonRetryable());
+        verify(client).reportInvalidDocumentSource(eq("idx"), eq("d2"), eq(UNCONVERTIBLE), any(), isNull());
         org.mockito.ArgumentCaptor<List<BulkOperationSpec>> sent = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(client).sendBulkRequest(eq("idx"), sent.capture(), isNull(), eq(false), any());
         assertEquals(List.of("d1", "d3"), sent.getValue().stream().map(op -> op.getOperation().getId()).toList());
@@ -356,7 +364,7 @@ class OpenSearchDocumentSinkTest {
 
         sink.writeBatch("idx", List.of(delete)).block();
 
-        verify(client, never()).reportInvalidDocumentSource(any(), any(), any(), any());
+        verify(client, never()).reportInvalidDocumentSource(any(), any(), any(), any(), any());
         org.mockito.ArgumentCaptor<List<BulkOperationSpec>> sent = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(client).sendBulkRequest(eq("idx"), sent.capture(), isNull(), eq(false), any());
         assertEquals(1, sent.getValue().size());

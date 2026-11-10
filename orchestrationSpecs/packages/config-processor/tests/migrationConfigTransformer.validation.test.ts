@@ -275,7 +275,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             ...collectionRouting,
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {disableFailedDocumentStream: true}
         };
 
         const result = await transformer.processFromObject(config);
@@ -296,7 +296,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             staticCollectionRouting: [{sourceIndex: "shared-config", collection: "common"}],
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {disableFailedDocumentStream: true}
         };
         config.traffic.replayers.replay1.replayerConfig = {
             requestTransforms: {entryPoint: {javascript: "(m) => m"}}
@@ -351,7 +351,7 @@ describe('MigrationConfigTransformer validation', () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {disableFailedDocumentStream: true}
         };
         const result = await transformer.processFromObject(config);
         const migration = result.snapshotMigrations?.[0] as any;

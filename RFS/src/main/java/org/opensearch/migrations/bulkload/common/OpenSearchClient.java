@@ -6,12 +6,9 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-<<<<<<< HEAD
 import java.util.ArrayList;
 import java.util.Arrays;
-=======
 import java.util.Base64;
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
@@ -118,50 +115,27 @@ public abstract class OpenSearchClient {
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
 
-<<<<<<< HEAD
-    // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
-    // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
-    // volatile: emitFailedDocumentStreamRecord runs on concurrent bulk-write threads (batchConcurrency defaults
-    // to 10) while setFailedDocumentStreamContext/setFailedDocumentStreamWorkItem are written from the pipeline thread, so these
-    // need safe publication across threads.
-    private volatile FailedDocumentStreamSink failedDocumentStreamSink;
-    private volatile String failedDocumentStreamSessionId = "unknown-session";
-    private volatile String failedDocumentStreamWorkerId = "unknown-worker";
-    // Canonical work-item id (index + shard + checkpoint) for the work item currently being
-    // processed. Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
-    private volatile String failedDocumentStreamWorkItemId;
-    // Operations sent alone because they exceed maxBytesPerBulkRequest; the WARN for them is rate-limited.
-    private final AtomicLong oversizedOperations = new AtomicLong();
-    private final AtomicLong oversizedOperationsAtLastWarning = new AtomicLong();
-    private final AtomicLong lastOversizedWarningNanos = new AtomicLong();
     static final Duration OVERSIZED_OPERATION_WARNING_INTERVAL = Duration.ofMinutes(1);
-    // Documents bigger than this are not sent (0 = no limit). See rejectOversizedDocument.
-    private volatile long maxDocumentSizeBytes;
-    private volatile BulkRetryPolicy bulkRetryPolicy = new BulkRetryPolicy(new RetryBudget());
-    private final AtomicLong nextBatchId = new AtomicLong();
-    private final AtomicLong lastBulkRequestStartNanos = new AtomicLong();
-    private volatile AdaptiveLimit bulkInFlightLimit;
-    private final BulkFlowStats bulkFlowStats = new BulkFlowStats();
-    private volatile BulkFlowMetrics bulkFlowMetrics = bulkFlowStats;
-    // How long a bulk attempt waits for its response; null means the RestClient's own timeout.
-    private volatile Duration bulkResponseTimeout;
     /** failureType for documents not sent because they exceed {@code maxDocumentSizeBytes}. */
     public static final String DOCUMENT_TOO_LARGE = "document_too_large";
     /** {@code measured} value for the encoded document body checked against {@code maxDocumentSizeBytes}. */
     public static final String MEASURED_REQUEST_BODY = "requestBody";
-=======
     private final FailedDocumentStreamContext failedDocumentStream;
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
+    /**
+     * Per-process bulk traffic-control state. Collection-bound clients change only the routing header and share
+     * this state so all collections consume one retry budget, adaptive allowance, metric stream, and batch sequence.
+     */
+    private final BulkRuntimeContext bulkRuntime;
 
     protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
                                CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
         this(client, failedRequestsLogger, version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest,
-            new FailedDocumentStreamContext());
+            new FailedDocumentStreamContext(), new BulkRuntimeContext());
     }
 
     private OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
                              CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest,
-                             FailedDocumentStreamContext failedDocumentStream) {
+                             FailedDocumentStreamContext failedDocumentStream, BulkRuntimeContext bulkRuntime) {
         if (maxDocsPerBulkRequest < 1 || maxBytesPerBulkRequest < 1) {
             throw new IllegalArgumentException("Bulk request count and byte limits must be positive");
         }
@@ -172,6 +146,7 @@ public abstract class OpenSearchClient {
         this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
         this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
         this.failedDocumentStream = failedDocumentStream;
+        this.bulkRuntime = bulkRuntime;
     }
 
     /**
@@ -222,11 +197,11 @@ public abstract class OpenSearchClient {
         if (maxDocumentSizeBytes < 0) {
             throw new IllegalArgumentException("maxDocumentSizeBytes must be >= 0, got " + maxDocumentSizeBytes);
         }
-        this.maxDocumentSizeBytes = maxDocumentSizeBytes;
+        bulkRuntime.maxDocumentSizeBytes = maxDocumentSizeBytes;
     }
 
     public long getMaxDocumentSizeBytes() {
-        return maxDocumentSizeBytes;
+        return bulkRuntime.maxDocumentSizeBytes;
     }
 
     /**
@@ -241,7 +216,7 @@ public abstract class OpenSearchClient {
      */
     public void rejectOversizedDocument(String indexName, BulkOperationSpec op, long size, String measured,
                                         IRfsContexts.IRequestContext context) {
-        var limit = maxDocumentSizeBytes;
+        var limit = bulkRuntime.maxDocumentSizeBytes;
         var docId = extractDocumentId(op);
         log.atWarn()
             .setMessage("Not sending document '{}' for index '{}': its {} is {} bytes, over maxDocumentSizeBytes {}")
@@ -251,7 +226,7 @@ public abstract class OpenSearchClient {
             .addArgument(size)
             .addArgument(limit)
             .log();
-        if (failedDocumentStreamSink == null) {
+        if (failedDocumentStream.sink == null) {
             log.atError()
                 .setMessage("Document '{}' for index '{}' was skipped for its size and, with no failed document "
                     + "stream configured, is not recorded anywhere")
@@ -272,7 +247,7 @@ public abstract class OpenSearchClient {
     }
 
     private boolean rejectIfTooLarge(String indexName, PreparedOperation op, IRfsContexts.IRequestContext context) {
-        var limit = maxDocumentSizeBytes;
+        var limit = bulkRuntime.maxDocumentSizeBytes;
         var body = op.encoded().body();
         if (limit <= 0 || body == null || body.length <= limit) {
             return false;
@@ -628,7 +603,7 @@ public abstract class OpenSearchClient {
      * runs out gives the batch's documents up as retry-exhausted.
      */
     protected Retry getBulkRetryStrategy(BulkRetryPolicy.Batch batch) {
-        return bulkRetryPolicy.retryFor(batch, BulkRetryPolicy.DEFAULT_MAX_BACKOFF);
+        return bulkRuntime.bulkRetryPolicy.retryFor(batch, BulkRetryPolicy.DEFAULT_MAX_BACKOFF);
     }
 
     /**
@@ -636,7 +611,7 @@ public abstract class OpenSearchClient {
      * {@link OpenSearchClientFactory}); a client otherwise has its own.
      */
     public void setBulkRetryBudget(RetryBudget budget) {
-        this.bulkRetryPolicy = new BulkRetryPolicy(budget);
+        bulkRuntime.bulkRetryPolicy = new BulkRetryPolicy(budget);
         installBulkFlowMetrics();
     }
 
@@ -645,15 +620,15 @@ public abstract class OpenSearchClient {
      * {@code metrics} as well as to this client's own totals ({@link #getBulkFlowSummary}).
      */
     public void setBulkFlowMetrics(BulkFlowMetrics metrics) {
-        this.bulkFlowMetrics = BulkFlowMetrics.both(bulkFlowStats, metrics);
+        bulkRuntime.bulkFlowMetrics = BulkFlowMetrics.both(bulkRuntime.bulkFlowStats, metrics);
         installBulkFlowMetrics();
     }
 
     private void installBulkFlowMetrics() {
-        var metrics = bulkFlowMetrics;
-        bulkRetryPolicy.setMetrics(metrics);
-        bulkRetryPolicy.budget().setMetrics(metrics);
-        var limit = bulkInFlightLimit;
+        var metrics = bulkRuntime.bulkFlowMetrics;
+        bulkRuntime.bulkRetryPolicy.setMetrics(metrics);
+        bulkRuntime.bulkRetryPolicy.budget().setMetrics(metrics);
+        var limit = bulkRuntime.bulkInFlightLimit;
         if (limit != null) {
             limit.setMetrics(metrics);
         }
@@ -661,11 +636,11 @@ public abstract class OpenSearchClient {
 
     /** Totals of this client's flow-control events, for the work-item metrics record. */
     public BulkFlowStats.Summary getBulkFlowSummary() {
-        return bulkFlowStats.summary(bulkInFlightLimit);
+        return bulkRuntime.bulkFlowStats.summary(bulkRuntime.bulkInFlightLimit);
     }
 
     public RetryBudget getBulkRetryBudget() {
-        return bulkRetryPolicy.budget();
+        return bulkRuntime.bulkRetryPolicy.budget();
     }
 
     /**
@@ -676,7 +651,7 @@ public abstract class OpenSearchClient {
         if (bulkResponseTimeout != null && (bulkResponseTimeout.isZero() || bulkResponseTimeout.isNegative())) {
             throw new IllegalArgumentException("bulkResponseTimeout must be positive, got " + bulkResponseTimeout);
         }
-        this.bulkResponseTimeout = bulkResponseTimeout;
+        bulkRuntime.bulkResponseTimeout = bulkResponseTimeout;
     }
 
     private BulkOperationSpec stripDocumentId(BulkOperationSpec original) {
@@ -735,7 +710,6 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
-<<<<<<< HEAD
         return sendBulkRequest(indexName, docs, context, allowServerGeneratedIds, allowlist, 1);
     }
 
@@ -745,20 +719,15 @@ public abstract class OpenSearchClient {
                                               DocumentExceptionAllowlist allowlist,
                                               int splitRequestConcurrency)
     {
-        return sendBulkRequests(indexName, docs, op -> new PreparedOperation(() -> op,
-            BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER)),
-            TRANSFORMED_PATH, context, allowlist, splitRequestConcurrency);
-=======
         return sendBulkRequests(indexName, docs, op -> {
             try {
                 return new PreparedOperation(() -> op,
                     BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER));
             } catch (InvalidDocumentSourceException e) {
-                reportInvalidDocumentSource(indexName, op.getOperation().getId(), op.getRawDocument(), e);
+                reportInvalidDocumentSource(indexName, op.getOperation().getId(), op.getRawDocument(), e, context);
                 return null;
             }
-        }, context, allowlist);
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
+        }, TRANSFORMED_PATH, context, allowlist, splitRequestConcurrency);
     }
 
     /** Send raw source bytes without a byte[]→Map→byte[] round-trip. */
@@ -766,7 +735,6 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
-<<<<<<< HEAD
         return sendBulkRequestRaw(indexName, docs, context, allowServerGeneratedIds, allowlist, 1);
     }
 
@@ -775,20 +743,15 @@ public abstract class OpenSearchClient {
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist,
                                                   int splitRequestConcurrency) {
-        return sendBulkRequests(indexName, docs, doc -> new PreparedOperation(
-            () -> BulkOperationConverter.fromRawDocument(doc, indexName),
-            BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER)),
-            RAW_PATH, context, allowlist, splitRequestConcurrency);
-=======
         return sendBulkRequests(indexName, docs, doc -> {
             try {
                 return new PreparedOperation(() -> BulkOperationConverter.fromRawDocument(doc, indexName),
                     BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER));
             } catch (InvalidDocumentSourceException e) {
-                reportInvalidDocumentSource(indexName, doc.id(), doc.source(), e);
+                reportInvalidDocumentSource(indexName, doc.id(), doc.source(), e, context);
                 return null;
             }
-        }, context, allowlist);
+        }, RAW_PATH, context, allowlist, splitRequestConcurrency);
     }
 
     /**
@@ -796,20 +759,36 @@ public abstract class OpenSearchClient {
      * The record carries the source as base64 because it cannot be embedded as JSON.
      */
     public void reportInvalidDocumentSource(String indexName, String docId, byte[] source, Exception cause) {
+        reportInvalidDocumentSource(indexName, docId, source, cause, null);
+    }
+
+    public void reportInvalidDocumentSource(
+        String indexName,
+        String docId,
+        byte[] source,
+        Exception cause,
+        IRfsContexts.IRequestContext context
+    ) {
         log.atWarn().setCause(cause)
             .setMessage("Skipping document {} for index '{}': its source cannot be sent as JSON")
             .addArgument(docId)
             .addArgument(indexName)
             .log();
+        countFailedDocuments(context, null, FailureClass.NON_RETRYABLE, 1);
         if (failedDocumentStream.sink == null) {
             return;
         }
         try {
-            var requestItem = OBJECT_MAPPER.createObjectNode();
-            requestItem.putObject("operation").put("_index", indexName).put("_id", docId);
+            var sourceItem = OBJECT_MAPPER.createObjectNode();
+            sourceItem.put("documentId", docId);
             if (source != null) {
-                requestItem.put("documentBase64", Base64.getEncoder().encodeToString(source));
+                sourceItem.put("bodyBase64", Base64.getEncoder().encodeToString(source));
             }
+            var targetItem = OBJECT_MAPPER.createObjectNode();
+            targetItem.put("effectiveIndex", indexName);
+            targetItem.put("documentId", docId);
+            targetItem.put("operationType", "index");
+            targetItem.putObject("action").put("_index", indexName).put("_id", docId);
             var responseItem = OBJECT_MAPPER.createObjectNode();
             responseItem.putObject("index").put("_index", indexName).put("_id", docId).put("status", 400)
                 .putObject("error").put("type", INVALID_SOURCE_FORMAT).put("reason", cause.getMessage());
@@ -822,7 +801,8 @@ public abstract class OpenSearchClient {
                 .failureType(INVALID_SOURCE_FORMAT)
                 .failureClass(FailureClass.NON_RETRYABLE)
                 .timestamp(Instant.now().toString())
-                .requestItem(requestItem)
+                .source(sourceItem)
+                .target(targetItem)
                 .responseItem(responseItem)
                 .build()).subscribe(
                     v -> {},
@@ -836,7 +816,6 @@ public abstract class OpenSearchClient {
                 .addArgument(indexName)
                 .log();
         }
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
     }
 
     /** A raw document whose exact encoded bytes were prepared while the source pipeline sized its batch. */
@@ -882,12 +861,16 @@ public abstract class OpenSearchClient {
             );
         }
         // The batching predicate and retry state must be fresh for every subscription.
-<<<<<<< HEAD
         return Mono.defer(() -> {
             var tooLarge = new long[1];
+            var invalidSources = new long[1];
             var batchPreparationStartedNanos = new long[] {System.nanoTime()};
             return Flux.fromIterable(docs)
-                .map(prepare)
+                .mapNotNull(doc -> {
+                    var prepared = prepare.apply(doc);
+                    invalidSources[0] += prepared == null ? 1 : 0;
+                    return prepared;
+                })
                 .filter(op -> {
                     boolean rejected = rejectIfTooLarge(indexName, op, context);
                     tooLarge[0] += rejected ? 1 : 0;
@@ -897,7 +880,7 @@ public abstract class OpenSearchClient {
                     (PreparedOperation op) -> op.encoded().size()), true)
                 .doOnNext(batch -> {
                     long preparedNanos = System.nanoTime();
-                    bulkFlowMetrics.onBatchPrepared(path, batch.size(),
+                    bulkRuntime.bulkFlowMetrics.onBatchPrepared(path, batch.size(),
                         (preparedNanos - batchPreparationStartedNanos[0]) / 1_000_000.0);
                     batchPreparationStartedNanos[0] = preparedNanos;
                     noteOversizedOperation(indexName, batch, path, context);
@@ -910,7 +893,8 @@ public abstract class OpenSearchClient {
                 )
                 .reduce(OpenSearchClient::combine)
                 .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"))
-                .map(response -> response.plusFailures(failuresOf(FailureClass.NON_RETRYABLE, tooLarge[0])));
+                .map(response -> response.plusFailures(failuresOf(
+                    FailureClass.NON_RETRYABLE, tooLarge[0] + invalidSources[0])));
         });
     }
 
@@ -927,15 +911,15 @@ public abstract class OpenSearchClient {
         if (size <= maxBytesPerBulkRequest) {
             return;
         }
-        long total = oversizedOperations.incrementAndGet();
+        long total = bulkRuntime.oversizedOperations.incrementAndGet();
         if (context != null) {
             context.addBulkOversizedOperation(path);
         }
         long now = System.nanoTime();
-        long last = lastOversizedWarningNanos.get();
+        long last = bulkRuntime.lastOversizedWarningNanos.get();
         boolean due = total == 1 || now - last >= OVERSIZED_OPERATION_WARNING_INTERVAL.toNanos();
-        if (due && lastOversizedWarningNanos.compareAndSet(last, now)) {
-            long sinceLastWarning = total - oversizedOperationsAtLastWarning.getAndSet(total);
+        if (due && bulkRuntime.lastOversizedWarningNanos.compareAndSet(last, now)) {
+            long sinceLastWarning = total - bulkRuntime.oversizedOperationsAtLastWarning.getAndSet(total);
             log.atWarn()
                 .setMessage("Sending a {}-byte operation for index '{}' in a request by itself because it exceeds the "
                     + "{}-byte bulk request limit ({} path). {} such operations so far, {} since the last warning")
@@ -947,17 +931,6 @@ public abstract class OpenSearchClient {
                 .addArgument(sinceLastWarning)
                 .log();
         }
-=======
-        return Mono.defer(() -> Flux.fromIterable(docs)
-            .mapNotNull(prepare)
-            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
-                (PreparedOperation op) -> op.encoded().size()), true)
-            // A split batch completes in source order, before its source checkpoint can advance.
-            .concatMap(batch -> executeBulkWithRetry(indexName, batch, context, allowlist), 1)
-            .reduce((previous, next) -> new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
-                previous.target.plus(next.target), previous.requests.plus(next.requests)))
-            .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
     }
 
     private static BulkNdjson.SerializedBulk assemble(List<PreparedOperation> pending) {
@@ -1007,17 +980,18 @@ public abstract class OpenSearchClient {
         var retryState = new BulkRetryPolicy.Batch();
         return Mono.defer(() -> {
             if (totals.batchId == 0) {
-                totals.batchId = nextBatchId.incrementAndGet();
+                totals.batchId = bulkRuntime.nextBatchId.incrementAndGet();
                 totals.openedNanos = System.nanoTime();
-                bulkFlowMetrics.onBatchOpened(totals.batchId);
+                bulkRuntime.bulkFlowMetrics.onBatchOpened(totals.batchId);
             }
             return withBulkSlot(() -> {
                 // Assemble and compress only after taking a slot, so queued batches retain neither request buffer.
                 boolean retry = totals.attempts > 0;
                 long requestStartNanos = System.nanoTime();
-                long previousStartNanos = lastBulkRequestStartNanos.getAndAccumulate(requestStartNanos, Math::max);
+                long previousStartNanos =
+                    bulkRuntime.lastBulkRequestStartNanos.getAndAccumulate(requestStartNanos, Math::max);
                 if (previousStartNanos > 0 && requestStartNanos > previousStartNanos) {
-                    bulkFlowMetrics.onRequestStartGap(retry,
+                    bulkRuntime.bulkFlowMetrics.onRequestStartGap(retry,
                         (requestStartNanos - previousStartNanos) / 1_000_000.0);
                 }
                 byte[] sentBytes;
@@ -1051,16 +1025,17 @@ public abstract class OpenSearchClient {
                 totals.bytes += bodyLength;
                 long attempt = totals.attempts;
                 if (attempt > 1) {
-                    bulkFlowMetrics.onDocumentsResent(pendingOps.size());
+                    bulkRuntime.bulkFlowMetrics.onDocumentsResent(pendingOps.size());
                 }
                 long compressedNanos = System.nanoTime();
-                bulkFlowMetrics.onRequestPrepared(retry,
+                bulkRuntime.bulkFlowMetrics.onRequestPrepared(retry,
                     (assembledNanos - requestStartNanos) / 1_000_000.0,
                     (compressedNanos - assembledNanos) / 1_000_000.0);
-                bulkFlowMetrics.onRequestBody(pendingOps.size(), bodyLength, sentBytes.length);
+                bulkRuntime.bulkFlowMetrics.onRequestBody(pendingOps.size(), bodyLength, sentBytes.length);
                 long start = System.nanoTime();
                 if (attempt > 1 && totals.lastAttemptEndNanos > 0) {
-                    bulkFlowMetrics.onAttemptGap((start - totals.lastAttemptEndNanos) / 1_000_000);
+                    bulkRuntime.bulkFlowMetrics.onAttemptGap(
+                        (start - totals.lastAttemptEndNanos) / 1_000_000);
                 }
                 return postBulkRequest(indexName, sentBytes, context)
                     .doOnSuccess(response -> {
@@ -1068,7 +1043,7 @@ public abstract class OpenSearchClient {
                         long elapsed = System.nanoTime() - start;
                         totals.durationNanos += elapsed;
                         traceResponse(indexName, attempt, response, elapsed);
-                        bulkFlowMetrics.onAttempt(attemptOutcome(response), attempt > 1,
+                        bulkRuntime.bulkFlowMetrics.onAttempt(attemptOutcome(response), attempt > 1,
                             Duration.ofNanos(elapsed).toMillis());
                     })
                     .doOnError(error -> {
@@ -1076,7 +1051,7 @@ public abstract class OpenSearchClient {
                         long elapsed = System.nanoTime() - start;
                         totals.durationNanos += elapsed;
                         traceTransportError(indexName, attempt, error, elapsed);
-                        bulkFlowMetrics.onAttempt(attemptOutcome(error), attempt > 1,
+                        bulkRuntime.bulkFlowMetrics.onAttempt(attemptOutcome(error), attempt > 1,
                             Duration.ofNanos(elapsed).toMillis());
                     })
                     .onErrorMap(error -> new NoResponseException(error, Duration.ofNanos(System.nanoTime() - start)));
@@ -1094,20 +1069,20 @@ public abstract class OpenSearchClient {
         // Only a test's limited schedule runs out; credentials the target refuses stop the worker.
         .onErrorResume(error -> !(error instanceof TargetAuthenticationFailed),
             error -> Mono.just(new AttemptOutcome.Exhausted(error, null)))
-        .doOnNext(outcome -> bulkFlowMetrics.onBatchFinished(totals.attempts))
+        .doOnNext(outcome -> bulkRuntime.bulkFlowMetrics.onBatchFinished(totals.attempts))
         .doFinally(signal -> {
             if (totals.batchId != 0) {
-                bulkFlowMetrics.onBatchClosed(totals.batchId,
+                bulkRuntime.bulkFlowMetrics.onBatchClosed(totals.batchId,
                     Duration.ofNanos(System.nanoTime() - totals.openedNanos).toMillis(), totals.longestThrottleStreak);
             }
         })
         .flatMap(outcome -> switch (outcome) {
             case AttemptOutcome.Completed completed -> {
-                bulkRetryPolicy.onSuccess(retryState);
+                bulkRuntime.bulkRetryPolicy.onSuccess(retryState);
                 yield Mono.just(withTotals(completed.response(), totals));
             }
             case AttemptOutcome.Split split -> {
-                bulkFlowMetrics.onBatchSplit(split.reason());
+                bulkRuntime.bulkFlowMetrics.onBatchSplit(split.reason());
                 yield splitAndSend(indexName, pendingOps, context, allowlist, totals, split.description());
             }
             case AttemptOutcome.Rejected rejected -> finishWithTerminalFailure(indexName, pendingOps, totals, context,
@@ -1124,7 +1099,7 @@ public abstract class OpenSearchClient {
     ) {
         return Mono.defer(() -> {
             long startedNanos = System.nanoTime();
-            return classification.get().doFinally(signal -> bulkFlowMetrics.onResponseClassified(
+            return classification.get().doFinally(signal -> bulkRuntime.bulkFlowMetrics.onResponseClassified(
                 responseReceived,
                 (System.nanoTime() - startedNanos) / 1_000_000.0
             ));
@@ -1302,7 +1277,7 @@ public abstract class OpenSearchClient {
         if (!resp.hasBadStatusCode()) {
             totals.countThrottle(errorClass == BulkErrorClass.THROTTLE);
             if (resp.reportsNoFailedOperations()) {
-                bulkFlowMetrics.onWaitingOnTarget(totals.batchId, 0);
+                bulkRuntime.bulkFlowMetrics.onWaitingOnTarget(totals.batchId, 0);
                 return Mono.just(new AttemptOutcome.Completed(resp));
             }
             log.atInfo()
@@ -1314,10 +1289,11 @@ public abstract class OpenSearchClient {
             int successCount = compactPendingDocs(indexName, pendingOps, resp, context, allowlist, totals);
 
             if (pendingOps.isEmpty()) {
-                bulkFlowMetrics.onWaitingOnTarget(totals.batchId, 0);
+                bulkRuntime.bulkFlowMetrics.onWaitingOnTarget(totals.batchId, 0);
                 return Mono.just(new AttemptOutcome.Completed(resp));
             }
-            bulkFlowMetrics.onWaitingOnTarget(totals.batchId, errorClass.isTargetState() ? pendingOps.size() : 0);
+            bulkRuntime.bulkFlowMetrics.onWaitingOnTarget(
+                totals.batchId, errorClass.isTargetState() ? pendingOps.size() : 0);
             log.atWarn()
                 .setMessage("After bulk request attempt {} on index '{}', {} more documents have succeeded, {} remain. The error response message was: {}")
                 .addArgument(totals.attempts)
@@ -1346,7 +1322,8 @@ public abstract class OpenSearchClient {
         }
         var failed = new OperationFailed(resp.getFailureMessage(), resp);
         totals.countThrottle(errorClass == BulkErrorClass.THROTTLE);
-        bulkFlowMetrics.onWaitingOnTarget(totals.batchId, errorClass.isTargetState() ? pendingOps.size() : 0);
+        bulkRuntime.bulkFlowMetrics.onWaitingOnTarget(
+            totals.batchId, errorClass.isTargetState() ? pendingOps.size() : 0);
         if (errorClass == BulkErrorClass.THROTTLE) {
             log.atInfo()
                 .setMessage("Bulk request attempt {} on index '{}' was throttled (status {}); retrying all {} documents")
@@ -1359,7 +1336,7 @@ public abstract class OpenSearchClient {
         }
         if (errorClass == BulkErrorClass.UNAVAILABLE) {
             var reason = BulkErrorClass.isClusterBlock(response) ? "cluster_block_exception" : "http_" + resp.statusCode;
-            bulkFlowMetrics.onTargetUnavailable(reason, pendingOps.size());
+            bulkRuntime.bulkFlowMetrics.onTargetUnavailable(reason, pendingOps.size());
             log.atWarn()
                 .setMessage("Bulk request attempt {} on index '{}' found the target unable to take writes (status {}, "
                     + "{}); retrying all {} documents until it can, without counting it against them. Response: {}")
@@ -1432,8 +1409,8 @@ public abstract class OpenSearchClient {
         if (!error.isResponseTimeout()) {
             // The connection couldn't be made, or was reset or closed: the target, not a document, is the problem.
             var reason = attemptOutcome(error).label();
-            bulkFlowMetrics.onTargetUnavailable(reason, pendingOps.size());
-            bulkFlowMetrics.onWaitingOnTarget(totals.batchId, pendingOps.size());
+            bulkRuntime.bulkFlowMetrics.onTargetUnavailable(reason, pendingOps.size());
+            bulkRuntime.bulkFlowMetrics.onWaitingOnTarget(totals.batchId, pendingOps.size());
             log.atWarn()
                 .setMessage("Bulk request attempt {} on index '{}' with {} documents got no response after {} ms "
                     + "({}): {}; retrying, without counting it against them")
@@ -1446,7 +1423,7 @@ public abstract class OpenSearchClient {
                 .log();
             return Mono.error(error);
         }
-        bulkFlowMetrics.onWaitingOnTarget(totals.batchId, 0);
+        bulkRuntime.bulkFlowMetrics.onWaitingOnTarget(totals.batchId, 0);
         // A response timeout is retried a fixed number of times. Split a multi-document batch to isolate a possible
         // poison document; give up a single document after its retry limit so the migration can move on.
         boolean single = pendingOps.size() == 1;
@@ -1461,7 +1438,8 @@ public abstract class OpenSearchClient {
             .addArgument(indexName)
             .addArgument(pendingOps::size)
             .addArgument(error.elapsed::toMillis)
-            .addArgument(() -> Optional.ofNullable(bulkResponseTimeout).map(t -> " at " + t.toMillis() + " ms")
+            .addArgument(() -> Optional.ofNullable(bulkRuntime.bulkResponseTimeout)
+                .map(t -> " at " + t.toMillis() + " ms")
                 .orElse(""))
             .addArgument(totals.consecutiveNoResponses)
             .addArgument(() -> String.valueOf(error.getCause()))
@@ -1553,7 +1531,7 @@ public abstract class OpenSearchClient {
         // schedule that runs out before either condition (only a test's limited schedule can) fails the work item.
         boolean targetAccepting = failureClass == FailureClass.NON_RETRYABLE || reason != null;
         if (reason != null) {
-            bulkFlowMetrics.onGaveUp(reason, pendingOps.size());
+            bulkRuntime.bulkFlowMetrics.onGaveUp(reason, pendingOps.size());
         }
         if (!targetAccepting) {
             log.atError()
@@ -1568,7 +1546,7 @@ public abstract class OpenSearchClient {
         // Both a rejection and a give-up are about the whole request (items that fail on their own are recorded as
         // they're given up, in compactPendingDocs), so every operation shares the request-level failure. Without a
         // stream they are classified and charged the same way and the batch moves on, unrecorded.
-        var sink = failedDocumentStreamSink;
+        var sink = failedDocumentStream.sink;
         var failure = wholeRequestFailure(findOperationFailed(error).map(f -> f.response).orElse(null), error);
         for (var op : pendingOps) {
             emitFailedDocumentStreamRecord(indexName, op.operation().get(), failure, failureClass);
@@ -1611,7 +1589,7 @@ public abstract class OpenSearchClient {
             byType.merge(type != null && REPORTED_ITEM_ERROR_TYPES.contains(type) ? type : OTHER_ITEM_ERROR, 1L,
                 Long::sum);
         }
-        byType.forEach((type, count) -> bulkFlowMetrics.onItemErrors(type, retryable, count));
+        byType.forEach((type, count) -> bulkRuntime.bulkFlowMetrics.onItemErrors(type, retryable, count));
     }
 
     /**
@@ -1677,14 +1655,15 @@ public abstract class OpenSearchClient {
      * how it went. The slot is held only for the attempt, so a batch waiting to retry holds none.
      */
     private Mono<HttpResponse> withBulkSlot(Supplier<Mono<HttpResponse>> attempt) {
-        var limit = bulkInFlightLimit;
+        var limit = bulkRuntime.bulkInFlightLimit;
         if (limit == null) {
             return Mono.defer(attempt);
         }
         return Mono.defer(() -> {
             long waitStart = System.nanoTime();
             return limit.acquire()
-                .doOnNext(slot -> bulkFlowMetrics.onSlotWait(Duration.ofNanos(System.nanoTime() - waitStart).toMillis()));
+                .doOnNext(slot -> bulkRuntime.bulkFlowMetrics.onSlotWait(
+                    Duration.ofNanos(System.nanoTime() - waitStart).toMillis()));
         }).flatMap(slot -> Mono.defer(attempt)
             .doOnNext(response -> slot.release(limitSignal(response)))
             .doOnError(error -> slot.release(limitSignal(error)))
@@ -1756,12 +1735,12 @@ public abstract class OpenSearchClient {
      * this process (see {@link OpenSearchClientFactory}); null for no limit beyond the pipeline's concurrency.
      */
     public void setBulkInFlightLimit(AdaptiveLimit limit) {
-        this.bulkInFlightLimit = limit;
+        bulkRuntime.bulkInFlightLimit = limit;
         installBulkFlowMetrics();
     }
 
     public AdaptiveLimit getBulkInFlightLimit() {
-        return bulkInFlightLimit;
+        return bulkRuntime.bulkInFlightLimit;
     }
 
     private boolean gzipBulkBodies() {
@@ -1776,7 +1755,7 @@ public abstract class OpenSearchClient {
             RestClient.addGzipRequestHeaders(additionalHeaders);
             RestClient.addGzipResponseHeaders(additionalHeaders);
         }
-        var responseTimeout = bulkResponseTimeout;
+        var responseTimeout = bulkRuntime.bulkResponseTimeout;
         return responseTimeout == null
             ? client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context)
             : client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context, responseTimeout);
@@ -1834,7 +1813,7 @@ public abstract class OpenSearchClient {
         retryableFailures.stream().filter(f -> f.getKind() == BulkItemErrorKind.UNAVAILABLE)
             .collect(java.util.stream.Collectors.groupingBy(ItemFailure::getErrorType,
                 java.util.stream.Collectors.counting()))
-            .forEach(bulkFlowMetrics::onTargetUnavailable);
+            .forEach(bulkRuntime.bulkFlowMetrics::onTargetUnavailable);
 
         // Keep only retryable failures in pendingDocs, in original order. A document whose item keeps failing with an
         // unknown error is given up after MAX_ITEM_FAILURE_RETRIES retries; target-state errors never count.
@@ -1858,7 +1837,7 @@ public abstract class OpenSearchClient {
         }
         if (itemsGivenUp > 0) {
             countFailedDocuments(context, totals, FailureClass.RETRYABLE_EXHAUSTED, itemsGivenUp);
-            bulkFlowMetrics.onGaveUp(BulkFlowMetrics.GiveUpReason.ITEM_FAILURES, itemsGivenUp);
+            bulkRuntime.bulkFlowMetrics.onGaveUp(BulkFlowMetrics.GiveUpReason.ITEM_FAILURES, itemsGivenUp);
             log.atError()
                 .setMessage("Giving up on {} documents for index '{}' whose items failed {} times; they are being "
                     + "recorded in the failed document stream and the migration continues")
@@ -1926,17 +1905,10 @@ public abstract class OpenSearchClient {
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
             FailedDocumentStreamRecord failedDocumentStreamRecord = FailedDocumentStreamRecord.builder()
-<<<<<<< HEAD
-                .sessionId(failedDocumentStreamSessionId)
-                .workerId(failedDocumentStreamWorkerId)
-                .workItemId(failedDocumentStreamWorkItemId)
-                .targetIndex(effectiveIndex)
-=======
                 .sessionId(failedDocumentStream.sessionId)
                 .workerId(failedDocumentStream.workerId)
                 .workItemId(failedDocumentStream.workItemId)
-                .targetIndex(indexName)
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
+                .targetIndex(effectiveIndex)
                 .documentId(docId)
                 .failureType(failureType)
                 .failureClass(cls)
@@ -2134,13 +2106,31 @@ public abstract class OpenSearchClient {
         private volatile String workItemId;
     }
 
+    private static final class BulkRuntimeContext {
+        // Operations sent alone because they exceed maxBytesPerBulkRequest; the WARN for them is rate-limited.
+        private final AtomicLong oversizedOperations = new AtomicLong();
+        private final AtomicLong oversizedOperationsAtLastWarning = new AtomicLong();
+        private final AtomicLong lastOversizedWarningNanos = new AtomicLong();
+        // Documents bigger than this are not sent (0 = no limit). See rejectOversizedDocument.
+        private volatile long maxDocumentSizeBytes;
+        private volatile BulkRetryPolicy bulkRetryPolicy = new BulkRetryPolicy(new RetryBudget());
+        private final AtomicLong nextBatchId = new AtomicLong();
+        private final AtomicLong lastBulkRequestStartNanos = new AtomicLong();
+        private volatile AdaptiveLimit bulkInFlightLimit;
+        private final BulkFlowStats bulkFlowStats = new BulkFlowStats();
+        private volatile BulkFlowMetrics bulkFlowMetrics = bulkFlowStats;
+        // How long a bulk attempt waits for its response; null means the RestClient's own timeout.
+        private volatile Duration bulkResponseTimeout;
+    }
+
     private static final class CollectionBoundClient extends OpenSearchClient {
         private final OpenSearchClient unbound;
 
         private CollectionBoundClient(OpenSearchClient unbound, String serverlessCollection) {
             super(unbound.client.withDefaultHeaders(ServerlessCollectionRouting.headersFor(serverlessCollection)),
                 unbound.failedRequestsLogger, unbound.version, unbound.compressionMode,
-                unbound.maxDocsPerBulkRequest, unbound.maxBytesPerBulkRequest, unbound.failedDocumentStream);
+                unbound.maxDocsPerBulkRequest, unbound.maxBytesPerBulkRequest,
+                unbound.failedDocumentStream, unbound.bulkRuntime);
             this.unbound = unbound;
         }
 
@@ -2155,8 +2145,8 @@ public abstract class OpenSearchClient {
         }
 
         @Override
-        protected Retry getBulkRetryStrategy() {
-            return unbound.getBulkRetryStrategy();
+        protected Retry getBulkRetryStrategy(BulkRetryPolicy.Batch batch) {
+            return unbound.getBulkRetryStrategy(batch);
         }
     }
 }

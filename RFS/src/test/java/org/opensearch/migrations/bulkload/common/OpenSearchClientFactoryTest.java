@@ -343,7 +343,6 @@ class OpenSearchClientFactoryTest {
         verifyNoMoreInteractions(restClient);
     }
 
-<<<<<<< HEAD
     private static final String SETTINGS_PATH = "_cluster/settings?include_defaults=true";
 
     /** Answers the n-th (1-based) request to {@code path} with {@code statusForAttempt(n)}, or 200 with {@code okBody}. */
@@ -415,7 +414,9 @@ class OpenSearchClientFactoryTest {
             assertTrue(logs.getCapturedLogEvents().stream().anyMatch(e -> e.getMessage().contains("uncompressed")
                     && e.getMessage().contains("status " + status)),
                 "log events: " + logs.getLogEvents());
-=======
+        }
+    }
+
     @Test
     void getClusterVersion_collectionRoutedTarget_skipsRootRequest() {
         when(connectionContext.isCollectionRouted()).thenReturn(true);
@@ -479,12 +480,10 @@ class OpenSearchClientFactoryTest {
             assertTrue(Thread.currentThread().isInterrupted());
         } finally {
             Thread.interrupted();
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
         }
     }
 
     @Test
-<<<<<<< HEAD
     void clientsFromOneFactoryShareOneRetryBudget() {
         setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
         setupOkResponse(restClient, SETTINGS_PATH, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
@@ -513,7 +512,9 @@ class OpenSearchClientFactoryTest {
 
         org.junit.jupiter.api.Assertions.assertSame(first.getBulkInFlightLimit(), second.getBulkInFlightLimit());
         assertEquals(7, first.getBulkInFlightLimit().max());
-=======
+    }
+
+    @Test
     void detectServerlessCollectionType_endpointCollection_keepsNoneWhenUndetermined() {
         when(connectionContext.isCollectionRouted()).thenReturn(true);
         when(restClient.putAsync(anyString(), anyString(), isNull()))
@@ -521,6 +522,5 @@ class OpenSearchClientFactoryTest {
 
         assertEquals(ServerlessCollectionType.NONE, openSearchClientFactory.detectServerlessCollectionType());
         verify(restClient, times(1)).putAsync(anyString(), anyString(), isNull());
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
     }
 }

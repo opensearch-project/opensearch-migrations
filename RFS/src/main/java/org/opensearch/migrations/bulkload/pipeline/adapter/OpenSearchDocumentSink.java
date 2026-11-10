@@ -1,14 +1,12 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-<<<<<<< HEAD
 import java.util.ArrayDeque;
-=======
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -16,16 +14,14 @@ import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-<<<<<<< HEAD
-import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
-=======
 import org.opensearch.migrations.bulkload.common.SourceFormat;
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
+import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.sink.GroupedDocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
@@ -60,11 +56,8 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
     private final boolean allowServerGeneratedIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
-<<<<<<< HEAD
     private boolean closed;
-=======
     private final CollectionRoutedTarget collectionRoutedTarget;
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
 
     public OpenSearchDocumentSink(
         OpenSearchClient client,
@@ -167,8 +160,14 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
         if (!usesRawFastPath()) {
             return new PreparedDocument<>(document, document.sourceLength(), null);
         }
-        var prepared = BulkNdjson.encodeRaw(document, collectionName, allowServerGeneratedIds, OBJECT_MAPPER);
-        return new PreparedDocument<>(document, prepared.size(), prepared);
+        try {
+            var prepared = BulkNdjson.encodeRaw(
+                document, collectionName, useServerGeneratedIds(collectionName), OBJECT_MAPPER);
+            return new PreparedDocument<>(document, prepared.size(), prepared);
+        } catch (SourceFormat.InvalidDocumentSourceException e) {
+            // Keep the source flowing to the lane that owns its checkpoint. The lane records and drops it.
+            return new PreparedDocument<>(document, document.sourceLength(), null);
+        }
     }
 
     @Override
@@ -198,9 +197,7 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
             .mapToLong(Document::sourceLength)
             .sum();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
-<<<<<<< HEAD
         int splitRequestConcurrency = Math.max(1, Math.min(requestConcurrency, sourceBatches.size()));
-=======
         // collectionName is the source index; routing by it holds even when a transformer renames _index
         var serverlessCollection = collectionRoutedTarget != null
             ? collectionRoutedTarget.collectionFor(collectionName)
@@ -209,85 +206,71 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
             ? collectionRoutedTarget.requiresServerGeneratedIds(serverlessCollection)
             : allowServerGeneratedIds;
         var targetClient = serverlessCollection != null ? client.forCollection(serverlessCollection) : client;
-
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
+        var invalidDocuments = new AtomicLong();
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (usesRawFastPath()) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
-<<<<<<< HEAD
             var documents = sourceBatches.stream().flatMap(List::stream).toList();
-            bulkMono = sendRaw(collectionName, documents, requestContext, splitRequestConcurrency);
+            bulkMono = sendRaw(targetClient, collectionName, documents, requestContext,
+                useServerGeneratedIds, splitRequestConcurrency, invalidDocuments);
         } else {
             bulkMono = Flux.fromIterable(sourceBatches)
-                .flatMapSequential(batch -> Mono.fromCallable(() -> transformBatch(collectionName, batch))
+                .flatMapSequential(batch -> Mono.fromCallable(
+                    () -> transformBatch(targetClient, collectionName, batch, invalidDocuments, requestContext))
                     .subscribeOn(Schedulers.parallel()), splitRequestConcurrency, 1)
                 .collectList()
                 .map(transformedBatches -> transformedBatches.stream().flatMap(List::stream).toList())
-                .flatMap(operations ->
-                    sendTransformed(collectionName, operations, requestContext, splitRequestConcurrency));
-=======
-            bulkMono = targetClient.sendBulkRequestRaw(collectionName, batch,
-                requestContext, useServerGeneratedIds, allowlist);
-        } else if (nativeTransformers != null) {
-            var operations = batch.stream()
-                .map(doc -> BulkOperationConverter.fromRawDocument(doc, collectionName))
-                .collect(Collectors.toList());
-            for (var nativeTransformer : nativeTransformers) {
-                operations = nativeTransformer.transformOperations(operations);
-            }
-            bulkMono = targetClient.sendBulkRequest(collectionName, operations,
-                requestContext, useServerGeneratedIds, allowlist);
-        } else {
-            var bulkOps = new ArrayList<BulkOperationSpec>(batch.size());
-            for (var doc : batch) {
-                try {
-                    bulkOps.add(BulkOperationConverter.fromDocument(doc, collectionName));
-                } catch (SourceFormat.InvalidDocumentSourceException e) {
-                    client.reportInvalidDocumentSource(collectionName, doc.id(), doc.source(), e);
-                }
-            }
-            List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
-            bulkMono = targetClient.sendBulkRequest(collectionName, opsToSend,
-                requestContext, useServerGeneratedIds, allowlist);
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
+                .flatMap(operations -> sendTransformed(targetClient, collectionName, operations,
+                    requestContext, useServerGeneratedIds, splitRequestConcurrency));
         }
 
         return bulkMono.map(response -> new BatchResult(docsInBatch, bytesInBatch, response.target,
-            response.requests, response.failures));
+            response.requests, response.failures.plus(
+                new MigrationMetrics.Failures(invalidDocuments.get(), 0))));
     }
 
     private Mono<OpenSearchClient.BulkResponse> sendRaw(
+        OpenSearchClient targetClient,
         String collectionName,
         List<PreparedDocument<BulkNdjson.EncodedOperation>> documents,
         IRfsContexts.IRequestContext requestContext,
-        int splitRequestConcurrency
+        boolean useServerGeneratedIds,
+        int splitRequestConcurrency,
+        AtomicLong invalidDocuments
     ) {
-        var prepared = documents.stream()
-            .map(document -> new OpenSearchClient.PreparedRawDocument(
-                document.document(),
-                document.preparation() != null
+        var prepared = new ArrayList<OpenSearchClient.PreparedRawDocument>(documents.size());
+        for (var document : documents) {
+            try {
+                var encoded = document.preparation() != null
                     ? document.preparation()
                     : BulkNdjson.encodeRaw(
-                        document.document(), collectionName, allowServerGeneratedIds, OBJECT_MAPPER
-                    )))
-            .toList();
-        return client.sendBulkRequestPreparedRaw(
+                        document.document(), collectionName, useServerGeneratedIds, OBJECT_MAPPER);
+                prepared.add(new OpenSearchClient.PreparedRawDocument(document.document(), encoded));
+            } catch (SourceFormat.InvalidDocumentSourceException e) {
+                targetClient.reportInvalidDocumentSource(
+                    collectionName, document.document().id(), document.document().source(), e, requestContext);
+                invalidDocuments.incrementAndGet();
+            }
+        }
+        return targetClient.sendBulkRequestPreparedRaw(
             collectionName, prepared, requestContext, allowlist, splitRequestConcurrency);
     }
 
     private Mono<OpenSearchClient.BulkResponse> sendTransformed(
+        OpenSearchClient targetClient,
         String collectionName,
         List<? extends BulkOperationSpec> operations,
         IRfsContexts.IRequestContext requestContext,
+        boolean useServerGeneratedIds,
         int splitRequestConcurrency
     ) {
         return splitRequestConcurrency == 1
-            ? client.sendBulkRequest(collectionName, operations, requestContext, allowServerGeneratedIds, allowlist)
-            : client.sendBulkRequest(
+            ? targetClient.sendBulkRequest(collectionName, operations, requestContext, useServerGeneratedIds, allowlist)
+            : targetClient.sendBulkRequest(
                 collectionName,
                 operations,
                 requestContext,
-                allowServerGeneratedIds,
+                useServerGeneratedIds,
                 allowlist,
                 splitRequestConcurrency
             );
@@ -298,8 +281,11 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
     }
 
     private List<BulkOperationSpec> transformBatch(
+        OpenSearchClient targetClient,
         String collectionName,
-        List<PreparedDocument<BulkNdjson.EncodedOperation>> batch
+        List<PreparedDocument<BulkNdjson.EncodedOperation>> batch,
+        AtomicLong invalidDocuments,
+        IRfsContexts.IRequestContext requestContext
     ) {
         var transformerState = acquireTransformer();
         try {
@@ -313,14 +299,29 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
                 }
                 return transformed;
             }
-            var bulkOps = batch.stream()
-                .map(PreparedDocument::document)
-                .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
-                .collect(Collectors.toList());
+            var bulkOps = new ArrayList<BulkOperationSpec>(batch.size());
+            for (var prepared : batch) {
+                var document = prepared.document();
+                try {
+                    bulkOps.add(BulkOperationConverter.fromDocument(document, collectionName));
+                } catch (SourceFormat.InvalidDocumentSourceException e) {
+                    targetClient.reportInvalidDocumentSource(
+                        collectionName, document.id(), document.source(), e, requestContext);
+                    invalidDocuments.incrementAndGet();
+                }
+            }
             return applyTransformation(bulkOps, transformerState.transformer());
         } finally {
             releaseTransformer(transformerState);
         }
+    }
+
+    private boolean useServerGeneratedIds(String collectionName) {
+        if (collectionRoutedTarget == null) {
+            return allowServerGeneratedIds;
+        }
+        return collectionRoutedTarget.requiresServerGeneratedIds(
+            collectionRoutedTarget.collectionFor(collectionName));
     }
 
     private TransformerState acquireTransformer() {

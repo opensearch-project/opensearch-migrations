@@ -542,7 +542,12 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
-<<<<<<< HEAD
+        try {
+            args.targetArgs.setCollectionRouted(ServerlessCollectionRouting.fromJson(args.collectionRouting).isPresent());
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException(e.getMessage(), e);
+        }
+
         validateSourceArgs(args);
         if (args.maxLeaseDuration.compareTo(args.initialLeaseDuration) < 0) {
             throw new ParameterException("--max-lease-duration (" + args.maxLeaseDuration
@@ -558,14 +563,6 @@ public class RfsMigrateDocuments {
     }
 
     private static void validateSourceArgs(Args args) {
-=======
-        try {
-            args.targetArgs.setCollectionRouted(ServerlessCollectionRouting.fromJson(args.collectionRouting).isPresent());
-        } catch (IllegalArgumentException e) {
-            throw new ParameterException(e.getMessage(), e);
-        }
-
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
         // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.repoUri == null) {

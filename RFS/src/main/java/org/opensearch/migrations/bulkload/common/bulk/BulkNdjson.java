@@ -109,7 +109,6 @@ public final class BulkNdjson {
             operationType == OperationType.INDEX);
     }
 
-    @SneakyThrows(IOException.class)
     public static EncodedOperation encodePreparedRaw(PreparedRawOperation prepared) {
         byte[] body = prepared.rawBody();
         if (body != null) {
