@@ -636,7 +636,7 @@ public abstract class OpenSearchClient {
 
     /** Totals of this client's flow-control events, for the work-item metrics record. */
     public BulkFlowStats.Summary getBulkFlowSummary() {
-        return bulkRuntime.bulkFlowStats.summary(bulkRuntime.bulkInFlightLimit);
+        return bulkRuntime.bulkFlowStats.snapshot(bulkRuntime.bulkInFlightLimit);
     }
 
     public RetryBudget getBulkRetryBudget() {

@@ -366,9 +366,12 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
             "transformerSupplier must not return null"
         );
         var nativeStages = nonNullTransformer.getNativeStages(BulkOperationTransformer.class).orElse(null);
-        var mode = nativeStages == null
-            ? TransformationMode.JSON
-            : nativeStages.isEmpty() ? TransformationMode.RAW : TransformationMode.NATIVE;
+        TransformationMode mode;
+        if (nativeStages == null) {
+            mode = TransformationMode.JSON;
+        } else {
+            mode = nativeStages.isEmpty() ? TransformationMode.RAW : TransformationMode.NATIVE;
+        }
         return new TransformerState(nonNullTransformer, nativeStages, mode);
     }
 
@@ -444,6 +447,7 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
         JSON
     }
 
+    @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     private record TransformerState(
         IJsonTransformer transformer,
         List<BulkOperationTransformer> nativeTransformers,

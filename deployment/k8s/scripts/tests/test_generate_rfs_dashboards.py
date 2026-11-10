@@ -516,9 +516,8 @@ class GeneratedDashboardTest(unittest.TestCase):
         self.assertIn("container_spec_cpu_period", cloudwatch_expressions)
         self.assertIn("container_spec_memory_limit_bytes", cloudwatch_expressions)
 
-        values_eks = (
-            Path(__file__).resolve().parents[2]
-            / "charts/aggregates/migrationAssistantWithArgo/valuesEks.yaml"
+        values_eks = Path(__file__).resolve().parents[2].joinpath(
+            "charts/aggregates/migrationAssistantWithArgo/valuesEks.yaml"
         ).read_text()
         self.assertIn("- container_spec_cpu_quota", values_eks)
         self.assertIn("- container_spec_cpu_period", values_eks)

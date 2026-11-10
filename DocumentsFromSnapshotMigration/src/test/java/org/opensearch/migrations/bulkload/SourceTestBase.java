@@ -129,10 +129,15 @@ public class SourceTestBase {
         String classpath = System.getProperty("java.class.path");
         String javaHome = System.getProperty("java.home");
         String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
+        var args = new ArrayList<>(Arrays.asList(processArgs));
+        if (!args.contains("--disable-failed-document-stream")
+            && !args.contains("--failed-document-stream-s3-bucket")) {
+            args.add("--disable-failed-document-stream");
+        }
 
         // Kick off the doc migration process
         log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
-            .addArgument(() -> Arrays.toString(processArgs))
+            .addArgument(args)
             .log();
         ProcessBuilder processBuilder = new ProcessBuilder(
             javaExecutable,
@@ -140,7 +145,7 @@ public class SourceTestBase {
             classpath,
             "org.opensearch.migrations.RfsMigrateDocuments"
         );
-        processBuilder.command().addAll(Arrays.asList(processArgs));
+        processBuilder.command().addAll(args);
         processBuilder.redirectErrorStream(true);
         processBuilder.redirectOutput();
         return processBuilder;

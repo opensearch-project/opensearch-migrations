@@ -29,6 +29,11 @@ MIB = 1048576
 RFS = "documentMigration"
 WC = "workCoordination"
 CONTAINER = "bulk-loader"
+FLEET_CAPACITY_LABEL = "% (fleet capacity)"
+DOCS_PER_SECOND_UNIT = "docs/s"
+ATTEMPTS_PER_SECOND_UNIT = "attempts/s"
+PER_MINUTE_UNIT = "per min"
+MIB_PER_SECOND_UNIT = "MiB/s"
 
 # name -> (OTel unit as Prometheus spells it, kind, scope, attributes)
 METRICS = {
@@ -299,7 +304,7 @@ class Quantile:
              f"({prom_dedup(self.name, '_bucket', rate=True)}))")
         return [(e if self.scale == 1 else f"{e} / {self.scale}", self.label)]
 
-    def cw(self, w):
+    def cw(self, _w):
         return []
 
 
@@ -476,7 +481,7 @@ class ContainerUtilization:
             limit = f"max by (pod) (container_spec_memory_limit_bytes{s})"
         if self.agg == "sum":
             expression = f"100 * sum({usage}) / sum({limit})"
-            label = "% (fleet capacity)"
+            label = FLEET_CAPACITY_LABEL
         else:
             expression = f"100 * max(({usage}) / ({limit}))"
             label = "% (hottest pod)"
@@ -506,14 +511,14 @@ class ContainerUtilization:
             # CPU quota is per pod while the CFS period is a common divisor. Summing both would cancel the pod
             # count and leave one pod's limit; sum all quotas and divide by the average period for fleet capacity.
             limit = f"SUM({quota}) / AVG({period})"
-            return [w.e(f"100 * ({usage}) / ({limit})", "% (fleet capacity)")]
+            return [w.e(f"100 * ({usage}) / ({limit})", FLEET_CAPACITY_LABEL)]
 
         memory_limit = self._cw_search("container_spec_memory_limit_bytes", "Average")
         if self.agg == "sum":
             # Scraped every 5 s: Sum / (PERIOD / 5) is the fleet's mean working set in the period.
             usage = f"{i} / (PERIOD({i}) / 5)"
             limit = f"SUM({memory_limit})"
-            label = "% (fleet capacity)"
+            label = FLEET_CAPACITY_LABEL
         else:
             usage = i
             limit = f"MAX({memory_limit})"
@@ -597,7 +602,7 @@ SECTIONS = [
         Panel("Documents migrated per second",
               "Documents successfully written to the target, fleet total per second. A sustained drop matters only "
               "after comparing it with the worker-capacity and target-feedback panels in the same row.",
-              "docs/s", [Rate("pipelineDocsMigrated", "Documents/s")]),
+              DOCS_PER_SECOND_UNIT, [Rate("pipelineDocsMigrated", "Documents/s")]),
         Panel("Workers by phase",
               "Number of RFS worker processes in each lifecycle phase. The stack is ordered from the first phase at "
               "the bottom to the last at the top: starting, acquiring work, downloading and unpacking a shard, "
@@ -612,13 +617,13 @@ SECTIONS = [
               "requests accepted on the first try at the bottom, then requests accepted after retry, item errors, "
               "target throttling, no response, and other errors. A growing upper portion means more request work is "
               "being repeated or rejected. The detailed first-versus-retry outcome matrix is in the expert section.",
-              "attempts/s", [AttemptOutcomeGroups()], stacked=True),
+              ATTEMPTS_PER_SECOND_UNIT, [AttemptOutcomeGroups()], stacked=True),
         Panel("Documents requiring manual action (per minute)",
               "Documents that did not migrate and were recorded as terminal failures, by failure class. "
               "NON_RETRYABLE is a document/request problem that retrying cannot fix; RETRYABLE_EXHAUSTED was given "
               "up after its retry policy. These are the documents an operator must inspect and replay or correct. "
               "Target throttles and temporary unavailability do not appear here unless a document ultimately fails.",
-              "per min", [
+              PER_MINUTE_UNIT, [
                   Rate("bulkDocumentsFailed", "Cannot be retried",
                        where={"failureClass": "NON_RETRYABLE"}, per_min=True),
                   Rate("bulkDocumentsFailed", "Retries exhausted",
@@ -639,7 +644,7 @@ SECTIONS = [
               "timeout. Workers independently probe upward again after cutting; under sustained target saturation, "
               "recurring cuts form an expected sawtooth and need not decay to zero. Correlate cuts with the adaptive "
               "allowance and utilization bands to see the size and breadth of target pushback.",
-              "per min", [
+              PER_MINUTE_UNIT, [
                   Rate("bulkLimitCuts", "HTTP 429 / request rejected",
                        where={"signal": "throttled_429"}, per_min=True),
                   Rate("bulkLimitCuts", "Item-level admission rejection",
@@ -651,9 +656,9 @@ SECTIONS = [
               "subset sent again during retries. Sent can briefly lead migrated while requests are in flight. "
               "Sustained re-sends or a widening sent-versus-migrated gap means retries or failures are consuming "
               "target capacity.",
-              "docs/s", [HistogramSumRate("bulkRequestDocuments", "Sent"),
-                         Rate("pipelineDocsMigrated", "Migrated"),
-                         Rate("bulkDocsResent", "Re-sent")]),
+              DOCS_PER_SECOND_UNIT, [HistogramSumRate("bulkRequestDocuments", "Sent"),
+                                     Rate("pipelineDocsMigrated", "Migrated"),
+                                     Rate("bulkDocsResent", "Re-sent")]),
         Panel("Requests in flight vs adaptive allowance",
               "Fleet totals for bulk requests currently in flight, the workers' current adaptive allowances, their "
               "configured maximums, and requests waiting for an allowance slot. The configured maximum is only a "
@@ -680,9 +685,9 @@ SECTIONS = [
               "metadata, framing, and retries. Bulk request body sent is that same body after optional compression. "
               "Compare the two request lines to see compression; compare document send/re-send rates above to "
               "separate retries from request overhead.",
-              "MiB/s", [Rate("pipelineBytesMigrated", "Migrated document source", scale=MIB),
-                        HistogramSumRate("bulkRequestBytes", "Uncompressed bulk NDJSON", scale=MIB),
-                        HistogramSumRate("bulkRequestSentBytes", "Bulk request body sent", scale=MIB)]),
+              MIB_PER_SECOND_UNIT, [Rate("pipelineBytesMigrated", "Migrated document source", scale=MIB),
+                                    HistogramSumRate("bulkRequestBytes", "Uncompressed bulk NDJSON", scale=MIB),
+                                    HistogramSumRate("bulkRequestSentBytes", "Bulk request body sent", scale=MIB)]),
         Panel("RFS CPU utilization (%)",
               "Bulk-loader CPU usage divided by its configured CPU limit. This panel and RFS memory are vertically "
               "aligned under the request allowance panel so worker resource saturation can be compared with unused "
@@ -724,7 +729,7 @@ SECTIONS = [
               "fan-in; packed has entered an exact target batch; request started/finished bracket the sink call; "
               "checkpointed can advance source progress. A sustained rate drop between adjacent lines locates the "
               "stage that is not feeding its consumer.",
-              "docs/s", [
+              DOCS_PER_SECOND_UNIT, [
                   Rate("pipelineStageDocuments", "Source", where={"stage": "source"}),
                   Rate("pipelineStageDocuments", "Prepared", where={"stage": "prepared"}),
                   Rate("pipelineStageDocuments", "Ordered prep", where={"stage": "ordered_prepared"}),
@@ -756,7 +761,7 @@ SECTIONS = [
               "Bytes crossing selected pipeline boundaries. Source and checkpointed bytes are original document "
               "source. Prepared, packed, and request-started bytes are exact encoded NDJSON operations including "
               "action metadata and framing. The change from source to prepared quantifies bulk-format overhead.",
-              "MiB/s", [
+              MIB_PER_SECOND_UNIT, [
                   Rate("pipelineStageBytes", "Source", where={"stage": "source"}, scale=MIB),
                   Rate("pipelineStageBytes", "Prepared", where={"stage": "prepared"}, scale=MIB),
                   Rate("pipelineStageBytes", "Packed", where={"stage": "packed"}, scale=MIB),
@@ -855,7 +860,7 @@ SECTIONS = [
               "couldn't take documents, and Item errors.",
               "ms", [Domain("IndexingLatency", "Average", "Indexing latency (ms)"),
                      Right(Domain("4xx", "Sum", "4xx")), Right(Domain("5xx", "Sum", "5xx"))],
-              cw_only=True, right_unit="per min"),
+              cw_only=True, right_unit=PER_MINUTE_UNIT),
         Panel("Target searchable documents (thousands) and used space (GB)",
               "AWS/ES SearchableDocuments and, on the right axis, ClusterUsedSpace.",
               "thousands of docs",
@@ -877,7 +882,7 @@ SECTIONS = [
               "429 throttles; correlate the overview's paused-document gauge with its limit-cut panel for those. "
               "A document is counted again on each attempt, so this is refusal volume rather than a "
               "distinct-document count.",
-              "per min", [Rate("bulkDocsTargetUnavailable", "{by}", by="reason", per_min=True)], stacked=True),
+              PER_MINUTE_UNIT, [Rate("bulkDocsTargetUnavailable", "{by}", by="reason", per_min=True)], stacked=True),
         Panel("Bulk attempt duration (s)",
               "Time from sending a bulk HTTP request until its response or transport error. The panel shows the "
               "mean, p50, and p99. Durations approaching the configured bulk response timeout indicate responses "
@@ -899,14 +904,14 @@ SECTIONS = [
               "tokens", [Gauge("retryBudgetTokens", "Lowest worker", "min"),
                          Gauge("retryBudgetTokens", "Highest worker", "max"),
                          Right(Rate("retryBudgetEmpty", "Ran out per minute", per_min=True))],
-              right_unit="per min"),
+              right_unit=PER_MINUTE_UNIT),
     ]),
     ("Failure diagnosis", True, [
         Panel("Documents given up after retries (per minute)",
               "Documents abandoned after repeated unknown status, no-response, or item failures. This explains the "
               "RETRYABLE_EXHAUSTED portion of the overview's manual-action graph. "
               "Throttling and temporary target unavailability do not give documents up by themselves.",
-              "per min", [Rate("bulkDocsGaveUp", "", by="reason", per_min=True)]),
+              PER_MINUTE_UNIT, [Rate("bulkDocsGaveUp", "", by="reason", per_min=True)]),
         Panel("Item errors per second",
               "Per-document errors returned inside otherwise successful bulk HTTP responses. Retried errors may "
               "reflect target state; terminal errors were attributed to the document and recorded for manual action.",
@@ -919,7 +924,7 @@ SECTIONS = [
               "Every bulk HTTP attempt split by first attempt or retry and by the exact internal outcome. Use this "
               "after the grouped overview graph identifies a problem and the distinction between first attempts and "
               "retries matters.",
-              "attempts/s", [Rate("bulkAttempts", "", by=("attempt", "outcome"))], stacked=True),
+              ATTEMPTS_PER_SECOND_UNIT, [Rate("bulkAttempts", "", by=("attempt", "outcome"))], stacked=True),
         Panel("Adaptive limit by worker",
               "Each worker's current adaptive target-concurrency limit. Workers sharing an overloaded target should "
               "move downward together; one low outlier can instead indicate a slow shard or a worker-local problem.",
@@ -951,7 +956,7 @@ SECTIONS = [
               "Number of request batches divided into smaller batches: status and no_response use binary splitting "
               "to isolate repeatedly failing documents; too_large reduces a request the target rejected for size. "
               "The actual request sizes reaching the target are shown in Throughput and request shape.",
-              "per min", [Rate("bulkBatchSplits", "", by="reason", per_min=True)], stacked=True),
+              PER_MINUTE_UNIT, [Rate("bulkBatchSplits", "", by="reason", per_min=True)], stacked=True),
     ]),
 ]
 
@@ -1041,16 +1046,17 @@ def cloudwatch():
 # --- Grafana --------------------------------------------------------------------------------------------------
 
 DS = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
-GRAFANA_UNITS = {"docs/s": "suffix: docs/s", "MiB/s": "suffix: MiB/s", "per min": "suffix: /min", "s": "s",
+GRAFANA_UNITS = {DOCS_PER_SECOND_UNIT: "suffix: docs/s", MIB_PER_SECOND_UNIT: "suffix: MiB/s",
+                 PER_MINUTE_UNIT: "suffix: /min", "s": "s",
                  "min": "m", "count": "short", "short": "short", "ops": "ops", "percent": "percent", "docs": "short",
-                 "attempts/s": "suffix: attempts/s", "errors/s": "suffix: errors/s",
+                 ATTEMPTS_PER_SECOND_UNIT: "suffix: attempts/s", "errors/s": "suffix: errors/s",
                  "ops/min": "suffix: /min", "ms": "ms", "GB": "suffix: GB", "docs / KiB": "short",
                  "cores": "suffix: cores", "MiB": "suffix: MiB", "thousands of docs": "short",
                  "tokens": "suffix: tokens", "connections": "suffix: connections",
                  "events (see legend)": "short"}
 
 
-def grafana():
+def grafana():  # NOSONAR - one renderer keeps panel ordering, row ownership, and overrides together
     panels = [{"type": "text", "title": "", "gridPos": {"h": 2, "w": 24, "x": 0, "y": 0},
                "options": {"mode": "markdown", "content": READING_GUIDE}}]
     pid = 1

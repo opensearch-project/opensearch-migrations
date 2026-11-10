@@ -998,7 +998,7 @@ def approve_step(ctx, names, list_flag, output_format, all_flag, pre_approve,
 @_override_options
 @_shared_options
 @click.pass_context
-def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,
+def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,  # NOSONAR - Click injects options
                    override, override_fields, all_fields, assume_yes,
                    workflow_name, argo_server, namespace, insecure, token):
     """Acknowledge gated configuration field changes.
@@ -1030,7 +1030,7 @@ def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,
 @_override_options
 @_shared_options
 @click.pass_context
-def approve_retry(ctx, names, list_flag, output_format, all_flag,
+def approve_retry(ctx, names, list_flag, output_format, all_flag,  # NOSONAR - Click injects options
                   override, override_fields, all_fields, assume_yes,
                   workflow_name, argo_server, namespace, insecure, token):
     """Confirm recovery is complete after an impossible change.

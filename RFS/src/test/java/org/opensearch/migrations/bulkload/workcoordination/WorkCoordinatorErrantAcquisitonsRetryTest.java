@@ -187,7 +187,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
             try (var wc = factory.get(client, 2, TEST_WORKER_ID);
                  var logs = new org.opensearch.migrations.testutils.CloseableLogSetup(wc.getLoggerName())) {
                 Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
-                    () -> wc.acquireNextWorkItem(Duration.ofSeconds(1), rootContext::createAcquireNextItemContext));
+                    () -> wc.acquireNextWorkItem(Duration.ofSeconds(3), rootContext::createAcquireNextItemContext));
                 var waits = CoordinatorRetryJitterTest.waits(logs,
                     java.util.regex.Pattern.compile("Backing off (PT[0-9.]+S) and trying again"));
                 var nominal = new java.util.ArrayList<Long>();

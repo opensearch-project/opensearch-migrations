@@ -15,7 +15,13 @@ public interface BulkFlowMetrics {
         TIMEOUT, CONNECTION_RESET, CONNECT_FAILED;
 
         public String label() {
-            return this == SERVER_5XX ? "5xx" : this == OTHER_4XX ? "other_4xx" : name().toLowerCase();
+            if (this == SERVER_5XX) {
+                return "5xx";
+            }
+            if (this == OTHER_4XX) {
+                return "other_4xx";
+            }
+            return name().toLowerCase();
         }
     }
 

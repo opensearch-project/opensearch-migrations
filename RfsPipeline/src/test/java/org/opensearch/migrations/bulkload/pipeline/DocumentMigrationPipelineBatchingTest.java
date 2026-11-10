@@ -167,7 +167,7 @@ class DocumentMigrationPipelineBatchingTest {
         Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
 
         class ExactPackingSink implements GroupedDocumentSink<String> {
-            final List<List<String>> receivedBatches = new ArrayList<>();
+            final List<List<String>> receivedBatches = new CopyOnWriteArrayList<>();
 
             @Override
             public Mono<Void> createCollection(CollectionMetadata metadata) {
@@ -470,9 +470,10 @@ class DocumentMigrationPipelineBatchingTest {
 
     @Test
     void keepsPreparationOnStablePersistentLanes() {
+        int laneCount = Math.min(4, Runtime.getRuntime().availableProcessors());
         var partition = new EsShardPartition("snapshot", "index", 0);
         var documents = Stream.iterate(0, i -> i + 1)
-            .limit(8)
+            .limit(2L * laneCount)
             .map(i -> new Document("doc-" + i, new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()))
             .toList();
         var source = Mockito.mock(DocumentSource.class);
@@ -520,11 +521,11 @@ class DocumentMigrationPipelineBatchingTest {
             .migratePartition(partition, "index", 0)
             .blockLast(Duration.ofSeconds(10));
 
-        Assertions.assertTrue(sink.preparationThreads.values().stream().distinct().count() >= 2);
-        for (int lane = 0; lane < 4; lane++) {
+        Assertions.assertEquals(laneCount, sink.preparationThreads.values().stream().distinct().count());
+        for (int lane = 0; lane < laneCount; lane++) {
             Assertions.assertEquals(
                 sink.preparationThreads.get("doc-" + lane),
-                sink.preparationThreads.get("doc-" + (lane + 4))
+                sink.preparationThreads.get("doc-" + (lane + laneCount))
             );
         }
     }
