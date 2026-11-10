@@ -71,9 +71,6 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             for (var field : problemMappingFields) {
                 ObjectNodeUtils.removeFieldsByPath(mappings, field);
             }
-            if (client.isCollectionRouted()) {
-                removeKnnVectorEngines(mappings, index.getName());
-            }
         }
 
         // Copy top-level metadata fields into settings.
@@ -123,22 +120,21 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         return result.build();
     }
 
-    static void removeKnnVectorEngines(JsonNode node, String indexName) {
+    static int removeKnnVectorEngines(JsonNode node) {
         if (node == null || !node.isContainerNode()) {
-            return;
+            return 0;
         }
+        var removed = 0;
         if (node instanceof ObjectNode field
             && "knn_vector".equals(field.path("type").asText())
             && field.get("method") instanceof ObjectNode method
-            && method.has(KNN_ENGINE)) {
-            log.atInfo()
-                .setMessage("Removing knn_vector method.engine '{}' from index '{}': NextGen collections choose the engine")
-                .addArgument(method.get(KNN_ENGINE).asText())
-                .addArgument(indexName)
-                .log();
-            method.remove(KNN_ENGINE);
+            && method.remove(KNN_ENGINE) != null) {
+            removed++;
         }
-        node.elements().forEachRemaining(child -> removeKnnVectorEngines(child, indexName));
+        for (var child : (Iterable<JsonNode>) node::elements) {
+            removed += removeKnnVectorEngines(child);
+        }
+        return removed;
     }
 
     private boolean isServerlessTarget() {
@@ -273,6 +269,17 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             }
 
             log.info("Reattempting creation of index '{}' after removing unsupported mapping parameters: {}", indexName, unsupportedMappingParams);
+            return;
+        }
+
+        if (invalidResponse.isUnsupportedKnnEngine()) {
+            var removed = removeKnnVectorEngines(mappings);
+            if (removed == 0) {
+                log.debug("Target rejected the knn engine parameter, but index '{}' has no knn_vector method.engine to remove", indexName);
+                throw invalidResponse;
+            }
+            log.info("Reattempting creation of index '{}' after removing method.engine from {} knn_vector field(s); the target chooses the engine",
+                indexName, removed);
             return;
         }
 

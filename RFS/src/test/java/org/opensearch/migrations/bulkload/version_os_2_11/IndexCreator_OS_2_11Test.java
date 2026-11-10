@@ -389,21 +389,31 @@ class IndexCreator_OS_2_11Test {
         "  \"settings\" : { }\n" +
         "}";
 
+    private static final String NEXTGEN_KNN_ENGINE_ERROR = "{\"error\":{\"root_cause\":[{\"type\":\"illegal_argument_exception\","
+        + "\"reason\":\"OpenSearch exception [type=illegal_argument_exception, reason=Field parameter 'engine' is not supported]"
+        + "- server : [envoy]\"}],\"type\":\"illegal_argument_exception\",\"reason\":\"OpenSearch exception "
+        + "[type=illegal_argument_exception, reason=Field parameter 'engine' is not supported]- server : [envoy]\"},\"status\":400}";
+
     @Test
-    void testCreate_collectionRoutedTarget_removesKnnVectorEngines() throws Exception {
+    void testCreate_retriesWithoutKnnVectorEnginesWhenTargetRejectsThem() throws Exception {
         var client = mock(OpenSearchClient.class);
-        when(client.isCollectionRouted()).thenReturn(true);
-        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+        when(client.createIndex(any(), any(), any())).thenAnswer(invocation -> {
+            ObjectNode body = invocation.getArgument(1);
+            if (body.get("mappings").toString().contains("\"engine\":\"faiss\"")) {
+                throw new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), NEXTGEN_KNN_ENGINE_ERROR));
+            }
+            return INDEX_CREATE_SUCCESS;
+        });
 
         var result = create(client, KNN_ENGINE_INDEX_JSON, "vectors_faiss");
 
-        assertThat(result.wasSuccessful(), equalTo(true));
+        assertThat(String.valueOf(result.getException()), result.wasSuccessful(), equalTo(true));
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
         var mappings = requestBodyCapture.getValue().get("mappings");
         assertThat(mappings.toString(), not(containsString("faiss")));
-        var embeddingMethod = mappings.at("/properties/embedding/method");
-        assertThat(embeddingMethod.toString(), equalTo("{\"name\":\"hnsw\",\"space_type\":\"l2\",\"parameters\":{\"m\":16}}"));
+        assertThat(mappings.at("/properties/embedding/method").toString(),
+            equalTo("{\"name\":\"hnsw\",\"space_type\":\"l2\",\"parameters\":{\"m\":16}}"));
         assertThat(mappings.at("/properties/doc/properties/inner/method").toString(), equalTo("{\"name\":\"hnsw\"}"));
         assertThat(mappings.at("/dynamic_templates/0/vectors/mapping/method").has("engine"), equalTo(false));
         assertThat("a field named engine is not a knn method parameter",
@@ -411,7 +421,7 @@ class IndexCreator_OS_2_11Test {
     }
 
     @Test
-    void testCreate_notCollectionRouted_keepsKnnVectorEngines() throws Exception {
+    void testCreate_keepsKnnVectorEnginesWhenTargetAcceptsThem() throws Exception {
         var client = mock(OpenSearchClient.class);
         when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
 
@@ -423,6 +433,18 @@ class IndexCreator_OS_2_11Test {
         var mappings = requestBodyCapture.getValue().get("mappings");
         assertThat(mappings.at("/properties/embedding/method/engine").asText(), equalTo("faiss"));
         assertThat(mappings.at("/dynamic_templates/0/vectors/mapping/method/engine").asText(), equalTo("faiss"));
+    }
+
+    @Test
+    void testCreate_knnEngineRejectedWithNoEngineToRemove_fails() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any()))
+            .thenThrow(new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), NEXTGEN_KNN_ENGINE_ERROR)));
+
+        var result = create(client, MIN_INDEX_JSON, "indexName");
+
+        assertThat(result.wasSuccessful(), equalTo(false));
+        verify(client, times(1)).createIndex(any(), any(), any());
     }
 
     @SneakyThrows
