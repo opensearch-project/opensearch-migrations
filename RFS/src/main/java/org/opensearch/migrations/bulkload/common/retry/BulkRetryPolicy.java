@@ -37,6 +37,8 @@ public class BulkRetryPolicy {
 
     private final RetryBudget budget;
     private final DoubleSupplier random;
+    // Installed after client construction and read by asynchronous retry callbacks.
+    @SuppressWarnings("java:S1450")
     private volatile BulkFlowMetrics metrics = BulkFlowMetrics.NONE;
 
     /** The retry state of one batch: what its last retry cost, so a success can refund it. */

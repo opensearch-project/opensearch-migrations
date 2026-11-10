@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.ByteArrayInputStream;
 import java.net.URI;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +35,6 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 import reactor.core.publisher.Mono;
-import reactor.util.retry.Retry;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
@@ -53,7 +51,6 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
@@ -115,19 +112,16 @@ class RfsFailedDocumentStreamLocalStackIntegrationTest {
         when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
         when(restClient.getConnectionContext()).thenReturn(connectionContext);
 
-        // One bulk with a success, an allowlisted "success", a non-retryable failure, and a retryable
-        // failure that never recovers. Only bad-map (NON_RETRYABLE) and throttled (RETRYABLE_EXHAUSTED)
-        // should end up in S3.
+        // One bulk with a success, an allowlisted "success", and a non-retryable failure. Only bad-map
+        // (NON_RETRYABLE) should end up in S3. Retryable target failures are deliberately not exhausted by
+        // a finite client retry schedule; the work-item lease controls how long RFS keeps trying them.
         var firstResponse = buildBulkResponse(List.of(
             successItem("ok-1"),
             allowlistedItem("dup-1"),
-            nonRetryableItem("bad-map"),
-            retryableItem("throttled")
+            nonRetryableItem("bad-map")
         ));
-        var subsequentResponse = buildBulkResponse(List.of(retryableItem("throttled")));
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null, firstResponse)))
-            .thenReturn(Mono.just(new HttpResponse(200, "", null, subsequentResponse)));
+            .thenReturn(Mono.just(new HttpResponse(200, "", null, firstResponse)));
 
         var sink = S3FailedDocumentStreamSink.builder()
             .bucket(BUCKET)
@@ -144,11 +138,9 @@ class RfsFailedDocumentStreamLocalStackIntegrationTest {
             restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
         client.setFailedDocumentStreamContext(sink, "sess-e2e", "worker-1");
         client.setFailedDocumentStreamWorkItem("movies__0__0");
-        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(client).getBulkRetryStrategy(any());
-
         assertDoesNotThrow(() -> client.sendBulkRequest(
             "movies",
-            List.of(createBulkDoc("ok-1"), createBulkDoc("dup-1"), createBulkDoc("bad-map"), createBulkDoc("throttled")),
+            List.of(createBulkDoc("ok-1"), createBulkDoc("dup-1"), createBulkDoc("bad-map")),
             mock(IRfsContexts.IRequestContext.class),
             false,
             allowlist
@@ -183,15 +175,13 @@ class RfsFailedDocumentStreamLocalStackIntegrationTest {
             byId.put(r.path("documentId").asText(), r);
         }
 
-        // Exactly the two terminal failures — the success and the allowlisted item are absent.
-        assertThat(byId.keySet(), containsInAnyOrder("bad-map", "throttled"));
+        // Exactly the terminal failure — the success and the allowlisted item are absent.
+        assertThat(byId.keySet(), containsInAnyOrder("bad-map"));
         assertThat(byId.get("bad-map").path("failureClass").asText(), equalTo("NON_RETRYABLE"));
         assertThat(byId.get("bad-map").path("failureType").asText(), equalTo("mapper_parsing_exception"));
-        assertThat(byId.get("throttled").path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
-        assertThat(byId.get("throttled").path("failureType").asText(), equalTo("es_rejected_execution_exception"));
         // Records carry the work-item context stamped on the client.
         assertThat(byId.get("bad-map").path("workItemId").asText(), equalTo("movies__0__0"));
-        assertThat(byId.get("throttled").path("targetIndex").asText(), equalTo("movies"));
+        assertThat(byId.get("bad-map").path("targetIndex").asText(), equalTo("movies"));
     }
 
     private List<JsonNode> readGzippedRecords(String key) throws Exception {
@@ -230,11 +220,6 @@ class RfsFailedDocumentStreamLocalStackIntegrationTest {
     private static String nonRetryableItem(String id) {
         return "{\"index\":{\"_index\":\"movies\",\"_id\":\"" + id + "\",\"status\":400,"
             + "\"error\":{\"type\":\"mapper_parsing_exception\",\"reason\":\"bad\"}}}";
-    }
-
-    private static String retryableItem(String id) {
-        return "{\"index\":{\"_index\":\"movies\",\"_id\":\"" + id + "\",\"status\":429,"
-            + "\"error\":{\"type\":\"es_rejected_execution_exception\",\"reason\":\"queue full\"}}}";
     }
 
     private static BulkOperationSpec createBulkDoc(String docId) {

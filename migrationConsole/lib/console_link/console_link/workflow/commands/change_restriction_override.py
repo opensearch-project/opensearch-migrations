@@ -128,7 +128,7 @@ def override_change_restrictions(namespace, workflow_name, gate, plural, request
 
     client.CustomObjectsApi().patch_namespaced_custom_object(
         group=CRD_GROUP, version=CRD_VERSION, namespace=namespace, plural=plural, name=name,
-        body={'metadata': {'annotations': {key: run_number for key in annotations}}})
+        body={'metadata': {'annotations': dict.fromkeys(annotations, run_number)}})
 
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     message = f"change-restriction override: {description} at {stamp}"

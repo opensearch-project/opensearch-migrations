@@ -342,6 +342,7 @@ public class BulkResponseParser {
         classifyParsed(parseItemFields(rawJson), rawJson, position, partition, allowlist);
     }
 
+    @SuppressWarnings("java:S1854")
     private static void classifyParsed(
         DocInfo parsed,
         String rawJson,

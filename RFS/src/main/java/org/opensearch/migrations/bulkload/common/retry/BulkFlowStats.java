@@ -46,7 +46,7 @@ public class BulkFlowStats implements BulkFlowMetrics {
         lowestLimit.accumulate(after);
     }
 
-    public Summary summary(AdaptiveLimit limit) {
+    public Summary snapshot(AdaptiveLimit limit) {
         Double current = limit == null ? null : limit.limit();
         Double lowest = null;
         Double highest = null;

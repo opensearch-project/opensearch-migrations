@@ -9,7 +9,11 @@ import {parse as parseYaml, stringify} from "yaml";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import {MigrationConfigTransformer, MigrationInitializer} from "../../src";
+import {
+    MigrationConfigTransformer,
+    MigrationInitializer,
+    stringifyKubernetesManifest,
+} from "../../src";
 
 const TEST_NAMESPACE = "migration-crd-roundtrip";
 const MIGRATION_RUN_NAMESPACE = "migration-run-history";
@@ -178,7 +182,7 @@ async function generateSnapshotMigrationManifest(config: z.infer<typeof OVERALL_
 
 function assertSpecRoundTrip(kind: string, name: string, expected: unknown, actual: unknown) {
     try {
-        expect(actual).toEqual(expected);
+        expect(actual).toEqual(JSON.parse(JSON.stringify(expected)));
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`${kind}/${name} spec did not round-trip through the generated CRD.\n${message}`);
@@ -231,7 +235,7 @@ describe("generated migration CRDs live compatibility", () => {
             }
 
             const containerPath = `/tmp/resource-${String(i).padStart(2, "0")}.yaml`;
-            await copyTextToContainer(container, stringify(resource), containerPath);
+            await copyTextToContainer(container, stringifyKubernetesManifest(resource), containerPath);
             await execOrThrow(
                 container,
                 ["kubectl", "apply", "-f", containerPath, "-n", TEST_NAMESPACE],
@@ -646,7 +650,7 @@ describe("generated migration CRDs live compatibility", () => {
                 ...manifest,
                 metadata: {...manifest.metadata, name: label, namespace: FAILED_DOCUMENT_STREAM_NAMESPACE},
             };
-            await copyTextToContainer(container, stringify(named), `/tmp/sm-${label}.yaml`);
+            await copyTextToContainer(container, stringifyKubernetesManifest(named), `/tmp/sm-${label}.yaml`);
             await execOrThrow(
                 container,
                 ["kubectl", "apply", "-f", `/tmp/sm-${label}.yaml`, "-n", FAILED_DOCUMENT_STREAM_NAMESPACE],

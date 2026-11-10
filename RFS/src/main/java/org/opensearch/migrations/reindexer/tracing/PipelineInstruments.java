@@ -20,6 +20,9 @@ import io.opentelemetry.api.metrics.Meter;
  * worker identifiers are deliberately absent.
  */
 public class PipelineInstruments implements PipelineMetrics {
+    private static final String COUNT_UNIT = "count";
+    private static final String BYTES_UNIT = "bytes";
+
     public static final String PIPELINE_STAGE_DOCUMENTS = "pipelineStageDocuments";
     public static final String PIPELINE_STAGE_BYTES = "pipelineStageBytes";
     public static final String PIPELINE_PREPARATION_QUEUE_WAIT = "pipelinePreparationQueueWait";
@@ -102,17 +105,17 @@ public class PipelineInstruments implements PipelineMetrics {
     private final List<AutoCloseable> gauges;
 
     public PipelineInstruments(Meter meter) {
-        stageDocuments = meter.counterBuilder(PIPELINE_STAGE_DOCUMENTS).setUnit("count").build();
-        stageBytes = meter.counterBuilder(PIPELINE_STAGE_BYTES).setUnit("bytes").build();
+        stageDocuments = meter.counterBuilder(PIPELINE_STAGE_DOCUMENTS).setUnit(COUNT_UNIT).build();
+        stageBytes = meter.counterBuilder(PIPELINE_STAGE_BYTES).setUnit(BYTES_UNIT).build();
         preparationQueueWait = durationHistogram(meter, PIPELINE_PREPARATION_QUEUE_WAIT);
         preparationDuration = durationHistogram(meter, PIPELINE_PREPARATION_DURATION);
         preparationOrderedWait = longDurationHistogram(meter, PIPELINE_PREPARATION_ORDERED_WAIT);
         packingDuration = durationHistogram(meter, PIPELINE_PACKING_DURATION);
         requestQueueWait = longDurationHistogram(meter, PIPELINE_REQUEST_QUEUE_WAIT);
         requestGroupDuration = longDurationHistogram(meter, PIPELINE_REQUEST_GROUP_DURATION);
-        packedBatchDocuments = meter.histogramBuilder(PIPELINE_PACKED_BATCH_DOCUMENTS).setUnit("count").ofLongs()
+        packedBatchDocuments = meter.histogramBuilder(PIPELINE_PACKED_BATCH_DOCUMENTS).setUnit(COUNT_UNIT).ofLongs()
             .setExplicitBucketBoundariesAdvice(DOCUMENT_BUCKETS).build();
-        packedBatchBytes = meter.histogramBuilder(PIPELINE_PACKED_BATCH_BYTES).setUnit("bytes").ofLongs()
+        packedBatchBytes = meter.histogramBuilder(PIPELINE_PACKED_BATCH_BYTES).setUnit(BYTES_UNIT).ofLongs()
             .setExplicitBucketBoundariesAdvice(BYTE_BUCKETS).build();
         packedBatchFill = meter.histogramBuilder(PIPELINE_PACKED_BATCH_FILL).setUnit("percent")
             .setExplicitBucketBoundariesAdvice(FILL_BUCKETS).build();
@@ -124,23 +127,24 @@ public class PipelineInstruments implements PipelineMetrics {
         });
 
         var registered = new ArrayList<AutoCloseable>();
-        registerGauge(meter, registered, PIPELINE_PREPARATION_QUEUED_CHUNKS, "count", preparationQueuedChunks);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_QUEUED_DOCUMENTS, "count", preparationQueuedDocuments);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_QUEUED_BYTES, "bytes", preparationQueuedBytes);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_ACTIVE_CHUNKS, "count", preparationActiveChunks);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_ORDERED_CHUNKS, "count", preparationOrderedChunks);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_ORDERED_DOCUMENTS, "count",
+        registerGauge(meter, registered, PIPELINE_PREPARATION_QUEUED_CHUNKS, COUNT_UNIT, preparationQueuedChunks);
+        registerGauge(meter, registered, PIPELINE_PREPARATION_QUEUED_DOCUMENTS, COUNT_UNIT,
+            preparationQueuedDocuments);
+        registerGauge(meter, registered, PIPELINE_PREPARATION_QUEUED_BYTES, BYTES_UNIT, preparationQueuedBytes);
+        registerGauge(meter, registered, PIPELINE_PREPARATION_ACTIVE_CHUNKS, COUNT_UNIT, preparationActiveChunks);
+        registerGauge(meter, registered, PIPELINE_PREPARATION_ORDERED_CHUNKS, COUNT_UNIT, preparationOrderedChunks);
+        registerGauge(meter, registered, PIPELINE_PREPARATION_ORDERED_DOCUMENTS, COUNT_UNIT,
             preparationOrderedDocuments);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_ORDERED_BYTES, "bytes", preparationOrderedBytes);
-        registerGauge(meter, registered, PIPELINE_REQUEST_READY_BATCHES, "count", requestReadyBatches);
-        registerGauge(meter, registered, PIPELINE_REQUEST_READY_DOCUMENTS, "count", requestReadyDocuments);
-        registerGauge(meter, registered, PIPELINE_REQUEST_READY_BYTES, "bytes", requestReadyBytes);
-        registerGauge(meter, registered, PIPELINE_REQUEST_ACTIVE_GROUPS, "count", requestActiveGroups);
-        registerGauge(meter, registered, PIPELINE_MAX_BATCH_DOCUMENTS, "count", maxBatchDocuments);
-        registerGauge(meter, registered, PIPELINE_MAX_BATCH_BYTES, "bytes", maxBatchBytes);
-        registerGauge(meter, registered, PIPELINE_BATCH_CONCURRENCY, "count", batchConcurrency);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_CONCURRENCY, "count", preparationConcurrency);
-        registerGauge(meter, registered, PIPELINE_PREPARATION_CHUNK_DOCUMENTS, "count",
+        registerGauge(meter, registered, PIPELINE_PREPARATION_ORDERED_BYTES, BYTES_UNIT, preparationOrderedBytes);
+        registerGauge(meter, registered, PIPELINE_REQUEST_READY_BATCHES, COUNT_UNIT, requestReadyBatches);
+        registerGauge(meter, registered, PIPELINE_REQUEST_READY_DOCUMENTS, COUNT_UNIT, requestReadyDocuments);
+        registerGauge(meter, registered, PIPELINE_REQUEST_READY_BYTES, BYTES_UNIT, requestReadyBytes);
+        registerGauge(meter, registered, PIPELINE_REQUEST_ACTIVE_GROUPS, COUNT_UNIT, requestActiveGroups);
+        registerGauge(meter, registered, PIPELINE_MAX_BATCH_DOCUMENTS, COUNT_UNIT, maxBatchDocuments);
+        registerGauge(meter, registered, PIPELINE_MAX_BATCH_BYTES, BYTES_UNIT, maxBatchBytes);
+        registerGauge(meter, registered, PIPELINE_BATCH_CONCURRENCY, COUNT_UNIT, batchConcurrency);
+        registerGauge(meter, registered, PIPELINE_PREPARATION_CONCURRENCY, COUNT_UNIT, preparationConcurrency);
+        registerGauge(meter, registered, PIPELINE_PREPARATION_CHUNK_DOCUMENTS, COUNT_UNIT,
             preparationChunkDocuments);
         gauges = List.copyOf(registered);
     }

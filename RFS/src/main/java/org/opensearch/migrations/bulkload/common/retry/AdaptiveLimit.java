@@ -220,6 +220,8 @@ public class AdaptiveLimit {
         return slot;
     }
 
+    // Slot is deliberately a small handle; the limit owns the queue, pacing, metrics, and all synchronized state.
+    @SuppressWarnings("java:S3398")
     private void release(Slot slot, Signal signal) {
         List<MonoSink<Slot>> handOff;
         List<Slot> handOffSlots;
