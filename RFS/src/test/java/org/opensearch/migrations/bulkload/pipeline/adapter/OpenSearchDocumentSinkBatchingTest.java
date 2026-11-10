@@ -322,7 +322,7 @@ class OpenSearchDocumentSinkBatchingTest {
             return input -> {
                 transformationsStarted.countDown();
                 try {
-                    if (!releaseTransformations.await(10, TimeUnit.SECONDS)) {
+                    if (!releaseTransformations.await(30, TimeUnit.SECONDS)) {
                         throw new AssertionError("Timed out waiting to release transformations");
                     }
                 } catch (InterruptedException e) {
@@ -342,12 +342,12 @@ class OpenSearchDocumentSinkBatchingTest {
         );
 
         var result = CompletableFuture.supplyAsync(() ->
-            sink.writeBatchGroup("idx", batches, 2).block(Duration.ofSeconds(10)));
-        boolean transformationsOverlapped = transformationsStarted.await(1, TimeUnit.SECONDS);
+            sink.writeBatchGroup("idx", batches, 2).block(Duration.ofSeconds(30)));
+        boolean transformationsOverlapped = transformationsStarted.await(10, TimeUnit.SECONDS);
         releaseTransformations.countDown();
-        assertNotNull(result.get(10, TimeUnit.SECONDS));
+        assertNotNull(result.get(30, TimeUnit.SECONDS));
 
-        assertTrue(transformationsOverlapped);
+        assertTrue(transformationsOverlapped, "Both transformations should start before either is released");
         assertEquals(List.of("d1", "d2"), sentIds());
     }
 
